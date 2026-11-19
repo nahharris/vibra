@@ -100,7 +100,7 @@ impl<'a> Builder<'_, 'a> {
         origin: &SourceOrigin,
         dest: u32,
     ) -> Result<(), EmitError> {
-        let arity = match self.close(&closure.value_type) {
+        let arity = match &self.close(&closure.value_type) {
             Type::Fn(signature) => signature.slot_count(),
             Type::Proc(_) => return Err(EmitError::unsupported("proc", origin)),
             other => {
@@ -178,7 +178,7 @@ impl<'a> Builder<'_, 'a> {
                 return Err(EmitError::unsupported("contractCall", origin));
             }
         };
-        let arity = match self.close(&self.lowering.types.callee_type(target, origin)?)
+        let arity = match &self.close(&self.lowering.types.callee_type(target, origin)?)
         {
             Type::Fn(signature) => signature.slot_count(),
             Type::Proc(_) => return Err(EmitError::unsupported("proc", origin)),

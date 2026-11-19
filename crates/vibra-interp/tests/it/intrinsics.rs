@@ -55,10 +55,10 @@ fn check_vectors(symbol: &str) {
         .enumerate()
         .map(|(slot, ty)| var(slot, ty.clone()))
         .collect();
-    let expr = row(intrinsic, arguments).expr;
+    let node = row(intrinsic, arguments);
     for vector in vectors {
         assert_eq!(
-            evaluate(&set, &expr, &vector.operands, LIMITS),
+            evaluate(&set, &node.expr, &vector.operands, LIMITS),
             Evaluation::Value(canonical_nan(vector.outcome.value())),
             "`{symbol}` on {:?}",
             vector.operands
@@ -362,8 +362,8 @@ fn apply(
         .enumerate()
         .map(|(slot, ty)| var(slot, ty))
         .collect();
-    let expr = generic_row(intrinsic, type_arguments, arguments).expr;
-    evaluate(&set, &expr, &values, LIMITS)
+    let node = generic_row(intrinsic, type_arguments, arguments);
+    evaluate(&set, &node.expr, &values, LIMITS)
 }
 
 fn chars(text: &str) -> Value {

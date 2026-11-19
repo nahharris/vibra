@@ -273,6 +273,7 @@ fn an_initializer_cycle_through_a_stored_closure_is_found() {
             value_type: thunk.clone(),
             slot_count: 0,
             captures: Vec::new(),
+            defaults: Vec::new(),
             body: node(Expr::Global(0)),
         }),
         captures: Vec::new(),

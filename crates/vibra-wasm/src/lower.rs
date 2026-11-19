@@ -50,8 +50,8 @@ use std::borrow::Cow;
 
 use vibra_ir::external::{CompilerIntrinsic, NATIVE_ROWS};
 use vibra_ir::{
-    CheckedModuleSet, ClosureBody, Construction, Expr, FunctionBody, Library, Node,
-    SourceOrigin, Type, Value,
+    CheckedModuleSet, ClosureBody, Construction, Expr, FnType, FunctionBody, Library,
+    Node, SourceOrigin, Type, Value,
 };
 use wasm_encoder::{BlockType, Instruction as I, ValType};
 
@@ -376,12 +376,12 @@ impl<'a> Lowering<'a> {
                         &guard.guard.consequence.origin,
                     ));
                 }
-                let signature = match function
+                let signature = match &function
                     .signature
                     .type_info()
                     .instantiate(&instance.arguments)
                 {
-                    Type::Fn(signature) => *signature,
+                    Type::Fn(signature) => FnType::clone(signature),
                     Type::Proc(_) => {
                         return Err(EmitError::unsupported("proc", &function.origin));
                     }
@@ -421,8 +421,8 @@ impl<'a> Lowering<'a> {
             Callable::Closure(closure) => {
                 let origin = &closure.body.origin;
                 let signature =
-                    match closure.value_type.instantiate(&instance.arguments) {
-                        Type::Fn(signature) => *signature,
+                    match &closure.value_type.instantiate(&instance.arguments) {
+                        Type::Fn(signature) => FnType::clone(signature),
                         Type::Proc(_) => {
                             return Err(EmitError::unsupported("proc", origin));
                         }

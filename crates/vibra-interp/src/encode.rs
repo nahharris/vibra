@@ -46,11 +46,11 @@ fn instantiated(fields: &[(String, Type)], arguments: &[Type]) -> Vec<(String, T
 }
 
 /// A child still to convert, at its closed type.
-type Child<'v, V> = (&'v V, Rc<Type>);
+pub(crate) type Child<'v, V> = (&'v V, Rc<Type>);
 
 /// What converting one node gives: a finished leaf, or a shape to build
 /// once its children, in order, are converted.
-enum Visited<'v, V, R, S> {
+pub(crate) enum Visited<'v, V, R, S> {
     Leaf(R),
     Node(S, Vec<Child<'v, V>>),
 }
@@ -118,7 +118,7 @@ fn entries<R>(parts: Vec<R>) -> Vec<(R, R)> {
 }
 
 /// A node of a neutral value, before its children are converted.
-enum NeutralShape {
+pub(crate) enum NeutralShape {
     Interface(Type),
     List,
     Tuple,
@@ -152,10 +152,10 @@ fn named_fields<'v, 'a>(
     Ok((names, children))
 }
 
-type ToNeutral<'v, 'a> = Visited<'v, Val<'a>, Value, NeutralShape>;
+pub(crate) type ToNeutral<'v, 'a> = Visited<'v, Val<'a>, Value, NeutralShape>;
 
 /// Takes apart one runtime node at the closed type `ty`.
-fn to_visit<'v, 'a>(
+pub(crate) fn to_visit<'v, 'a>(
     set: &CheckedModuleSet,
     value: &'v Val<'a>,
     ty: &Type,
@@ -422,6 +422,11 @@ fn from_visit<'a>(
             leaf(Repr::Atom(atom))
         }
         (Type::Void, Value::Void) => leaf(Repr::Void),
+        (Type::Any | Type::Interface(..), Value::Interface { held_type, .. })
+            if held_type.depth() > Type::MAX_DEPTH =>
+        {
+            Err(mismatch(ty))
+        }
         (Type::Any | Type::Interface(..), Value::Interface { held_type, held }) => {
             Ok(Node(
                 RuntimeShape::Interface(held_type.clone()),
@@ -451,6 +456,13 @@ fn from_visit<'a>(
         (Type::Record(fields), Value::Record(written)) => {
             let (names, children) = neutral_fields(fields.entries(), written, ty)?;
             Ok(Node(RuntimeShape::Record(names), children))
+        }
+        (Type::Fn(_) | Type::Proc(_), Value::Function { type_arguments, .. })
+            if type_arguments
+                .iter()
+                .any(|argument| argument.depth() > Type::MAX_DEPTH) =>
+        {
+            Err(mismatch(ty))
         }
         (
             Type::Fn(_) | Type::Proc(_),

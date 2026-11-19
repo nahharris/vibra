@@ -17,6 +17,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
+use crate::conformance::Evidence;
 use crate::encode::{TypeTable, encode_value};
 use crate::external::CompilerIntrinsic;
 use crate::{
@@ -39,6 +40,255 @@ impl Node {
     #[must_use]
     pub const fn new(expr: Expr, origin: SourceOrigin) -> Self {
         Self { expr, origin }
+    }
+}
+
+/// Dropping a tree of nodes moves each node's operands to a work list, so
+/// that no host stack grows with the depth of the tree.
+impl Drop for Node {
+    fn drop(&mut self) {
+        let mut pending = Vec::new();
+        self.expr.take_operands(&mut pending);
+        while let Some(mut expr) = pending.pop() {
+            expr.take_operands(&mut pending);
+        }
+    }
+}
+
+impl Expr {
+    /// Checks that every type written in this expression, its operands,
+    /// patterns, constants, and closure bodies included, nests at most
+    /// [`Type::MAX_DEPTH`] levels. The expression is walked with a work
+    /// list.
+    ///
+    /// # Errors
+    ///
+    /// [`IrError::InvalidType`] for the first type nested deeper.
+    pub fn check_type_depth(&self) -> Result<(), IrError> {
+        let mut exprs = vec![self];
+        let mut patterns: Vec<&Pattern> = Vec::new();
+        while let Some(expr) = exprs.pop() {
+            let mut types: Vec<&Type> = Vec::new();
+            let mut nodes: Vec<&Node> = Vec::new();
+            match expr {
+                Self::Literal(constant) => types.push(constant.value_type()),
+                Self::Intrinsic {
+                    type_arguments,
+                    arguments,
+                    ..
+                } => {
+                    types.extend(type_arguments);
+                    nodes.extend(arguments);
+                }
+                Self::Sequence(statements) => nodes.extend(statements),
+                Self::Variable { value_type, .. }
+                | Self::Captured { value_type, .. }
+                | Self::Default(value_type) => types.push(value_type),
+                Self::Global(_) => {}
+                Self::Function { type_arguments, .. } => types.extend(type_arguments),
+                Self::Closure { closure, captures } => {
+                    types.push(&closure.value_type);
+                    types.extend(&closure.captures);
+                    types.extend(closure.defaults.iter().map(|(_, c)| c.value_type()));
+                    nodes.extend(captures);
+                    nodes.push(&closure.body);
+                }
+                Self::Let { value, body, .. } => nodes.extend([&**value, &**body]),
+                Self::LetElse {
+                    pattern,
+                    value,
+                    fallback,
+                    body,
+                } => {
+                    patterns.push(pattern);
+                    nodes.extend([&**value, &**fallback, &**body]);
+                }
+                Self::Match {
+                    subject,
+                    arms,
+                    value_type,
+                } => {
+                    types.push(value_type);
+                    nodes.push(subject);
+                    for arm in arms {
+                        patterns.push(&arm.pattern);
+                        nodes.push(&arm.body);
+                    }
+                }
+                Self::If {
+                    condition,
+                    then_branch,
+                    else_branch,
+                } => {
+                    nodes.extend([&**condition, &**then_branch]);
+                    nodes.extend(else_branch.as_deref());
+                }
+                Self::Construct {
+                    value_type,
+                    construction,
+                } => {
+                    types.push(value_type);
+                    match construction {
+                        Construction::Tuple(operands)
+                        | Construction::List(operands) => {
+                            nodes.extend(operands);
+                        }
+                        Construction::Record(fields)
+                        | Construction::Case { fields, .. } => {
+                            nodes.extend(fields.iter().map(|(_, node)| node));
+                        }
+                        Construction::Wrapper(operand) => nodes.push(operand),
+                        Construction::Dict(entries) => {
+                            for (key, value) in entries {
+                                nodes.extend([key, value]);
+                            }
+                        }
+                    }
+                }
+                Self::Lookup { collection, key } => {
+                    nodes.extend([&**collection, &**key])
+                }
+                Self::Call { target, arguments }
+                | Self::TailCall { target, arguments } => {
+                    match target {
+                        CallTarget::Direct { type_arguments, .. } => {
+                            types.extend(type_arguments);
+                        }
+                        CallTarget::Value(callee) => nodes.push(callee),
+                        CallTarget::Contract(call) => {
+                            types.push(&call.receiver);
+                            types.extend(&call.arguments);
+                            types.extend(&call.member_arguments);
+                            types.extend(
+                                call.choices.entries().iter().map(|(_, ty)| ty),
+                            );
+                        }
+                    }
+                    nodes.extend(&arguments.positional);
+                    nodes.extend(arguments.labelled.iter().map(|(_, node)| node));
+                }
+                Self::WidenToInterface { value, value_type } => {
+                    types.push(value_type);
+                    nodes.push(value);
+                }
+                Self::Field { record: value, .. }
+                | Self::Return(value)
+                | Self::Try(value)
+                | Self::WidenAtom(value) => nodes.push(value),
+            }
+            while let Some(pattern) = patterns.pop() {
+                match pattern {
+                    Pattern::Literal(constant) => types.push(constant.value_type()),
+                    Pattern::Tuple(inner) | Pattern::List(inner) => {
+                        patterns.extend(inner)
+                    }
+                    Pattern::Record(fields) | Pattern::Case { fields, .. } => {
+                        patterns.extend(fields.iter().map(|(_, pattern)| pattern));
+                    }
+                    Pattern::Wrapper(inner) => patterns.push(inner),
+                    Pattern::Discard | Pattern::Bind(_) => {}
+                }
+            }
+            for ty in types {
+                ty.check_depth()?;
+            }
+            exprs.extend(nodes.into_iter().map(|node| &node.expr));
+        }
+        Ok(())
+    }
+
+    /// Moves the expression of each operand of this one to `pending`,
+    /// leaving a placeholder that owns nothing.
+    fn take_operands(&mut self, pending: &mut Vec<Self>) {
+        let mut take = |node: &mut Node| {
+            pending.push(std::mem::replace(&mut node.expr, Self::Default(Type::Void)));
+        };
+        match self {
+            Self::Intrinsic {
+                arguments: nodes, ..
+            }
+            | Self::Sequence(nodes) => {
+                nodes.iter_mut().for_each(&mut take);
+            }
+            Self::Closure { closure, captures } => {
+                captures.iter_mut().for_each(&mut take);
+                if let Some(closure) = Arc::get_mut(closure) {
+                    take(&mut closure.body);
+                }
+            }
+            Self::Let { value, body, .. } => {
+                take(value);
+                take(body);
+            }
+            Self::LetElse {
+                value,
+                fallback,
+                body,
+                ..
+            } => {
+                take(value);
+                take(fallback);
+                take(body);
+            }
+            Self::Match { subject, arms, .. } => {
+                take(subject);
+                for arm in arms {
+                    take(&mut arm.body);
+                }
+            }
+            Self::If {
+                condition,
+                then_branch,
+                else_branch,
+            } => {
+                take(condition);
+                take(then_branch);
+                if let Some(else_branch) = else_branch {
+                    take(else_branch);
+                }
+            }
+            Self::Construct { construction, .. } => match construction {
+                Construction::Tuple(nodes) | Construction::List(nodes) => {
+                    nodes.iter_mut().for_each(&mut take);
+                }
+                Construction::Record(fields) | Construction::Case { fields, .. } => {
+                    for (_, node) in fields {
+                        take(node);
+                    }
+                }
+                Construction::Wrapper(node) => take(node),
+                Construction::Dict(entries) => {
+                    for (key, value) in entries {
+                        take(key);
+                        take(value);
+                    }
+                }
+            },
+            Self::Lookup { collection, key } => {
+                take(collection);
+                take(key);
+            }
+            Self::Call { target, arguments } | Self::TailCall { target, arguments } => {
+                if let CallTarget::Value(callee) = target {
+                    take(callee);
+                }
+                arguments.positional.iter_mut().for_each(&mut take);
+                for (_, node) in &mut arguments.labelled {
+                    take(node);
+                }
+            }
+            Self::Field { record: node, .. }
+            | Self::Return(node)
+            | Self::Try(node)
+            | Self::WidenToInterface { value: node, .. }
+            | Self::WidenAtom(node) => take(node),
+            Self::Literal(_)
+            | Self::Variable { .. }
+            | Self::Global(_)
+            | Self::Function { .. }
+            | Self::Captured { .. }
+            | Self::Default(_) => {}
+        }
     }
 }
 
@@ -261,6 +511,9 @@ pub struct ClosureBody {
     pub slot_count: usize,
     /// The type of each captured slot.
     pub captures: Vec<Type>,
+    /// The constant default of each labelled parameter, which the closure
+    /// value carries to every call through it.
+    pub defaults: Vec<(String, Constant)>,
     /// The body.
     pub body: Node,
 }
@@ -439,7 +692,10 @@ impl<'a> Tables<'a> {
 pub(crate) struct Checker<'a> {
     pub(crate) tables: Tables<'a>,
     pub(crate) scope: OpenScope<'a>,
-    pub(crate) slots: Vec<Option<Type>>,
+    /// The bounds of the binders in scope, and the interface `Self` belongs
+    /// to in a default body.
+    pub(crate) evidence: Evidence<'a>,
+    pub(crate) slots: Slots,
     pub(crate) captures: Vec<Type>,
     /// The enclosing callable's result, `None` in a module-value
     /// initializer.
@@ -447,6 +703,50 @@ pub(crate) struct Checker<'a> {
     /// Whether the expression is a guard's predicate or consequence, where
     /// nothing leaves the activation.
     pub(crate) in_guard: bool,
+}
+
+/// The slots of an activation being checked: the declared count bounds the
+/// slot numbers, and only the slots bound hold storage, so a count taken
+/// from the IR allocates nothing in proportion to itself.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct Slots {
+    count: usize,
+    held: BTreeMap<usize, Type>,
+}
+
+impl Slots {
+    pub(crate) const fn new(count: usize) -> Self {
+        Self {
+            count,
+            held: BTreeMap::new(),
+        }
+    }
+
+    const fn check(&self, slot: usize) -> Result<(), IrError> {
+        if slot < self.count {
+            Ok(())
+        } else {
+            Err(IrError::SlotOutOfRange {
+                slot,
+                count: self.count,
+            })
+        }
+    }
+
+    /// The type `slot` holds, `None` when it is unset.
+    pub(crate) fn get(&self, slot: usize) -> Result<Option<&Type>, IrError> {
+        self.check(slot)?;
+        Ok(self.held.get(&slot))
+    }
+
+    /// Sets `slot` to `ty`, or unsets it, and returns what it held.
+    fn set(&mut self, slot: usize, ty: Option<Type>) -> Result<Option<Type>, IrError> {
+        self.check(slot)?;
+        Ok(match ty {
+            Some(ty) => self.held.insert(slot, ty),
+            None => self.held.remove(&slot),
+        })
+    }
 }
 
 /// `actual` is a value of `expected`: they are equal, or `actual` is `Never`.
@@ -462,7 +762,7 @@ pub(crate) fn expect(expected: &Type, actual: &Type) -> Result<(), IrError> {
 }
 
 /// The fields of `fields` are exactly `declared`, each once.
-fn check_field_set<'n>(
+pub(crate) fn check_field_set<'n>(
     declared: impl IntoIterator<Item = &'n str>,
     written: impl IntoIterator<Item = &'n str>,
     subset: bool,
@@ -509,7 +809,8 @@ impl<'a> Checker<'a> {
         Self {
             tables,
             scope,
-            slots: vec![None; slot_count],
+            evidence: Evidence::default(),
+            slots: Slots::new(slot_count),
             captures: Vec::new(),
             result: None,
             in_guard: false,
@@ -528,8 +829,75 @@ impl<'a> Checker<'a> {
             .map_err(|error| IrError::InvalidExpression(format!("a constant: {error}")))
     }
 
-    fn bool_type(&self) -> Result<Type, IrError> {
+    pub(crate) fn bool_type(&self) -> Result<Type, IrError> {
         self.tables.library_type(Library::Bool, Vec::new())
+    }
+
+    /// Checks the defaults of a callable with the labels `labels`: one
+    /// constant of the label's type for each label, as the source chapter's
+    /// `labelled` gives every optional parameter, and no other.
+    pub(crate) fn check_defaults(
+        &self,
+        labels: &NamedTypes,
+        defaults: &[(String, Constant)],
+    ) -> Result<(), IrError> {
+        let mut seen = BTreeSet::new();
+        for (label, default) in defaults {
+            let expected = labels.get(label).ok_or_else(|| {
+                IrError::InvalidExpression(format!("a default for no label `{label}`"))
+            })?;
+            if !seen.insert(label.as_str()) {
+                return Err(IrError::Duplicate {
+                    what: "default",
+                    name: label.clone(),
+                });
+            }
+            self.check_constant(default)?;
+            expect(expected, default.value_type())?;
+        }
+        if let Some((label, _)) = labels
+            .entries()
+            .iter()
+            .find(|(label, _)| !seen.contains(label.as_str()))
+        {
+            return Err(IrError::InvalidExpression(format!(
+                "the labelled parameter `{label}` has no default"
+            )));
+        }
+        Ok(())
+    }
+
+    /// Checks that `key` implements `Ordered`, as every dict key must.
+    pub(crate) fn check_dict_key(&self, key: &Type) -> Result<(), IrError> {
+        if self.tables.is_dict_key(self.evidence, key)? {
+            Ok(())
+        } else {
+            Err(IrError::InvalidType(format!(
+                "{key} does not implement `Ordered` and keys no dict"
+            )))
+        }
+    }
+
+    /// The type of the function at `index` as a value at `type_arguments`,
+    /// whose bounds hold.
+    pub(crate) fn instantiated_function(
+        &self,
+        index: usize,
+        type_arguments: &[Type],
+    ) -> Result<Type, IrError> {
+        for argument in type_arguments {
+            self.check_type(argument)?;
+        }
+        let ty = self.tables.function_type(index, type_arguments)?;
+        self.tables.check_bounds(
+            self.evidence,
+            self.tables.function(index)?.signature.binders(),
+            &Substitution {
+                binders: type_arguments,
+                ..Substitution::default()
+            },
+        )?;
+        Ok(ty)
     }
 
     /// Sets `slot` to `ty` and returns what it held.
@@ -538,20 +906,14 @@ impl<'a> Checker<'a> {
         slot: usize,
         ty: Type,
     ) -> Result<Option<Type>, IrError> {
-        let count = self.slots.len();
-        let held = self
-            .slots
-            .get_mut(slot)
-            .ok_or(IrError::SlotOutOfRange { slot, count })?;
-        Ok(held.replace(ty))
+        self.slots.set(slot, Some(ty))
     }
 
     /// Restores slots bound by [`Self::bind`], last first.
     pub(crate) fn restore(&mut self, bound: Vec<(usize, Option<Type>)>) {
         for (slot, held) in bound.into_iter().rev() {
-            if let Some(place) = self.slots.get_mut(slot) {
-                *place = held;
-            }
+            // Every slot here was bound, so it is in range.
+            let _ = self.slots.set(slot, held);
         }
     }
 
@@ -594,257 +956,11 @@ impl<'a> Checker<'a> {
         })
     }
 
-    /// Checks `node` and gives its type.
-    pub(crate) fn check(&mut self, node: &Node) -> Result<Type, IrError> {
-        match &node.expr {
-            Expr::Literal(constant) => {
-                self.check_constant(constant)?;
-                Ok(constant.value_type().clone())
-            }
-            Expr::Intrinsic {
-                intrinsic,
-                type_arguments,
-                arguments,
-            } => self.check_intrinsic(*intrinsic, type_arguments, arguments),
-            Expr::Sequence(statements) => {
-                let mut last = None;
-                for statement in statements {
-                    last = Some(self.check(statement)?);
-                }
-                last.ok_or_else(|| {
-                    IrError::InvalidExpression("an empty sequence".to_owned())
-                })
-            }
-            Expr::Variable { slot, value_type } => {
-                self.check_type(value_type)?;
-                let count = self.slots.len();
-                let held = self
-                    .slots
-                    .get(*slot)
-                    .ok_or(IrError::SlotOutOfRange { slot: *slot, count })?
-                    .as_ref()
-                    .ok_or(IrError::UnsetSlot(*slot))?;
-                if held != value_type {
-                    return Err(IrError::SlotTypeMismatch {
-                        slot: *slot,
-                        expected: Box::new(held.clone()),
-                        actual: Box::new(value_type.clone()),
-                    });
-                }
-                Ok(value_type.clone())
-            }
-            Expr::Global(index) => self
-                .tables
-                .globals
-                .get(*index)
-                .map(|global| global.value_type.clone())
-                .ok_or(IrError::UnknownGlobal(*index)),
-            Expr::Function {
-                function,
-                type_arguments,
-            } => {
-                for argument in type_arguments {
-                    self.check_type(argument)?;
-                }
-                self.tables.function_type(*function, type_arguments)
-            }
-            Expr::Closure { closure, captures } => {
-                self.check_closure(closure, captures)
-            }
-            Expr::Captured { slot, value_type } => {
-                self.check_type(value_type)?;
-                let held = self.captures.get(*slot).ok_or(IrError::SlotOutOfRange {
-                    slot: *slot,
-                    count: self.captures.len(),
-                })?;
-                if held != value_type {
-                    return Err(IrError::SlotTypeMismatch {
-                        slot: *slot,
-                        expected: Box::new(held.clone()),
-                        actual: Box::new(value_type.clone()),
-                    });
-                }
-                Ok(value_type.clone())
-            }
-            Expr::Let { slot, value, body } => {
-                let value = self.check(value)?;
-                match slot {
-                    Some(slot) => {
-                        let held = self.bind(*slot, value)?;
-                        let body = self.check(body);
-                        self.restore(vec![(*slot, held)]);
-                        body
-                    }
-                    None => self.check(body),
-                }
-            }
-            Expr::LetElse {
-                pattern,
-                value,
-                fallback,
-                body,
-            } => {
-                let value = self.check(value)?;
-                expect(&Type::Never, &self.check(fallback)?)?;
-                let mut bound = Vec::new();
-                let checked = self
-                    .check_pattern(pattern, &value, &mut bound)
-                    .and_then(|()| self.check(body));
-                self.restore(bound);
-                checked
-            }
-            Expr::Match {
-                subject,
-                arms,
-                value_type,
-            } => {
-                self.check_type(value_type)?;
-                let subject = self.check(subject)?;
-                if arms.is_empty() {
-                    return Err(IrError::InvalidExpression(
-                        "a match with no arm".to_owned(),
-                    ));
-                }
-                for arm in arms {
-                    let mut bound = Vec::new();
-                    let checked = self
-                        .check_pattern(&arm.pattern, &subject, &mut bound)
-                        .and_then(|()| self.check(&arm.body))
-                        .and_then(|body| expect(value_type, &body));
-                    self.restore(bound);
-                    checked?;
-                }
-                Ok(value_type.clone())
-            }
-            Expr::If {
-                condition,
-                then_branch,
-                else_branch,
-            } => {
-                let condition = self.check(condition)?;
-                expect(&self.bool_type()?, &condition)?;
-                let then_type = self.check(then_branch)?;
-                match else_branch {
-                    None => {
-                        expect(&Type::Void, &then_type)?;
-                        Ok(Type::Void)
-                    }
-                    Some(else_branch) => {
-                        let else_type = self.check(else_branch)?;
-                        if then_type == Type::Never {
-                            Ok(else_type)
-                        } else {
-                            expect(&then_type, &else_type)?;
-                            Ok(then_type)
-                        }
-                    }
-                }
-            }
-            Expr::Construct {
-                value_type,
-                construction,
-            } => self.check_construct(value_type, construction),
-            Expr::Field { record, field } => {
-                let record = self.check(record)?;
-                match self.shape(&record)? {
-                    Shape::Record(fields) => fields
-                        .into_iter()
-                        .find_map(|(name, value)| (name == *field).then_some(value))
-                        .ok_or_else(|| {
-                            IrError::InvalidExpression(format!(
-                                "{record} has no field `{field}`"
-                            ))
-                        }),
-                    _ => Err(IrError::InvalidExpression(format!(
-                        "a field read of {record}, which is not a record"
-                    ))),
-                }
-            }
-            Expr::Lookup { collection, key } => {
-                let collection = self.check(collection)?;
-                let key = self.check(key)?;
-                let library = self.tables.library;
-                let (key_type, item) = if let Type::List(element) = &collection {
-                    (Type::U64, element.as_ref().clone())
-                } else if library.arguments_of(Library::Str, &collection).is_some() {
-                    (Type::U64, Type::Char)
-                } else if library.arguments_of(Library::Bytes, &collection).is_some() {
-                    (Type::U64, Type::U8)
-                } else if let Some([key_type, value]) =
-                    library.arguments_of(Library::Dict, &collection)
-                {
-                    (key_type.clone(), value.clone())
-                } else {
-                    return Err(IrError::InvalidExpression(format!(
-                        "a lookup on {collection}"
-                    )));
-                };
-                expect(&key_type, &key)?;
-                self.tables.library_type(Library::Option, vec![item])
-            }
-            Expr::Call { target, arguments } => self.check_call(target, arguments),
-            Expr::TailCall { target, arguments } => {
-                if self.in_guard {
-                    return Err(IrError::MisplacedNode("a tail call inside a guard"));
-                }
-                let result = self
-                    .result
-                    .clone()
-                    .ok_or(IrError::MisplacedNode("a tail call outside a callable"))?;
-                let callee = self.check_call(target, arguments)?;
-                if matches!(callee, Type::Intent(_)) {
-                    return Err(IrError::InvalidExpression(
-                        "a tail call of a procedure builds a plan".to_owned(),
-                    ));
-                }
-                expect(&result, &callee)?;
-                Ok(callee)
-            }
-            Expr::Return(value) => {
-                if self.in_guard {
-                    return Err(IrError::MisplacedNode("a return inside a guard"));
-                }
-                let result = self
-                    .result
-                    .clone()
-                    .ok_or(IrError::MisplacedNode("a return outside a callable"))?;
-                expect(&result, &self.check(value)?)?;
-                Ok(Type::Never)
-            }
-            Expr::Try(value) => {
-                if self.in_guard {
-                    return Err(IrError::MisplacedNode("a try inside a guard"));
-                }
-                let result = self
-                    .result
-                    .clone()
-                    .ok_or(IrError::MisplacedNode("a try outside a callable"))?;
-                let value = self.check(value)?;
-                self.check_try(&value, &result)
-            }
-            Expr::WidenToInterface { value, value_type } => {
-                self.check_type(value_type)?;
-                let value = self.check(value)?;
-                if !value_type.is_interface_value() || value.is_interface_value() {
-                    return Err(IrError::InvalidExpression(format!(
-                        "{value} does not widen to {value_type}"
-                    )));
-                }
-                Ok(value_type.clone())
-            }
-            Expr::WidenAtom(value) => match self.check(value)? {
-                Type::AtomSingleton(_) => Ok(Type::Atom),
-                other => Err(IrError::InvalidExpression(format!(
-                    "{other} is not an atom singleton"
-                ))),
-            },
-            Expr::Default(_) => Err(IrError::MisplacedNode(
-                "a default outside a labelled argument",
-            )),
-        }
-    }
-
-    fn check_try(&self, value: &Type, result: &Type) -> Result<Type, IrError> {
+    pub(crate) fn check_try(
+        &self,
+        value: &Type,
+        result: &Type,
+    ) -> Result<Type, IrError> {
         let library = self.tables.library;
         if let Some([item]) = library.arguments_of(Library::Option, value)
             && library.arguments_of(Library::Option, result).is_some()
@@ -862,190 +978,6 @@ impl<'a> Checker<'a> {
         )))
     }
 
-    fn check_intrinsic(
-        &mut self,
-        intrinsic: CompilerIntrinsic,
-        type_arguments: &[Type],
-        arguments: &[Node],
-    ) -> Result<Type, IrError> {
-        let row = intrinsic.row();
-        if row.generics.len() != type_arguments.len() {
-            return Err(IrError::ArityMismatch {
-                what: "type arguments",
-                expected: row.generics.len(),
-                actual: type_arguments.len(),
-            });
-        }
-        for argument in type_arguments {
-            self.check_type(argument)?;
-        }
-        if row.parameters.len() != arguments.len() {
-            return Err(IrError::ArityMismatch {
-                what: "arguments",
-                expected: row.parameters.len(),
-                actual: arguments.len(),
-            });
-        }
-        for (parameter, argument) in row.parameters.iter().zip(arguments) {
-            let parameter =
-                parameter.instantiate(self.tables.library, type_arguments)?;
-            expect(&parameter, &self.check(argument)?)?;
-        }
-        row.result.instantiate(self.tables.library, type_arguments)
-    }
-
-    fn check_closure(
-        &mut self,
-        closure: &ClosureBody,
-        captures: &[Node],
-    ) -> Result<Type, IrError> {
-        self.check_type(&closure.value_type)?;
-        let (parameters, labels, _) =
-            call_shape(&closure.value_type).ok_or_else(|| {
-                IrError::InvalidExpression(format!(
-                    "a closure of {}, which is not callable",
-                    closure.value_type
-                ))
-            })?;
-        let result = match &closure.value_type {
-            Type::Fn(signature) => signature.result.clone(),
-            Type::Proc(signature) => signature.result.clone(),
-            _ => Type::Never,
-        };
-        let slot_types = parameters
-            .iter()
-            .cloned()
-            .chain(labels.entries().iter().map(|(_, value)| value.clone()))
-            .collect::<Vec<_>>();
-        if captures.len() != closure.captures.len() {
-            return Err(IrError::ArityMismatch {
-                what: "captures",
-                expected: closure.captures.len(),
-                actual: captures.len(),
-            });
-        }
-        for (expected, capture) in closure.captures.iter().zip(captures) {
-            self.check_type(expected)?;
-            expect(expected, &self.check(capture)?)?;
-        }
-        if closure.slot_count < slot_types.len() {
-            return Err(IrError::InvalidSlotCount {
-                needed: slot_types.len(),
-                declared: closure.slot_count,
-            });
-        }
-        let mut inner = Checker {
-            tables: self.tables,
-            scope: self.scope,
-            slots: vec![None; closure.slot_count],
-            captures: closure.captures.clone(),
-            result: Some(result.clone()),
-            in_guard: self.in_guard,
-        };
-        for (slot, ty) in slot_types.into_iter().enumerate() {
-            inner.bind(slot, ty)?;
-        }
-        expect(&result, &inner.check(&closure.body)?)?;
-        Ok(closure.value_type.clone())
-    }
-
-    fn check_construct(
-        &mut self,
-        value_type: &Type,
-        construction: &Construction,
-    ) -> Result<Type, IrError> {
-        self.check_type(value_type)?;
-        let library = self.tables.library;
-        if let Some([key, value]) = library.arguments_of(Library::Dict, value_type) {
-            let Construction::Dict(entries) = construction else {
-                return Err(IrError::InvalidExpression(format!(
-                    "a {value_type} is built from a dict literal"
-                )));
-            };
-            for (entry_key, entry_value) in entries {
-                expect(key, &self.check(entry_key)?)?;
-                expect(value, &self.check(entry_value)?)?;
-            }
-            return Ok(value_type.clone());
-        }
-        match (self.shape(value_type)?, construction) {
-            (Shape::Tuple(components), Construction::Tuple(operands)) => {
-                if components.len() != operands.len() {
-                    return Err(IrError::ArityMismatch {
-                        what: "tuple components",
-                        expected: components.len(),
-                        actual: operands.len(),
-                    });
-                }
-                for (component, operand) in components.iter().zip(operands) {
-                    expect(component, &self.check(operand)?)?;
-                }
-            }
-            (Shape::Record(fields), Construction::Record(operands)) => {
-                self.check_fields(&fields, operands)?;
-            }
-            (Shape::Wrapper(representation), Construction::Wrapper(operand)) => {
-                expect(&representation, &self.check(operand)?)?;
-            }
-            (Shape::Variant(cases, arguments), Construction::Case { case, fields }) => {
-                let declared = cases
-                    .iter()
-                    .find(|declared| declared.name == *case)
-                    .ok_or_else(|| {
-                        IrError::InvalidExpression(format!("no case `{case}`"))
-                    })?;
-                let declared = declared
-                    .fields
-                    .iter()
-                    .map(|(name, value)| (name.clone(), value.instantiate(&arguments)))
-                    .collect::<Vec<_>>();
-                self.check_fields(&declared, fields)?;
-            }
-            (Shape::List(element), Construction::List(operands)) => {
-                for operand in operands {
-                    expect(&element, &self.check(operand)?)?;
-                }
-            }
-            _ => {
-                return Err(IrError::InvalidExpression(format!(
-                    "the construction does not fit {value_type}"
-                )));
-            }
-        }
-        if let Type::Declared(id, _) = value_type
-            && let Some(invariant) = self.tables.definition(id)?.invariant()
-            && let Some(consequence) = &invariant.consequence
-        {
-            return self.tables.library_type(
-                Library::Result,
-                vec![value_type.clone(), consequence.value_type().clone()],
-            );
-        }
-        Ok(value_type.clone())
-    }
-
-    fn check_fields(
-        &mut self,
-        declared: &[(String, Type)],
-        operands: &[(String, Node)],
-    ) -> Result<(), IrError> {
-        check_field_set(
-            declared.iter().map(|(name, _)| name.as_str()),
-            operands.iter().map(|(name, _)| name.as_str()),
-            false,
-        )?;
-        for (name, operand) in operands {
-            let expected = declared
-                .iter()
-                .find_map(|(field, value)| (field == name).then_some(value))
-                .ok_or_else(|| {
-                    IrError::InvalidExpression(format!("no field `{name}`"))
-                })?;
-            expect(expected, &self.check(operand)?)?;
-        }
-        Ok(())
-    }
-
     pub(crate) fn check_field_subset(
         declared: &[(String, Type)],
         written: &[(String, Pattern)],
@@ -1057,212 +989,163 @@ impl<'a> Checker<'a> {
         )
     }
 
-    fn callee_type(
-        &mut self,
-        target: &CallTarget,
-    ) -> Result<(Type, Option<usize>), IrError> {
-        match target {
-            CallTarget::Direct {
-                function,
-                type_arguments,
-            } => {
-                for argument in type_arguments {
-                    self.check_type(argument)?;
-                }
-                Ok((
-                    self.tables.function_type(*function, type_arguments)?,
-                    Some(*function),
-                ))
-            }
-            CallTarget::Value(callee) => Ok((self.check(callee)?, None)),
-            CallTarget::Contract(call) => {
-                let ContractCall {
-                    interface,
-                    member,
-                    receiver,
-                    arguments,
-                    choices,
-                    member_arguments,
-                } = call.as_ref();
-                for ty in std::iter::once(receiver)
-                    .chain(arguments)
-                    .chain(member_arguments)
-                    .chain(choices.entries().iter().map(|(_, value)| value))
-                {
-                    self.check_type(ty)?;
-                }
-                let definition =
-                    self.tables.interfaces.get(interface).ok_or_else(|| {
-                        IrError::UnknownInterface(interface.path().to_owned())
-                    })?;
-                let declared = definition.member(member).ok_or_else(|| {
-                    IrError::InvalidExpression(format!(
-                        "`{}` has no member `{member}`",
-                        interface.path()
-                    ))
-                })?;
-                if definition.parameters().len() != arguments.len() {
-                    return Err(IrError::ArityMismatch {
-                        what: "interface arguments",
-                        expected: definition.parameters().len(),
-                        actual: arguments.len(),
-                    });
-                }
-                let own = declared
-                    .signature
-                    .binders()
-                    .len()
-                    .saturating_sub(arguments.len());
-                if own != member_arguments.len() {
-                    return Err(IrError::ArityMismatch {
-                        what: "member type arguments",
-                        expected: own,
-                        actual: member_arguments.len(),
-                    });
-                }
-                if definition.associated().len() != choices.len()
-                    || !names_equal(
-                        definition.associated().iter().map(String::as_str),
-                        choices.names(),
-                    )
-                {
-                    return Err(IrError::InvalidExpression(format!(
-                        "a call of `{}.{member}` fixes every associated type",
-                        interface.path()
-                    )));
-                }
-                self.check_implementation(interface, receiver, arguments, choices)?;
-                let binders = arguments
-                    .iter()
-                    .chain(member_arguments)
-                    .cloned()
-                    .collect::<Vec<_>>();
-                Ok((
-                    declared.signature.type_info().substitute(&Substitution {
-                        binders: &binders,
-                        self_type: Some(receiver),
-                        associated: Some(choices),
-                    }),
-                    None,
-                ))
-            }
-        }
-    }
-
-    /// For a closed key, the implementation that is selected exists and its
-    /// choices are the ones the call names.
-    fn check_implementation(
-        &self,
-        interface: &TypeId,
-        receiver: &Type,
-        arguments: &[Type],
-        choices: &NamedTypes,
-    ) -> Result<(), IrError> {
-        if !receiver.is_closed()
-            || receiver.is_interface_value()
-            || !arguments.iter().all(Type::is_closed)
+    /// The type of the member a contract call calls, at the call's
+    /// substitution, once the call names the member, its interface's
+    /// arguments and choices, a receiver that implements it, and type
+    /// arguments that satisfy the member's bounds.
+    pub(crate) fn contract_callee(&self, call: &ContractCall) -> Result<Type, IrError> {
+        let ContractCall {
+            interface,
+            member,
+            receiver,
+            arguments,
+            choices,
+            member_arguments,
+        } = call;
+        for ty in std::iter::once(receiver)
+            .chain(arguments)
+            .chain(member_arguments)
+            .chain(choices.entries().iter().map(|(_, value)| value))
         {
-            return Ok(());
+            self.check_type(ty)?;
         }
-        for implementation in self.tables.implementations {
-            if implementation.contract().interface != *interface {
-                continue;
-            }
-            let mut assignment = vec![None; implementation.binders().len()];
-            let matched = crate::module_set::unify(
-                implementation.receiver(),
-                receiver,
-                &mut assignment,
-            ) && implementation
-                .contract()
-                .arguments
-                .iter()
-                .zip(arguments)
-                .all(|(left, right)| {
-                    crate::module_set::unify(left, right, &mut assignment)
-                });
-            if matched {
-                let binders = crate::module_set::resolved(&assignment);
-                let selected = implementation
-                    .choices()
-                    .entries()
-                    .iter()
-                    .map(|(name, value)| (name.clone(), value.instantiate(&binders)));
-                return if NamedTypes::new(selected)? == *choices {
-                    Ok(())
-                } else {
-                    Err(IrError::InvalidExpression(format!(
-                        "the choices of the call of `{}` are not the selected implementation's",
-                        interface.path()
-                    )))
-                };
-            }
-        }
-        Err(IrError::InvalidExpression(format!(
-            "no implementation of `{}` for {receiver}",
-            interface.path()
-        )))
-    }
-
-    fn check_call(
-        &mut self,
-        target: &CallTarget,
-        arguments: &Arguments,
-    ) -> Result<Type, IrError> {
-        let (callee, direct) = self.callee_type(target)?;
-        let (parameters, labels, result) = call_shape(&callee).ok_or_else(|| {
+        let definition =
+            self.tables.interfaces.get(interface).ok_or_else(|| {
+                IrError::UnknownInterface(interface.path().to_owned())
+            })?;
+        let declared = definition.member(member).ok_or_else(|| {
             IrError::InvalidExpression(format!(
-                "a call of {callee}, which is not callable"
+                "`{}` has no member `{member}`",
+                interface.path()
             ))
         })?;
-        let (parameters, labels) = (parameters.to_vec(), labels.clone());
-        if parameters.len() != arguments.positional.len() {
+        if definition.parameters().len() != arguments.len() {
             return Err(IrError::ArityMismatch {
-                what: "arguments",
-                expected: parameters.len(),
-                actual: arguments.positional.len(),
+                what: "interface arguments",
+                expected: definition.parameters().len(),
+                actual: arguments.len(),
             });
         }
-        for (parameter, argument) in parameters.iter().zip(&arguments.positional) {
-            expect(parameter, &self.check(argument)?)?;
-        }
-        if labels.len() != arguments.labelled.len() {
+        let own = declared
+            .signature
+            .binders()
+            .len()
+            .saturating_sub(arguments.len());
+        if own != member_arguments.len() {
             return Err(IrError::ArityMismatch {
-                what: "labelled arguments",
-                expected: labels.len(),
-                actual: arguments.labelled.len(),
+                what: "member type arguments",
+                expected: own,
+                actual: member_arguments.len(),
             });
         }
-        let mut seen = BTreeSet::new();
-        for (label, argument) in &arguments.labelled {
-            if !seen.insert(label.as_str()) {
-                return Err(IrError::Duplicate {
-                    what: "labelled argument",
-                    name: label.clone(),
-                });
+        if definition.associated().len() != choices.len()
+            || !names_equal(
+                definition.associated().iter().map(String::as_str),
+                choices.names(),
+            )
+        {
+            return Err(IrError::InvalidExpression(format!(
+                "a call of `{}.{member}` fixes every associated type",
+                interface.path()
+            )));
+        }
+        self.check_receiver(interface, member, declared, call)?;
+        let binders = arguments
+            .iter()
+            .chain(member_arguments)
+            .cloned()
+            .collect::<Vec<_>>();
+        let substitution = Substitution {
+            binders: &binders,
+            self_type: Some(receiver),
+            associated: Some(choices),
+        };
+        self.tables.check_bounds(
+            self.evidence,
+            declared.signature.binders(),
+            &substitution,
+        )?;
+        Ok(declared.signature.type_info().substitute(&substitution))
+    }
+
+    /// Checks the receiver of a contract call. Through an interface value,
+    /// the value's interface, positional arguments, and choices are the
+    /// call's, the member has a receiver slot, and no other parameter
+    /// mentions `Self`. Otherwise evidence that the receiver implements the
+    /// interface gives exactly the call's choices.
+    fn check_receiver(
+        &self,
+        interface: &TypeId,
+        member: &str,
+        declared: &crate::InterfaceMember,
+        call: &ContractCall,
+    ) -> Result<(), IrError> {
+        let path = interface.path();
+        if call.receiver.is_interface_value() {
+            let same = matches!(
+                &call.receiver,
+                Type::Interface(held, arguments, choices)
+                    if held == interface
+                        && *arguments == call.arguments
+                        && *choices == call.choices
+            );
+            if !same {
+                return Err(IrError::InvalidExpression(format!(
+                    "a call of `{path}.{member}` through a value of {}",
+                    call.receiver
+                )));
             }
-            let expected = labels.get(label).ok_or_else(|| {
-                IrError::InvalidExpression(format!("no label `{label}`"))
+            let parameters = match declared.signature.type_info() {
+                Type::Fn(signature) => signature.parameters.as_slice(),
+                Type::Proc(signature) => signature.parameters.as_slice(),
+                _ => &[],
+            };
+            let slot = declared
+                .signature
+                .receiver()
+                .and_then(|slot| usize::try_from(slot).ok())
+                .ok_or_else(|| {
+                    IrError::InvalidExpression(format!(
+                        "`{path}.{member}` has no receiver slot and is not called through an interface value"
+                    ))
+                })?;
+            let mentions_self = |ty: &Type| {
+                let mut found = false;
+                ty.visit(&mut |inner| found |= *inner == Type::SelfType);
+                found
+            };
+            let labels = match declared.signature.type_info() {
+                Type::Fn(signature) => signature.labels.entries(),
+                Type::Proc(signature) => signature.labels.entries(),
+                _ => &[],
+            };
+            let other_self = parameters
+                .iter()
+                .enumerate()
+                .any(|(index, ty)| index != slot && mentions_self(ty))
+                || labels.iter().any(|(_, ty)| mentions_self(ty));
+            if other_self {
+                return Err(IrError::InvalidExpression(format!(
+                    "`{path}.{member}` takes `Self` outside its receiver slot and is not called through an interface value"
+                )));
+            }
+            return Ok(());
+        }
+        let provided = self
+            .tables
+            .conformance(self.evidence, &call.receiver, interface, &call.arguments)?
+            .ok_or_else(|| {
+                IrError::InvalidExpression(format!(
+                    "no implementation of `{path}` for {}",
+                    call.receiver
+                ))
             })?;
-            if let Expr::Default(value_type) = &argument.expr {
-                self.check_type(value_type)?;
-                expect(expected, value_type)?;
-                if let Some(function) = direct
-                    && !self
-                        .tables
-                        .function(function)?
-                        .defaults
-                        .iter()
-                        .any(|(name, _)| name == label)
-                {
-                    return Err(IrError::InvalidExpression(format!(
-                        "the callee has no default for `{label}`"
-                    )));
-                }
-            } else {
-                expect(expected, &self.check(argument)?)?;
-            }
+        if provided == call.choices {
+            Ok(())
+        } else {
+            Err(IrError::InvalidExpression(format!(
+                "the choices of the call of `{path}` are not the selected implementation's"
+            )))
         }
-        Ok(result)
     }
 }

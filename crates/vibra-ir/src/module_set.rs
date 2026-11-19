@@ -11,14 +11,14 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
+use crate::conformance::Evidence;
 use crate::encode::{TypeTable, encode_value};
-use crate::expr::{Checker, ClosureBody, Expr, Tables, expect};
-use crate::external::{CompilerIntrinsic, RowType};
+use crate::expr::{Checker, Tables, expect};
+use crate::external::CompilerIntrinsic;
 use crate::{
-    Arguments, CallTarget, Constant, Construction, ExitGuard, FnType, Guard,
-    Implementation, InterfaceDefinition, IrError, Library, LibraryTypes, Node,
-    OpenScope, Pattern, SignatureRecord, SourceOrigin, Substitution, Type, TypeBody,
-    TypeDefinition, TypeId,
+    Constant, ExitGuard, FnType, Guard, Implementation, InterfaceDefinition, IrError,
+    Library, LibraryTypes, Node, OpenScope, SignatureRecord, SourceOrigin,
+    Substitution, Type, TypeBody, TypeDefinition, TypeId,
 };
 
 /// A module value: an immutable, typed, lazily initialized `let`.
@@ -221,7 +221,7 @@ fn is_open_form(ty: &Type) -> bool {
 
 /// Whether two types have the same outermost form: the same case, and the
 /// same identity, names, atom, or row where the case has one.
-fn same_head(left: &Type, right: &Type) -> bool {
+pub(crate) fn same_head(left: &Type, right: &Type) -> bool {
     match (left, right) {
         (Type::AtomSingleton(left), Type::AtomSingleton(right))
         | (Type::Associated(left), Type::Associated(right)) => left == right,
@@ -308,30 +308,17 @@ pub(crate) fn may_match(created: &Type, callee: &Type) -> bool {
             .all(|(left, right)| may_match(left, right))
 }
 
-/// The facts a body's check gathers, kept beside the checker.
+/// The facts a body's check gathers, kept beside the checker: the body's
+/// own, and each closure it creates at any depth, numbered from zero in
+/// the order their bodies finish.
 #[derive(Debug, Default)]
-struct Gathered {
-    facts: Facts,
-    closures: Vec<(Type, Facts)>,
-}
-
-impl Gathered {
-    /// Takes in a closure whose body gathered `inner`, returning its number.
-    fn absorb(&mut self, closure_type: Type, mut inner: Self) -> usize {
-        let base = self.closures.len();
-        inner.facts.rebase(base);
-        for (_, facts) in &mut inner.closures {
-            facts.rebase(base);
-        }
-        self.closures.append(&mut inner.closures);
-        let number = self.closures.len();
-        self.closures.push((closure_type, inner.facts));
-        number
-    }
+pub(crate) struct Gathered {
+    pub(crate) facts: Facts,
+    pub(crate) closures: Vec<(Type, Facts)>,
 }
 
 /// The functions a contract call of `member` on `interface` may select.
-fn contract_targets(
+pub(crate) fn contract_targets(
     tables: &Tables<'_>,
     interface: &TypeId,
     member: &str,
@@ -353,258 +340,12 @@ fn contract_targets(
     targets
 }
 
-fn ordered_targets(tables: &Tables<'_>) -> BTreeSet<usize> {
+pub(crate) fn ordered_targets(tables: &Tables<'_>) -> BTreeSet<usize> {
     tables
         .library
         .get(Library::Ordered)
         .map(|ordered| contract_targets(tables, ordered, "compare"))
         .unwrap_or_default()
-}
-
-/// Walks a body that has been checked and gathers its facts. Types come from
-/// a second check of each callee, which has passed once already.
-fn gather(
-    checker: &mut Checker<'_>,
-    node: &Node,
-    out: &mut Gathered,
-) -> Result<(), IrError> {
-    let tables = checker.tables;
-    match &node.expr {
-        Expr::Global(index) => {
-            out.facts.reads.insert(*index);
-        }
-        Expr::Function {
-            function,
-            type_arguments,
-        } => {
-            let ty = tables.function_type(*function, type_arguments)?;
-            out.facts.values.push((Callable::Function(*function), ty));
-        }
-        Expr::Closure { closure, captures } => {
-            for capture in captures {
-                gather(checker, capture, out)?;
-            }
-            let mut inner = Gathered::default();
-            gather_closure(checker, closure, &mut inner)?;
-            let number = out.absorb(closure.value_type.clone(), inner);
-            out.facts
-                .values
-                .push((Callable::Closure(number), closure.value_type.clone()));
-        }
-        Expr::Intrinsic {
-            intrinsic,
-            type_arguments,
-            arguments,
-        } => {
-            for parameter in intrinsic.row().parameters {
-                if let RowType::Fn(..) = parameter {
-                    out.facts
-                        .indirect
-                        .push(parameter.instantiate(tables.library, type_arguments)?);
-                }
-            }
-            for argument in arguments {
-                gather(checker, argument, out)?;
-            }
-        }
-        Expr::Construct {
-            value_type,
-            construction,
-        } => {
-            if let Type::Declared(id, _) = value_type {
-                if tables.library.get(Library::Dict) == Some(id) {
-                    out.facts.calls.extend(ordered_targets(&tables));
-                } else if let Some(invariant) = tables.definition(id)?.invariant()
-                    && invariant.consequence.is_some()
-                {
-                    out.facts.calls.insert(invariant.predicate);
-                }
-            }
-            match construction {
-                Construction::Tuple(operands) | Construction::List(operands) => {
-                    for operand in operands {
-                        gather(checker, operand, out)?;
-                    }
-                }
-                Construction::Record(fields) | Construction::Case { fields, .. } => {
-                    for (_, operand) in fields {
-                        gather(checker, operand, out)?;
-                    }
-                }
-                Construction::Wrapper(operand) => gather(checker, operand, out)?,
-                Construction::Dict(entries) => {
-                    for (key, value) in entries {
-                        gather(checker, key, out)?;
-                        gather(checker, value, out)?;
-                    }
-                }
-            }
-        }
-        Expr::Lookup { collection, key } => {
-            let collection_type = checker.check(collection)?;
-            if tables
-                .library
-                .arguments_of(Library::Dict, &collection_type)
-                .is_some()
-            {
-                out.facts.calls.extend(ordered_targets(&tables));
-            }
-            gather(checker, collection, out)?;
-            gather(checker, key, out)?;
-        }
-        Expr::Call { target, arguments } | Expr::TailCall { target, arguments } => {
-            gather_call(checker, target, arguments, out)?;
-        }
-        Expr::Sequence(statements) => {
-            for statement in statements {
-                gather(checker, statement, out)?;
-            }
-        }
-        Expr::Let { slot, value, body } => {
-            let value_type = checker.check(value)?;
-            gather(checker, value, out)?;
-            match slot {
-                Some(slot) => {
-                    let held = checker.bind(*slot, value_type)?;
-                    let gathered = gather(checker, body, out);
-                    checker.restore(vec![(*slot, held)]);
-                    gathered?;
-                }
-                None => gather(checker, body, out)?,
-            }
-        }
-        Expr::LetElse {
-            pattern,
-            value,
-            fallback,
-            body,
-        } => {
-            let value_type = checker.check(value)?;
-            gather(checker, value, out)?;
-            gather(checker, fallback, out)?;
-            gather_bound(checker, pattern, &value_type, body, out)?;
-        }
-        Expr::Match { subject, arms, .. } => {
-            let subject_type = checker.check(subject)?;
-            gather(checker, subject, out)?;
-            for arm in arms {
-                gather_bound(checker, &arm.pattern, &subject_type, &arm.body, out)?;
-            }
-        }
-        Expr::If {
-            condition,
-            then_branch,
-            else_branch,
-        } => {
-            gather(checker, condition, out)?;
-            gather(checker, then_branch, out)?;
-            if let Some(else_branch) = else_branch {
-                gather(checker, else_branch, out)?;
-            }
-        }
-        Expr::Field { record: value, .. }
-        | Expr::Return(value)
-        | Expr::Try(value)
-        | Expr::WidenToInterface { value, .. }
-        | Expr::WidenAtom(value) => gather(checker, value, out)?,
-        Expr::Literal(_)
-        | Expr::Variable { .. }
-        | Expr::Captured { .. }
-        | Expr::Default(_) => {}
-    }
-    Ok(())
-}
-
-fn gather_bound(
-    checker: &mut Checker<'_>,
-    pattern: &Pattern,
-    subject: &Type,
-    body: &Node,
-    out: &mut Gathered,
-) -> Result<(), IrError> {
-    let mut bound = Vec::new();
-    let gathered = checker
-        .check_pattern(pattern, subject, &mut bound)
-        .and_then(|()| gather(checker, body, out));
-    checker.restore(bound);
-    gathered
-}
-
-fn gather_call(
-    checker: &mut Checker<'_>,
-    target: &CallTarget,
-    arguments: &Arguments,
-    out: &mut Gathered,
-) -> Result<(), IrError> {
-    let tables = checker.tables;
-    match target {
-        CallTarget::Direct { function, .. } => {
-            out.facts.calls.insert(*function);
-        }
-        CallTarget::Value(callee) => {
-            let callee_type = checker.check(callee)?;
-            out.facts.indirect.push(callee_type);
-            gather(checker, callee, out)?;
-        }
-        CallTarget::Contract(call) => {
-            out.facts.calls.extend(contract_targets(
-                &tables,
-                &call.interface,
-                &call.member,
-            ));
-        }
-    }
-    for argument in &arguments.positional {
-        gather(checker, argument, out)?;
-    }
-    for (_, argument) in &arguments.labelled {
-        gather(checker, argument, out)?;
-    }
-    Ok(())
-}
-
-fn gather_closure(
-    checker: &Checker<'_>,
-    closure: &ClosureBody,
-    out: &mut Gathered,
-) -> Result<(), IrError> {
-    let mut inner = closure_checker(checker, closure)?;
-    gather(&mut inner, &closure.body, out)
-}
-
-/// The checker of a closure's body, its argument slots bound.
-fn closure_checker<'a>(
-    outer: &Checker<'a>,
-    closure: &ClosureBody,
-) -> Result<Checker<'a>, IrError> {
-    let (parameters, labels, result) = match &closure.value_type {
-        Type::Fn(signature) => (
-            &signature.parameters,
-            &signature.labels,
-            signature.result.clone(),
-        ),
-        Type::Proc(signature) => (
-            &signature.parameters,
-            &signature.labels,
-            signature.result.clone(),
-        ),
-        other => {
-            return Err(IrError::InvalidExpression(format!(
-                "a closure of {other}, which is not callable"
-            )));
-        }
-    };
-    let mut inner = Checker::new(outer.tables, outer.scope, closure.slot_count);
-    inner.captures.clone_from(&closure.captures);
-    inner.result = Some(result);
-    inner.in_guard = outer.in_guard;
-    let slot_types = parameters
-        .iter()
-        .chain(labels.entries().iter().map(|(_, value)| value));
-    for (slot, ty) in slot_types.enumerate() {
-        inner.bind(slot, ty.clone())?;
-    }
-    Ok(inner)
 }
 
 fn check_names_distinct<'a>(
@@ -769,6 +510,62 @@ impl CheckedModuleSet {
         Ok(Arc::new(Self { flow, ..set }))
     }
 
+    /// Whether a value of `held`, a closed type, may stand behind an
+    /// interface value of `interface_type`: `held` is valid, is no interface
+    /// value type, and widens to `interface_type` as a checked
+    /// `WidenToInterface` would.
+    ///
+    /// # Errors
+    ///
+    /// `held` is malformed or names nothing, or the evidence that it
+    /// implements the interface needs more goals than validation allows.
+    pub fn widens(&self, held: &Type, interface_type: &Type) -> Result<bool, IrError> {
+        let tables = self.tables();
+        tables.check_type(held, OpenScope::Closed)?;
+        if held.is_interface_value() {
+            return Ok(false);
+        }
+        match interface_type {
+            Type::Any => Ok(true),
+            Type::Interface(interface, arguments, choices) => tables.conforms_with(
+                Evidence::default(),
+                held,
+                interface,
+                arguments,
+                choices,
+            ),
+            _ => Ok(false),
+        }
+    }
+
+    /// The type of the function at `index` as a value at `type_arguments`,
+    /// which are closed and satisfy its bounds.
+    ///
+    /// # Errors
+    ///
+    /// No function `index`, a type argument that is malformed, open, or of
+    /// the wrong count, or a bound that does not hold.
+    pub fn function_value_type(
+        &self,
+        index: usize,
+        type_arguments: &[Type],
+    ) -> Result<Type, IrError> {
+        let tables = self.tables();
+        for argument in type_arguments {
+            tables.check_type(argument, OpenScope::Closed)?;
+        }
+        let ty = tables.function_type(index, type_arguments)?;
+        tables.check_bounds(
+            Evidence::default(),
+            tables.function(index)?.signature.binders(),
+            &Substitution {
+                binders: type_arguments,
+                ..Substitution::default()
+            },
+        )?;
+        Ok(ty)
+    }
+
     fn tables(&self) -> Tables<'_> {
         Tables {
             library: self.table.library(),
@@ -830,12 +627,25 @@ impl CheckedModuleSet {
                 }
             }
         }
+        check_finite_size(&self.table)?;
+        let mut defaults = BTreeMap::new();
         for interface in self.interfaces.values() {
             for member in interface.members() {
                 tables.check_type(
                     member.signature.type_info(),
                     member.signature.scope(),
                 )?;
+                if !self_map_result(member.signature.type_info(), self.table.library())
+                {
+                    return Err(IrError::InvalidType(format!(
+                        "the result of `{}.{}` holds `Self` outside the positions an interface value reboxes",
+                        interface.id().path(),
+                        member.name
+                    )));
+                }
+                if let Some(default) = member.default {
+                    defaults.insert(default, interface.id());
+                }
                 if let Some(default) = member.default
                     && tables.function(default)?.signature != member.signature
                 {
@@ -853,13 +663,19 @@ impl CheckedModuleSet {
             tables.check_type(&global.value_type, OpenScope::Closed)?;
             let mut checker =
                 Checker::new(tables, OpenScope::Closed, global.slot_count);
-            expect(&global.value_type, &checker.check(&global.initializer)?)?;
             let mut gathered = Gathered::default();
-            gather(&mut checker, &global.initializer, &mut gathered)?;
+            expect(
+                &global.value_type,
+                &checker.check_gathering(&global.initializer, &mut gathered)?,
+            )?;
             flow.absorb_owner(gathered, |flow, facts| flow.globals.push(facts));
         }
-        for function in &self.functions {
-            let gathered = self.validate_function(&tables, function)?;
+        for (index, function) in self.functions.iter().enumerate() {
+            let gathered = self.validate_function(
+                &tables,
+                function,
+                defaults.get(&index).copied(),
+            )?;
             flow.absorb_owner(gathered, |flow, facts| flow.functions.push(facts));
         }
         Ok(flow)
@@ -911,6 +727,11 @@ impl CheckedModuleSet {
                 let member = interface.member(name).ok_or_else(|| {
                     IrError::InvalidType(format!("`{path}` has no member `{name}`"))
                 })?;
+                if member.default.is_some() {
+                    return Err(IrError::InvalidType(format!(
+                        "an implementation of `{path}` supplies the default member `{name}` again"
+                    )));
+                }
                 let expected = implemented_type(
                     &member.signature,
                     implementation,
@@ -948,6 +769,7 @@ impl CheckedModuleSet {
         &self,
         tables: &Tables<'_>,
         function: &CheckedFunction,
+        self_interface: Option<&TypeId>,
     ) -> Result<Gathered, IrError> {
         let signature = &function.signature;
         let scope = signature.scope();
@@ -981,21 +803,12 @@ impl CheckedModuleSet {
                 declared: function.slot_count,
             });
         }
-        let mut seen = BTreeSet::new();
-        for (label, default) in &function.defaults {
-            let expected = labels.get(label).ok_or_else(|| {
-                IrError::InvalidExpression(format!("no label `{label}`"))
-            })?;
-            if !seen.insert(label) {
-                return Err(IrError::Duplicate {
-                    what: "default",
-                    name: label.clone(),
-                });
-            }
-            self.check_constant(default)?;
-            expect(expected, default.value_type())?;
-        }
         let mut checker = Checker::new(*tables, scope, function.slot_count);
+        checker.check_defaults(labels, &function.defaults)?;
+        checker.evidence = Evidence {
+            binders: signature.binders(),
+            self_interface,
+        };
         checker.result = Some(result.clone());
         for (slot, ty) in slot_types.into_iter().enumerate() {
             checker.bind(slot, ty)?;
@@ -1003,8 +816,7 @@ impl CheckedModuleSet {
         let mut gathered = Gathered::default();
         match &function.body {
             FunctionBody::Expr(body) => {
-                expect(&result, &checker.check(body)?)?;
-                gather(&mut checker, body, &mut gathered)?;
+                expect(&result, &checker.check_gathering(body, &mut gathered)?)?;
             }
             FunctionBody::Intrinsic {
                 intrinsic,
@@ -1017,6 +829,9 @@ impl CheckedModuleSet {
                         expected: row.generics.len(),
                         actual: type_arguments.len(),
                     });
+                }
+                for argument in type_arguments {
+                    argument.check_depth()?;
                 }
                 let parameters = row
                     .parameters
@@ -1058,10 +873,14 @@ impl CheckedModuleSet {
         result: &Type,
         gathered: &mut Gathered,
     ) -> Result<(), IrError> {
-        expect(&table_bool(&self.table)?, &checker.check(&guard.predicate)?)?;
-        expect(result, &checker.check(&guard.consequence)?)?;
-        gather(checker, &guard.predicate, gathered)?;
-        gather(checker, &guard.consequence, gathered)
+        expect(
+            &table_bool(&self.table)?,
+            &checker.check_gathering(&guard.predicate, gathered)?,
+        )?;
+        expect(
+            result,
+            &checker.check_gathering(&guard.consequence, gathered)?,
+        )
     }
 
     /// The declared types and the library bindings, for encoding.
@@ -1140,6 +959,156 @@ impl Flow {
 
 fn table_bool(table: &TypeTable) -> Result<Type, IrError> {
     table.library().declared(Library::Bool, Vec::new())
+}
+
+/// The types a declaration's body holds inline: its fields, components,
+/// representation, or case fields.
+fn body_components(definition: &TypeDefinition) -> Vec<&Type> {
+    match definition.body() {
+        TypeBody::Record(fields) => fields.iter().map(|(_, ty)| ty).collect(),
+        TypeBody::Tuple(values) => values.iter().collect(),
+        TypeBody::Wrapper(value) => vec![value],
+        TypeBody::Variant(cases) => cases
+            .iter()
+            .flat_map(|case| case.fields.iter().map(|(_, ty)| ty))
+            .collect(),
+    }
+}
+
+/// The declarations and binders that `ty` holds inline, given for each
+/// declaration the parameters its own layout holds inline. A list, a
+/// callable, and an interface value hold their contents behind an
+/// indirection; a tuple and a record hold their components inline.
+fn layout_heads<'a>(
+    ty: &'a Type,
+    inline: &BTreeMap<&TypeId, BTreeSet<usize>>,
+    declarations: &mut BTreeSet<&'a TypeId>,
+    binders: &mut BTreeSet<usize>,
+) {
+    let mut pending = vec![ty];
+    while let Some(ty) = pending.pop() {
+        match ty {
+            Type::Tuple(_) | Type::Record(_) => pending.extend(ty.components()),
+            Type::Declared(id, arguments) => {
+                declarations.insert(id);
+                if let Some(parameters) = inline.get(id) {
+                    pending.extend(
+                        parameters.iter().filter_map(|index| arguments.get(*index)),
+                    );
+                }
+            }
+            Type::Binder(index) => {
+                binders.insert(*index);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// The type chapter's "Recursive types": a declaration may reach itself only
+/// through a list, a dict, or a callable type, so that every value of it has
+/// a finite layout.
+fn check_finite_size(table: &TypeTable) -> Result<(), IrError> {
+    let mut inline: BTreeMap<&TypeId, BTreeSet<usize>> = table
+        .types()
+        .keys()
+        .map(|id| (id, BTreeSet::new()))
+        .collect();
+    loop {
+        let mut changed = false;
+        for (id, definition) in table.types() {
+            let mut declarations = BTreeSet::new();
+            let mut binders = BTreeSet::new();
+            for component in body_components(definition) {
+                layout_heads(component, &inline, &mut declarations, &mut binders);
+            }
+            let entry = inline.entry(id).or_default();
+            if *entry != binders {
+                *entry = binders;
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    let mut edges: BTreeMap<&TypeId, BTreeSet<&TypeId>> = BTreeMap::new();
+    for (id, definition) in table.types() {
+        let mut declarations = BTreeSet::new();
+        let mut binders = BTreeSet::new();
+        for component in body_components(definition) {
+            layout_heads(component, &inline, &mut declarations, &mut binders);
+        }
+        declarations.retain(|target| table.types().contains_key(*target));
+        edges.insert(id, declarations);
+    }
+    let mut incoming: BTreeMap<&TypeId, usize> =
+        edges.keys().map(|id| (*id, 0)).collect();
+    for targets in edges.values() {
+        for target in targets {
+            *incoming.entry(target).or_default() += 1;
+        }
+    }
+    let mut ready: Vec<&TypeId> = incoming
+        .iter()
+        .filter(|(_, count)| **count == 0)
+        .map(|(id, _)| *id)
+        .collect();
+    while let Some(id) = ready.pop() {
+        for target in edges.get(id).into_iter().flatten() {
+            if let Some(count) = incoming.get_mut(target) {
+                *count -= 1;
+                if *count == 0 {
+                    ready.push(target);
+                }
+            }
+        }
+        incoming.remove(id);
+    }
+    match incoming.keys().next() {
+        Some(id) => Err(IrError::InvalidType(format!(
+            "`{}` holds itself inline and has no finite size",
+            id.path()
+        ))),
+        None => Ok(()),
+    }
+}
+
+/// Whether every `Self` in the result of the callable type `member` stands
+/// in a position of the type chapter's `Self` map: the result itself, and
+/// recursively a component of a tuple or record, or an argument of
+/// `Option`, `Result`, or `List`.
+fn self_map_result(member: &Type, library: &LibraryTypes) -> bool {
+    let result = match member {
+        Type::Fn(signature) => &signature.result,
+        Type::Proc(signature) => &signature.result,
+        _ => return true,
+    };
+    let mut pending = vec![result];
+    while let Some(ty) = pending.pop() {
+        match ty {
+            Type::SelfType => {}
+            Type::Tuple(_) | Type::Record(_) | Type::List(_) => {
+                pending.extend(ty.components());
+            }
+            Type::Declared(id, arguments)
+                if matches!(
+                    library.library_of(id),
+                    Some(Library::Option | Library::Result)
+                ) =>
+            {
+                pending.extend(arguments);
+            }
+            other => {
+                let mut found = false;
+                other.visit(&mut |inner| found |= *inner == Type::SelfType);
+                if found {
+                    return false;
+                }
+            }
+        }
+    }
+    true
 }
 
 /// Whether two implementations of one interface have keys some types

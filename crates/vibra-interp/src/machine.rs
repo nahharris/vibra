@@ -15,14 +15,15 @@ use vibra_ir::external::CompilerIntrinsic;
 use vibra_ir::{
     Arguments, CallTarget, CheckedFunction, CheckedModuleSet, ClosureBody, Constant,
     Construction, Expr, FunctionBody, Guard, Library, MatchArm, NamedTypes, Node,
-    Pattern, SourceOrigin, Type, TypeBody, TypeId,
+    Pattern, SourceOrigin, Type, TypeBody, TypeId, Value,
 };
 
 use crate::compare::{DictBuild, DictFind, Structural};
 use crate::encode::{ObserveError, encoding, from_neutral};
 use crate::frame::{Frame, TypeEnv};
+use crate::ingress::{Check, Ingress, Then, checks_of, needs_checks, refused};
 use crate::types::{match_type, mentions_self, type_of};
-use crate::value::{ClosureVal, FunctionVal, Held, Repr, Val, same};
+use crate::value::{ClosureVal, FunctionVal, Held, Repr, Val, neutral_storage, same};
 use crate::{FailureKind, Instrumentation, TestAssertionFailure, intrinsics};
 
 /// Why the machine stopped before its work was done.
@@ -31,6 +32,9 @@ pub(crate) enum Halt {
     /// The checked program is not one the checker accepts:
     /// `@runtime.invalidCheckedProgram`.
     Invalid(String),
+    /// A value the host handed in is not a value of its type:
+    /// `@runtime.invalidHostValue`.
+    HostValue(String),
     /// The memory budget is exhausted.
     Memory,
     /// The reduction limit of an evaluation is reached.
@@ -69,6 +73,9 @@ enum GlobalState<'a> {
 pub(crate) enum Step<'a> {
     /// Evaluate a node.
     Eval(&'a Node),
+    /// Evaluate an expression written at an origin: the root of an
+    /// evaluation, which is not a node of the module set.
+    Root(&'a Expr, &'a SourceOrigin),
     /// Hand a value to the top continuation.
     Ret(Val<'a>),
 }
@@ -201,6 +208,9 @@ pub(crate) enum Kont<'a> {
     DictBuild(Box<DictBuild<'a>>),
     DictFind(Box<DictFind<'a>>),
     Structural(Box<Structural<'a>>),
+    /// The checks of a value coming in, the answer of the current one
+    /// awaited.
+    Ingress(Box<Ingress<'a>>),
     /// Widens each `Self` position of a result dispatched through an
     /// interface value back to that interface value.
     Rebox {
@@ -224,6 +234,7 @@ impl<'a> Kont<'a> {
             Self::DictBuild(build) => build.for_each_value(visit),
             Self::DictFind(find) => find.for_each_value(visit),
             Self::Structural(structural) => structural.for_each_value(visit),
+            Self::Ingress(ingress) => ingress.for_each_value(visit),
             _ => {}
         }
     }
@@ -267,6 +278,8 @@ pub(crate) struct Machine<'a> {
     frame_bytes: u64,
     live_bytes: u64,
     allocated_bytes: u64,
+    /// The constants already admitted, by address: each is checked once.
+    admitted: HashSet<usize>,
     pub(crate) stats: Instrumentation,
 }
 
@@ -304,6 +317,7 @@ impl<'a> Machine<'a> {
             frame_bytes: 0,
             live_bytes: 0,
             allocated_bytes: 0,
+            admitted: HashSet::new(),
             stats: Instrumentation::default(),
         }
     }
@@ -324,7 +338,16 @@ impl<'a> Machine<'a> {
                         return Err(Halt::Reductions);
                     }
                     self.origin = Some(&node.origin);
-                    self.eval(node)?
+                    self.eval(&node.expr, &node.origin)?
+                }
+                Step::Root(expr, origin) => {
+                    self.stats.reduction_count =
+                        self.stats.reduction_count.saturating_add(1);
+                    if self.stats.reduction_count > self.reduction_limit {
+                        return Err(Halt::Reductions);
+                    }
+                    self.origin = Some(origin);
+                    self.eval(expr, origin)?
                 }
                 Step::Ret(value) => match self.konts.pop() {
                     None => return invalid("a value with no continuation"),
@@ -360,20 +383,148 @@ impl<'a> Machine<'a> {
 
     /// A constant as a runtime value.
     fn constant(&mut self, constant: &'a Constant) -> Result<Val<'a>, Halt> {
-        let value = from_neutral(self.set, constant.value(), constant.value_type())?;
-        self.allocated(&value)?;
-        Ok(value)
+        self.ingress(constant.value(), constant.value_type(), false)
+    }
+
+    /// A neutral value as a runtime value of `ty`: its storage is reserved
+    /// against the budget before any of it is built. A value that does not
+    /// fit `ty` halts as an invalid host value when `host` holds.
+    pub(crate) fn ingress(
+        &mut self,
+        value: &'a Value,
+        ty: &Type,
+        host: bool,
+    ) -> Result<Val<'a>, Halt> {
+        let cost = as_u64(neutral_storage(value));
+        self.reserve(cost, &[])?;
+        let converted =
+            from_neutral(self.set, value, ty).map_err(|halt| match halt {
+                Halt::Invalid(message) => refused(host, message),
+                other => other,
+            })?;
+        self.allocated_bytes = self.allocated_bytes.saturating_add(cost);
+        Ok(converted)
+    }
+
+    /// The checks `constant` must pass the first time the run meets it.
+    fn constant_checks(
+        &mut self,
+        constant: &'a Constant,
+        checks: &mut Vec<Check<'a>>,
+    ) -> Result<(), Halt> {
+        if !self.admitted.insert(std::ptr::from_ref(constant).addr())
+            || !needs_checks(self.set, constant.value_type())
+        {
+            return Ok(());
+        }
+        let value = self.constant(constant)?;
+        checks.extend(checks_of(self.set, &value, constant.value_type(), false)?);
+        Ok(())
+    }
+
+    /// A literal: its constant, admitted the first time.
+    fn literal(&mut self, constant: &'a Constant) -> Result<Step<'a>, Halt> {
+        let value = self.constant(constant)?;
+        if !self.admitted.insert(std::ptr::from_ref(constant).addr())
+            || !needs_checks(self.set, constant.value_type())
+        {
+            return Ok(Step::Ret(value));
+        }
+        let checks = checks_of(self.set, &value, constant.value_type(), false)?;
+        self.admit(checks, false, Then::Ret(value))
+    }
+
+    /// Runs `step` once the constants a call can reach without evaluating a
+    /// node are admitted: the defaults of every function and the
+    /// consequence of every invariant.
+    pub(crate) fn prelude(&mut self, step: Step<'a>) -> Result<Step<'a>, Halt> {
+        let set = self.set;
+        let mut checks = Vec::new();
+        for function in set.functions() {
+            for (_, default) in &function.defaults {
+                self.constant_checks(default, &mut checks)?;
+            }
+        }
+        for definition in set.types().types().values() {
+            if let Some(consequence) = definition
+                .invariant()
+                .and_then(|invariant| invariant.consequence.as_ref())
+            {
+                self.constant_checks(consequence, &mut checks)?;
+            }
+        }
+        self.admit(checks, false, Then::Continue(step))
     }
 
     // ----- memory -----
 
-    /// Accounts a newly built value against the budget.
-    pub(crate) fn allocated(&mut self, value: &Val<'_>) -> Result<(), Halt> {
+    /// Accounts a newly built value, which no root holds yet, against the
+    /// budget.
+    pub(crate) fn allocated(&mut self, value: &Val<'a>) -> Result<(), Halt> {
         if let Some((_, bytes)) = value.storage() {
             self.allocated_bytes = self.allocated_bytes.saturating_add(as_u64(bytes));
-            self.check_memory()?;
+            self.reserve(0, std::slice::from_ref(value))?;
         }
         Ok(())
+    }
+
+    /// Checks that `pending` more bytes fit the budget beside what is
+    /// accounted. When they do not at first, the live bytes are measured
+    /// again from the roots and from `in_flight`, the values built that no
+    /// root holds yet.
+    fn reserve(&mut self, pending: u64, in_flight: &[Val<'a>]) -> Result<(), Halt> {
+        let accounted = self.accounted().saturating_add(pending);
+        if accounted <= self.budget {
+            self.stats.peak_memory_bytes = self.stats.peak_memory_bytes.max(accounted);
+            return Ok(());
+        }
+        self.live_bytes = self.measure(in_flight);
+        self.allocated_bytes = 0;
+        let accounted = self.accounted().saturating_add(pending);
+        self.stats.peak_memory_bytes = self.stats.peak_memory_bytes.max(accounted);
+        if accounted > self.budget {
+            return Err(Halt::Memory);
+        }
+        Ok(())
+    }
+
+    /// A frame of `slot_count` slots, its bytes reserved before it is built;
+    /// `in_flight` are the values that will fill it.
+    pub(crate) fn new_frame(
+        &mut self,
+        slot_count: usize,
+        env: Rc<TypeEnv>,
+        in_flight: &[Val<'a>],
+    ) -> Result<Frame<'a>, Halt> {
+        let cost = FRAME_BYTES
+            .saturating_add(as_u64(slot_count).saturating_mul(SLOT_BYTES))
+            .saturating_add(KONT_BYTES);
+        self.reserve(cost, in_flight)?;
+        Frame::try_new(slot_count, env).ok_or(Halt::Memory)
+    }
+
+    /// Sets `slot` of the current activation. An evaluation's root
+    /// activation grows to hold it, its new slots reserved first.
+    pub(crate) fn bind_slot(
+        &mut self,
+        slot: usize,
+        value: Val<'a>,
+    ) -> Result<(), Halt> {
+        let count = self.frame()?.slots.len();
+        if slot >= count {
+            let wanted = slot.checked_add(1).ok_or(Halt::Memory)?;
+            let extra = wanted.saturating_sub(count);
+            let bytes = as_u64(extra).saturating_mul(SLOT_BYTES);
+            self.reserve(bytes, std::slice::from_ref(&value))?;
+            let frame = self.frame_mut()?;
+            frame
+                .slots
+                .try_reserve_exact(extra)
+                .map_err(|_| Halt::Memory)?;
+            frame.slots.resize(wanted, None);
+            self.frame_bytes = self.frame_bytes.saturating_add(bytes);
+        }
+        self.frame_mut()?.set(slot, value)
     }
 
     fn accounted(&self) -> u64 {
@@ -384,22 +535,12 @@ impl<'a> Machine<'a> {
     }
 
     fn check_memory(&mut self) -> Result<(), Halt> {
-        let accounted = self.accounted();
-        self.stats.peak_memory_bytes = self.stats.peak_memory_bytes.max(accounted);
-        if accounted <= self.budget {
-            return Ok(());
-        }
-        self.live_bytes = self.measure(None);
-        self.allocated_bytes = 0;
-        if self.accounted() > self.budget {
-            return Err(Halt::Memory);
-        }
-        Ok(())
+        self.reserve(0, &[])
     }
 
     /// The bytes of every value reachable from the machine's roots and from
     /// `extra`, each shared part counted once.
-    pub(crate) fn measure(&self, extra: Option<&Val<'a>>) -> u64 {
+    pub(crate) fn measure(&self, extra: &[Val<'a>]) -> u64 {
         let mut seen = HashSet::new();
         let mut pending: Vec<Val<'a>> = Vec::new();
         let mut total: u64 = 0;
@@ -425,7 +566,7 @@ impl<'a> Machine<'a> {
                 root(value, true, &mut total);
             }
         }
-        if let Some(value) = extra {
+        for value in extra {
             root(value, true, &mut total);
         }
         while let Some(value) = pending.pop() {
@@ -476,24 +617,31 @@ impl<'a> Machine<'a> {
 
     // ----- evaluation -----
 
-    fn read_slot(&mut self, slot: usize, value_type: &Type) -> Result<Val<'a>, Halt> {
-        let set = self.set;
-        let frame = self.frame_mut()?;
+    /// Reads `slot`; an evaluation's input is converted and admitted on its
+    /// first read, at the type the read names.
+    fn read_slot(&mut self, slot: usize, value_type: &Type) -> Result<Step<'a>, Halt> {
+        let frame = self.frame()?;
         if let Some(Some(value)) = frame.slots.get(slot) {
-            return Ok(value.clone());
+            return Ok(Step::Ret(value.clone()));
         }
-        let input = frame.inputs.get(slot).ok_or_else(|| {
+        let inputs = frame.inputs;
+        let input = inputs.get(slot).ok_or_else(|| {
             Halt::Invalid(format!("slot {slot} is read before it is set"))
         })?;
-        let value = from_neutral(set, input, &frame.env.apply(value_type))?;
-        frame.bind(slot, value.clone());
-        Ok(value)
+        let ty = frame.env.apply(value_type);
+        let value = self.ingress(input, &ty, true)?;
+        let checks = checks_of(self.set, &value, &ty, true)?;
+        self.admit(checks, true, Then::Bind(slot, value))
     }
 
     #[allow(clippy::too_many_lines)]
-    fn eval(&mut self, node: &'a Node) -> Result<Step<'a>, Halt> {
-        Ok(match &node.expr {
-            Expr::Literal(constant) => Step::Ret(self.constant(constant)?),
+    fn eval(
+        &mut self,
+        expr: &'a Expr,
+        origin: &'a SourceOrigin,
+    ) -> Result<Step<'a>, Halt> {
+        Ok(match expr {
+            Expr::Literal(constant) => self.literal(constant)?,
             Expr::Intrinsic {
                 intrinsic,
                 type_arguments,
@@ -503,14 +651,12 @@ impl<'a> Machine<'a> {
                     intrinsic: *intrinsic,
                     type_arguments,
                     nodes: arguments,
-                    origin: &node.origin,
+                    origin,
                 },
                 Vec::new(),
             )?,
             Expr::Sequence(statements) => self.sequence(statements)?,
-            Expr::Variable { slot, value_type } => {
-                Step::Ret(self.read_slot(*slot, value_type)?)
-            }
+            Expr::Variable { slot, value_type } => self.read_slot(*slot, value_type)?,
             Expr::Global(index) => self.global(*index)?,
             Expr::Function {
                 function,
@@ -595,8 +741,8 @@ impl<'a> Machine<'a> {
                     Work::Call {
                         target,
                         arguments,
-                        tail: matches!(node.expr, Expr::TailCall { .. }),
-                        origin: &node.origin,
+                        tail: matches!(expr, Expr::TailCall { .. }),
+                        origin,
                     },
                     Vec::new(),
                 )?
@@ -651,7 +797,8 @@ impl<'a> Machine<'a> {
             GlobalState::Unread => {
                 *state = GlobalState::Evaluating;
                 self.konts.push(Kont::Global(index));
-                let frame = Frame::new(global.slot_count, Rc::clone(&self.empty_env));
+                let env = Rc::clone(&self.empty_env);
+                let frame = self.new_frame(global.slot_count, env, &[])?;
                 self.frame_bytes = self.frame_bytes.saturating_add(frame_cost(&frame));
                 self.frames.push(frame);
                 self.check_memory()?;
@@ -697,7 +844,11 @@ impl<'a> Machine<'a> {
                     env,
                 })));
                 self.allocated(&value)?;
-                Ok(Step::Ret(value))
+                let mut checks = Vec::new();
+                for (_, default) in &body.defaults {
+                    self.constant_checks(default, &mut checks)?;
+                }
+                self.admit(checks, false, Then::Ret(value))
             }
             Work::Lookup { collection, .. } => {
                 let mut done = done.into_iter();
@@ -973,21 +1124,23 @@ impl<'a> Machine<'a> {
         }
     }
 
-    /// The value of the default of `label` that the resolved callee
-    /// declares.
+    /// The value of the default of `label` that the resolved callee, a
+    /// function or a closure value, carries.
     fn default_of(
         &mut self,
         target: &Target<'a>,
         label: &str,
     ) -> Result<Val<'a>, Halt> {
-        let Target::Function(index) = target else {
-            return invalid(format!(
-                "a default for `{label}` of a callee without defaults"
-            ));
+        let defaults = match target {
+            Target::Function(index) => self.function(*index)?.defaults.as_slice(),
+            Target::Closure(closure) => closure.body.defaults.as_slice(),
+            _ => {
+                return invalid(format!(
+                    "a default for `{label}` of a callee without defaults"
+                ));
+            }
         };
-        let function = self.function(*index)?;
-        let constant = function
-            .defaults
+        let constant = defaults
             .iter()
             .find_map(|(name, constant)| (name == label).then_some(constant))
             .ok_or_else(|| {
@@ -1030,9 +1183,9 @@ impl<'a> Machine<'a> {
                 if matches!(body.value_type, Type::Proc(_)) {
                     return Err(unavailable_plan());
                 }
-                let mut frame = Frame::new(body.slot_count, env);
+                let mut frame = self.new_frame(body.slot_count, env, &args)?;
                 for (slot, value) in args.into_iter().enumerate() {
-                    frame.bind(slot, value);
+                    frame.set(slot, value)?;
                 }
                 frame.closure = Some(closure);
                 self.push_frame(frame, tail)?;
@@ -1054,9 +1207,9 @@ impl<'a> Machine<'a> {
                     let origin = origin.unwrap_or(&function.origin);
                     return self.intrinsic(*intrinsic, &type_arguments, args, origin);
                 }
-                let mut frame = Frame::new(function.slot_count, env);
+                let mut frame = self.new_frame(function.slot_count, env, &args)?;
                 for (slot, value) in args.into_iter().enumerate() {
-                    frame.bind(slot, value);
+                    frame.set(slot, value)?;
                 }
                 self.push_frame(frame, tail)?;
                 if let Some(guard) = &function.entry_guard {
@@ -1271,76 +1424,119 @@ impl<'a> Machine<'a> {
                     self_type: None,
                     associated: Some(choices),
                 });
-        let result = match signature {
-            Type::Fn(signature) => signature.result,
+        let result = match &signature {
+            Type::Fn(signature) => signature.result.clone(),
             _ => return invalid(format!("`{member}` is not a function")),
         };
         Ok((held.held_type.clone(), result))
     }
 
     /// `value`, with each `Self` position of `ty` widened to an interface
-    /// value holding `held_type`.
+    /// value holding `held_type`. The value is walked with a work list, so
+    /// no host stack grows with its depth or its type's.
     fn rebox(
         &self,
         value: Val<'a>,
         ty: &Type,
         held_type: &Type,
     ) -> Result<Val<'a>, Halt> {
+        let mut tasks = vec![Rebox::Enter(value, ty.clone())];
+        let mut built: Vec<Val<'a>> = Vec::new();
+        while let Some(task) = tasks.pop() {
+            match task {
+                Rebox::Enter(value, ty) => {
+                    self.rebox_enter(value, &ty, held_type, &mut tasks, &mut built)?;
+                }
+                Rebox::Build(shape, count) => {
+                    let children = built.split_off(built.len().saturating_sub(count));
+                    built.push(shape.build(children)?);
+                }
+            }
+        }
+        built
+            .pop()
+            .ok_or_else(|| Halt::Invalid("a rebox with no result".to_owned()))
+    }
+
+    /// Takes apart one value of `ty`: a value with no `Self` position is
+    /// done; otherwise its rebuilding and each of its components is queued.
+    fn rebox_enter(
+        &self,
+        value: Val<'a>,
+        ty: &Type,
+        held_type: &Type,
+        tasks: &mut Vec<Rebox<'a>>,
+        built: &mut Vec<Val<'a>>,
+    ) -> Result<(), Halt> {
         if *ty == Type::SelfType {
-            return Ok(Val(Repr::Interface(Rc::new(Held {
+            built.push(Val(Repr::Interface(Rc::new(Held {
                 held_type: held_type.clone(),
                 value,
             }))));
+            return Ok(());
         }
         if !mentions_self(ty) {
-            return Ok(value);
+            built.push(value);
+            return Ok(());
         }
-        let set = self.set;
-        let go = |value: &Val<'a>, ty: &Type| self.rebox(value.clone(), ty, held_type);
-        Ok(match (ty, &value.0) {
-            (Type::Tuple(types), Repr::Tuple(values)) => Val::tuple(
-                values
-                    .iter()
-                    .zip(types)
-                    .map(|(value, ty)| go(value, ty))
-                    .collect::<Result<_, _>>()?,
+        let mut queue = |shape: RebuildShape<'a>, parts: Vec<(Val<'a>, Type)>| {
+            tasks.push(Rebox::Build(shape, parts.len()));
+            tasks.extend(
+                parts
+                    .into_iter()
+                    .rev()
+                    .map(|(value, ty)| Rebox::Enter(value, ty)),
+            );
+        };
+        let field_of = |fields: &dyn Fn(&str) -> Option<Type>, name: &str| {
+            fields(name).ok_or_else(|| Halt::Invalid(format!("no field `{name}`")))
+        };
+        match (ty, &value.0) {
+            (Type::Tuple(types), Repr::Tuple(values)) => queue(
+                RebuildShape::Tuple,
+                values.iter().cloned().zip(types.iter().cloned()).collect(),
             ),
-            (Type::Record(fields), Repr::Record(values)) => Val(Repr::Record(Rc::new(
+            (Type::Record(fields), Repr::Record(values)) => {
+                let lookup = |name: &str| fields.get(name).cloned();
+                let parts = values
+                    .iter()
+                    .map(|(name, value)| Ok((value.clone(), field_of(&lookup, name)?)))
+                    .collect::<Result<Vec<_>, Halt>>()?;
+                queue(
+                    RebuildShape::Record(
+                        values.iter().map(|(name, _)| *name).collect(),
+                    ),
+                    parts,
+                );
+            }
+            (Type::List(element), Repr::List(values)) => queue(
+                RebuildShape::List,
                 values
                     .iter()
-                    .map(|(name, value)| {
-                        let ty = fields.get(name).ok_or_else(|| {
-                            Halt::Invalid(format!("no field `{name}`"))
-                        })?;
-                        Ok((*name, go(value, ty)?))
-                    })
-                    .collect::<Result<_, Halt>>()?,
-            ))),
-            (Type::List(element), Repr::List(values)) => Val::list(
-                values
-                    .iter()
-                    .map(|value| go(value, element))
-                    .collect::<Result<_, _>>()?,
+                    .map(|value| (value.clone(), element.as_ref().clone()))
+                    .collect(),
             ),
             (Type::Declared(id, arguments), _) => {
-                match (set.library().library_of(id), &value.0, arguments.as_slice()) {
-                    (Some(Library::Option), Repr::Opt(None), _) => value,
-                    (Some(Library::Option), Repr::Opt(Some(inner)), [item]) => {
-                        Val::some(go(inner, item)?)
-                    }
-                    (Some(Library::Dict), Repr::Dict(dict), [key, item]) => {
-                        Val(Repr::Dict(Rc::new(crate::value::DictVal {
-                            key: dict.key.clone(),
-                            entries: dict
-                                .entries
-                                .iter()
-                                .map(|(k, v)| Ok((go(k, key)?, go(v, item)?)))
-                                .collect::<Result<_, Halt>>()?,
-                        })))
-                    }
-                    _ => {
-                        self.rebox_declared(value.clone(), id, arguments, held_type)?
-                    }
+                match (
+                    self.set.library().library_of(id),
+                    &value.0,
+                    arguments.as_slice(),
+                ) {
+                    (Some(Library::Option), Repr::Opt(None), _) => built.push(value),
+                    (Some(Library::Option), Repr::Opt(Some(inner)), [item]) => queue(
+                        RebuildShape::Some,
+                        vec![(Val::clone(inner), item.clone())],
+                    ),
+                    (Some(Library::Dict), Repr::Dict(dict), [key, item]) => queue(
+                        RebuildShape::Dict(dict.key.clone()),
+                        dict.entries
+                            .iter()
+                            .flat_map(|(k, v)| {
+                                [(k.clone(), key.clone()), (v.clone(), item.clone())]
+                            })
+                            .collect(),
+                    ),
+                    _ => self.rebox_declared(value, id, arguments, tasks, built)?,
                 }
             }
             _ => {
@@ -1348,7 +1544,8 @@ impl<'a> Machine<'a> {
                     "a `Self` position in {ty} that cannot be reboxed"
                 ));
             }
-        })
+        }
+        Ok(())
     }
 
     fn rebox_declared(
@@ -1356,67 +1553,68 @@ impl<'a> Machine<'a> {
         value: Val<'a>,
         id: &TypeId,
         arguments: &[Type],
-        held_type: &Type,
-    ) -> Result<Val<'a>, Halt> {
+        tasks: &mut Vec<Rebox<'a>>,
+        built: &mut Vec<Val<'a>>,
+    ) -> Result<(), Halt> {
         let definition = self
             .set
             .types()
             .definition(id)
             .ok_or_else(|| Halt::Invalid(format!("no type `{}`", id.path())))?;
-        let go = |value: &Val<'a>, ty: &Type| {
-            self.rebox(value.clone(), &ty.instantiate(arguments), held_type)
+        let mut queue = |shape: RebuildShape<'a>, parts: Vec<(Val<'a>, Type)>| {
+            tasks.push(Rebox::Build(shape, parts.len()));
+            tasks.extend(
+                parts
+                    .into_iter()
+                    .rev()
+                    .map(|(value, ty)| Rebox::Enter(value, ty)),
+            );
         };
-        Ok(match (definition.body(), &value.0) {
-            (TypeBody::Record(fields), Repr::Record(values)) => {
-                Val(Repr::Record(Rc::new(
-                    values
+        let fields_of = |declared: &[(String, Type)], values: &[(&'a str, Val<'a>)]| {
+            values
+                .iter()
+                .map(|(name, value)| {
+                    let ty = declared
                         .iter()
-                        .map(|(name, value)| {
-                            let ty = fields
-                                .iter()
-                                .find_map(|(field, ty)| (field == name).then_some(ty))
-                                .ok_or_else(|| {
-                                    Halt::Invalid(format!("no field `{name}`"))
-                                })?;
-                            Ok((*name, go(value, ty)?))
-                        })
-                        .collect::<Result<_, Halt>>()?,
-                )))
-            }
-            (TypeBody::Tuple(types), Repr::Tuple(values)) => Val::tuple(
+                        .find_map(|(field, ty)| (field == name).then_some(ty))
+                        .ok_or_else(|| Halt::Invalid(format!("no field `{name}`")))?;
+                    Ok((value.clone(), ty.instantiate(arguments)))
+                })
+                .collect::<Result<Vec<_>, Halt>>()
+        };
+        match (definition.body(), &value.0) {
+            (TypeBody::Record(fields), Repr::Record(values)) => queue(
+                RebuildShape::Record(values.iter().map(|(name, _)| *name).collect()),
+                fields_of(fields, values)?,
+            ),
+            (TypeBody::Tuple(types), Repr::Tuple(values)) => queue(
+                RebuildShape::Tuple,
                 values
                     .iter()
-                    .zip(types)
-                    .map(|(value, ty)| go(value, ty))
-                    .collect::<Result<_, _>>()?,
+                    .cloned()
+                    .zip(types.iter().map(|ty| ty.instantiate(arguments)))
+                    .collect(),
             ),
-            (TypeBody::Wrapper(representation), Repr::Wrapper(inner)) => {
-                Val(Repr::Wrapper(Rc::new(go(inner, representation)?)))
-            }
+            (TypeBody::Wrapper(representation), Repr::Wrapper(inner)) => queue(
+                RebuildShape::Wrapper,
+                vec![(Val::clone(inner), representation.instantiate(arguments))],
+            ),
             (TypeBody::Variant(_), Repr::Case(case)) => {
                 let declared = definition
                     .case(case.case)
                     .ok_or_else(|| Halt::Invalid(format!("no case `{}`", case.case)))?;
-                Val::case(
-                    case.case,
-                    case.fields
-                        .iter()
-                        .map(|(name, value)| {
-                            let ty = declared
-                                .fields
-                                .iter()
-                                .find_map(|(field, ty)| (field == name).then_some(ty))
-                                .ok_or_else(|| {
-                                    Halt::Invalid(format!("no field `{name}`"))
-                                })?;
-                            Ok((*name, go(value, ty)?))
-                        })
-                        .collect::<Result<_, Halt>>()?,
-                )
+                queue(
+                    RebuildShape::Case(
+                        case.case,
+                        case.fields.iter().map(|(name, _)| *name).collect(),
+                    ),
+                    fields_of(&declared.fields, &case.fields)?,
+                );
             }
-            (TypeBody::Variant(_), Repr::Tag(_)) => value,
+            (TypeBody::Variant(_), Repr::Tag(_)) => built.push(value),
             _ => return invalid("a reboxed value that does not fit its type"),
-        })
+        }
+        Ok(())
     }
 
     // ----- intrinsics -----
@@ -1542,7 +1740,7 @@ impl<'a> Machine<'a> {
             Kont::Leave => {
                 let frame = self.frame_mut()?;
                 if let Some(exit) = frame.exit.take() {
-                    frame.bind(exit.candidate, value.clone());
+                    frame.set(exit.candidate, value.clone())?;
                     self.konts.push(Kont::Leave);
                     self.konts.push(Kont::Ensures {
                         candidate: value,
@@ -1568,7 +1766,7 @@ impl<'a> Machine<'a> {
             }
             Kont::Let { slot, body } => {
                 if let Some(slot) = slot {
-                    self.frame_mut()?.bind(slot, value);
+                    self.bind_slot(slot, value)?;
                 }
                 Step::Eval(body)
             }
@@ -1665,6 +1863,7 @@ impl<'a> Machine<'a> {
             Kont::Structural(structural) => {
                 self.resume_structural(*structural, &value)?
             }
+            Kont::Ingress(ingress) => self.resume_ingress(*ingress, &value)?,
             Kont::Rebox { result, held_type } => {
                 let value = self.rebox(value, &result, &held_type)?;
                 self.allocated(&value)?;
@@ -1701,7 +1900,7 @@ impl<'a> Machine<'a> {
             let fits = match pattern {
                 Pattern::Discard => true,
                 Pattern::Bind(slot) => {
-                    self.frame_mut()?.bind(*slot, value);
+                    self.bind_slot(*slot, value)?;
                     true
                 }
                 Pattern::Literal(constant) => same(&self.constant(constant)?, &value),
@@ -1842,4 +2041,50 @@ fn failure(
         actual,
         origin: origin.clone(),
     }))
+}
+
+/// One step of a rebox: take a value of a type apart, or put a value back
+/// together from its last reboxed components.
+enum Rebox<'a> {
+    Enter(Val<'a>, Type),
+    Build(RebuildShape<'a>, usize),
+}
+
+/// What a reboxed value is rebuilt as, around its reboxed components.
+enum RebuildShape<'a> {
+    Tuple,
+    Record(Vec<&'a str>),
+    List,
+    Some,
+    Dict(Type),
+    Wrapper,
+    Case(&'a str, Vec<&'a str>),
+}
+
+impl<'a> RebuildShape<'a> {
+    fn build(self, components: Vec<Val<'a>>) -> Result<Val<'a>, Halt> {
+        let missing = || Halt::Invalid("a rebox lost a component".to_owned());
+        Ok(match self {
+            Self::Tuple => Val::tuple(components),
+            Self::Record(names) => Val(Repr::Record(Rc::new(
+                names.into_iter().zip(components).collect(),
+            ))),
+            Self::List => Val::list(components),
+            Self::Some => Val::some(components.into_iter().next().ok_or_else(missing)?),
+            Self::Dict(key) => {
+                let mut components = components.into_iter();
+                let mut entries = Vec::new();
+                while let Some(entry_key) = components.next() {
+                    entries.push((entry_key, components.next().ok_or_else(missing)?));
+                }
+                Val(Repr::Dict(Rc::new(crate::value::DictVal { key, entries })))
+            }
+            Self::Wrapper => Val(Repr::Wrapper(Rc::new(
+                components.into_iter().next().ok_or_else(missing)?,
+            ))),
+            Self::Case(case, names) => {
+                Val::case(case, names.into_iter().zip(components).collect())
+            }
+        })
+    }
 }

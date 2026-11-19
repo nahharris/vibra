@@ -12,9 +12,9 @@ use crate::{Type, TypeTable};
 
 /// A value.
 ///
-/// Equality and dropping walk the value with an explicit work list, so that
-/// no host stack grows with its depth.
-#[derive(Clone, Debug, Eq)]
+/// Equality, cloning, debug formatting, and dropping walk the value with an
+/// explicit work list, so that no host stack grows with its depth.
+#[derive(Eq)]
 pub enum Value {
     /// An `I8`.
     I8(i8),
@@ -303,6 +303,225 @@ impl PartialEq for Value {
             }
         }
         true
+    }
+}
+
+impl Value {
+    /// This value rebuilt from its own non-value parts and `children`, the
+    /// copies of its children in [`Self::children`] order.
+    fn rebuilt(&self, children: Vec<Self>) -> Self {
+        let mut children = children.into_iter();
+        let mut fields = |fields: &[(String, Self)]| {
+            fields
+                .iter()
+                .map(|(name, _)| (name.clone(), children.next().unwrap_or(Self::Void)))
+                .collect::<Vec<_>>()
+        };
+        match self {
+            Self::I8(n) => Self::I8(*n),
+            Self::I16(n) => Self::I16(*n),
+            Self::I32(n) => Self::I32(*n),
+            Self::I64(n) => Self::I64(*n),
+            Self::U8(n) => Self::U8(*n),
+            Self::U16(n) => Self::U16(*n),
+            Self::U32(n) => Self::U32(*n),
+            Self::U64(n) => Self::U64(*n),
+            Self::F32(bits) => Self::F32(*bits),
+            Self::F64(bits) => Self::F64(*bits),
+            Self::Char(c) => Self::Char(*c),
+            Self::Atom(atom) => Self::Atom(atom.clone()),
+            Self::Void => Self::Void,
+            Self::Str(text) => Self::Str(text.clone()),
+            Self::Bytes(bytes) => Self::Bytes(bytes.clone()),
+            Self::Tuple(_) => Self::Tuple(children.collect()),
+            Self::List(_) => Self::List(children.collect()),
+            Self::Closure { .. } => Self::Closure {
+                captures: children.collect(),
+            },
+            Self::Dict(entries) => Self::Dict(
+                entries
+                    .iter()
+                    .map(|_| {
+                        let key = children.next().unwrap_or(Self::Void);
+                        (key, children.next().unwrap_or(Self::Void))
+                    })
+                    .collect(),
+            ),
+            Self::Record(written) => Self::Record(fields(written)),
+            Self::Variant {
+                case,
+                fields: written,
+            } => Self::Variant {
+                case: case.clone(),
+                fields: fields(written),
+            },
+            Self::Wrapper(_) => {
+                Self::Wrapper(Box::new(children.next().unwrap_or(Self::Void)))
+            }
+            Self::Interface { held_type, .. } => Self::Interface {
+                held_type: held_type.clone(),
+                held: Box::new(children.next().unwrap_or(Self::Void)),
+            },
+            Self::Function {
+                function,
+                type_arguments,
+            } => Self::Function {
+                function: *function,
+                type_arguments: type_arguments.clone(),
+            },
+        }
+    }
+}
+
+impl Clone for Value {
+    fn clone(&self) -> Self {
+        enum Task<'v> {
+            Enter(&'v Value),
+            Build(&'v Value, usize),
+        }
+        let mut tasks = vec![Task::Enter(self)];
+        let mut built: Vec<Self> = Vec::new();
+        while let Some(task) = tasks.pop() {
+            match task {
+                Task::Enter(value) => {
+                    let children = value.children();
+                    tasks.push(Task::Build(value, children.len()));
+                    tasks.extend(children.into_iter().rev().map(Task::Enter));
+                }
+                Task::Build(value, count) => {
+                    let children = built.split_off(built.len().saturating_sub(count));
+                    built.push(value.rebuilt(children));
+                }
+            }
+        }
+        built.pop().unwrap_or(Self::Void)
+    }
+}
+
+/// The derived debug form, `{:#?}` included: `Tuple([I8(1), Void])`,
+/// `Variant { case: "some", fields: [("value", U8(2))] }`.
+impl std::fmt::Debug for Value {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        enum Piece<'v> {
+            Text(&'static str),
+            Name(&'v str),
+            Value(&'v Value),
+        }
+        fn list<'v>(
+            pieces: &mut Vec<Piece<'v>>,
+            open: &'static str,
+            items: impl IntoIterator<Item = Vec<Piece<'v>>>,
+            close: &'static str,
+        ) {
+            let mut out = vec![Piece::Text(open)];
+            for (index, item) in items.into_iter().enumerate() {
+                if index > 0 {
+                    out.push(Piece::Text(", "));
+                }
+                out.extend(item);
+            }
+            out.push(Piece::Text(close));
+            pieces.extend(out.into_iter().rev());
+        }
+        fn named<'v>(fields: &'v [(String, Value)]) -> Vec<Vec<Piece<'v>>> {
+            fields
+                .iter()
+                .map(|(name, value)| {
+                    vec![
+                        Piece::Text("("),
+                        Piece::Name(name),
+                        Piece::Text(", "),
+                        Piece::Value(value),
+                        Piece::Text(")"),
+                    ]
+                })
+                .collect()
+        }
+        let mut pieces = vec![Piece::Value(self)];
+        while let Some(piece) = pieces.pop() {
+            let value = match piece {
+                Piece::Text(text) => {
+                    f.write_str(text)?;
+                    continue;
+                }
+                Piece::Name(name) => {
+                    write!(f, "{name:?}")?;
+                    continue;
+                }
+                Piece::Value(value) => value,
+            };
+            match value {
+                Self::I8(n) => write!(f, "I8({n:?})")?,
+                Self::I16(n) => write!(f, "I16({n:?})")?,
+                Self::I32(n) => write!(f, "I32({n:?})")?,
+                Self::I64(n) => write!(f, "I64({n:?})")?,
+                Self::U8(n) => write!(f, "U8({n:?})")?,
+                Self::U16(n) => write!(f, "U16({n:?})")?,
+                Self::U32(n) => write!(f, "U32({n:?})")?,
+                Self::U64(n) => write!(f, "U64({n:?})")?,
+                Self::F32(bits) => write!(f, "F32({bits:?})")?,
+                Self::F64(bits) => write!(f, "F64({bits:?})")?,
+                Self::Char(c) => write!(f, "Char({c:?})")?,
+                Self::Atom(atom) => write!(f, "Atom({atom:?})")?,
+                Self::Void => f.write_str("Void")?,
+                Self::Str(text) => write!(f, "Str({text:?})")?,
+                Self::Bytes(bytes) => write!(f, "Bytes({bytes:?})")?,
+                Self::Tuple(values) => list(
+                    &mut pieces,
+                    "Tuple([",
+                    values.iter().map(|value| vec![Piece::Value(value)]),
+                    "])",
+                ),
+                Self::List(values) => list(
+                    &mut pieces,
+                    "List([",
+                    values.iter().map(|value| vec![Piece::Value(value)]),
+                    "])",
+                ),
+                Self::Closure { captures } => list(
+                    &mut pieces,
+                    "Closure { captures: [",
+                    captures.iter().map(|value| vec![Piece::Value(value)]),
+                    "] }",
+                ),
+                Self::Dict(entries) => list(
+                    &mut pieces,
+                    "Dict([",
+                    entries.iter().map(|(key, value)| {
+                        vec![
+                            Piece::Text("("),
+                            Piece::Value(key),
+                            Piece::Text(", "),
+                            Piece::Value(value),
+                            Piece::Text(")"),
+                        ]
+                    }),
+                    "])",
+                ),
+                Self::Record(fields) => {
+                    list(&mut pieces, "Record([", named(fields), "])")
+                }
+                Self::Variant { case, fields } => {
+                    write!(f, "Variant {{ case: {case:?}, ")?;
+                    list(&mut pieces, "fields: [", named(fields), "] }");
+                }
+                Self::Wrapper(inner) => {
+                    list(&mut pieces, "Wrapper(", [vec![Piece::Value(inner)]], ")");
+                }
+                Self::Interface { held_type, held } => {
+                    write!(f, "Interface {{ held_type: {held_type:?}, ")?;
+                    list(&mut pieces, "held: ", [vec![Piece::Value(held)]], " }");
+                }
+                Self::Function {
+                    function,
+                    type_arguments,
+                } => write!(
+                    f,
+                    "Function {{ function: {function:?}, type_arguments: {type_arguments:?} }}"
+                )?,
+            }
+        }
+        Ok(())
     }
 }
 

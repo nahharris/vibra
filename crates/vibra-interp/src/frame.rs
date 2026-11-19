@@ -6,6 +6,7 @@ use std::rc::Rc;
 
 use vibra_ir::{ExitGuard, NamedTypes, Substitution, Type, Value};
 
+use crate::machine::Halt;
 use crate::value::{ClosureVal, Val};
 
 /// The closed substitution an activation runs under: its binders, and for
@@ -66,23 +67,29 @@ pub(crate) struct Frame<'a> {
 }
 
 impl<'a> Frame<'a> {
-    pub(crate) fn new(slot_count: usize, env: Rc<TypeEnv>) -> Self {
-        Self {
-            slots: vec![None; slot_count],
+    /// A frame of `slot_count` unset slots, `None` when the host cannot hold
+    /// them. The machine reserves the frame's bytes against its budget
+    /// first.
+    pub(crate) fn try_new(slot_count: usize, env: Rc<TypeEnv>) -> Option<Self> {
+        let mut slots = Vec::new();
+        slots.try_reserve_exact(slot_count).ok()?;
+        slots.resize(slot_count, None);
+        Some(Self {
+            slots,
             closure: None,
             env,
             exit: None,
             inputs: &[],
-        }
+        })
     }
 
-    /// Sets `slot`, growing the frame of an evaluation if it must.
-    pub(crate) fn bind(&mut self, slot: usize, value: Val<'a>) {
-        if slot >= self.slots.len() {
-            self.slots.resize(slot.saturating_add(1), None);
-        }
-        if let Some(place) = self.slots.get_mut(slot) {
-            *place = Some(value);
-        }
+    /// Sets `slot`, which the frame has.
+    pub(crate) fn set(&mut self, slot: usize, value: Val<'a>) -> Result<(), Halt> {
+        let count = self.slots.len();
+        let place = self.slots.get_mut(slot).ok_or_else(|| {
+            Halt::Invalid(format!("slot {slot} of an activation with {count}"))
+        })?;
+        *place = Some(value);
+        Ok(())
     }
 }

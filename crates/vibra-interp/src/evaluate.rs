@@ -5,14 +5,13 @@ use std::rc::Rc;
 
 use vibra_diagnostics::ByteSpan;
 use vibra_ir::{
-    CheckedModuleSet, CheckedProgram, Expr, Node, ObservedValue, SourceOrigin, Trap,
-    Type, Value,
+    CheckedModuleSet, CheckedProgram, Expr, ObservedValue, SourceOrigin, Trap, Type,
+    Value,
 };
 
 use crate::encode::{ObserveError, observe, to_neutral};
-use crate::frame::Frame;
 use crate::machine::{Halt, Machine, Mode, Resolved, Target};
-use crate::types::type_of;
+use crate::types::type_of_expr;
 use crate::value::Val;
 use crate::{
     Evaluation, Execution, Limit, Limits, MemoryBudget, RuntimeError, TestExecution,
@@ -30,6 +29,11 @@ fn runtime_error(
     };
     match halt {
         Halt::Invalid(message) => trap(message),
+        Halt::HostValue(message) => RuntimeError::Trap {
+            trap: Trap::InvalidHostValue,
+            origin: origin.cloned(),
+            message,
+        },
         Halt::Memory => RuntimeError::MemoryExhausted { budget },
         Halt::Unavailable(message) => RuntimeError::Unavailable { message },
         Halt::Reductions => trap("a reduction limit outside an evaluation".to_owned()),
@@ -75,7 +79,10 @@ fn call_entry<'a>(
         target: Target::Function(entry),
         env: Rc::clone(&machine.empty_env),
     };
-    let step = match machine.invoke(resolved, Vec::new(), false, None) {
+    let started = machine
+        .invoke(resolved, Vec::new(), false, None)
+        .and_then(|step| machine.prelude(step));
+    let step = match started {
         Ok(step) => step,
         Err(halt) => return Err(runtime_error(halt, machine.origin(), budget)),
     };
@@ -98,7 +105,7 @@ pub fn run(
     let mut machine = Machine::new(set, Mode::Run, budget.bytes, u64::MAX);
     let value = call_entry(&mut machine, program.entry(), budget)?
         .map_err(|halt| runtime_error(halt, machine.origin(), budget))?;
-    machine.stats.live_memory_bytes = machine.measure(Some(&value));
+    machine.stats.live_memory_bytes = machine.measure(std::slice::from_ref(&value));
     let (neutral, canonical) = match observe(set, &value, &result_type) {
         Ok(observed) => observed,
         Err(ObserveError::Unsupported) => {
@@ -139,7 +146,8 @@ pub fn run_test(
     let mut machine = Machine::new(set, Mode::Test, budget.bytes, u64::MAX);
     let failure = match call_entry(&mut machine, program.entry(), budget)? {
         Ok(value) => {
-            machine.stats.live_memory_bytes = machine.measure(Some(&value));
+            machine.stats.live_memory_bytes =
+                machine.measure(std::slice::from_ref(&value));
             None
         }
         Err(Halt::Failed(failure)) => Some(*failure),
@@ -165,22 +173,30 @@ pub fn evaluate(
     limits: Limits,
 ) -> Evaluation {
     let defect = Evaluation::Defect(Trap::InvalidCheckedProgram);
-    let root = Node::new(expr.clone(), SourceOrigin::new("", ByteSpan::empty_at(0)));
-    let Ok(value_type) = type_of(set, &root) else {
+    let origin = SourceOrigin::new("", ByteSpan::empty_at(0));
+    if expr.check_type_depth().is_err() {
+        return defect;
+    }
+    let Ok(value_type) = type_of_expr(set, expr) else {
         return defect;
     };
     let mut machine =
         Machine::new(set, Mode::Evaluate, limits.memory.bytes, limits.reductions);
-    let mut frame = Frame::new(inputs.len(), Rc::clone(&machine.empty_env));
-    frame.inputs = inputs;
+    let env = Rc::clone(&machine.empty_env);
     let outcome = machine
-        .enter_root(frame)
-        .and_then(|()| machine.execute(crate::machine::Step::Eval(&root)))
+        .new_frame(inputs.len(), env, &[])
+        .and_then(|mut frame| {
+            frame.inputs = inputs;
+            machine.enter_root(frame)
+        })
+        .and_then(|()| machine.prelude(crate::machine::Step::Root(expr, &origin)))
+        .and_then(|step| machine.execute(step))
         .and_then(|value| to_neutral(set, &value, &value_type));
     match outcome {
         Ok(value) => Evaluation::Value(value),
         Err(Halt::Reductions) => Evaluation::LimitReached(Limit::Reductions),
         Err(Halt::Memory) => Evaluation::LimitReached(Limit::Memory),
+        Err(Halt::HostValue(_)) => Evaluation::Defect(Trap::InvalidHostValue),
         Err(_) => defect,
     }
 }

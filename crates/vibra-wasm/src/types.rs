@@ -407,8 +407,8 @@ impl<'a> Types<'a> {
                 self.library_type(Library::Option, vec![item], origin)?
             }
             Expr::Call { target, .. } | Expr::TailCall { target, .. } => {
-                match self.callee_type(target, origin)? {
-                    Type::Fn(signature) => signature.result,
+                match &self.callee_type(target, origin)? {
+                    Type::Fn(signature) => signature.result.clone(),
                     Type::Proc(_) => {
                         return Err(EmitError::unsupported("proc", origin));
                     }

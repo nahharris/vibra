@@ -19,6 +19,7 @@ mod depth;
 mod evaluation;
 mod intrinsics;
 mod observation;
+mod soundness;
 mod tests_and_dispatch;
 
 use std::sync::Arc;
@@ -478,6 +479,7 @@ pub fn closure(
             value_type,
             slot_count,
             captures: types,
+            defaults: Vec::new(),
             body,
         }),
         captures: nodes,

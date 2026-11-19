@@ -211,6 +211,7 @@ fn samples() -> Vec<(Node, CheckedProgram)> {
             value_type: i32_fn(),
             slot_count: 1,
             captures: vec![Type::I32],
+            defaults: Vec::new(),
             body: add(var(0, Type::I32), captured.clone()),
         }),
         captures: vec![int(2)],

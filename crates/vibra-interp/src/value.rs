@@ -362,6 +362,63 @@ impl<'a> Val<'a> {
     }
 }
 
+/// An upper bound on the bytes that the runtime form of the neutral `value`
+/// stores, by the formulas of [`Val::storage`], found without building it.
+/// A held type and a type argument are counted as the runtime counts them.
+pub(crate) fn neutral_storage(value: &vibra_ir::Value) -> usize {
+    use std::mem::size_of;
+
+    use vibra_ir::Value;
+    let slot = size_of::<Val<'_>>();
+    let field = slot.saturating_add(16);
+    let mut total = 0_usize;
+    let mut pending = vec![value];
+    while let Some(value) = pending.pop() {
+        let own = match value {
+            Value::Atom(text) | Value::Str(text) => text.len(),
+            Value::Bytes(bytes) => bytes.len(),
+            Value::Tuple(values) | Value::List(values) => {
+                pending.extend(values);
+                size_of::<Vec<Val<'_>>>()
+                    .saturating_add(values.len().saturating_mul(slot))
+            }
+            Value::Closure { captures } => {
+                pending.extend(captures);
+                size_of::<ClosureVal<'_>>()
+                    .saturating_add(captures.len().saturating_mul(slot))
+            }
+            Value::Dict(entries) => {
+                for (key, value) in entries {
+                    pending.push(key);
+                    pending.push(value);
+                }
+                size_of::<DictVal<'_>>().saturating_add(
+                    entries.len().saturating_mul(slot.saturating_mul(2)),
+                )
+            }
+            Value::Record(fields) | Value::Variant { fields, .. } => {
+                pending.extend(fields.iter().map(|(_, value)| value));
+                size_of::<CaseVal<'_>>()
+                    .max(size_of::<Vec<Val<'_>>>())
+                    .saturating_add(fields.len().saturating_mul(field))
+            }
+            Value::Wrapper(inner) => {
+                pending.push(inner);
+                slot
+            }
+            Value::Interface { held, .. } => {
+                pending.push(held);
+                size_of::<Held<'_>>()
+            }
+            Value::Function { type_arguments, .. } => size_of::<FunctionVal>()
+                .saturating_add(type_arguments.len().saturating_mul(32)),
+            _ => 0,
+        };
+        total = total.saturating_add(own);
+    }
+    total
+}
+
 /// Structural sameness: the equality a constant pattern tests. Floats
 /// compare by their bits, which no pattern holds.
 pub(crate) fn same(left: &Val<'_>, right: &Val<'_>) -> bool {

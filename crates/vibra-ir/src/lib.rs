@@ -13,6 +13,8 @@ use std::fmt;
 
 pub mod arena;
 pub mod boundary;
+mod check;
+mod conformance;
 mod constant;
 mod encode;
 mod expr;

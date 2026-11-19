@@ -43,11 +43,11 @@ fn spin() -> CheckedFunction {
 #[test]
 fn the_reduction_count_is_the_evaluation_limit() {
     let set = set_with(vec![spin()], Vec::new(), Vec::new());
-    let expr = call(BASE, vec![u64_lit(1_250)]).expr;
+    let node = call(BASE, vec![u64_lit(1_250)]);
     let under = |reductions: u64| {
         evaluate(
             &set,
-            &expr,
+            &node.expr,
             &[],
             Limits {
                 reductions,
