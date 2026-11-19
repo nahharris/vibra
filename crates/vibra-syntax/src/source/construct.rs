@@ -419,8 +419,8 @@ pub(crate) fn match_constructs(
     // Whether each token is followed, after trivia, by a `:`.
     let mut colon_after = vec![false; tokens.len()];
     let mut next_is_colon = false;
-    for (index, token) in tokens.iter().enumerate().rev() {
-        colon_after[index] = next_is_colon;
+    for (slot, token) in colon_after.iter_mut().zip(tokens).rev() {
+        *slot = next_is_colon;
         if !token.kind.is_trivia() {
             next_is_colon = token.kind == TokenKind::Colon;
         }
