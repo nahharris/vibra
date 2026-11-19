@@ -18,6 +18,8 @@ V2-SRC-DECL-fn-performs	active	01-source-language.md#grammar
 V2-SRC-DECL-fn-reserved-label	active	01-source-language.md#reserved-words
 V2-SRC-DECL-fn-section-order	active	01-source-language.md#grammar
 V2-SRC-DECL-given-bound-forms	active	01-source-language.md#grammar
+V2-SRC-DECL-guard-do-block	active	01-source-language.md#grammar
+V2-SRC-DECL-guard-else-do-block	active	01-source-language.md#grammar
 V2-SRC-DECL-impl-in-type	active	01-source-language.md#impl
 V2-SRC-DECL-impl-member-guard	active	01-source-language.md#impl
 V2-SRC-DECL-impl-top-level	active	01-source-language.md#impl

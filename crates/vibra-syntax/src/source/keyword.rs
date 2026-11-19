@@ -12,9 +12,10 @@
 //! - an expression word is an ordinary token of an expression
 //!   ([`EXPRESSION_WORDS`]).
 //!
-//! `do` is the one word with two readings: directly inside a `fn`, `proc`, or
-//! `test` it is the body section, closed by that declaration's own closer
-//! ([`BODY_CONSTRUCTS`]); anywhere else it opens a block closed by `enddo`.
+//! `do` is the one word with two readings: at a section boundary directly
+//! inside a `fn`, `proc`, or `test` it is the body section, closed by that
+//! declaration's own closer ([`BODY_CONSTRUCTS`]); anywhere else, a guard's
+//! operand included, it opens a block closed by `enddo`.
 
 /// Every opener keyword with its typed closer.
 pub const CONSTRUCTS: &[(&str, &str)] = &[

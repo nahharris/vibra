@@ -1,0 +1,1 @@
+fn f returns r: Void ensures ready else do false enddo do return void endfn

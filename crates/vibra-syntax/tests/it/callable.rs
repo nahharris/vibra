@@ -182,6 +182,52 @@ fn labelled_and_guards() {
 }
 
 #[test]
+fn a_do_that_starts_a_guard_operand_is_a_block() {
+    // A `do` where a guard's expression is expected opens a block; only a
+    // `do` at a section boundary opens the body.
+    for text in [
+        "fn f returns r: Void requires do true enddo do return void endfn",
+        "fn f returns r: Void ensures do true enddo do return void endfn",
+        "proc p returns r: Void requires do true enddo do return void endproc",
+        "let g: Fn({} Void) be fn returns r: Void requires do true enddo do return void endfn endlet",
+    ] {
+        let document = source(text);
+        assert!(document.diagnostics().is_empty(), "{text}");
+    }
+    let text = "fn f returns r: Void requires do true enddo do return void endfn";
+    let document = source(text);
+    let view = callables(&document)[0];
+    let guard = view.requires().unwrap();
+    let ExprForm::Postfix(predicate) = guard.predicate().unwrap().form() else {
+        panic!("the predicate is a postfix form");
+    };
+    assert!(matches!(predicate.primary(), Some(Primary::Do(_))));
+    assert!(guard.consequence().is_none());
+    assert!(view.body().is_some());
+    // A block in the guard's `else`, and blocks in both operands.
+    for text in [
+        "fn f returns r: Void requires ready else do false enddo do return void endfn",
+        "fn f returns r: Void requires do true enddo else do false enddo do return void endfn",
+        "fn f returns r: Void requires try do true enddo do return void endfn",
+    ] {
+        let document = source(text);
+        assert!(document.diagnostics().is_empty(), "{text}");
+        let view = callables(&document)[0];
+        let guard = view.requires().unwrap();
+        assert!(guard.predicate().is_some(), "{text}");
+        assert!(view.body().is_some(), "{text}");
+    }
+    let text =
+        "fn f returns r: Void requires ready else do false enddo do return void endfn";
+    let document = source(text);
+    let guard = callables(&document)[0].requires().unwrap();
+    let ExprForm::Postfix(consequence) = guard.consequence().unwrap().form() else {
+        panic!("the consequence is a postfix form");
+    };
+    assert!(matches!(consequence.primary(), Some(Primary::Do(_))));
+}
+
+#[test]
 fn the_signature_is_required_and_the_names_are_kept() {
     let text = "fn f takes {x: I32} do return x endfn";
     assert_eq!(diagnostics(text), [(SyntaxInvalidForm, 0, 37)]);
@@ -261,12 +307,26 @@ fn sections_a_form_does_not_admit() {
         "fn f takes {x: I32} returns r: I32 requires a requires b do return x endfn";
     assert_eq!(diagnostics(text), [(SyntaxDuplicateSection, 46, 54)]);
     // A guard is one expression and an optional `else` expression.
-    let text = "fn f returns r: I32 requires do return 1i32 endfn";
+    let text = "fn f returns r: I32 requires visibility @public do return 1i32 endfn";
     assert_eq!(diagnostics(text), [(SyntaxInvalidForm, 20, 28)]);
     let text = "fn f returns r: I32 requires a b do return 1i32 endfn";
     assert_eq!(diagnostics(text), [(SyntaxInvalidForm, 20, 32)]);
-    let text = "fn f returns r: I32 requires a else do return 1i32 endfn";
+    let text =
+        "fn f returns r: I32 requires a else visibility @public do return 1i32 endfn";
     assert_eq!(diagnostics(text), [(SyntaxInvalidForm, 20, 35)]);
+    // A `do` where the guard's expression is expected opens a block, so a
+    // body written there is a block that `endfn` leaves open.
+    for text in [
+        "fn f returns r: I32 requires do return 1i32 endfn",
+        "fn f returns r: I32 requires a else do return 1i32 endfn",
+    ] {
+        let (start, end) = at(text, "endfn");
+        assert_eq!(
+            diagnostics(text),
+            [(SyntaxUnmatchedDelimiter, start, end)],
+            "{text}"
+        );
+    }
     let text = "fn f returns r: I32 given {T} do return 1i32 endfn";
     assert_eq!(diagnostics(text), [(SyntaxInvalidForm, 26, 29)]);
     let text = "proc p returns r: Void performs X do return void endproc";
