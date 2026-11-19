@@ -144,6 +144,14 @@ type I8 of Intrinsic(@i8)
       symbol "i8.equal"
     endfn
   endimpl
+  impl Ordered
+    fn compare
+      takes {left: Self right: Self}
+      returns order: Ordering
+      external @compiler
+      symbol "i8.compare"
+    endfn
+  endimpl
 endtype
 
 type I16 of Intrinsic(@i16)
@@ -252,6 +260,14 @@ type I16 of Intrinsic(@i16)
       returns same: Bool
       external @compiler
       symbol "i16.equal"
+    endfn
+  endimpl
+  impl Ordered
+    fn compare
+      takes {left: Self right: Self}
+      returns order: Ordering
+      external @compiler
+      symbol "i16.compare"
     endfn
   endimpl
 endtype
@@ -364,6 +380,14 @@ type I32 of Intrinsic(@i32)
       symbol "i32.equal"
     endfn
   endimpl
+  impl Ordered
+    fn compare
+      takes {left: Self right: Self}
+      returns order: Ordering
+      external @compiler
+      symbol "i32.compare"
+    endfn
+  endimpl
 endtype
 
 type I64 of Intrinsic(@i64)
@@ -474,6 +498,14 @@ type I64 of Intrinsic(@i64)
       symbol "i64.equal"
     endfn
   endimpl
+  impl Ordered
+    fn compare
+      takes {left: Self right: Self}
+      returns order: Ordering
+      external @compiler
+      symbol "i64.compare"
+    endfn
+  endimpl
 endtype
 
 type U8 of Intrinsic(@u8)
@@ -568,6 +600,14 @@ type U8 of Intrinsic(@u8)
       returns same: Bool
       external @compiler
       symbol "u8.equal"
+    endfn
+  endimpl
+  impl Ordered
+    fn compare
+      takes {left: Self right: Self}
+      returns order: Ordering
+      external @compiler
+      symbol "u8.compare"
     endfn
   endimpl
 endtype
@@ -666,6 +706,14 @@ type U16 of Intrinsic(@u16)
       symbol "u16.equal"
     endfn
   endimpl
+  impl Ordered
+    fn compare
+      takes {left: Self right: Self}
+      returns order: Ordering
+      external @compiler
+      symbol "u16.compare"
+    endfn
+  endimpl
 endtype
 
 type U32 of Intrinsic(@u32)
@@ -762,6 +810,14 @@ type U32 of Intrinsic(@u32)
       symbol "u32.equal"
     endfn
   endimpl
+  impl Ordered
+    fn compare
+      takes {left: Self right: Self}
+      returns order: Ordering
+      external @compiler
+      symbol "u32.compare"
+    endfn
+  endimpl
 endtype
 
 type U64 of Intrinsic(@u64)
@@ -856,6 +912,14 @@ type U64 of Intrinsic(@u64)
       returns same: Bool
       external @compiler
       symbol "u64.equal"
+    endfn
+  endimpl
+  impl Ordered
+    fn compare
+      takes {left: Self right: Self}
+      returns order: Ordering
+      external @compiler
+      symbol "u64.compare"
     endfn
   endimpl
 endtype
@@ -1011,6 +1075,14 @@ endtype
 type Str of List(Char)
   role @str
   visibility @public
+  impl Ordered
+    fn compare
+      takes {left: Self right: Self}
+      returns order: Ordering
+      external @compiler
+      symbol "str.compare"
+    endfn
+  endimpl
 endtype
 
 type Bytes of List(U8)
@@ -1022,4 +1094,11 @@ type Dict(K V) of List({K V})
   role @dict
   visibility @public
   representation @private
+  fn entries
+    takes {dict: Self}
+    returns pairs: List({K V})
+    visibility @public
+    external @compiler
+    symbol "dict.entries"
+  endfn
 endtype
