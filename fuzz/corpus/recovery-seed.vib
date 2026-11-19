@@ -1,0 +1,3 @@
+fn f takes {x: I32 returns r: I32 do return x endfn
+type T of { endtype
+let x: I32 be [1i32 2i32 endlet

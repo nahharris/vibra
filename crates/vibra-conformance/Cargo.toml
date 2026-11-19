@@ -24,5 +24,9 @@ vibra-workspace.workspace = true
 name = "vibra-conformance"
 path = "src/bin/conformance.rs"
 
+[[bin]]
+name = "fuzz"
+path = "src/bin/fuzz.rs"
+
 [lints]
 workspace = true

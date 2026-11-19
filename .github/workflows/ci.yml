@@ -124,6 +124,10 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: cargo run --locked --offline -p vibra-conformance-v1 --bin m1-fuzz -- --profile ci-smoke
 
+      - name: Run reader fuzz smoke
+        if: matrix.os == 'ubuntu-latest'
+        run: cargo run --locked --offline -p vibra-conformance --bin fuzz -- --profile ci-smoke
+
   archive-isolation:
     name: archive stays out of the build
     runs-on: ubuntu-latest
