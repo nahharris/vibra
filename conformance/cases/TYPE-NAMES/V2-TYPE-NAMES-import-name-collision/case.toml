@@ -1,0 +1,19 @@
+id = "V2-TYPE-NAMES-import-name-collision"
+rule = "V2-TYPE-NAMES-import-name-collision"
+profile = "staticV2"
+operation = "resolve"
+description = "02-type-system.md#namespaces-and-resolution: an import name and a declaration share the flat scope; the later is @name.redeclaration, related to the import"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@name.redeclaration"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 23, end = 25 }
+related = [{ source = "src/app/main.vib", span = { start = 9, end = 11 } }]

@@ -1,0 +1,19 @@
+id = "V2-TYPE-NAMES-no-projection-path"
+rule = "V2-TYPE-NAMES-no-projection-path"
+profile = "staticV2"
+operation = "resolve"
+description = "02-type-system.md#associated-types: there is no projection path: in I.Item the part Item is @name.unknownSymbol, related to the parameter"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@name.unknownSymbol"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 46, end = 50 }
+related = [{ source = "src/app/main.vib", span = { start = 9, end = 10 } }]

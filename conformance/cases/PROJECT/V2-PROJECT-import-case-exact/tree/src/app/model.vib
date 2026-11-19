@@ -1,0 +1,1 @@
+type User of U8 endtype

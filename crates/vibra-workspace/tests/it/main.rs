@@ -13,5 +13,6 @@ mod support;
 mod discovery;
 mod graph;
 mod project;
+mod resolve;
 mod revision;
 mod snapshot;

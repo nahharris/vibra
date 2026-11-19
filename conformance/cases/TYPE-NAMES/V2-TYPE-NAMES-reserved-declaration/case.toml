@@ -1,0 +1,18 @@
+id = "V2-TYPE-NAMES-reserved-declaration"
+rule = "V2-TYPE-NAMES-reserved-declaration"
+profile = "staticV2"
+operation = "resolve"
+description = "02-type-system.md#the-prelude: a type declared with a prelude type name is @name.reservedDeclaration"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@name.reservedDeclaration"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 5, end = 11 }

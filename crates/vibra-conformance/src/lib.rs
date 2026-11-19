@@ -18,16 +18,17 @@
 //! # Handlers
 //!
 //! [`ReaderV2Handler`] runs the `reader` operation under `readerV2`;
-//! [`ProjectDecodeHandler`] and [`SourceGraphHandler`] run `projectDecode`
-//! and `sourceGraph` under `staticV2`. Every
-//! other case is unavailable until the step that makes its observations
-//! exist registers a handler.
+//! [`ProjectDecodeHandler`], [`SourceGraphHandler`], and [`ResolveHandler`]
+//! run `projectDecode`, `sourceGraph`, and `resolve` under `staticV2`.
+//! Every other case is unavailable until the step that makes its
+//! observations exist registers a handler.
 
 mod corpus;
 mod manifest;
 mod profile;
 mod project;
 mod reader;
+mod resolve;
 mod rules;
 mod runner;
 mod standard;
@@ -46,6 +47,7 @@ pub use profile::{
 };
 pub use project::{ProjectDecodeHandler, SourceGraphHandler};
 pub use reader::ReaderV2Handler;
+pub use resolve::ResolveHandler;
 pub use rules::{
     IdentityParts, InvalidIdentity, RULE_PREFIXES, RULES_FILE_NAME, RULES_HEADER,
     RuleIndex, RuleRow, RuleStatus, RulesError, parse_identity,

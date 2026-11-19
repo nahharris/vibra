@@ -1,0 +1,12 @@
+id = "V2-PROJECT-import-std-unit"
+rule = "V2-PROJECT-import-std-unit"
+profile = "staticV2"
+operation = "resolve"
+description = "04-programs-and-packages.md#packages-units-and-targets: every module names the @std unit"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

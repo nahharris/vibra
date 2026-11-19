@@ -39,6 +39,7 @@ vibra-nexus-eval = { path = "crates/vibra-nexus-eval" }
 vibra-schema-v1 = { path = "crates/vibra-schema-v1" }
 vibra-syntax = { path = "crates/vibra-syntax" }
 vibra-syntax-v1 = { path = "crates/vibra-syntax-v1" }
+vibra-resolve = { path = "crates/vibra-resolve" }
 vibra-resolve-v1 = { path = "crates/vibra-resolve-v1" }
 vibra-schema = { path = "crates/vibra-schema" }
 vibra-types-v1 = { path = "crates/vibra-types-v1" }

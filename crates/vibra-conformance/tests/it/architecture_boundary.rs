@@ -34,6 +34,7 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
         &[
             "vibra-diagnostics",
             "vibra-fmt",
+            "vibra-resolve",
             "vibra-syntax",
             "vibra-workspace",
         ],
@@ -47,7 +48,12 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
     ("vibra-ir", &["vibra-diagnostics"]),
     // The workspace reads a project's files and hands later phases a
     // snapshot; no language crate depends on it.
-    ("vibra-workspace", &["vibra-diagnostics", "vibra-syntax"]),
+    (
+        "vibra-workspace",
+        &["vibra-diagnostics", "vibra-resolve", "vibra-syntax"],
+    ),
+    // Resolution reads the reader's views of the modules a caller hands it.
+    ("vibra-resolve", &["vibra-diagnostics", "vibra-syntax"]),
     // The reference interpreter runs checked IR and knows no front end.
     ("vibra-interp", &["vibra-diagnostics", "vibra-ir"]),
     // The toolchain-owned native code: it reads the closed table of native
@@ -391,7 +397,7 @@ fn workspace_matches_the_declared_architecture() {
 }
 
 /// The number of rows, one for each crate directory.
-const ROWS: usize = 33;
+const ROWS: usize = 34;
 
 #[test]
 fn every_crate_directory_has_exactly_one_row() {
@@ -525,6 +531,7 @@ const SEMANTIC_CRATES: &[&str] = &[
     "vibra-diagnostics",
     "vibra-syntax",
     "vibra-fmt",
+    "vibra-resolve",
     "vibra-ir",
     "vibra-interp",
     "vibra-native",

@@ -1,0 +1,12 @@
+id = "V2-PROJECT-import-declaration"
+rule = "V2-PROJECT-import-declaration"
+profile = "staticV2"
+operation = "resolve"
+description = "04-programs-and-packages.md#modules-and-imports: a declaration import binds the declaration's name"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
