@@ -26,8 +26,6 @@ vibra-resolve-v1.workspace = true
 vibra-schema-v1.workspace = true
 vibra-syntax-v1.workspace = true
 vibra-types-v1.workspace = true
-vibra-wasm.workspace = true
-vibra-wasm-run.workspace = true
 vibra-workspace-v1.workspace = true
 
 [[bin]]
@@ -37,7 +35,6 @@ path = "src/bin/conformance.rs"
 [dev-dependencies]
 # The version already in the lock file, to read the emitted objects back.
 object = { version = "=0.40.0", default-features = false, features = ["read"] }
-wasmparser.workspace = true
 
 [lints]
 workspace = true

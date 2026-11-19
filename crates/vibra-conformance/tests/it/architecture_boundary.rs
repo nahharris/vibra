@@ -142,8 +142,8 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
     // The WebAssembly emitter is the second consumer of checked IR, beside the
     // interpreter. It reaches no engine, and it does not reach the native-code
     // crate either: a module names a native only by the import names recorded
-    // in `vibra-ir-v1`.
-    ("vibra-wasm", &["vibra-diagnostics-v1", "vibra-ir-v1"]),
+    // in `vibra-ir`. Its tests read diagnostic codes.
+    ("vibra-wasm", &["vibra-diagnostics", "vibra-ir"]),
     // The toolchain-owned native code, written once against a value-access
     // interface that the interpreter and the runner each implement. It reaches
     // no engine and no emitter: it reads the closed table of native imports and
@@ -255,8 +255,6 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
             "vibra-schema-v1",
             "vibra-resolve-v1",
             "vibra-syntax-v1",
-            "vibra-wasm",
-            "vibra-wasm-run",
             "vibra-workspace-v1",
             "vibra-exec",
             "vibra-host-v1",
@@ -610,8 +608,8 @@ fn only_the_harness_depends_on_the_runner() {
     for (name, edges) in workspace_graph(&workspace_root()) {
         assert_eq!(
             edges.contains(RUNNER_CRATE),
-            name == "vibra-conformance-v1",
-            "`{name}`: only `vibra-conformance-v1` depends on `{RUNNER_CRATE}`"
+            name == "vibra-conformance",
+            "`{name}`: only `vibra-conformance` depends on `{RUNNER_CRATE}`"
         );
     }
 }
@@ -638,14 +636,13 @@ fn the_emitter_has_no_engine_and_no_native_code_crate() {
         };
         assert_eq!(
             section("dependencies"),
-            BTreeSet::from(["vibra-ir-v1".to_owned(), "wasm-encoder".to_owned()]),
-            "the emitter depends on `vibra-ir-v1` and the encoder only (`vibra-diagnostics-v1` \
-             is permitted but unused)"
+            BTreeSet::from(["vibra-ir".to_owned(), "wasm-encoder".to_owned()]),
+            "the emitter depends on `vibra-ir` and the encoder only"
         );
         assert!(
             section("dev-dependencies")
-                .is_subset(&BTreeSet::from(["vibra-diagnostics-v1".to_owned()])),
-            "the emitter's tests may use `vibra-diagnostics-v1` and nothing else"
+                .is_subset(&BTreeSet::from(["vibra-diagnostics".to_owned()])),
+            "the emitter's tests may use `vibra-diagnostics` and nothing else"
         );
         assert!(section("build-dependencies").is_empty());
     }

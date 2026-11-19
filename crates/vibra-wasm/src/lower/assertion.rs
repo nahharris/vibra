@@ -1,105 +1,140 @@
-//! The closed test assertions: `assert.true`, `assert.false`, and `assert.equal`.
+//! The assertion rows and canonical equality.
 //!
-//! An assertion evaluates through the ordinary typed call path and is neither a
-//! language function nor a host operation (`docs/spec/06-runtime.md`, "Test
-//! assertions"), so a call of one is lowered in line, where the call is. Its
-//! operands are evaluated first, in order, as every call's are.
+//! An assertion that holds is `void`. One that fails records status `3`, the
+//! failed row, the origin, and for `assert.equal` the two operands (the bits
+//! of a scalar, or an ID of an arena value, which the runner reads at the type
+//! the origin table gives), and stops the instance, so no later effect runs
+//! (`docs/spec/06-runtime.md`, "Wasm transition"). An assertion outside a test
+//! is the trap `@runtime.invalidCheckedProgram`, as it is for the reference
+//! interpreter.
 //!
-//! - `assert.true` and `assert.false` read the discriminant of their `bool`.
-//! - `assert.equal` compares canonical encodings, with the one walk of
-//!   [`crate::canon_typed`] for every type: a NaN is replaced by the quiet NaN
-//!   of its width (decision D11.1), so a NaN equals a NaN and a negative zero
-//!   does not equal a positive one. The walk takes arena values, so an operand
-//!   that is a scalar or of a generic type is compared as the one component of a
-//!   tuple. Each operand is first scanned for a function ([`crate::canon`]),
-//!   because a function has no encoding: finding one in either is the trap
-//!   `@runtime.unobservable-function`, at the assertion call.
-//!
-//! A false assertion records the failure and stops the test: the status `3`,
-//! which assertion it was, the origin ordinal of the call, and, for
-//! `assert.equal`, the two operands as the bits of a scalar or as value IDs.
-//! The origin table says by what type the host reads them. An operand whose
-//! type names a generic parameter has no type the host could read, so it
-//! crosses as an interface value, which carries the descriptor of the type it
-//! holds, and the table says `any`.
-//!
-//! A module that runs a program, and not tests, stops at an assertion, as the
-//! reference interpreter does when it is not running a test: the trap
-//! `@runtime.invalid-checked-program`.
+//! `assert.equal` compares canonical encodings, which two values of one type
+//! have exactly when they have the same shape and the same scalars, where
+//! every NaN of a float type encodes as the canonical NaN. The routine
+//! [`deep_equal`] decides it for two arena values, iteratively over a
+//! worklist it allocates in the arena, so the engine stack stays bounded
+//! however deeply a value nests.
 
-use vibra_ir_v1::boundary::TrapCode;
-use vibra_ir_v1::{Expr, SourceOrigin, TestAssertion, Type};
-use wasm_encoder::Instruction as I;
+use vibra_ir::boundary::Failure;
+use vibra_ir::external::CompilerIntrinsic;
+use vibra_ir::{SourceOrigin, Type};
+use wasm_encoder::{BlockType, Instruction as I};
 
-use super::{Builder, ByteSource, FRAME, Kind, Part, Term};
+use super::{Builder, Term};
 use crate::error::EmitError;
-use crate::layout::{header, state};
-use crate::runtime::{ValueClass, c32, get, ld32, ld64, st32, st64};
+use crate::layout::{CellClass, header, state};
+use crate::runtime::{
+    I32, I64, Ins, Routine, Routines, ValueClass, c32, c64, get, ld8, ld32, ld64, make,
+    set, st32, st64, tee,
+};
 
-impl Builder<'_, '_> {
-    /// Lowers a call of the assertion `assertion`, whose operands are
-    /// `arguments`, into `dest`.
+impl<'a> Builder<'_, 'a> {
+    /// `assert.true`, `assert.false`, or `assert.equal` on the operands in
+    /// `operands`, whose types are `parameters`.
     pub(super) fn assertion(
         &mut self,
-        assertion: TestAssertion,
-        arguments: &[Expr],
+        intrinsic: CompilerIntrinsic,
+        parameters: &[Type],
+        operands: &[u32],
         origin: &SourceOrigin,
         dest: u32,
     ) -> Result<(), EmitError> {
-        let mark = self.next_temp;
-        let mut operands = Vec::with_capacity(arguments.len());
-        for argument in arguments {
-            self.class(&argument.result_type(), argument.origin())?;
-            let slot = self.temp();
-            self.expr(argument, slot)?;
-            operands.push(slot);
-        }
         if !self.lowering.tests {
-            let stop = self.lowering.fns.stop_trap;
-            self.push(&[c32(TrapCode::InvalidCheckedProgram.code()), I::Call(stop)]);
+            self.stop_invalid(origin);
             self.store_bits(dest, 0, ValueClass::Void);
-            self.release_to(mark);
             return Ok(());
         }
-        match (assertion, operands.as_slice()) {
-            (TestAssertion::True, [actual]) => {
-                self.assert_bool(*actual, 1, TestAssertion::True, origin);
+        let (holds, fails) = (self.new_block(), self.new_block());
+        let failure = match (intrinsic, operands, parameters) {
+            (
+                CompilerIntrinsic::AssertTrue | CompilerIntrinsic::AssertFalse,
+                [operand],
+                _,
+            ) => {
+                self.truth(*operand, origin)?;
+                let failure = if intrinsic == CompilerIntrinsic::AssertTrue {
+                    Failure::AssertTrue
+                } else {
+                    self.push(&[I::I32Eqz]);
+                    Failure::AssertFalse
+                };
+                self.end(Term::Branch {
+                    then_block: holds,
+                    else_block: fails,
+                });
+                self.start(fails);
+                self.record_failure(failure, origin, None);
+                failure
             }
-            (TestAssertion::False, [actual]) => {
-                self.assert_bool(*actual, 0, TestAssertion::False, origin);
+            (CompilerIntrinsic::AssertEqual, [expected, actual], [ty, _]) => {
+                if !self.observable(ty, origin)? {
+                    return Err(EmitError::unsupported("assertEqual", origin));
+                }
+                let class = self.class(ty, origin)?;
+                if class == ValueClass::Ref {
+                    let deep_equal = self.lowering.deep_equal();
+                    self.load_ref(*expected);
+                    self.load_ref(*actual);
+                    self.push(&[I::Call(deep_equal)]);
+                } else {
+                    self.scalar_equal(*expected, *actual, class);
+                }
+                self.end(Term::Branch {
+                    then_block: holds,
+                    else_block: fails,
+                });
+                self.start(fails);
+                let new_id = self.lowering.fns.new_id;
+                for (slot, address) in
+                    [(*expected, state::EXPECTED), (*actual, state::ACTUAL)]
+                {
+                    let at = self.cell(slot);
+                    self.push(&[c32(0)]);
+                    if class == ValueClass::Ref {
+                        self.load_ref(slot);
+                        self.push(&[I::Call(new_id)]);
+                    } else {
+                        self.push(&[get(super::FRAME), ld64(at)]);
+                    }
+                    self.push(&[st64(address)]);
+                }
+                self.record_failure(Failure::AssertEqual, origin, Some(ty.clone()));
+                Failure::AssertEqual
             }
-            (TestAssertion::Equal, [expected, actual]) => {
-                let ty = arguments.first().map(Expr::result_type).ok_or_else(|| {
-                    EmitError::malformed("shape", Some(origin.clone()))
-                })?;
-                self.assert_equal(*expected, *actual, &ty, origin)?;
+            _ => {
+                return Err(EmitError::malformed(
+                    format!(
+                        "`{}` with {} operands",
+                        intrinsic.symbol(),
+                        operands.len()
+                    ),
+                    origin,
+                ));
             }
-            _ => return Err(EmitError::malformed("shape", Some(origin.clone()))),
+        };
+        self.goto(holds, holds);
+        if failure == Failure::AssertEqual {
+            let class = parameters
+                .first()
+                .map(|ty| self.class(ty, origin))
+                .transpose()?
+                .unwrap_or(ValueClass::Void);
+            for slot in operands {
+                self.discard(*slot, class);
+            }
         }
         self.store_bits(dest, 0, ValueClass::Void);
-        self.release_to(mark);
         Ok(())
     }
 
-    /// Records a stop by a registered trap at the origin ordinal and stops.
-    fn stop_at(&mut self, code: TrapCode, ordinal: u32) {
-        self.push(&[
-            c32(0),
-            c32(1),
-            st32(state::STATUS),
-            c32(0),
-            c32(code.code()),
-            st32(state::TRAP_CODE),
-            c32(0),
-            c32(ordinal.cast_signed()),
-            st32(state::ORIGIN),
-            I::Unreachable,
-        ]);
-    }
-
-    /// Records a failed assertion at the origin ordinal and stops. The operands
-    /// of an `assert.equal` are in their state fields already.
-    fn stop_failed(&mut self, failure: TestAssertion, ordinal: u32) {
+    /// Records a failed assertion and stops.
+    fn record_failure(
+        &mut self,
+        failure: Failure,
+        origin: &SourceOrigin,
+        operand: Option<Type>,
+    ) {
+        let ordinal = self.lowering.origin_ordinal(origin, operand);
         self.push(&[
             c32(0),
             c32(3),
@@ -113,176 +148,317 @@ impl Builder<'_, '_> {
             I::Unreachable,
         ]);
     }
+}
 
-    /// `assert.true` and `assert.false`: the `bool` in `actual` must be the
-    /// variant `required`.
-    fn assert_bool(
-        &mut self,
-        actual: u32,
-        required: i32,
-        failure: TestAssertion,
-        origin: &SourceOrigin,
-    ) {
-        let ordinal = self.lowering.origin_ordinal(origin, None);
-        let (pass, fail) = (self.new_block(), self.new_block());
-        let at = self.cell(actual);
-        self.push(&[
-            get(FRAME),
-            ld32(at),
-            ld32(header::VARIANT),
-            c32(required),
-            I::I32Eq,
-        ]);
-        self.end(Term::Branch {
-            then_block: pass,
-            else_block: fail,
-        });
-        self.start(fail);
-        self.stop_failed(failure, ordinal);
-        self.goto(pass, pass);
-        self.drop_slot(actual);
-    }
+/// `(a, b) -> i32`: `1` when two arena values of one type have the same
+/// canonical encoding, and `0` otherwise.
+///
+/// It walks pairs of objects from a worklist: two objects are equal when they
+/// are the same object, or have the same kind, case, and length and equal
+/// payloads. A payload of characters or bytes is compared byte by byte; a
+/// payload of cells compares the class bytes, then each cell: a reference
+/// pushes its pair, a float compares by bits or as two NaNs, and any other
+/// scalar compares by bits. The worklist is a block of the arena that doubles
+/// when it fills, and it is freed before the routine returns.
+pub(crate) fn deep_equal(fns: &Routines) -> Routine {
+    // Params: 0 a, 1 b. Locals: 2 stack, 3 capacity, 4 top, 5 x, 6 y, 7 len,
+    // 8 i, 9 x cells, 10 y cells, 11 class byte, 12 x bits (i64), 13 y bits
+    // (i64), 14 scratch, 15 payload bytes.
+    let (stack, capacity, top, x, y, len, i, x_cells, y_cells, class) =
+        (2, 3, 4, 5, 6, 7, 8, 9, 10, 11);
+    let (x_bits, y_bits, scratch, bytes) = (12, 13, 14, 15);
+    let first = 16_i32;
+    let empty = BlockType::Empty;
+    let mut code: Vec<Ins> = vec![
+        get(0),
+        get(1),
+        I::I32Eq,
+        I::If(empty),
+        c32(1),
+        I::Return,
+        I::End,
+        c32(first),
+        set(capacity),
+        c64(8 + 8 * i64::from(first)),
+        I::Call(fns.alloc),
+        set(stack),
+        get(stack),
+        get(0),
+        st32(8),
+        get(stack),
+        get(1),
+        st32(12),
+        c32(1),
+        set(top),
+        // $fail
+        I::Block(empty),
+        // $next
+        I::Loop(empty),
+        get(top),
+        I::I32Eqz,
+        I::If(empty),
+        get(stack),
+        I::Call(fns.free),
+        c32(1),
+        I::Return,
+        I::End,
+        get(top),
+        c32(1),
+        I::I32Sub,
+        set(top),
+        get(stack),
+        get(top),
+        c32(8),
+        I::I32Mul,
+        I::I32Add,
+        tee(scratch),
+        ld32(8),
+        set(x),
+        get(scratch),
+        ld32(12),
+        set(y),
+        get(x),
+        get(y),
+        I::I32Eq,
+        I::BrIf(0),
+        get(x),
+        ld8(header::KIND),
+        get(y),
+        ld8(header::KIND),
+        I::I32Ne,
+        I::BrIf(1),
+        get(x),
+        ld32(header::VARIANT),
+        get(y),
+        ld32(header::VARIANT),
+        I::I32Ne,
+        I::BrIf(1),
+        get(x),
+        ld32(header::LEN),
+        tee(len),
+        get(y),
+        ld32(header::LEN),
+        I::I32Ne,
+        I::BrIf(1),
+        // Characters or bytes: compare the payload bytes.
+        get(x),
+        ld8(header::STRIDE),
+        c32(8),
+        I::I32Ne,
+        I::If(empty),
+        get(len),
+        get(x),
+        ld8(header::STRIDE),
+        I::I32Mul,
+        set(bytes),
+        c32(0),
+        set(i),
+        I::Block(empty),
+        I::Loop(empty),
+        get(i),
+        get(bytes),
+        I::I32GeU,
+        I::BrIf(1),
+        get(x),
+        get(i),
+        I::I32Add,
+        ld8(header::SIZE),
+        get(y),
+        get(i),
+        I::I32Add,
+        ld8(header::SIZE),
+        I::I32Ne,
+        I::BrIf(4),
+        get(i),
+        c32(1),
+        I::I32Add,
+        set(i),
+        I::Br(0),
+        I::End,
+        I::End,
+        I::Br(1),
+        I::End,
+        // Cells: the class bytes, padded to 8, precede the cells.
+        get(x),
+        get(len),
+        c32(7),
+        I::I32Add,
+        c32(-8),
+        I::I32And,
+        I::I32Add,
+        set(x_cells),
+        get(y),
+        get(len),
+        c32(7),
+        I::I32Add,
+        c32(-8),
+        I::I32And,
+        I::I32Add,
+        set(y_cells),
+        c32(0),
+        set(i),
+        I::Block(empty),
+        I::Loop(empty),
+        get(i),
+        get(len),
+        I::I32GeU,
+        I::BrIf(1),
+        get(x),
+        get(i),
+        I::I32Add,
+        ld8(header::SIZE),
+        tee(class),
+        get(y),
+        get(i),
+        I::I32Add,
+        ld8(header::SIZE),
+        I::I32Ne,
+        I::BrIf(3),
+        get(x_cells),
+        get(i),
+        c32(8),
+        I::I32Mul,
+        I::I32Add,
+        ld64(header::SIZE),
+        set(x_bits),
+        get(y_cells),
+        get(i),
+        c32(8),
+        I::I32Mul,
+        I::I32Add,
+        ld64(header::SIZE),
+        set(y_bits),
+        get(class),
+        c32(i32::from(CellClass::Ref.code())),
+        I::I32Eq,
+        I::If(empty),
+        // Push the pair, doubling the worklist when it is full.
+        get(top),
+        get(capacity),
+        I::I32Eq,
+        I::If(empty),
+        get(capacity),
+        I::I64ExtendI32U,
+        c64(16),
+        I::I64Mul,
+        c64(8),
+        I::I64Add,
+        I::Call(fns.alloc),
+        set(scratch),
+        get(scratch),
+        c32(8),
+        I::I32Add,
+        get(stack),
+        c32(8),
+        I::I32Add,
+        get(capacity),
+        c32(8),
+        I::I32Mul,
+        I::MemoryCopy {
+            src_mem: 0,
+            dst_mem: 0,
+        },
+        get(stack),
+        I::Call(fns.free),
+        get(scratch),
+        set(stack),
+        get(capacity),
+        c32(1),
+        I::I32Shl,
+        set(capacity),
+        I::End,
+        get(stack),
+        get(top),
+        c32(8),
+        I::I32Mul,
+        I::I32Add,
+        tee(scratch),
+        get(x_bits),
+        I::I32WrapI64,
+        st32(8),
+        get(scratch),
+        get(y_bits),
+        I::I32WrapI64,
+        st32(12),
+        get(top),
+        c32(1),
+        I::I32Add,
+        set(top),
+        I::Else,
+        get(x_bits),
+        get(y_bits),
+        I::I64Ne,
+        I::If(empty),
+        get(class),
+        c32(i32::from(CellClass::F32.code())),
+        I::I32Eq,
+        I::If(empty),
+    ];
+    code.extend(both_nan(x_bits, y_bits, 0x7FFF_FFFF, 0x7F80_0000));
+    code.extend([
+        I::I32Eqz,
+        I::BrIf(6),
+        I::Else,
+        get(class),
+        c32(i32::from(CellClass::F64.code())),
+        I::I32Eq,
+        I::If(empty),
+    ]);
+    code.extend(both_nan(
+        x_bits,
+        y_bits,
+        0x7FFF_FFFF_FFFF_FFFF,
+        0x7FF0_0000_0000_0000,
+    ));
+    code.extend([
+        I::I32Eqz,
+        I::BrIf(7),
+        I::Else,
+        I::Br(7),
+        I::End,
+        I::End,
+        I::End,
+        I::End,
+        get(i),
+        c32(1),
+        I::I32Add,
+        set(i),
+        I::Br(0),
+        I::End,
+        I::End,
+        I::Br(0),
+        I::End,
+        I::End,
+        // $fail
+        get(stack),
+        I::Call(fns.free),
+        c32(0),
+        I::End,
+    ]);
+    make(
+        &[I32, I32],
+        &[I32],
+        &[
+            I32, I32, I32, I32, I32, I32, I32, I32, I32, I32, I64, I64, I32, I32,
+        ],
+        code,
+    )
+}
 
-    /// Stores into the state field `field` what an operand of a failed
-    /// `assert.equal` crosses the boundary as: the bits of a scalar, or the ID
-    /// of a value. An operand whose type names a generic parameter is first
-    /// widened to an interface value, which holds the descriptor of its type.
-    fn cross_operand(
-        &mut self,
-        slot: u32,
-        ty: &Type,
-        class: ValueClass,
-        field: u32,
-    ) -> Result<(), EmitError> {
-        let new_id = self.lowering.fns.new_id;
-        if ty.has_params() {
-            let pair = self.temp();
-            self.widen_to_interface(slot, ty, pair)?;
-            let at = self.cell(pair);
-            self.push(&[c32(0), get(FRAME), ld32(at), I::Call(new_id), st64(field)]);
-            return Ok(());
-        }
-        let at = self.cell(slot);
-        match class {
-            ValueClass::Ref | ValueClass::Dyn => {
-                self.push(&[
-                    c32(0),
-                    get(FRAME),
-                    ld32(at),
-                    I::Call(new_id),
-                    st64(field),
-                ]);
-            }
-            ValueClass::I32 | ValueClass::F32 => {
-                self.push(&[
-                    c32(0),
-                    get(FRAME),
-                    ld32(at),
-                    I::I64ExtendI32U,
-                    st64(field),
-                ]);
-            }
-            ValueClass::I64 | ValueClass::F64 => {
-                self.push(&[c32(0), get(FRAME), ld64(at), st64(field)]);
-            }
-            ValueClass::Void => {
-                self.push(&[c32(0), crate::runtime::c64(0), st64(field)]);
-            }
-        }
-        Ok(())
-    }
-
-    /// `assert.equal`: the two operands, of the type `ty`, must have the same
-    /// canonical encoding. There is one comparison for every type
-    /// ([`crate::canon_typed`]); it takes arena values, so an operand that is a
-    /// scalar, or of a generic type, is compared as the one component of a
-    /// tuple. Each operand is first scanned for a function, which has no
-    /// encoding.
-    fn assert_equal(
-        &mut self,
-        expected: u32,
-        actual: u32,
-        ty: &Type,
-        origin: &SourceOrigin,
-    ) -> Result<(), EmitError> {
-        let class = self.class(ty, origin)?;
-        let recorded = if ty.has_params() {
-            Type::Any
-        } else {
-            ty.clone()
-        };
-        let ordinal = self.lowering.origin_ordinal(origin, Some(&recorded));
-        let (pass, fail) = (self.new_block(), self.new_block());
-        let mut owned = Vec::new();
-
-        let objects = if class == ValueClass::Ref {
-            [expected, actual]
-        } else {
-            let mut wrapped = [expected, actual];
-            for slot in &mut wrapped {
-                let source = *slot;
-                let copy = self.temp();
-                self.copy_cell(copy, source);
-                self.claim(copy, class, ByteSource::Slot(source));
-                let tuple = self.temp();
-                self.build(Kind::Tuple, 0, &[Part::Slot { slot: copy, class }], tuple);
-                owned.push(tuple);
-                *slot = tuple;
-            }
-            wrapped
-        };
-        let scan = self.lowering.scan();
-        for object in objects {
-            let (visible, hidden) = (self.new_block(), self.new_block());
-            let at = self.cell(object);
-            self.push(&[get(FRAME), ld32(at), I::Call(scan)]);
-            self.end(Term::Branch {
-                then_block: visible,
-                else_block: hidden,
-            });
-            self.start(hidden);
-            self.stop_at(TrapCode::UnobservableFunction, ordinal);
-            self.goto(visible, visible);
-        }
-        let typed = self.lowering.typed_walk();
-        let desc = self.temp();
-        let described = if class == ValueClass::Ref {
-            ty.clone()
-        } else {
-            Type::Tuple(vec![ty.clone()])
-        };
-        self.build_type(&described, desc)?;
-        let (left, right, held) = (
-            self.cell(objects[0]),
-            self.cell(objects[1]),
-            self.cell(desc),
-        );
-        self.push(&[
-            get(FRAME),
-            ld32(left),
-            get(FRAME),
-            ld32(right),
-            get(FRAME),
-            ld32(held),
-            I::Call(typed),
-        ]);
-        self.drop_slot(desc);
-        self.end(Term::Branch {
-            then_block: pass,
-            else_block: fail,
-        });
-
-        self.start(fail);
-        self.cross_operand(expected, ty, class, state::EXPECTED)?;
-        self.cross_operand(actual, ty, class, state::ACTUAL)?;
-        self.stop_failed(TestAssertion::Equal, ordinal);
-        self.goto(pass, pass);
-
-        for object in owned {
-            self.drop_slot(object);
-        }
-        self.discard(expected, class);
-        self.discard(actual, class);
-        Ok(())
-    }
+/// Whether the two cells in the locals `x` and `y` are both NaNs, by their
+/// magnitude bits under `magnitude` exceeding those of infinity.
+fn both_nan(x: u32, y: u32, magnitude: i64, infinity: i64) -> [Ins; 11] {
+    [
+        get(x),
+        c64(magnitude),
+        I::I64And,
+        c64(infinity),
+        I::I64GtU,
+        get(y),
+        c64(magnitude),
+        I::I64And,
+        c64(infinity),
+        I::I64GtU,
+        I::I32And,
+    ]
 }

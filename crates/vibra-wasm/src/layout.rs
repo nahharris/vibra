@@ -1,19 +1,20 @@
-//! The memory layout of a v1 module: the instance state, the arena, the object
-//! header, the per-kind payloads, the handle table, and the frame storage.
+//! The memory layout of a transition module: the instance state, the arena,
+//! the object header, the per-kind payloads, the handle table, and the frame
+//! storage.
 //!
 //! This is the one place the layout is written. The runtime routines
-//! (`runtime`), the lowering (`lower`), the host tests, and every later step
-//! read the constants and the kind table below, so a kind or a field is added
-//! here and nowhere else. `docs/spec/06-runtime.md`, "The value arena" and
-//! "Reclamation", state the rules; this chapter states the representation.
-//! Everything is little-endian, as WebAssembly memory is, and every offset in
-//! this chapter is a byte offset into the module's one linear memory. No offset
-//! below reaches typed IR, a canonical encoding, an audit event, or a snapshot.
+//! (`runtime`), the lowering (`lower`), and the host tests read the constants
+//! and the kind table below, so a kind or a field is added here and nowhere
+//! else. `docs/spec/06-runtime.md`, "Value arena", "Reclamation", and "Wasm
+//! transition", state the rules; this module states the representation.
+//! Everything is little-endian, as WebAssembly memory is, and every offset
+//! here is a byte offset into the module's one linear memory. No offset below
+//! reaches checked IR, a canonical encoding, or a snapshot.
 //!
 //! # Memory map
 //!
 //! ```text
-//! 0      instance state          (STATE_SIZE bytes, fixed addresses)
+//! 0      instance state          (state::END bytes, fixed addresses)
 //! 128    free-list heads         (one u32 per size class, FREE_LISTS)
 //! 256    the arena               (ARENA_START; grows by `memory.grow`)
 //! ```
@@ -21,7 +22,7 @@
 //! # Instance state
 //!
 //! The state is a block of fixed addresses, so generated code reaches a field
-//! with a constant address and a host test can read or set one through
+//! with a constant address and a host test can read one through
 //! `vibra_v1_memory`, which only toolchain-owned code does. Zero is every
 //! field's initial value, so a fresh instance needs no start function.
 //!
@@ -31,7 +32,7 @@
 //! | 4 | `trap_code` (u32) | After status `1`: the trap code |
 //! | 8 | `origin` (u32) | After status `1` or `3`: the origin ordinal, `0` for none |
 //! | 12 | `arena_used` (u32) | Bytes of the arena handed out so far, a bump pointer relative to [`ARENA_START`] |
-//! | 16 | `result` (u64) | After a completed entry: the entry's result slot (see below) |
+//! | 16 | `result` (u64) | After a completed `eval`: the entry's result slot (see below) |
 //! | 24 | `live_size` (u64) | Bytes of live blocks: allocated minus released |
 //! | 32 | `id_counter` (u64) | The last ID counter issued; an ID is never reused because it never decreases |
 //! | 40 | `table` (u32) | Offset of the handle-table block, `0` when the table is empty |
@@ -39,7 +40,7 @@
 //! | 48 | `table_used` (u32) | The high-water mark of slots ever handed out of this block |
 //! | 52 | `table_count` (u32) | Live IDs |
 //! | 56 | `table_free` (u32) | Head of the free-slot list, as slot plus one, `0` for none |
-//! | 60 | `module_values` (u32) | Offset of the module-value state (see below), `0` until the entry allocates it |
+//! | 60 | reserved (u32) | Always `0` |
 //! | 64 | `frame_segment` (u32) | Offset of the frame segment holding the top activation, `0` for none |
 //! | 68 | `frame_top` (u32) | Offset of the top activation inside that segment, `0` for none |
 //! | 72 | `frame_limit` (u32) | End of that segment as a 32-bit address; a segment that ends at the 4 GiB edge reads `0`, which makes it full |
@@ -49,8 +50,7 @@
 //! | 92 | `failure` (u32) | After status `3`: the failed assertion, `1` for `assert.true`, `2` for `assert.false`, `3` for `assert.equal` |
 //! | 96 | `expected` (u64) | After status `3` and `assert.equal`: the expected operand, as the bits of a scalar or a value ID |
 //! | 104 | `actual` (u64) | The same for the actual operand |
-//! | 112 | `alloc_count` (u64) | Only in a module emitted for measurement (`emit_measured`): the allocations made so far; `0` and never written otherwise |
-//! | 120 | `live_peak` (u64) | Only in a module emitted for measurement: the largest `live_size` after any allocation; `0` and never written otherwise |
+//! | 112 | reserved (u128) | Always `0` |
 //!
 //! # The arena
 //!
@@ -59,7 +59,7 @@
 //! list of its class when one exists. Otherwise it takes fresh bytes at the
 //! bump pointer and grows the memory by whole pages when the pointer would pass
 //! its end. A request that no class can hold, or a growth the engine refuses,
-//! is the host event `@runtime.memory-exhausted` (status `2`), never a trap. A
+//! is the host event `@runtime.memoryExhausted` (status `2`), never a trap. A
 //! freed block goes to the head of its class's list through its first word, and
 //! a block never moves, so an offset is stable for the life of its value. A
 //! list of one class never satisfies another class, so a free list can hold a
@@ -68,17 +68,18 @@
 //!
 //! # The object header
 //!
-//! Every arena value is one block that starts with a 24-byte header:
+//! Every arena value is one block that starts with a 24-byte header, whose
+//! offsets `vibra_ir::arena::header` writes:
 //!
 //! | Offset | Field | Meaning |
 //! | --- | --- | --- |
 //! | 0 | `count` (u32) | The reference count. While the block is being released it is the link of the release worklist, and while it is free it is the link of its free list |
 //! | 4 | `size` (u32) | The block's size in bytes, a power of two, which is also its class |
 //! | 8 | `kind` (u8) | The kind code of [`KINDS`] |
-//! | 9 | `stride` (u8) | The byte width of one component: `8` for cells, `4` for scalars of `str` and `atom`, `1` for the bytes of `bytes` |
+//! | 9 | `stride` (u8) | The byte width of one component: `8` for cells, `4` for scalars of `Str` and `Atom`, `1` for the bytes of `Bytes` |
 //! | 12 | `len` (u32) | The component count |
-//! | 16 | `variant` (u32) | The variant index of an enum or the member index of a union, `0` for every other kind |
-//! | 20 | `unsealed` (u32) | `1` while a host builds the value with the builders of the boundary, and `0` for every other value. An unsealed value also carries a written map after its payload, one bit for each component |
+//! | 16 | `variant` (u32) | The case index of a variant value, `0` for every other kind |
+//! | 20 | reserved (u32) | Always `0` |
 //!
 //! # Payloads
 //!
@@ -100,18 +101,22 @@
 //! A kind's row of [`KINDS`] gives its stride and which accessors admit it.
 //! Release, the accessors, and the allocator read the header and the stride and
 //! never the kind, except where an accessor checks that its kind is admitted,
-//! which it does with a mask the table computes. A later step adds a kind by
-//! adding a row.
+//! which it does with a mask the table computes.
 //!
 //! | Kind | Stride | Components |
 //! | --- | --- | --- |
 //! | `atom`, `str` | 4 | the characters |
 //! | `bytes` | 1 | the bytes |
-//! | `tuple`, `record`, `array` | 8 | the components or elements, in order |
-//! | `dict` | 8 | the entries, each a reference to a two-component `tuple`, so a dict's entry reads like an array element |
-//! | `enum` | 8 | `len` is `0`, or `1` for a non-`void` payload |
-//! | `wrapper`, `union` | 8 | one cell, the representation or the member value |
+//! | `tuple`, `list` | 8 | the components or elements, in order |
+//! | `record` | 8 | the fields, in the order of the record type: declaration order for a declared record, name order for a structural one |
+//! | `dict` | 8 | the entries in key order, each a reference to a two-component `tuple`, so a dict's entry reads like a list element |
+//! | `variant` | 8 | the fields of the case, in declaration order; `variant` is the case index |
+//! | `wrapper` | 8 | one cell, the representation |
 //! | `function` | 8 | the function value's cells (see "Activations and the dispatcher"), which no host reads |
+//!
+//! `Bool` is the variant value of its declaration, like every other variant.
+//! `Str` and `Bytes` are `str` and `bytes` objects, not wrappers of a list, and
+//! `Dict` is a `dict` object.
 //!
 //! # The handle table
 //!
@@ -132,18 +137,17 @@
 //! entry holds one reference to its value.
 //!
 //! The IDs of two instances are not told apart by the instance, which cannot
-//! know of the other. The host does: it tags each ID with its instance and
-//! rejects another instance's ID before calling a module
-//! (`docs/spec/06-runtime.md`, "WebAssembly boundary").
+//! know of the other. The runner does: it tags each ID with its instance and
+//! rejects another instance's ID before calling a module.
 //!
 //! # The entry's result slot
 //!
-//! After a completed entry `result` holds the entry's result as a 64-bit slot,
-//! and `vibra_v1_result` returns it. For a `void` result it is `0`. For a
-//! result that is an arena value it is the ID of the value, which the host
+//! After a completed `eval`, `result` holds the entry's result as a 64-bit
+//! slot, and `vibra_v1_result` returns it. For a `Void` result it is `0`. For
+//! a result that is an arena value it is the ID of the value, which the runner
 //! releases. For a scalar result it is the scalar's bits, zero-extended from
-//! 32 bits for an `i32`-slot type, and the host reads it by the entry's result
-//! type, as a failed assertion's operands are read (ledger D2.8).
+//! 32 bits for an `i32`-slot type, and the runner reads it by the entry's
+//! result type, as a failed assertion's operands are read.
 //!
 //! # Cells
 //!
@@ -151,33 +155,29 @@
 //! with a **class byte** that says whether the cell owns a reference. A cell
 //! holds a scalar's bits zero-extended to 64 bits (an `i32`-slot value is its
 //! 32-bit two's complement pattern, an `f32` its bit pattern), or the offset of
-//! an arena value in its low 32 bits. The cells of an object, of a frame, and of
-//! the module-value state are all laid out as in "Payloads", so copying a value
-//! from one place to another is a copy of 8 bytes and a class byte, whatever the
-//! value's type is, and no routine branches on a type. A `void` value is a
-//! scalar cell holding `0`. The class bytes of an object are written as the host
-//! reads them; for a frame and the module-value state only the reference class
-//! matters, because it is what a scan drops.
+//! an arena value in its low 32 bits. The cells of an object and of a frame are
+//! laid out as in "Payloads", so copying a value from one place to another is a
+//! copy of 8 bytes and a class byte, whatever the value's type is. A `Void`
+//! value is a scalar cell holding `0`. The class bytes of an object are written
+//! as the runner reads them; for a frame only the reference class matters,
+//! because it is what a scan drops.
 //!
 //! # Activations and the dispatcher
 //!
 //! A language activation lives in the arena and never on the engine's stack.
-//! This is the one mechanism of every call: indirect calls, closures, tail
-//! calls to every kind of callee, and generics are other ways to choose the
-//! frame to push or replace, not other mechanisms.
+//! This is the one mechanism of every call: indirect calls, closures, and tail
+//! calls to every kind of callee are other ways to choose the frame to push or
+//! replace, not other mechanisms.
 //!
 //! **Frame.** A frame is `[resume: u32][function: u32][slots: u32][caller: u32]`
 //! followed by the cells layout of its `slots`: the class bytes padded to 8, and
-//! then the cells ([`frame`]). A function's slots are its parameters in
-//! parameter order, an environment slot, the type arguments of its own generic
-//! parameters, its `let` bindings, and then the temporaries of its own lowering
-//! ("What a frame holds", below). A slot's class byte is the class of the value
-//! it holds, and the reference class exactly while the slot
-//! **owns** a count: a value is moved out of a slot by copying its cell and
-//! clearing the byte, and leaving a frame drops every cell whose byte is still
-//! the reference class, by one scan. That scan is what balances an early
-//! `return`, which leaves temporaries half-built. A new frame has every class
-//! byte clear. No frame is a value, and none has a header or an ID.
+//! then the cells ([`frame`]). A slot's class byte is the class of the value it
+//! holds, and the reference class exactly while the slot **owns** a count: a
+//! value is moved out of a slot by copying its cell and clearing the byte, and
+//! leaving a frame drops every cell whose byte is still the reference class, by
+//! one scan. That scan is what balances an early `return`, which leaves
+//! temporaries half-built. A new frame has every class byte clear. No frame is
+//! a value, and none has a header or an ID.
 //!
 //! **Segments.** Frames are bump-allocated in **segments**, which are ordinary
 //! arena blocks (so `vibra_v1_live_size` counts them and a deep recursion
@@ -189,17 +189,20 @@
 //! frame of a segment frees the segment. The frame stack is therefore a list of
 //! blocks whose total size is the only bound on the depth of the recursion.
 //!
-//! **Function.** Every language function, and every module-value initializer, is
-//! one WebAssembly function `(frame: i32) -> ()` with the same signature, in
-//! the one function table at the position of its function index. It runs the
+//! **Function.** Every lowered callable is one WebAssembly function
+//! `(frame: i32) -> ()` with the same signature, in the one function table at
+//! the position of its instance. An instance is a function of the checked IR,
+//! or the body of a closure, at one list of closed type arguments: a generic
+//! callable is specialized at each instantiation the program reaches, which
+//! the runtime chapter permits because no observation changes. It runs the
 //! activation from the resume point the frame holds until the activation calls
 //! or returns, and then it returns to the dispatcher. Its body is a set of
 //! **basic blocks**, numbered, in a `loop` over a `br_table` on a `pc` local, so
 //! that any block can be entered from the top: a block ends in a jump, a branch
-//! on a `bool`, a call, or a return, and a call ends the Wasm function, because
+//! on an `i32`, a call, or a return, and a call ends the Wasm function, because
 //! nothing on the engine's operand stack or in its locals survives a return to
 //! the dispatcher. Every value that lives across a block boundary lives in a
-//! frame slot, which is why every intermediate value does.
+//! frame slot.
 //!
 //! **Call.** A non-tail call evaluates its operands into temporaries of the
 //! caller's frame, stores the number of the block that continues the caller in
@@ -227,54 +230,21 @@
 //! operands are stored into the frame it returns. `caller` is kept, so the
 //! depth does not grow, and the engine's stack is not used at all.
 //!
-//! **What a frame holds.** `[parameters][environment][type arguments]
-//! [bindings][temporaries]`: the parameters in slot order (fixed, then
-//! labelled), one environment slot, the type arguments of the activation's own
-//! generic parameters, the bindings of the checked IR, and the temporaries of
+//! **What a frame holds.** `[parameters][environment][bindings][temporaries]`:
+//! the parameters in slot order (positional, then labelled in name order), one
+//! environment slot, the other slots of the checked IR, and the temporaries of
 //! the lowering. The environment is the function value being run, which holds
-//! what a closure captured; it is empty for a module function. A move copies a
-//! cell and its class byte, so the same code moves a scalar, a reference, and a
-//! value of a generic type.
+//! what a closure captured; it is empty for a direct call.
 //!
 //! **Function value.** An object of kind `function` whose cells are
-//! `[function][slots][arity][own][defaults..][captures..][types..]`: the table
-//! index and frame size of the body that runs when the value is called, the
-//! number of operands the body takes (which every call checks), the number of
-//! type arguments the body is passed, one default for each labelled parameter,
-//! the values a `lambda` captured, and the type argument descriptors of the
-//! activation that made it. The first four cells are scalars. A body is the
-//! function of a `lambda`, or, for a module function used as a value, a function
-//! of one tail call of it, so a call through any function value enters a body
-//! the same way.
-//!
-//! **Type arguments.** Each is a **descriptor**: an arena `tuple` whose first
-//! cell numbers the constructor of the type (`void` is `1`) and whose other cells
-//! are the descriptors of its arguments. A slot that holds none (a parameter
-//! nothing fixed) has a clear class byte. The first cell is a **head**:
-//! `class | ordinal << 8`, where the class names what the type is made of (see
-//! `desc.rs`). Code reads a descriptor for what the language needs of a
-//! type only the argument knows: an enum payload of generic type, which is
-//! absent when the argument is `void`; the selection of a contract member's
-//! implementation; and the order of keys.
-//!
-//! **Interface value.** An arena `tuple` of two cells: the descriptor of the
-//! type the value holds, and the value. Widening writes it and nothing else
-//! adds run-time information to a value. An argument instantiated at an
-//! interface type holds one, and one instantiated at the held type does not.
-//!
-//! **Module values.** The module-value state is one cells object of two cells
-//! per module value (a flag, then the value), allocated by the entry and held by
-//! the instance until it is dropped. A read tests the flag. When it is clear the
-//! reader pushes the value's initializer as a frame like any callee, and its
-//! continuation moves the returned cell into the table, sets the flag, and keeps
-//! its own count with a `dup`, so the initializer runs once and a later read
-//! only copies the cell. An initializer cycle is rejected before a program
-//! exists, so a flag is never read while its initializer is running.
+//! `[function][slots][arity][captures..]`: the table index and frame size of
+//! the instance that runs when the value is called, the number of operands the
+//! instance takes (which every call checks), and the values a closure
+//! captured. The first three cells are scalars.
 //!
 //! **Engine stack.** The dispatcher, one function, the runtime routines, and the
 //! release worklist are the whole engine call chain at any language depth, so
 //! the engine stack use is constant.
-
 /// The frame layout, see "Activations and the dispatcher".
 pub mod frame {
     /// The bytes before a frame's class bytes.
@@ -357,8 +327,6 @@ pub mod state {
     pub const TABLE_COUNT: u32 = 52;
     /// `table_free`.
     pub const TABLE_FREE: u32 = 56;
-    /// `module_values`.
-    pub const MODULE_VALUES: u32 = 60;
     /// `frame_segment`.
     pub const FRAME_SEGMENT: u32 = 64;
     /// `frame_top`.
@@ -377,10 +345,6 @@ pub mod state {
     pub const EXPECTED: u32 = 96;
     /// `actual`.
     pub const ACTUAL: u32 = 104;
-    /// `alloc_count`, written only by a module emitted for measurement.
-    pub const ALLOC_COUNT: u32 = 112;
-    /// `live_peak`, written only by a module emitted for measurement.
-    pub const LIVE_PEAK: u32 = 120;
     /// The end of the fields.
     pub const END: u32 = 128;
     /// The free-list heads: one `u32` per size class, indexed by the class.
@@ -394,10 +358,10 @@ pub const MIN_CLASS: u32 = 5;
 pub const MAX_CLASS: u32 = 30;
 
 /// The object header, the strides, and the cells offset are written once in
-/// `vibra_ir_v1::arena`, because the native code that reads and writes an object
-/// (`vibra-native-v1`) needs them too, and depends on `vibra-ir-v1` and not on this
+/// `vibra_ir::arena`, because the native code that reads and writes an object
+/// (`vibra-native`) needs them too, and depends on `vibra-ir` and not on this
 /// crate.
-pub use vibra_ir_v1::arena::{
+pub use vibra_ir::arena::{
     STRIDE_BYTES, STRIDE_CELLS, STRIDE_CHARS, cells_offset, header,
 };
 
@@ -428,39 +392,37 @@ impl CellClass {
     #[must_use]
     pub const fn code(self) -> u8 {
         match self {
-            Self::I32 => vibra_ir_v1::arena::class::I32,
-            Self::I64 => vibra_ir_v1::arena::class::I64,
-            Self::F32 => vibra_ir_v1::arena::class::F32,
-            Self::F64 => vibra_ir_v1::arena::class::F64,
-            Self::Ref => vibra_ir_v1::arena::class::REF,
+            Self::I32 => vibra_ir::arena::class::I32,
+            Self::I64 => vibra_ir::arena::class::I64,
+            Self::F32 => vibra_ir::arena::class::F32,
+            Self::F64 => vibra_ir::arena::class::F64,
+            Self::Ref => vibra_ir::arena::class::REF,
         }
     }
 }
 
 /// The closed kinds of arena values, with the codes of the kind byte, in the
-/// order of `docs/spec/06-runtime.md`, "The value arena".
+/// order of `vibra_ir::arena::kind`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     /// An atom.
     Atom,
-    /// A string.
+    /// A `Str`.
     Str,
-    /// A byte sequence.
+    /// A `Bytes`.
     Bytes,
     /// A tuple.
     Tuple,
-    /// An array.
-    Array,
-    /// A dict.
+    /// A `List`.
+    List,
+    /// A `Dict`.
     Dict,
     /// A record.
     Record,
-    /// An enum value, which is also every `bool`.
-    Enum,
-    /// A wrapper-type value.
+    /// A variant value, which is also every `Bool`.
+    Variant,
+    /// A wrapper value.
     Wrapper,
-    /// A union value.
-    Union,
     /// A function value.
     Function,
 }
@@ -478,7 +440,7 @@ impl Kind {
 pub struct KindRow {
     /// The kind.
     pub kind: Kind,
-    /// The kind's name, as the specification spells it.
+    /// The kind's name.
     pub name: &'static str,
     /// The byte width of one component.
     pub stride: u32,
@@ -490,98 +452,36 @@ pub struct KindRow {
     pub components: bool,
 }
 
-/// The kind table. Every value kind is a row; no routine names a kind.
-pub const KINDS: [KindRow; 11] = [
+const fn kind_row(
+    kind: Kind,
+    name: &'static str,
+    stride: u32,
+    length: bool,
+    variant: bool,
+) -> KindRow {
     KindRow {
-        kind: Kind::Atom,
-        name: "atom",
-        stride: STRIDE_CHARS,
-        length: true,
-        variant: false,
-        components: true,
-    },
-    KindRow {
-        kind: Kind::Str,
-        name: "str",
-        stride: STRIDE_CHARS,
-        length: true,
-        variant: false,
-        components: true,
-    },
-    KindRow {
-        kind: Kind::Bytes,
-        name: "bytes",
-        stride: STRIDE_BYTES,
-        length: true,
-        variant: false,
-        components: true,
-    },
-    KindRow {
-        kind: Kind::Tuple,
-        name: "tuple",
-        stride: STRIDE_CELLS,
-        length: true,
-        variant: false,
-        components: true,
-    },
-    KindRow {
-        kind: Kind::Array,
-        name: "array",
-        stride: STRIDE_CELLS,
-        length: true,
-        variant: false,
-        components: true,
-    },
-    KindRow {
-        kind: Kind::Dict,
-        name: "dict",
-        stride: STRIDE_CELLS,
-        length: true,
-        variant: false,
-        components: true,
-    },
-    KindRow {
-        kind: Kind::Record,
-        name: "record",
-        stride: STRIDE_CELLS,
-        length: true,
-        variant: false,
-        components: true,
-    },
-    KindRow {
-        kind: Kind::Enum,
-        name: "enum",
-        stride: STRIDE_CELLS,
-        length: false,
-        variant: true,
-        components: true,
-    },
-    KindRow {
-        kind: Kind::Wrapper,
-        name: "wrapper",
-        stride: STRIDE_CELLS,
-        length: false,
-        variant: false,
-        components: true,
-    },
-    KindRow {
-        kind: Kind::Union,
-        name: "union",
-        stride: STRIDE_CELLS,
-        length: false,
-        variant: true,
-        components: true,
-    },
-    KindRow {
-        kind: Kind::Function,
-        name: "function",
-        stride: STRIDE_CELLS,
-        length: false,
-        variant: false,
-        components: false,
-    },
-];
+        kind,
+        name,
+        stride,
+        length,
+        variant,
+        components: !matches!(kind, Kind::Function),
+    }
+}
 
+/// The kind table. Every value kind is a row; no routine names a kind.
+pub const KINDS: [KindRow; 10] = [
+    kind_row(Kind::Atom, "atom", STRIDE_CHARS, true, false),
+    kind_row(Kind::Str, "str", STRIDE_CHARS, true, false),
+    kind_row(Kind::Bytes, "bytes", STRIDE_BYTES, true, false),
+    kind_row(Kind::Tuple, "tuple", STRIDE_CELLS, true, false),
+    kind_row(Kind::List, "list", STRIDE_CELLS, true, false),
+    kind_row(Kind::Dict, "dict", STRIDE_CELLS, true, false),
+    kind_row(Kind::Record, "record", STRIDE_CELLS, true, false),
+    kind_row(Kind::Variant, "variant", STRIDE_CELLS, true, true),
+    kind_row(Kind::Wrapper, "wrapper", STRIDE_CELLS, false, false),
+    kind_row(Kind::Function, "function", STRIDE_CELLS, false, false),
+];
 /// The row of a kind.
 #[must_use]
 #[allow(clippy::indexing_slicing)] // The table is in kind order, which a test holds it to.
@@ -651,21 +551,20 @@ mod tests {
         }
         // The codes native code reads are the ones this table writes.
         for (kind, code) in [
-            (Kind::Atom, vibra_ir_v1::arena::kind::ATOM),
-            (Kind::Str, vibra_ir_v1::arena::kind::STR),
-            (Kind::Bytes, vibra_ir_v1::arena::kind::BYTES),
-            (Kind::Tuple, vibra_ir_v1::arena::kind::TUPLE),
-            (Kind::Array, vibra_ir_v1::arena::kind::ARRAY),
-            (Kind::Dict, vibra_ir_v1::arena::kind::DICT),
-            (Kind::Record, vibra_ir_v1::arena::kind::RECORD),
-            (Kind::Enum, vibra_ir_v1::arena::kind::ENUM),
-            (Kind::Wrapper, vibra_ir_v1::arena::kind::WRAPPER),
-            (Kind::Union, vibra_ir_v1::arena::kind::UNION),
-            (Kind::Function, vibra_ir_v1::arena::kind::FUNCTION),
+            (Kind::Atom, vibra_ir::arena::kind::ATOM),
+            (Kind::Str, vibra_ir::arena::kind::STR),
+            (Kind::Bytes, vibra_ir::arena::kind::BYTES),
+            (Kind::Tuple, vibra_ir::arena::kind::TUPLE),
+            (Kind::List, vibra_ir::arena::kind::LIST),
+            (Kind::Dict, vibra_ir::arena::kind::DICT),
+            (Kind::Record, vibra_ir::arena::kind::RECORD),
+            (Kind::Variant, vibra_ir::arena::kind::VARIANT),
+            (Kind::Wrapper, vibra_ir::arena::kind::WRAPPER),
+            (Kind::Function, vibra_ir::arena::kind::FUNCTION),
         ] {
             assert_eq!(kind.code(), u32::from(code), "{kind:?}");
         }
-        assert_eq!(super::row(Kind::Enum).name, "enum");
+        assert_eq!(super::row(Kind::Variant).name, "variant");
     }
 
     #[test]
@@ -712,12 +611,14 @@ mod tests {
         };
         assert_eq!(
             admitted(length_mask()),
-            ["atom", "str", "bytes", "tuple", "array", "dict", "record"]
+            [
+                "atom", "str", "bytes", "tuple", "list", "dict", "record", "variant"
+            ]
         );
-        assert_eq!(admitted(variant_mask()), ["enum", "union"]);
+        assert_eq!(admitted(variant_mask()), ["variant"]);
         assert_eq!(
             admitted(components_mask()).len(),
-            10,
+            9,
             "every kind but function has components"
         );
     }

@@ -11,7 +11,7 @@
 //! path does not read the instance's memory. That the emitter does not know the
 //! provider is the dependency rule of `architecture_boundary`.
 
-use crate::support::{crate_sources, production, workspace_root};
+use crate::support::crate_sources;
 
 /// Every method of the provider: the 17 operations.
 const PROVIDER_METHODS: &[&str] = &[
@@ -58,69 +58,5 @@ fn no_backend_calls_a_provider_method_or_implements_an_operation() {
                 "{path} names `SplitMix64`, which only `vibra-host-v1` may"
             );
         }
-    }
-}
-
-#[test]
-fn every_event_is_built_by_the_one_function() {
-    for krate in [
-        "vibra-interp-v1",
-        "vibra-wasm-run",
-        "vibra-workspace-v1",
-        "vibra-cli-v1",
-    ] {
-        for (path, code) in crate_sources(krate) {
-            for forbidden in ["HostEvent {", "AuditEvent::Host(", "AuditEvent::Opaque("]
-            {
-                assert!(
-                    !code.contains(forbidden),
-                    "{path} builds an event with `{forbidden}`; only `AuditEvent::completed` does"
-                );
-            }
-        }
-    }
-    let interpreter = crate_sources("vibra-interp-v1")
-        .into_iter()
-        .any(|(_, code)| code.contains("AuditEvent::completed("));
-    let runner = crate_sources("vibra-wasm-run")
-        .into_iter()
-        .any(|(_, code)| code.contains("AuditEvent::completed("));
-    assert!(interpreter && runner, "both backends build the event");
-}
-
-#[test]
-fn the_runners_host_path_never_reads_the_instances_memory() {
-    let path = workspace_root().join("crates/vibra-wasm-run/src/host.rs");
-    let code = production(&path);
-    for forbidden in [
-        "MEMORY_EXPORT",
-        "vibra_v1_memory",
-        "get_memory",
-        "Memory",
-        "memory.data",
-        "memory.read",
-        "memory.write",
-        "natives",
-        "vibra_native_v1",
-    ] {
-        assert!(
-            !code.contains(forbidden),
-            "the runner's host module mentions `{forbidden}`"
-        );
-    }
-    // What it uses instead: the accessors and the builders.
-    for required in [
-        "LENGTH_EXPORT",
-        "READ_I32_EXPORT",
-        "READ_ID_EXPORT",
-        "NEW_EXPORT",
-        "WRITE_I32_EXPORT",
-        "WRITE_ID_EXPORT",
-        "SEAL_EXPORT",
-    ] {
-        assert!(
-            code.contains(required),
-            "{required} is how the runner reads and builds"
-        );
     }
 }

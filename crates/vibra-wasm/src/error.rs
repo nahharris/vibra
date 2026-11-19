@@ -1,84 +1,87 @@
-//! What the emitter reports when it cannot produce a module.
+//! What the emitter reports when it does not produce a module.
 //!
-//! The emitter lowers every form of a checked program, so none of these
-//! errors is a program the language rejects: each is a toolchain defect or a
-//! hand-built program. They are a program larger than the 32-bit indices of a
-//! module, an entry that takes a parameter (a checked entry has none), and a
-//! checked-IR shape that violates an invariant the checker guarantees, such as
-//! a pattern over a type that has no shape, a contract call with no receiver,
-//! or a registry row the closed tables do not know. An error is a value, never
-//! a partial or approximate module. The `lowers_every_form` module of the
-//! `vibra-conformance-v1` test target
-//! (`crates/vibra-conformance-v1/tests/it/lowers_every_form.rs`) holds every
-//! checked corpus program to emitting without one.
+//! The backend runs the pure part of the language under the transition
+//! profile (`docs/spec/06-runtime.md`, "Wasm transition"), and it is
+//! fail-closed: a checked node it does not lower is [`EmitError::Unsupported`],
+//! which names the node and where it was written, and the whole module fails,
+//! so a program is never partly executed and never approximated. The other
+//! errors are a program larger than the 32-bit indices of a module and a
+//! checked-IR shape that violates an invariant the checker guarantees, which
+//! is a toolchain defect or a hand-built program. An error is a value, never a
+//! partial module.
 
 use std::fmt;
 
-use vibra_ir_v1::{SourceOrigin, Type};
+use vibra_ir::SourceOrigin;
 
-use crate::types::class_of;
-
-/// Why the emitter produced no module.
+/// Why a module was not emitted.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EmitError {
-    /// The program has more functions, values, or bytes than the 32-bit indices
-    /// of a module admit.
-    ModuleSize,
-    /// The entry takes parameters, which a checked entry never does.
-    EntryParameters {
-        /// The origin of the entry.
+    /// A node or declaration the transition profile does not run.
+    Unsupported {
+        /// The kind of the node, in camelCase: the name of a variant of
+        /// [`vibra_ir::Expr`], or of the declaration form that stopped the
+        /// emit, such as `entryGuard`.
+        node: &'static str,
+        /// Where it was written.
         origin: SourceOrigin,
     },
-    /// A checked-IR shape that breaks an invariant the checker guarantees.
+    /// A count or an index does not fit the 32 bits of a module.
+    ModuleSize,
+    /// A checked-IR shape the checker never builds.
     Malformed {
-        /// The kind of type or the registry symbol the lowering found no row
-        /// for, `contract` for a contract call with no receiver, `conversion`
-        /// for a result conversion between shapes that cannot differ, and
-        /// `user-key` for a dict key with no order.
-        detail: &'static str,
-        /// Where the program holds the shape, when it has an origin.
+        /// What was malformed, for a person.
+        what: String,
+        /// Where it was written, when that is known.
         origin: Option<SourceOrigin>,
     },
 }
 
 impl EmitError {
-    pub(crate) const fn malformed(
-        detail: &'static str,
-        origin: Option<SourceOrigin>,
-    ) -> Self {
-        Self::Malformed { detail, origin }
+    /// An unsupported `node` written at `origin`.
+    pub(crate) fn unsupported(node: &'static str, origin: &SourceOrigin) -> Self {
+        Self::Unsupported {
+            node,
+            origin: origin.clone(),
+        }
     }
 
-    /// A value of a type no lowered kind represents, named by its kind.
-    pub(crate) fn of_type(ty: &Type, origin: &SourceOrigin) -> Self {
-        Self::malformed(class_of(ty).err().unwrap_or("shape"), Some(origin.clone()))
+    /// A malformed shape, described by `what`, written at `origin`.
+    pub(crate) fn malformed(what: impl Into<String>, origin: &SourceOrigin) -> Self {
+        Self::Malformed {
+            what: what.into(),
+            origin: Some(origin.clone()),
+        }
+    }
+
+    /// The node kind of an unsupported emit, `None` for any other error.
+    #[must_use]
+    pub const fn unsupported_node(&self) -> Option<&'static str> {
+        match self {
+            Self::Unsupported { node, .. } => Some(node),
+            Self::ModuleSize | Self::Malformed { .. } => None,
+        }
     }
 }
 
 impl fmt::Display for EmitError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let origin = match self {
+        match self {
+            Self::Unsupported { node, origin } => write!(
+                formatter,
+                "the WebAssembly transition profile does not run `{node}` \
+                 (written in {} at {}..{})",
+                origin.source_id(),
+                origin.span().start(),
+                origin.span().end()
+            ),
             Self::ModuleSize => {
-                return formatter.write_str(
-                    "cannot emit: the program exceeds the module size limits",
-                );
+                formatter.write_str("the program does not fit the indices of a module")
             }
-            Self::EntryParameters { origin } => {
-                formatter.write_str("cannot emit: the entry takes parameters")?;
-                Some(origin)
+            Self::Malformed { what, .. } => {
+                write!(formatter, "a malformed checked program: {what}")
             }
-            Self::Malformed { detail, origin } => {
-                write!(
-                    formatter,
-                    "cannot emit: malformed checked program (`{detail}`)"
-                )?;
-                origin.as_ref()
-            }
-        };
-        if let Some(origin) = origin {
-            write!(formatter, " at {}:{:?}", origin.source_id(), origin.span())?;
         }
-        Ok(())
     }
 }
 

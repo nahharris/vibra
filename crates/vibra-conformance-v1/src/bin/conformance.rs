@@ -108,11 +108,6 @@ fn run() -> Result<(), String> {
         "interpreter backend: {} passed, {} failed, {} unavailable",
         interpreter.passed, interpreter.failed, interpreter.unavailable
     );
-    let wasm = report.wasm_counts();
-    println!(
-        "wasm backend: {} matched, {} failed",
-        wasm.matched, wasm.failed
-    );
     // The reference stepper, against the committed inventory when the corpus
     // has one beside it. Pending cells are gaps and do not fail the run; a cell
     // the stepper contradicts does.

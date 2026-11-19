@@ -1,73 +1,63 @@
 //! Deterministic WebAssembly emission for checked Vibra IR.
 //!
-//! This is the second consumer of [`vibra_ir_v1::CheckedProgram`], beside the
+//! This is the second consumer of [`vibra_ir::CheckedProgram`], beside the
 //! reference interpreter: it has no frontend of its own and lowers the same
-//! typed IR the interpreter runs. It depends on `vibra-ir-v1` and the encoder
-//! only. It reaches no engine, and it does not depend on the native-code
-//! crate: a module names a native only by an import from the pure module whose
-//! name `vibra_ir_v1::boundary` records.
+//! checked IR the interpreter runs. It depends on `vibra-ir` and the encoder
+//! only. It reaches no engine and no native code: a module names a native
+//! routine only by an import from the pure module `vibra_native_v1`, whose
+//! rows `vibra_ir::external::NATIVE_ROWS` fixes.
 //!
 //! # What is lowered
 //!
-//! Every module has a memory layer: the value arena, precise reference
-//! counting with a worklist release, the handle table, the instance state, and
-//! the host accessors ([`layout`] states the representation). Checked source
-//! programs lower in full: literals, sequences, `let`, `if`, and `return`;
-//! module values, evaluated lazily and once; functions with fixed and labelled
-//! parameters; the nominal and structural data kinds with their constructors,
-//! projections, and the injection of a member into a union; calls of every
-//! kind (function values and closures, a call through one, a tail call to every
-//! kind of callee, omitted labelled operands, and generic functions and types,
-//! whose type arguments are passed to each activation at run time); patterns
-//! and typed failure (`match` with every pattern kind, destructuring in `let`,
-//! parameters, and lambdas, `let-else`, `as` narrowing, `try`, and `never`, by
-//! one recursive scheme over a table of what each kind of pattern asks of a
-//! value); collections, numbers and text, native bodies, and interfaces; and
-//! the test assertions and the test module ([`emit_tests`]: `vibra_v1_test`,
-//! the failure exports, and the origin table of [`OriginTable`]), including a
-//! result converted through an array, a dict, a record, or a union, and a
-//! `void` item of a builtin `option` iterator. Activations live in the arena
-//! and a call does not nest a WebAssembly call ([`layout`], "Activations and
-//! the dispatcher"). [`EmitError`] reports only a program the checker cannot
-//! have produced, and never a module that omits part of the program.
+//! The module is the transition module of `docs/spec/06-runtime.md`, "Wasm
+//! transition": it runs the pure part of the language. Every module has a
+//! memory layer: the value arena, precise reference counting with a worklist
+//! release, the handle table, the instance state, and the accessors
+//! ([`layout`] states the representation). A program lowers through its
+//! literals, intrinsic rows, tuples, records, variants, wrappers, lists,
+//! `match` and `let` patterns, `if`, sequences, `return`, `try`, calls of
+//! functions, function values, and closures, tail calls, the rows of `Str`,
+//! `Bytes`, `List`, and `Dict` that the native imports implement, and the
+//! assertions of a test module. Each generic callable is specialized at the
+//! type arguments it is used at. Activations live in the arena and a call does
+//! not nest a WebAssembly call ([`layout`], "Activations and the dispatcher"),
+//! so a tail call runs in constant space.
+//!
+//! The backend is fail-closed: a node the transition profile does not run is
+//! [`EmitError::Unsupported`], naming the node and its origin, and no module
+//! is produced, so a program is never partly executed.
 //!
 //! # The module
 //!
-//! A module defines one 32-bit linear memory exported as `vibra_v1_memory`, one
-//! function table holding its language functions, imports nothing (no program
-//! lowered so far uses a native), exports the accessors of
-//! `docs/spec/06-runtime.md`, "WebAssembly boundary", that do not depend on a
-//! test, and has no custom section. Emission is deterministic: the bytes depend
-//! only on the checked program.
+//! A module defines one 32-bit linear memory exported as `vibra_v1_memory`,
+//! one function table holding its lowered instances, imports only native
+//! routines, exports `vibra_v1_eval` or `vibra_v1_test` and the accessors of
+//! the chapter's closed table, and has no custom section. Emission is
+//! deterministic: the bytes depend only on the checked program.
 
-mod canon;
-mod canon_typed;
-
-mod desc;
 mod encode;
 mod error;
-mod host;
-mod key;
 pub mod layout;
 mod lower;
-mod pattern;
 mod primitive;
 mod runtime;
 pub mod support;
 mod types;
 
-use vibra_ir_v1::{CheckedProgram, SourceOrigin, Type};
+use vibra_ir::{CheckedModuleSet, CheckedProgram, SourceOrigin, Type};
 
-pub use desc::DescriptorTable;
 pub use error::EmitError;
+
+use crate::lower::{Callable, Lowered, Lowering};
+use crate::runtime::TestEntry;
 
 /// The origin table the toolchain produces beside a module.
 ///
-/// A module carries no source map before Milestone 7, so a trap or a failed
-/// assertion names its origin by an ordinal into this table, which maps each
-/// ordinal to one source span (`docs/spec/06-runtime.md`, "Traps"). Ordinal `0`
-/// means no origin, so the first entry has ordinal `1`. The table is not part
-/// of the module's bytes.
+/// A module carries no source map, so a trap or a failed assertion names its
+/// origin by an ordinal into this table, which maps each ordinal to one source
+/// span (`docs/spec/06-runtime.md`, "Traps"). Ordinal `0` means no origin, so
+/// the first entry has ordinal `1`. The table is not part of the module's
+/// bytes.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct OriginTable {
     origins: Vec<(SourceOrigin, Option<Type>)>,
@@ -80,7 +70,7 @@ impl OriginTable {
         self.origins.len()
     }
 
-    /// Whether the table maps no origin: a module with no assertion call.
+    /// Whether the table maps no origin.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.origins.is_empty()
@@ -93,9 +83,8 @@ impl OriginTable {
         self.row(ordinal).map(|(origin, _)| origin)
     }
 
-    /// The type by which the host reads the operands of a failed `assert.equal`
-    /// at an ordinal: the static type of the operands, or `any` when the type
-    /// names a generic parameter. `None` for every other origin.
+    /// The closed type at which the host reads the operands of a failed
+    /// `assert.equal` at an ordinal. `None` for every other origin.
     #[must_use]
     pub fn operand_type(&self, ordinal: u32) -> Option<&Type> {
         self.row(ordinal).and_then(|(_, ty)| ty.as_ref())
@@ -112,7 +101,6 @@ impl OriginTable {
 pub struct EmittedModule {
     bytes: Vec<u8>,
     origins: OriginTable,
-    descriptors: DescriptorTable,
 }
 
 impl EmittedModule {
@@ -128,13 +116,6 @@ impl EmittedModule {
         &self.origins
     }
 
-    /// The table that names the types of the module's descriptors, produced
-    /// beside it for a host that reads an interface value.
-    #[must_use]
-    pub const fn descriptors(&self) -> &DescriptorTable {
-        &self.descriptors
-    }
-
     /// The module's binary encoding, by value.
     #[must_use]
     pub fn into_bytes(self) -> Vec<u8> {
@@ -142,225 +123,157 @@ impl EmittedModule {
     }
 }
 
-/// Lowers a checked program to a v1 module.
+/// Lowers a checked program to an evaluation module, whose `vibra_v1_eval`
+/// runs the entry and leaves its result.
 ///
 /// The same program always yields the same bytes.
 ///
 /// # Errors
 ///
-/// [`EmitError`] when the program is not one the checker could have produced:
-/// it exceeds the module size limits, its entry takes a parameter, or a checked
-/// shape breaks an invariant. No module is produced for such a program.
+/// [`EmitError::Unsupported`] for a node the transition profile does not run;
+/// [`EmitError::ModuleSize`] and [`EmitError::Malformed`] for a program larger
+/// than a module or one the checker could not have produced. No module is
+/// produced then.
 pub fn emit(program: &CheckedProgram) -> Result<EmittedModule, EmitError> {
-    build(program, None, false)
-}
-
-/// [`emit`] for a module the performance baseline measures: the allocator also
-/// counts its allocations and records the peak live size in two state fields
-/// (`layout::state::ALLOC_COUNT` and `LIVE_PEAK`) that a module built by [`emit`]
-/// never writes. The module is otherwise the same program, and the same
-/// program always yields the same bytes.
-///
-/// # Errors
-///
-/// [`EmitError`] as for [`emit`].
-pub fn emit_measured(program: &CheckedProgram) -> Result<EmittedModule, EmitError> {
-    build(program, None, true)
-}
-
-/// Lowers the tests of a checked module set to a v1 test module.
-///
-/// `program` is any program of the set, which every test of a workspace shares,
-/// and `entries` are the function indices of the tests, in canonical discovery
-/// order: the module's `vibra_v1_test` runs the test at a position of this
-/// list, each in a fresh instance. The same input always yields the same bytes.
-///
-/// # Errors
-///
-/// [`EmitError`] as for [`emit`].
-pub fn emit_tests(
-    program: &CheckedProgram,
-    entries: &[usize],
-) -> Result<EmittedModule, EmitError> {
-    build(program, Some(entries), false)
-}
-
-/// [`emit_tests`] for a module the performance baseline measures, as
-/// [`emit_measured`].
-///
-/// # Errors
-///
-/// [`EmitError`] as for [`emit`].
-pub fn emit_tests_measured(
-    program: &CheckedProgram,
-    entries: &[usize],
-) -> Result<EmittedModule, EmitError> {
-    build(program, Some(entries), true)
-}
-
-#[allow(clippy::too_many_lines)]
-fn build(
-    program: &CheckedProgram,
-    tests: Option<&[usize]>,
-    measure: bool,
-) -> Result<EmittedModule, EmitError> {
-    // A module indexes its functions with 32 bits. A count that does not fit is
-    // reported, never wrapped.
-    let counts = u32::try_from(program.functions().len())
-        .ok()
-        .zip(u32::try_from(program.globals().len()).ok())
-        .and_then(|(functions, globals)| {
-            Some((functions, globals, functions.checked_add(globals)?))
-        });
-    let entry = u32::try_from(program.entry_index()).ok();
-    let Some(((_, globals, total), entry)) = counts.zip(entry) else {
-        return Err(EmitError::ModuleSize);
-    };
-    let mut class = runtime::ValueClass::Void;
-    if tests.is_none() {
-        let entry_function = program.entry();
-        if !entry_function.signature().slot_types().is_empty() {
-            return Err(EmitError::EntryParameters {
-                origin: entry_function.origin().clone(),
-            });
+    let set = program.module_set();
+    let entry = program.entry();
+    let function = set.functions().get(entry).ok_or(EmitError::Malformed {
+        what: format!("no entry function {entry}"),
+        origin: None,
+    })?;
+    let result = match function.signature.type_info() {
+        Type::Fn(signature) => signature.result.clone(),
+        Type::Proc(_) => return Err(EmitError::unsupported("proc", &function.origin)),
+        other => {
+            return Err(EmitError::malformed(
+                format!("an entry of type {other}"),
+                &function.origin,
+            ));
         }
-        class =
-            types::class_of(&entry_function.signature().result()).map_err(|kind| {
-                EmitError::malformed(kind, Some(entry_function.origin().clone()))
-            })?;
-    }
-
-    // The lambdas of the program follow its functions and module values in the
-    // table, in the order a traversal meets them.
-    let lambdas = lower::collect(program);
-    let reachable = lower::reachable(program, tests);
-    let total = u32::try_from(lambdas.len())
-        .ok()
-        .and_then(|lambdas| total.checked_add(lambdas))
-        .ok_or(EmitError::ModuleSize)?;
-    // The key unit, the language function that orders keys by the descriptor of
-    // their type, follows the lambdas in a module that calls it.
-    let total = if lower::needs_key_unit(program) {
-        total.checked_add(1).ok_or(EmitError::ModuleSize)?
-    } else {
-        total
     };
-    // A call pushes a frame of the callee's size, which is known only once the
-    // callee is lowered: the first pass finds every size, and which natives the
-    // program calls. The natives are imported, and an import takes a function
-    // index before every defined function, so the second pass numbers the
-    // routines after them.
-    let count = total as usize;
-    let run_tests = tests.is_some();
-    let first_fns = encode::routines_for(total);
-    let mut first = lower::Lowering::new(
-        &first_fns,
-        program,
-        &lambdas,
-        vec![0; count],
-        Vec::new(),
-        Vec::new(),
-        lower::Extras::default(),
-        run_tests,
-    )
-    .with_reachable(reachable.clone());
-    let mut sizes = Vec::with_capacity(count);
-    for index in 0..count {
-        sizes.push(first.function(index)?.slots);
-    }
-    let natives = first.used_natives();
-    let extras = first.needed();
-    let imports = natives
-        .iter()
-        .filter_map(|intrinsic| intrinsic.native_import())
-        .collect::<Vec<_>>();
-    let host_imports = first.used_host_rows();
-    let import_count = u32::try_from(imports.len() + host_imports.len())
-        .map_err(|_| EmitError::ModuleSize)?;
-    let fns = encode::routines_for(
-        total
-            .checked_add(import_count)
-            .ok_or(EmitError::ModuleSize)?,
-    );
-    let mut lowering = lower::Lowering::new(
-        &fns,
-        program,
-        &lambdas,
-        sizes.clone(),
-        natives,
-        host_imports.clone(),
-        extras,
-        run_tests,
-    )
-    .with_reachable(reachable);
-    let mut lowered = Vec::with_capacity(count);
-    for index in 0..count {
-        lowered.push(lowering.function(index)?.code);
-    }
-    let entry_slots = sizes
-        .get(entry as usize)
-        .copied()
-        .ok_or(EmitError::ModuleSize)?;
-    let include_new =
-        lowering.built_object() || globals != 0 || !host_imports.is_empty();
-    let extra = lowering.comparer_routines();
-    let descriptors = lowering.descriptors();
-    let origins = OriginTable {
-        origins: lowering.take_origins(),
-    };
-    let entry = match tests {
-        None => encode::Entry::Program {
-            function: entry,
-            slots: entry_slots,
-            module_values: globals,
+    let class = types::Types::new(set).class(&result, &function.origin)?;
+    let mut lowering = Lowering::new(set, false);
+    let root =
+        lowering.instance(Callable::Function(entry), Vec::new(), &function.origin)?;
+    lowering.measure()?;
+    let lowered = lowering.emit()?;
+    let slots = lowered.slots.get(root as usize).copied().unwrap_or(0);
+    assemble(
+        lowered,
+        encode::Entry::Program {
+            function: root,
+            slots,
             class,
         },
-        Some(entries) => encode::Entry::Tests {
-            entries: entries
-                .iter()
-                .map(|index| {
-                    let function = program.functions().get(*index)?;
-                    let signature = function.signature();
-                    if signature.slot_types().is_empty()
-                        && signature.result() == Type::Void
-                    {
-                        Some((u32::try_from(*index).ok()?, sizes.get(*index).copied()?))
-                    } else {
-                        None
-                    }
+    )
+}
+
+/// Lowers tests of a checked module set to a test module.
+///
+/// `tests` are the function indices of the tests, in canonical discovery
+/// order: the module's `vibra_v1_test` runs the test at a position of this
+/// list, each in a fresh instance. A function that returns a value is not a
+/// test, and running it is the trap `@runtime.invalidCheckedProgram`, as the
+/// reference interpreter refuses it. The same input always yields the same
+/// bytes.
+///
+/// # Errors
+///
+/// [`EmitError::Unsupported`] for a test with `takes` and for a node the
+/// transition profile does not run; otherwise as for [`emit`].
+pub fn emit_tests(
+    set: &CheckedModuleSet,
+    tests: &[usize],
+) -> Result<EmittedModule, EmitError> {
+    let mut lowering = Lowering::new(set, true);
+    let mut roots = Vec::with_capacity(tests.len());
+    for index in tests {
+        let function = set.functions().get(*index).ok_or(EmitError::Malformed {
+            what: format!("no test function {index}"),
+            origin: None,
+        })?;
+        if !function.signature.binders().is_empty() {
+            return Err(EmitError::malformed("a generic test", &function.origin));
+        }
+        let signature = match function.signature.type_info() {
+            Type::Fn(signature) => signature,
+            Type::Proc(_) => {
+                return Err(EmitError::unsupported("proc", &function.origin));
+            }
+            other => {
+                return Err(EmitError::malformed(
+                    format!("a test of type {other}"),
+                    &function.origin,
+                ));
+            }
+        };
+        if signature.slot_count() != 0 {
+            return Err(EmitError::unsupported("testTakes", &function.origin));
+        }
+        roots.push(if signature.result == Type::Void {
+            Some(lowering.instance(
+                Callable::Function(*index),
+                Vec::new(),
+                &function.origin,
+            )?)
+        } else {
+            None
+        });
+    }
+    lowering.measure()?;
+    let lowered = lowering.emit()?;
+    let entries: Vec<TestEntry> = roots
+        .into_iter()
+        .map(|root| {
+            root.map(|root| {
+                (root, lowered.slots.get(root as usize).copied().unwrap_or(0))
+            })
+        })
+        .collect();
+    assemble(lowered, encode::Entry::Tests { entries })
+}
+
+/// Encodes the lowered instances under `entry`.
+fn assemble(
+    lowered: Lowered,
+    entry: encode::Entry,
+) -> Result<EmittedModule, EmitError> {
+    let import_count =
+        u32::try_from(lowered.imports.len()).map_err(|_| EmitError::ModuleSize)?;
+    let instance_count =
+        u32::try_from(lowered.functions.len()).map_err(|_| EmitError::ModuleSize)?;
+    let end = import_count
+        .checked_add(instance_count)
+        .ok_or(EmitError::ModuleSize)?;
+    let imports = lowered
+        .imports
+        .iter()
+        .map(|intrinsic| {
+            intrinsic
+                .native_import()
+                .ok_or_else(|| EmitError::Malformed {
+                    what: format!(
+                        "the row `{}` is not a native import",
+                        intrinsic.symbol()
+                    ),
+                    origin: None,
                 })
-                .collect(),
-            module_values: globals,
-        },
-    };
+        })
+        .collect::<Result<Vec<_>, _>>()?;
     let parts = encode::Parts {
-        functions: lowered,
+        functions: lowered.functions,
         // The table holds function indices, which the imports come before.
-        table: (import_count..import_count + total).collect(),
+        table: (import_count..end).collect(),
         entry,
-        segments: lowering.into_segments(),
-        include_new,
+        segments: lowered.segments,
         imports,
-        host_imports,
-        extra,
-        measure,
+        extra: lowered.extra,
     };
     let bytes = encode::module(&parts).ok_or(EmitError::ModuleSize)?;
     Ok(EmittedModule {
         bytes,
-        origins,
-        descriptors,
+        origins: OriginTable {
+            origins: lowered.origins,
+        },
     })
-}
-
-/// Whether the emitter lowers the registry row `intrinsic` inline: a primitive
-/// row that does not loop, which is the integer rows but `to-str` and `parse`,
-/// the integer conversions, the `char` rows, `array.length`, and the float
-/// arithmetic, equality, and order rows. The rows that loop are native imports
-/// (`CompilerIntrinsic::native_import`), and `vibra_ir_v1::external::CompilerIntrinsic::vectors`
-/// holds both kinds to samples. A row it lowers neither way is reported by
-/// [`emit`] as [`EmitError::Malformed`].
-#[must_use]
-pub fn lowers_primitive(intrinsic: vibra_ir_v1::external::CompilerIntrinsic) -> bool {
-    primitive::plan(intrinsic).is_some()
 }

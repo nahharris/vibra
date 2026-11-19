@@ -21,18 +21,12 @@ use crate::profile::ConformanceProfile;
 ///
 /// The hundred-thousand-deep case needs about 38 MiB in the interpreter's
 /// accounting, so this leaves it a margin, and it is small enough that recursion
-/// with no base case reaches it in seconds. The Wasm backend applies it to the
-/// instance's linear memory.
+/// with no base case reaches it in seconds.
 pub const INSTANCE_MEMORY_LIMIT_BYTES: usize = 64 * 1024 * 1024;
 
 /// The reference interpreter's budget under [`INSTANCE_MEMORY_LIMIT_BYTES`].
 pub(crate) const fn interpreter_budget() -> vibra_interp_v1::MemoryBudget {
     vibra_interp_v1::MemoryBudget::new(INSTANCE_MEMORY_LIMIT_BYTES)
-}
-
-/// The Wasm runner's limit under [`INSTANCE_MEMORY_LIMIT_BYTES`].
-pub(crate) const fn wasm_memory_limit() -> vibra_wasm_run::MemoryLimit {
-    vibra_wasm_run::MemoryLimit::new(INSTANCE_MEMORY_LIMIT_BYTES)
 }
 
 /// A backend's result and its ordered audit trace.
@@ -44,14 +38,15 @@ pub struct ExecutionObservation {
     pub audit_trace: Vec<vibra_host_v1::AuditEvent>,
 }
 
-/// What the WebAssembly backend did with an accepted executable case.
+/// What an executor beside the interpreter (the reference stepper, or a linked
+/// executable) did with an accepted executable case.
 ///
 /// The case has one expectation (`docs/spec/07-diagnostics-and-conformance.md`,
-/// "Differential execution"), so the Wasm backend reports the same kinds of
+/// "Differential execution"), so an executor reports the same kinds of
 /// observation the interpreter does, and the runner compares them with it.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum WasmObservation {
-    /// The module ran to completion.
+pub enum ExecutorObservation {
+    /// The program ran to completion.
     Completed(ExecutionObservation),
     /// The instance ended in a host event: the atom of its unlocated
     /// diagnostic, such as `@runtime.memory-exhausted`.
@@ -60,10 +55,9 @@ pub enum WasmObservation {
     /// `@runtime.unobservable-function`. The case expects that code as its one
     /// runtime error diagnostic.
     Trapped(String),
-    /// The backend failed on the program: the emitter produced no module (a
-    /// toolchain defect, since a checked program has every form lowered), the
-    /// module did not validate, the engine refused it, or the run stopped some
-    /// way the interpreter did not. It fails the Wasm backend on the case.
+    /// The executor failed on the program: it could not prepare the program,
+    /// or the run stopped some way the interpreter did not. It fails the
+    /// executor on the case.
     Failed {
         /// What went wrong.
         reason: String,
@@ -131,11 +125,9 @@ pub struct CaseObservation {
     /// The host event that ended execution, instead of a result: the atom of
     /// the unlocated diagnostic, such as `@runtime.memory-exhausted`.
     pub host_event: Option<String>,
-    /// What the WebAssembly backend did with the case. A handler that runs an
+    /// What the reference stepper did with the case. A handler that runs an
     /// executable case sets it for every program it runs. A rejected program
     /// is no executable case, so a handler leaves it unset.
-    pub wasm: Option<BackendObservation<WasmObservation>>,
-    /// What the reference stepper did with the case, set wherever `wasm` is.
     pub native: Option<NativeObservation>,
     /// What the `windows` column needs to build and launch the case's entry,
     /// set wherever `native` is for an entry.
@@ -183,7 +175,7 @@ impl fmt::Display for HandlerError {
 
 impl std::error::Error for HandlerError {}
 
-/// The interface a future reader, static, interpreter, tooling, or Wasm
+/// The interface a future reader, static, interpreter, or tooling
 /// implementation uses to plug into the internal runner.
 pub trait ProfileHandler: Send + Sync {
     /// Whether this handler owns the declared shape of `case`.
@@ -398,12 +390,12 @@ pub enum CaseStatus {
     },
 }
 
-/// The WebAssembly backend's status on one executable case.
+/// An executor's status on one run of an executable case.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum WasmStatus {
-    /// The backend ran the case and reproduced its one expectation.
+pub enum ExecutorStatus {
+    /// The executor ran the case and reproduced its one expectation.
     Matched,
-    /// The backend ran the case and disagreed with the expectation.
+    /// The executor ran the case and disagreed with the expectation.
     Failed {
         /// A stable, actionable mismatch explanation.
         reason: String,
@@ -416,11 +408,9 @@ pub struct BackendStatuses {
     /// The reference interpreter's status: the case's expectations compared
     /// with what the interpreter handler observed.
     pub interpreter: CaseStatus,
-    /// The WebAssembly backend's status, or `None` when no Wasm execution
-    /// handler took part in the case, or the case never reached a backend
-    /// because its handler failed or was unavailable.
-    pub wasm: Option<WasmStatus>,
-    /// The reference stepper's status, under the same conditions as `wasm`.
+    /// The reference stepper's status, or `None` when no stepper observation
+    /// took part in the case, or the case never reached a backend because its
+    /// handler failed or was unavailable.
     pub native: Option<NativeStatus>,
     /// The linked executable's status (the `windows` column), or `None` when the
     /// column was not run or the case never reached the stepper.
@@ -436,7 +426,7 @@ pub struct CaseReport {
     pub required_profile: ConformanceProfile,
     /// Profile that supplied execution, when one was selected.
     pub provided_profile: Option<ConformanceProfile>,
-    /// Final status. An executable case passes only when both backends do.
+    /// Final status. An executable case passes only when every executor does.
     pub status: CaseStatus,
     /// Each backend's status, for an executable case; `None` for any other.
     pub backends: Option<BackendStatuses>,
@@ -592,24 +582,6 @@ impl RunReport {
         }
         counts
     }
-
-    /// The WebAssembly backend's counts over the executable cases.
-    #[must_use]
-    pub fn wasm_counts(&self) -> WasmCounts {
-        let mut counts = WasmCounts::default();
-        for status in self
-            .reports
-            .iter()
-            .filter_map(|report| report.backends.as_ref())
-            .filter_map(|backends| backends.wasm.as_ref())
-        {
-            match status {
-                WasmStatus::Matched => counts.matched += 1,
-                WasmStatus::Failed { .. } => counts.failed += 1,
-            }
-        }
-        counts
-    }
 }
 
 /// The reference interpreter's counts over the executable cases.
@@ -621,15 +593,6 @@ pub struct InterpreterCounts {
     pub failed: usize,
     /// Cases no registered handler could run.
     pub unavailable: usize,
-}
-
-/// The WebAssembly backend's counts over the executable cases.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct WasmCounts {
-    /// Cases the backend reproduced.
-    pub matched: usize,
-    /// Cases on which the backend disagreed with the expectation.
-    pub failed: usize,
 }
 
 /// The internal backend-independent conformance runner.
@@ -747,14 +710,12 @@ impl ConformanceRunner {
                         backends: None,
                     };
                 }
-                let wasm = wasm_status(case, &observation);
                 let native = native_status(case, &observation);
                 let windows = self.windows.as_ref().and_then(|executor| {
                     windows_status(executor, case, &observation, native.as_ref())
                 });
                 let status = differential_status(
                     &interpreter,
-                    wasm.as_ref(),
                     native.as_ref(),
                     windows.as_ref(),
                 );
@@ -765,7 +726,6 @@ impl ConformanceRunner {
                     status,
                     backends: Some(BackendStatuses {
                         interpreter,
-                        wasm,
                         native,
                         windows,
                     }),
@@ -779,7 +739,6 @@ impl ConformanceRunner {
                     provided_profile: None,
                     backends: executable.then(|| BackendStatuses {
                         interpreter: status.clone(),
-                        wasm: None,
                         native: None,
                         windows: None,
                     }),
@@ -800,7 +759,6 @@ impl ConformanceRunner {
                     provided_profile: Some(provided),
                     backends: executable.then(|| BackendStatuses {
                         interpreter: status.clone(),
-                        wasm: None,
                         native: None,
                         windows: None,
                     }),
@@ -1026,22 +984,7 @@ impl CaseExpectations {
     }
 }
 
-/// The WebAssembly backend's status on an executable case, against the one
-/// expectation the case has, or `None` when no Wasm execution handler took part
-/// in the case, so that only the interpreter judges it.
-fn wasm_status(case: &Case, observation: &CaseObservation) -> Option<WasmStatus> {
-    let wasm = observation.wasm.as_ref()?;
-    Some(executor_status(
-        case,
-        observation,
-        wasm,
-        "wasm",
-        "the module",
-    ))
-}
-
-/// The stepper's status: each of its runs, held to the comparison the Wasm
-/// backend is held to.
+/// The stepper's status: each of its runs, held to the case's one expectation.
 fn native_status(case: &Case, observation: &CaseObservation) -> Option<NativeStatus> {
     Some(match observation.native.as_ref()? {
         NativeObservation::Pending { package, .. } => {
@@ -1049,7 +992,7 @@ fn native_status(case: &Case, observation: &CaseObservation) -> Option<NativeSta
         }
         NativeObservation::Ran(runs) => {
             for run in runs {
-                if let WasmStatus::Failed { reason } = executor_status(
+                if let ExecutorStatus::Failed { reason } = executor_status(
                     case,
                     observation,
                     &run.observation,
@@ -1138,7 +1081,7 @@ fn windows_runs_status(
             .iter()
             .find(|s| s.quota == run.quota)
             .and_then(|s| match &s.observation.outcome {
-                WasmObservation::Completed(execution) => {
+                ExecutorObservation::Completed(execution) => {
                     Some((execution, s.observation.program_failed))
                 }
                 _ => None,
@@ -1148,8 +1091,10 @@ fn windows_runs_status(
             // everything else the executable reports is still held to the
             // stepper's: the command outcome and the audit trace.
             result_unobserved = true;
-            if let (Some((stepper, stepper_failed)), WasmObservation::Completed(actual)) =
-                (stepper_execution, &run.observation.outcome)
+            if let (
+                Some((stepper, stepper_failed)),
+                ExecutorObservation::Completed(actual),
+            ) = (stepper_execution, &run.observation.outcome)
                 && (stepper.audit_trace != actual.audit_trace
                     || stepper_failed != run.observation.program_failed)
             {
@@ -1161,7 +1106,7 @@ fn windows_runs_status(
             }
             continue;
         }
-        if let WasmStatus::Failed { reason } = executor_status(
+        if let ExecutorStatus::Failed { reason } = executor_status(
             case,
             observation,
             &run.observation,
@@ -1174,7 +1119,7 @@ fn windows_runs_status(
         }
         // Direct comparison: when both completed, the two canonical results
         // are the same text, whatever the case's snapshot says.
-        if let (Some((stepper, _)), WasmObservation::Completed(actual)) =
+        if let (Some((stepper, _)), ExecutorObservation::Completed(actual)) =
             (stepper_execution, &run.observation.outcome)
             && stepper.result != actual.result
         {
@@ -1206,21 +1151,21 @@ fn unobserved_verdict(result_unobserved: bool, expects_result: bool) -> NativeSt
     }
 }
 
-/// An executor that reports in the terms of [`WasmObservation`], held to the
+/// An executor that reports in the terms of [`ExecutorObservation`], held to the
 /// case's one expectation. `name` is how a comparison names it and `subject`
 /// how a reason refers to it.
 fn executor_status(
     case: &Case,
     observation: &CaseObservation,
-    wasm: &BackendObservation<WasmObservation>,
+    executor: &BackendObservation<ExecutorObservation>,
     name: &str,
     subject: &str,
-) -> WasmStatus {
+) -> ExecutorStatus {
     let expectations = &case.manifest().expectations;
-    match &wasm.outcome {
-        WasmObservation::Completed(actual) => {
+    match &executor.outcome {
+        ExecutorObservation::Completed(actual) => {
             if let Some(event) = &expectations.host_event {
-                return WasmStatus::Failed {
+                return ExecutorStatus::Failed {
                     reason: format!(
                         "host event mismatch: expected {event}, but {subject} completed"
                     ),
@@ -1232,22 +1177,22 @@ fn executor_status(
                 expectations.interpreter.is_none()
                     && diagnostic.code.domain() == vibra_diagnostics_v1::Domain::Runtime
             }) {
-                return WasmStatus::Failed {
+                return ExecutorStatus::Failed {
                     reason: format!(
                         "trap mismatch: expected {}, but {subject} completed",
                         trap.code.as_atom()
                     ),
                 };
             }
-            if let (Some(interpreter), Some(wasm)) = (
+            if let (Some(interpreter), Some(failed)) = (
                 observation
                     .interpreter
                     .as_ref()
                     .and_then(|backend| backend.program_failed),
-                wasm.program_failed,
-            ) && interpreter != wasm
+                executor.program_failed,
+            ) && interpreter != failed
             {
-                return WasmStatus::Failed {
+                return ExecutorStatus::Failed {
                     reason: format!(
                         "command outcome mismatch: the interpreter's entry {} err, {subject}'s {}",
                         if interpreter {
@@ -1255,7 +1200,7 @@ fn executor_status(
                         } else {
                             "did not return"
                         },
-                        if wasm { "did" } else { "did not" }
+                        if failed { "did" } else { "did not" }
                     ),
                 };
             }
@@ -1266,33 +1211,33 @@ fn executor_status(
                 Some(actual),
             )
             .map_or_else(
-                |reason| WasmStatus::Failed { reason },
-                |()| WasmStatus::Matched,
+                |reason| ExecutorStatus::Failed { reason },
+                |()| ExecutorStatus::Matched,
             )
         }
-        WasmObservation::Failed { reason } => WasmStatus::Failed {
+        ExecutorObservation::Failed { reason } => ExecutorStatus::Failed {
             reason: reason.clone(),
         },
-        WasmObservation::Trapped(code) => {
+        ExecutorObservation::Trapped(code) => {
             if expectations
                 .diagnostics
                 .iter()
                 .any(|diagnostic| diagnostic.code.as_atom() == code)
             {
-                WasmStatus::Matched
+                ExecutorStatus::Matched
             } else {
-                WasmStatus::Failed {
+                ExecutorStatus::Failed {
                     reason: format!(
                         "trap mismatch: {subject} trapped with {code}, which the case does not expect"
                     ),
                 }
             }
         }
-        WasmObservation::HostEvent(event) => {
+        ExecutorObservation::HostEvent(event) => {
             if expectations.host_event.as_deref() == Some(event.as_str()) {
-                WasmStatus::Matched
+                ExecutorStatus::Matched
             } else {
-                WasmStatus::Failed {
+                ExecutorStatus::Failed {
                     reason: format!(
                         "host event mismatch: expected {:?}, got {event:?}",
                         expectations.host_event
@@ -1303,11 +1248,10 @@ fn executor_status(
     }
 }
 
-/// The status of an executable case: it passes only when both backends do,
-/// and a failure names the backend that disagreed.
+/// The status of an executable case: it passes only when every executor does,
+/// and a failure names the executor that disagreed.
 fn differential_status(
     interpreter: &CaseStatus,
-    wasm: Option<&WasmStatus>,
     native: Option<&NativeStatus>,
     windows: Option<&NativeStatus>,
 ) -> CaseStatus {
@@ -1322,9 +1266,6 @@ fn differential_status(
                 reason: reason.clone(),
             };
         }
-    }
-    if let Some(WasmStatus::Failed { reason }) = wasm {
-        reasons.push(format!("wasm backend: {reason}"));
     }
     if let Some(NativeStatus::Failed { reason }) = native {
         reasons.push(format!("native backend: stepper: {reason}"));
