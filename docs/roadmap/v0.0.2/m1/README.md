@@ -82,7 +82,7 @@ the vertical-slice rule.
 | 03 | [lexer-and-vibon](steps/03-lexer-and-vibon.md) | vertical | 02 | 12, 13, 24 | `vibra-syntax`, `vibra-fmt` (new), `vibra-conformance`, `conformance/cases`, CI | landed |
 | 04 | [source-skeleton](steps/04-source-skeleton.md) | vertical | 03 | 09, 12, 13, 24, 27 | `vibra-syntax`, `vibra-fmt`, `conformance/cases` | landed |
 | 05 | [type-declarations](steps/05-type-declarations.md) | vertical | 04 | 09, 12, 13, 24, 27 | `vibra-syntax`, `vibra-fmt`, `conformance/cases` | landed |
-| 06 | [expressions-and-patterns](steps/06-expressions-and-patterns.md) | vertical | 05 | 09, 12, 13, 24, 27 | `vibra-syntax`, `vibra-fmt`, `conformance/cases` | planned |
+| 06 | [expressions-and-patterns](steps/06-expressions-and-patterns.md) | vertical | 05 | 09, 12, 13, 24, 27 | `vibra-syntax`, `vibra-fmt`, `conformance/cases` | landed |
 | 07 | [callables-and-tests-syntax](steps/07-callables-and-tests-syntax.md) | vertical | 06 | 09, 12, 13, 24, 27 | `vibra-syntax`, `vibra-fmt`, `conformance/cases` | planned |
 | 08 | [reader-exit](steps/08-reader-exit.md) | evidence | 07 | 09, 10, 11, 12, 13, 14, 24, 27 | `vibra-conformance`, `vibra-conformance-v1` (the ignored inventory test deleted), `fuzz/`, `conformance/cases` | planned |
 | 09 | [project-and-source-graph](steps/09-project-and-source-graph.md) | vertical | 03 | 04, 05, 06, 07, 08, 12, 13, 14, 24, 27 | `vibra-workspace` (new), `vibra-conformance`, `conformance/cases` | landed |

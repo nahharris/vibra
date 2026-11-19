@@ -752,7 +752,7 @@ fn an_anonymous_callable_is_unavailable() {
     let end = text.find("endfn").unwrap() + 5;
     assert_eq!(diagnostics(text), [(ToolUnavailable, start, end)]);
     let text = "let f: Fn({} Void) be fn endfn endlet";
-    assert_eq!(diagnostics(text), [(ToolUnavailable, 21, 29)]);
+    assert_eq!(diagnostics(text), [(ToolUnavailable, 22, 30)]);
     // A named declaration is no expression.
     let text = "let f: U8 be type A of U8 endtype endlet";
     assert_eq!(diagnostics(text), [(SyntaxInvalidForm, 13, 33)]);
