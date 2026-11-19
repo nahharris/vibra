@@ -1,0 +1,14 @@
+id = "V2-TOOL-format-module"
+rule = "V2-TOOL-format-module"
+profile = "toolingV2"
+operation = "format"
+description = "05-tooling.md#formatting: a captured module is laid out, one space between tokens and one after each colon; a fn with sections is on several lines (01-source-language.md#canonical-format), and its candidate text checks"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+source = "tree/src/app/main.vib"
+
+[expect]
+verdict = "accepted"
+formatted = "formatted.vib"

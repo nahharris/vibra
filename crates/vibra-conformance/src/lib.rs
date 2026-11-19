@@ -21,11 +21,13 @@
 //! [`ProjectDecodeHandler`], [`SourceGraphHandler`], [`ResolveHandler`], and
 //! [`WorkspaceCheckHandler`] run `projectDecode`, `sourceGraph`, `resolve`,
 //! and `workspaceCheck` under `staticV2`; [`InterpretHandler`] runs
-//! `interpret` under `interpreterV2`.
+//! `interpret` under `interpreterV2`; [`FormatHandler`] runs `format`
+//! under `toolingV2`.
 //! Every other case is unavailable until the step that makes its
 //! observations exist registers a handler.
 
 mod corpus;
+mod format;
 mod interpret;
 mod manifest;
 mod profile;
@@ -41,6 +43,7 @@ pub use corpus::{
     Case, CaseInputDocument, CaseTreeFile, Corpus, CorpusError, corpus_root,
     workspace_root,
 };
+pub use format::FormatHandler;
 pub use interpret::{INTERPRET_BUDGET, InterpretHandler};
 pub use manifest::{
     CaseExpectations, CaseInputs, CaseManifest, ExpectedDiagnostic, ExpectedFix,

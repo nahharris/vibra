@@ -8,7 +8,7 @@ use serde::Serialize;
 
 use crate::SCHEMA_VERSION;
 use crate::capability::CommandCapability;
-use crate::diagnostic::DiagnosticDocument;
+use crate::diagnostic::{DiagnosticDocument, SpanDocument};
 use crate::validate::{SchemaViolation, validate_command_result};
 
 /// The observation an envelope describes.
@@ -120,8 +120,74 @@ pub struct HelpPayload {
     pub capabilities: Vec<CommandCapability>,
 }
 
-/// The payload, keyed by the command. This version publishes the `help`
-/// payload and the empty payload.
+/// The `fmt` payload.
+///
+/// `docs/spec/05-tooling.md`, "Formatting": a preview carries the formatted
+/// text; a written file carries `text: null`; diagnostics that prevent
+/// writing carry the planned text with `written: false`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FmtPayload {
+    /// The workspace-relative path, written with `/`.
+    pub path: String,
+    /// Whether the input bytes differ from the formatted bytes.
+    pub changed: bool,
+    /// Whether the file was replaced.
+    pub written: bool,
+    /// The formatted or planned text; `null` after a write.
+    pub text: Option<String>,
+}
+
+/// The kind of a bare guard obligation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ObligationKind {
+    /// A `requires` guard.
+    Requires,
+    /// An `ensures` guard.
+    Ensures,
+    /// A `where` guard.
+    Where,
+}
+
+/// One obligation of the `check` payload.
+///
+/// `docs/spec/05-tooling.md`, "Structural position and semantic envelope",
+/// "Obligation record": `{kind, declaration, predicateIdentity, source,
+/// status, ruleIds, dependencies, counterexample}`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ObligationRecord {
+    /// `requires`, `ensures`, or `where`.
+    pub kind: ObligationKind,
+    /// The identity of the declaration that carries the guard.
+    pub declaration: String,
+    /// The identity of the predicate.
+    pub predicate_identity: String,
+    /// The predicate's span.
+    pub source: SpanDocument,
+    /// `passed`, `refuted`, `unknown`, or `unsupported`.
+    pub status: Status,
+    /// The discharge rules used, in order.
+    pub rule_ids: Vec<String>,
+    /// The checked inputs the obligation depends on.
+    pub dependencies: Vec<String>,
+    /// The canonical VIBON text of the refuting values, or `null`.
+    pub counterexample: Option<String>,
+}
+
+/// The `check` payload.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CheckPayload {
+    /// Whether the covered units are admitted: no error diagnostic.
+    pub accepted: bool,
+    /// Every bare guard obligation of the covered units.
+    pub obligations: Vec<ObligationRecord>,
+}
+
+/// The payload, keyed by the command. This version publishes the `help`,
+/// `fmt`, and `check` payloads and the empty payload.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(untagged)]
 pub enum Payload {
@@ -129,6 +195,10 @@ pub enum Payload {
     Empty {},
     /// The payload of a successful `help`.
     Help(HelpPayload),
+    /// The payload of `fmt` once its path was admitted.
+    Fmt(FmtPayload),
+    /// The payload of `check` once the workspace was checked.
+    Check(CheckPayload),
 }
 
 /// The closed object every structured response is.

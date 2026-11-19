@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use crate::corpus::Case;
+use crate::format::FormatHandler;
 use crate::interpret::InterpretHandler;
 use crate::profile::{
     CaseObservation, ConformanceProfile, HandlerError, ProfileHandler,
@@ -181,7 +182,8 @@ pub enum DispatchResult {
 ///
 /// The reader runs under `readerV2`; the project decoder, the source graph,
 /// resolution, and the workspace check run under `staticV2`; `interpret` runs
-/// under `interpreterV2`. Every other operation has no handler yet.
+/// under `interpreterV2`; `format` runs under `toolingV2`. Every other
+/// operation has no handler yet.
 /// The binary and the host tests build this one dispatcher, so the two cannot
 /// disagree about which handlers exist.
 #[must_use]
@@ -193,4 +195,5 @@ pub fn standard_dispatcher() -> ProfileDispatcher {
         .with_handler(ConformanceProfile::StaticV2, ResolveHandler)
         .with_handler(ConformanceProfile::StaticV2, WorkspaceCheckHandler)
         .with_handler(ConformanceProfile::InterpreterV2, InterpretHandler)
+        .with_handler(ConformanceProfile::ToolingV2, FormatHandler)
 }

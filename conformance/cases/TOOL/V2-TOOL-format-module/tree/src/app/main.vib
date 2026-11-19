@@ -1,0 +1,1 @@
+fn  id takes {x:I32} returns r:I32 do return x endfn

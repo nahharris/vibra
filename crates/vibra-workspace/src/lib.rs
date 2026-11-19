@@ -15,15 +15,18 @@
 //! no source byte is read before the walk's checks pass), and
 //! [`SourceGraph::build`]. Later phases receive the snapshot and no
 //! filesystem access; [`resolve_input`] hands its modules to resolution,
-//! and [`check_snapshot`] checks the targets it covers.
+//! [`check_snapshot`] checks the targets it covers, and [`plan_format`]
+//! formats one confined document, checking a captured module's candidate
+//! text in place of its bytes.
 //!
 //! # Position in the architecture
 //!
-//! This crate depends on `vibra-diagnostics`, `vibra-resolve`,
-//! `vibra-syntax`, and `vibra-types`. It is the tooling crate that reads a
+//! This crate depends on `vibra-diagnostics`, `vibra-fmt`,
+//! `vibra-resolve`, `vibra-syntax`, and `vibra-types`. It is the tooling crate that reads a
 //! project's files; no language crate depends on it.
 
 mod discovery;
+mod format_plan;
 mod project;
 mod resolve;
 mod revision;
@@ -32,6 +35,9 @@ mod snapshot;
 mod source_graph;
 
 pub use discovery::{DiscoveredProject, discover_project, discover_project_at};
+pub use format_plan::{
+    Discovery, FormatPlan, InvalidPath, WorkspaceCapture, format_mode, plan_format,
+};
 pub use project::{
     Availability, Dependency, DependencyKind, PROJECT_FILE_NAME, PROJECT_FORMAT,
     Package, Project, Target, TargetKind, decode_project, project_schema,

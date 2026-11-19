@@ -1,6 +1,6 @@
 [package]
 name = "vibra-cli"
-description = "The vibra command line: argument grammar, the support inventory, and the version 2 envelope."
+description = "The vibra command line: argument grammar, the support inventory, the version 2 envelope, fmt, and check."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -12,6 +12,7 @@ publish.workspace = true
 serde_json.workspace = true
 vibra-diagnostics.workspace = true
 vibra-schema.workspace = true
+vibra-workspace.workspace = true
 
 [[bin]]
 name = "vibra"

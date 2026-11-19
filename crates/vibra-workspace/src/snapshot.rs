@@ -199,6 +199,20 @@ impl SourceSnapshot {
         self.units.iter().flat_map(|unit| unit.modules.iter())
     }
 
+    /// This snapshot with the bytes of the module `source_id` replaced by
+    /// `bytes`, or `None` when no module has that source identity.
+    #[must_use]
+    pub fn with_module_bytes(&self, source_id: &str, bytes: &[u8]) -> Option<Self> {
+        let mut replaced = self.clone();
+        let module = replaced
+            .units
+            .iter_mut()
+            .flat_map(|unit| unit.modules.iter_mut())
+            .find(|module| module.source_id == source_id)?;
+        module.bytes = bytes.to_vec();
+        Some(replaced)
+    }
+
     /// The `project` and `source` records of the workspace revision, over the
     /// exact captured bytes.
     #[must_use]

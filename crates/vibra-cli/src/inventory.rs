@@ -5,7 +5,7 @@
 //! accepts always has a row, and a command the tool does not support is named
 //! as such wherever it is shown.
 
-use vibra_schema::{COMMAND_RESULT_SCHEMA_ID, CommandCapability};
+use vibra_schema::{COMMAND_RESULT_SCHEMA_ID, CommandCapability, DIAGNOSTIC_SCHEMA_ID};
 
 /// An option of a command line.
 #[derive(Clone, Copy, Debug)]
@@ -121,12 +121,20 @@ pub static LINES: [Line; 18] = [
         synopsis: "fmt PATH [--write]",
         required: 1,
         options: &[WRITE],
+        supported: true,
+        operations: &["format"],
+        profiles: &["readerV2"],
+        schema_ids: &[COMMAND_RESULT_SCHEMA_ID, DIAGNOSTIC_SCHEMA_ID],
         ..UNSUPPORTED
     },
     Line {
         words: &["check"],
         synopsis: "check [TARGET]",
         optional: 1,
+        supported: true,
+        operations: &["workspaceCheck"],
+        profiles: &["staticV2"],
+        schema_ids: &[COMMAND_RESULT_SCHEMA_ID, DIAGNOSTIC_SCHEMA_ID],
         ..UNSUPPORTED
     },
     Line {

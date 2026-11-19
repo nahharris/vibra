@@ -1,0 +1,14 @@
+id = "V2-TOOL-format-canonical"
+rule = "V2-TOOL-format-canonical"
+profile = "toolingV2"
+operation = "format"
+description = "05-tooling.md#formatting: the canonical text of a captured module formats to the same bytes"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+source = "tree/src/app/main.vib"
+
+[expect]
+verdict = "accepted"
+formatted = "formatted.vib"

@@ -131,11 +131,11 @@ fn help_validates_and_its_payload_is_closed() {
 
 #[test]
 fn the_empty_payload_is_for_every_response_but_a_successful_help() {
-    let mut check = envelope("check", Status::Unsupported, CommandOutcome::Unavailable);
-    check.diagnostics.push(unavailable_diagnostic());
-    validate_command_result(&value(&check)).expect("unavailable validates");
+    let mut lint = envelope("lint", Status::Unsupported, CommandOutcome::Unavailable);
+    lint.diagnostics.push(unavailable_diagnostic());
+    validate_command_result(&value(&lint)).expect("unavailable validates");
 
-    let mut payload = value(&check);
+    let mut payload = value(&lint);
     payload["payload"] = json!({"accepted": true});
     assert!(validate_command_result(&payload).is_err());
 
@@ -145,19 +145,19 @@ fn the_empty_payload_is_for_every_response_but_a_successful_help() {
 
 #[test]
 fn an_unavailable_result_is_unsupported_and_carries_its_diagnostic() {
-    let mut check = envelope("check", Status::Unsupported, CommandOutcome::Unavailable);
-    check.diagnostics.push(unavailable_diagnostic());
-    validate_command_result(&value(&check)).expect("validates");
+    let mut lint = envelope("lint", Status::Unsupported, CommandOutcome::Unavailable);
+    lint.diagnostics.push(unavailable_diagnostic());
+    validate_command_result(&value(&lint)).expect("validates");
 
-    let mut wrong_status = value(&check);
+    let mut wrong_status = value(&lint);
     wrong_status["status"] = json!("passed");
     assert!(validate_command_result(&wrong_status).is_err());
 
-    let mut none = check.clone();
+    let mut none = lint.clone();
     none.diagnostics.clear();
     assert!(validate_command_result(&value(&none)).is_err());
 
-    let mut wrong_code = value(&check);
+    let mut wrong_code = value(&lint);
     wrong_code["diagnostics"][0]["code"] = json!("@tool.stalePlan");
     assert!(validate_command_result(&wrong_code).is_err());
 }
@@ -219,19 +219,19 @@ fn the_envelope_is_closed_and_rejects_unknown_fields_values_and_versions() {
 
 #[test]
 fn a_diagnostic_inside_the_envelope_is_validated_against_the_diagnostic_schema() {
-    let mut check = envelope("check", Status::Unsupported, CommandOutcome::Unavailable);
-    check.diagnostics.push(unavailable_diagnostic());
-    let mut bad = value(&check);
+    let mut lint = envelope("lint", Status::Unsupported, CommandOutcome::Unavailable);
+    lint.diagnostics.push(unavailable_diagnostic());
+    let mut bad = value(&lint);
     bad["diagnostics"][0]["code"] = json!("@tool.unavailable-x");
     assert!(validate_command_result(&bad).is_err());
-    let mut span = value(&check);
+    let mut span = value(&lint);
     span["diagnostics"][0]["primarySpan"]["start"] = json!(5);
     assert!(validate_command_result(&span).is_err(), "start after end");
 }
 
 #[test]
 fn the_validated_value_is_an_error_not_a_panic_for_an_invalid_envelope() {
-    let mut invalid = envelope("check", Status::Passed, CommandOutcome::Unavailable);
+    let mut invalid = envelope("lint", Status::Passed, CommandOutcome::Unavailable);
     invalid.diagnostics.clear();
     let violation = invalid
         .to_validated_json()

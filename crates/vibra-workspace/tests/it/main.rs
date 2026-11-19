@@ -11,6 +11,7 @@
 mod support;
 
 mod discovery;
+mod format;
 mod graph;
 mod project;
 mod resolve;

@@ -277,3 +277,10 @@ V2-RUNTIME-memory-exhausted	active	06-runtime.md#activations-and-memory
 V2-PROJECT-workspace-check-library	active	05-tooling.md#command-surface
 V2-PROJECT-workspace-check-bin-unavailable	active	05-tooling.md#command-surface
 V2-TOOL-unavailable-proc	active	07-diagnostics-and-conformance.md#runtime-and-tool-failures
+V2-TOOL-format-module	active	05-tooling.md#formatting
+V2-TOOL-format-canonical	active	05-tooling.md#formatting
+V2-TOOL-format-recovered	active	07-diagnostics-and-conformance.md#recovery
+V2-TOOL-format-semantic-error	active	05-tooling.md#formatting
+V2-TOOL-format-vibon	active	04-programs-and-packages.md#decoded-values-and-canonical-bytes
+V2-TOOL-format-top-order	active	01-source-language.md#canonical-format
+V2-TOOL-format-outside-unit	active	05-tooling.md#formatting
