@@ -503,6 +503,104 @@ fn try_propagates_none_and_unwraps_some() {
     );
 }
 
+/// `try` unwraps `ok` and leaves the callable with `err`, its error
+/// unchanged.
+#[test]
+fn try_propagates_err_and_unwraps_ok() {
+    let carrier = || crate::result(Type::I32, crate::str_type());
+    let case = |case: &str, field: &str, value: Node| {
+        construct(
+            carrier(),
+            Construction::Case {
+                case: case.to_owned(),
+                fields: vec![(field.to_owned(), value)],
+            },
+        )
+    };
+    let body = case(
+        "ok",
+        "value",
+        integer(
+            IntegerType::I32,
+            IntegerOp::Add,
+            vec![node(Expr::Try(Box::new(var(0, carrier())))), int(1)],
+        ),
+    );
+    let increment =
+        function("increment", signature(vec![carrier()], carrier()), body, 1);
+    let set = set_with(vec![increment], Vec::new(), Vec::new());
+    assert_eq!(
+        eval(&set, &call(BASE, vec![case("ok", "value", int(1))])),
+        Evaluation::Value(crate::ok_value(Value::I32(2)))
+    );
+    assert_eq!(
+        eval(&set, &call(BASE, vec![case("err", "error", text("bad"))])),
+        Evaluation::Value(crate::variant_value(
+            "err",
+            vec![("error", text_value("bad"))]
+        ))
+    );
+}
+
+/// Tuple, list, record, and literal patterns take their subject apart: a
+/// list pattern matches only its own length, and a record pattern ignores
+/// the fields it omits.
+#[test]
+fn match_takes_products_and_lists_apart() {
+    let set = set_with(Vec::new(), Vec::new(), Vec::new());
+    let literal = |value: i32| {
+        Pattern::Literal(Constant::new(Type::I32, Value::I32(value)).unwrap())
+    };
+    let add = |left: Node, right: Node| {
+        integer(IntegerType::I32, IntegerOp::Add, vec![left, right])
+    };
+    let pair = crate::tuple_of(
+        vec![Type::I32, Type::list(Type::I32)],
+        vec![int(1), crate::list_of(Type::I32, vec![int(2), int(3)])],
+    );
+    let matched = node(Expr::Match {
+        subject: Box::new(pair),
+        arms: vec![
+            MatchArm {
+                pattern: Pattern::Tuple(vec![
+                    literal(1),
+                    Pattern::List(vec![Pattern::Bind(0)]),
+                ]),
+                body: int(-1),
+            },
+            MatchArm {
+                pattern: Pattern::Tuple(vec![
+                    literal(1),
+                    Pattern::List(vec![Pattern::Bind(0), Pattern::Bind(1)]),
+                ]),
+                body: add(var(0, Type::I32), var(1, Type::I32)),
+            },
+            MatchArm {
+                pattern: Pattern::Discard,
+                body: int(0),
+            },
+        ],
+        value_type: Type::I32,
+    });
+    assert_eq!(eval(&set, &matched), Evaluation::Value(Value::I32(5)));
+    let fields =
+        NamedTypes::new([("a".to_owned(), Type::I32), ("b".to_owned(), Type::I32)])
+            .unwrap();
+    let record = construct(
+        Type::Record(fields),
+        Construction::Record(vec![("a".to_owned(), int(1)), ("b".to_owned(), int(7))]),
+    );
+    let matched = node(Expr::Match {
+        subject: Box::new(record),
+        arms: vec![MatchArm {
+            pattern: Pattern::Record(vec![("b".to_owned(), Pattern::Bind(0))]),
+            body: var(0, Type::I32),
+        }],
+        value_type: Type::I32,
+    });
+    assert_eq!(eval(&set, &matched), Evaluation::Value(Value::I32(7)));
+}
+
 /// An unwritten label takes the callee's default.
 #[test]
 fn an_unwritten_label_takes_the_callees_default() {

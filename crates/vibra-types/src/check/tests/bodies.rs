@@ -198,6 +198,12 @@ fn patterns_bind_at_run_time() {
                   fn f takes {n: I32} returns r: I32 do \
                   return match n case zero 100i32 case 5i32 1i32 case _ 2i32 endmatch endfn\n";
     assert_eq!(run(source).as_deref(), Ok(value("i32", "101i32").as_str()));
+    let source = "type Celsius of F64 endtype\n\
+                  type User of {name: Str id: I32} endtype\n\
+                  fn main returns r: I32 do let Celsius(c) be Celsius(1.5f64) endlet \
+                  let {x: x} be {x: 2i32 y: 3i32} endlet \
+                  return match User(name: \"Ada\" id: 4i32) case User(id: i) I32.add(i x) endmatch endfn\n";
+    assert_eq!(run(source).as_deref(), Ok(value("i32", "6i32").as_str()));
 }
 
 /// `try` leaves the callable with the absence and otherwise yields the
