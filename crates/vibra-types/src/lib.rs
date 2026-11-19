@@ -16,7 +16,12 @@
 //! The crate reads no file and no ambient state: the standard library is
 //! embedded at build time and every input is bytes.
 
+mod check;
 mod stdlib;
+
+pub use check::{
+    CheckResult, Interpretation, check_source, check_workspace, interpret,
+};
 
 pub use stdlib::{
     LibraryNames, OverlayModule, PRELUDE, Role, STDLIB_UNIT, Stdlib, StdlibDeclaration,

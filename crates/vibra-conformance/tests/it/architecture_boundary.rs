@@ -73,15 +73,17 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
         "vibra-host",
         &["vibra-diagnostics", "vibra-ir", "vibra-syntax"],
     ),
-    // The checker: the embedded standard library and its loader. It reads the
-    // registry and library names of `vibra-ir` and the reader's tree, and
-    // hands resolution the library as its embedded unit; only its tests use
-    // the formatter, to hold the modules and the manifest canonical.
+    // The checker: the embedded standard library and its loader, the type
+    // checker, and its lowering to checked IR. It reads the reader's tree,
+    // resolves through `vibra-resolve`, and runs an accepted source in the
+    // reference interpreter for `interpret`; only its tests use the
+    // formatter, to hold the modules and the manifest canonical.
     (
         "vibra-types",
         &[
             "vibra-diagnostics",
             "vibra-fmt",
+            "vibra-interp",
             "vibra-ir",
             "vibra-resolve",
             "vibra-syntax",
