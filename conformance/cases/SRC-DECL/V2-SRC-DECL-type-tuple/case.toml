@@ -1,0 +1,13 @@
+id = "V2-SRC-DECL-type-tuple"
+rule = "V2-SRC-DECL-type-tuple"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#type: a declared tuple: the body is a tuple type with two components, whose braces are no node"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "accepted"
+tree = "tree.vibon"
+formatted = "formatted.vib"

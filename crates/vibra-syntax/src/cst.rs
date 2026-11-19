@@ -27,8 +27,10 @@ use crate::lexer::{Token, TokenKind};
 /// Interior kinds are the nodes of the `@tree.v2` observation, named after
 /// the grammar productions; leaf kinds are its leaf kinds. The three bracket
 /// kinds, [`SyntaxKind::Construct`], and [`SyntaxKind::Section`] are generic
-/// groups for a grammar this crate does not parse yet; the tree observation
-/// writes their children in their place.
+/// groups, which the tree observation writes as their children in their
+/// place: a bracket form that is no production of its own (a tuple type, the
+/// arguments of a type application, the braces of `given`), and the
+/// constructs and sections of a grammar this crate does not parse yet.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum SyntaxKind {
     /// The document node of a `.vibon` document.
@@ -49,10 +51,40 @@ pub enum SyntaxKind {
     Entry,
     /// The `use` production.
     Use,
-    /// The `type-decl` production, at the top level.
+    /// The `type-decl` production.
     TypeDecl,
-    /// The `interface-decl` production, at the top level.
+    /// The `interface-decl` production.
     InterfaceDecl,
+    /// The `case` production: one alternative of a variant type.
+    Case,
+    /// The `assoc-type` production: an associated type of an interface.
+    AssocType,
+    /// The `impl` production.
+    Impl,
+    /// The `assoc-choice` production: the choice of an associated type.
+    AssocChoice,
+    /// The `type-params` production.
+    TypeParams,
+    /// The `given` production.
+    Given,
+    /// The `where` production.
+    Where,
+    /// The `visibility` production.
+    Visibility,
+    /// The `representation` production.
+    Representation,
+    /// The `role` production.
+    Role,
+    /// The `doc` production.
+    Doc,
+    /// The `record-type` production.
+    RecordType,
+    /// The `inputs` production: the input vector of a callable type.
+    Inputs,
+    /// The `row` production.
+    Row,
+    /// The `path` production.
+    Path,
     /// The `fn-decl` production, at the top level.
     FnDecl,
     /// The `proc-decl` production, at the top level.
@@ -117,6 +149,21 @@ impl SyntaxKind {
             Self::Use => "@use",
             Self::TypeDecl => "@typeDecl",
             Self::InterfaceDecl => "@interfaceDecl",
+            Self::Case => "@case",
+            Self::AssocType => "@assocType",
+            Self::Impl => "@impl",
+            Self::AssocChoice => "@assocChoice",
+            Self::TypeParams => "@typeParams",
+            Self::Given => "@given",
+            Self::Where => "@where",
+            Self::Visibility => "@visibility",
+            Self::Representation => "@representation",
+            Self::Role => "@role",
+            Self::Doc => "@doc",
+            Self::RecordType => "@recordType",
+            Self::Inputs => "@inputs",
+            Self::Row => "@row",
+            Self::Path => "@path",
             Self::FnDecl => "@fnDecl",
             Self::ProcDecl => "@procDecl",
             Self::ModuleLet => "@moduleLet",

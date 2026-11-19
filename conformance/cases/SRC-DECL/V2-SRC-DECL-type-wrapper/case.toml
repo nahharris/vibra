@@ -1,0 +1,13 @@
+id = "V2-SRC-DECL-type-wrapper"
+rule = "V2-SRC-DECL-type-wrapper"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#type: a wrapper type over one type, on one line"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "accepted"
+tree = "tree.vibon"
+formatted = "formatted.vib"

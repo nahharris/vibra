@@ -1,0 +1,5 @@
+type Lookup(T)
+  case found {value: T}
+  case missing
+  visibility @public
+endtype

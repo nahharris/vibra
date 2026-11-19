@@ -1,0 +1,13 @@
+id = "V2-SRC-DECL-impl-in-type"
+rule = "V2-SRC-DECL-impl-in-type"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#impl: an impl in a type that chooses the associated type Item"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "accepted"
+tree = "tree.vibon"
+formatted = "formatted.vib"

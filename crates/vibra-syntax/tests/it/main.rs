@@ -15,3 +15,4 @@ mod lexer;
 mod schema;
 mod source;
 mod tree;
+mod types;

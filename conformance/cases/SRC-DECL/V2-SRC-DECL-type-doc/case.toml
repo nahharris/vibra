@@ -1,0 +1,13 @@
+id = "V2-SRC-DECL-type-doc"
+rule = "V2-SRC-DECL-type-doc"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#type: a doc section whose operand is a doc string"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "accepted"
+tree = "tree.vibon"
+formatted = "formatted.vib"

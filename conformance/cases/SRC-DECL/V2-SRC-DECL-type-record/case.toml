@@ -1,0 +1,13 @@
+id = "V2-SRC-DECL-type-record"
+rule = "V2-SRC-DECL-type-record"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#type: a declared record with a visibility section; it fits in 88 columns, so it is formatted on one line"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "accepted"
+tree = "tree.vibon"
+formatted = "formatted.vib"

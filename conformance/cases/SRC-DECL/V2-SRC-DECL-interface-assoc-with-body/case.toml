@@ -1,0 +1,16 @@
+id = "V2-SRC-DECL-interface-assoc-with-body"
+rule = "V2-SRC-DECL-interface-assoc-with-body"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#interface: an associated type has no body: a nested type with one is an invalid form over the nested type"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@syntax.invalidForm"
+level = "@error"
+span = { start = 12, end = 35 }

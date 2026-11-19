@@ -1,0 +1,16 @@
+id = "V2-SRC-DECL-type-reserved-field"
+rule = "V2-SRC-DECL-type-reserved-field"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#reserved-words: a reserved word as a record field name is a reserved label at the word"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@name.reservedLabel"
+level = "@error"
+span = { start = 11, end = 15 }

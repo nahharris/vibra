@@ -1,0 +1,13 @@
+id = "V2-SRC-DECL-type-path"
+rule = "V2-SRC-DECL-type-path"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#names-and-paths: a dotted path in a type position is one path node"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "accepted"
+tree = "tree.vibon"
+formatted = "formatted.vib"

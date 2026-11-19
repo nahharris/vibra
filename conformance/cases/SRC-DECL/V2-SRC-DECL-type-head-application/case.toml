@@ -1,0 +1,13 @@
+id = "V2-SRC-DECL-type-head-application"
+rule = "V2-SRC-DECL-type-head-application"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#grammar: Fn is a reserved type head: its operands are the inputs and the result of a callable type, never type arguments of a path"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "accepted"
+tree = "tree.vibon"
+formatted = "formatted.vib"

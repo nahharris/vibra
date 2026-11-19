@@ -12,6 +12,7 @@ use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 use crate::cst::{CstNode, match_brackets};
 use crate::data::{DataNode, DataShaper};
 use crate::lexer::{check_encoding, lex};
+use crate::source::SourceOptions;
 
 /// The grammar of a document.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -189,15 +190,28 @@ fn parse_data_with(
     )
 }
 
-/// Parses a `.vib` document.
+/// Parses a `.vib` document that is not a standard-library module.
 ///
 /// Reports the encoding, literal, name, and separator faults, unmatched
 /// delimiters and closers, top-level tokens that open no form, a late `use`,
-/// malformed imports, repeated sections, and `as` outside a `use`. Each
-/// `type`, `interface`, `fn`, `proc`, `let`, and `test` form is
+/// malformed imports, repeated sections, `as` outside a `use`, and the
+/// faults of the `type` and `interface` grammar. Each `fn`, `proc`, `let`,
+/// and `test` form, and each named `fn` or `proc` member, is
 /// `@tool.unavailable` over the whole form until its grammar exists.
 #[must_use]
 pub fn parse_source(source_id: Option<&str>, bytes: &[u8]) -> Document {
+    parse_source_with(source_id, bytes, SourceOptions::default())
+}
+
+/// Parses a `.vib` document with the reader `options`: whether it is an
+/// embedded standard-library module, where `role` and `Intrinsic` are
+/// admitted.
+#[must_use]
+pub fn parse_source_with(
+    source_id: Option<&str>,
+    bytes: &[u8],
+    options: SourceOptions,
+) -> Document {
     let (text, mut diagnostics) = check_encoding(bytes);
     let Some(text) = text else {
         return Document::finish(
@@ -211,7 +225,7 @@ pub fn parse_source(source_id: Option<&str>, bytes: &[u8]) -> Document {
     };
     let lexed = lex(text);
     diagnostics.extend(lexed.diagnostics);
-    let root = crate::source::parse(text, &lexed.tokens, &mut diagnostics);
+    let root = crate::source::parse(text, &lexed.tokens, options, &mut diagnostics);
     Document::finish(
         DocumentMode::Source,
         source_id,

@@ -1,0 +1,16 @@
+id = "V2-SRC-DECL-type-role-outside-stdlib"
+rule = "V2-SRC-DECL-type-role-outside-stdlib"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#type: the role section outside the embedded standard library is an invalid section"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@syntax.invalidSection"
+level = "@error"
+span = { start = 13, end = 23 }

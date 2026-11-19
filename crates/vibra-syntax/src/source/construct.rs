@@ -12,8 +12,9 @@
 //!   `do` directly inside a `fn`, `proc`, or `test` is the body section, which
 //!   runs to the next section keyword or the closer and holds the constructs
 //!   nested in it; a `do` inside the body opens a block closed by `enddo`;
-//! - the word after `as` is a name position: a reserved word there other than
-//!   the construct's own closer is taken as the name;
+//! - the word after `as`, and the first word of a `type` or an `interface`,
+//!   is a name position: a reserved word there other than the construct's own
+//!   closer is taken as the name;
 //! - a closer is resolved by kind (`docs/spec/07-diagnostics-and-conformance.md`,
 //!   "Recovery"), over constructs and brackets alike.
 //!
@@ -26,6 +27,11 @@ use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 use super::keyword::{
     BODY_CONSTRUCTS, TOP_LEVEL, closer_of, is_section, opener_keyword, opener_of,
 };
+
+/// The constructs whose first word is always a name position: a `type` or an
+/// `interface` is never anonymous, so a reserved word written there is its
+/// recovered name, not a section.
+const NAMED_CONSTRUCTS: &[&str] = &["type", "interface"];
 use crate::cst::{CstNode, SyntaxKind};
 use crate::lexer::{Token, TokenKind};
 
@@ -157,6 +163,7 @@ impl Matcher<'_> {
 
     fn open(&mut self, kind: FrameKind, token: Token) {
         let top_level = self.stack.is_empty();
+        let expect_name = matches!(kind, FrameKind::Construct(opener) if NAMED_CONSTRUCTS.contains(&opener));
         self.stack.push(Frame {
             kind,
             opener: token.span,
@@ -164,7 +171,7 @@ impl Matcher<'_> {
             items: vec![CstNode::leaf(SyntaxKind::of_token(token.kind), token.span)],
             section: None,
             body: false,
-            expect_name: false,
+            expect_name,
         });
     }
 

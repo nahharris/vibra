@@ -12,11 +12,6 @@ verdict = "refuted"
 formatted = "formatted.vib"
 
 [[expect.diagnostics]]
-code = "@tool.unavailable"
-level = "@error"
-span = { start = 0, end = 20 }
-
-[[expect.diagnostics]]
 code = "@syntax.invalidForm"
 level = "@error"
 span = { start = 22, end = 25 }
