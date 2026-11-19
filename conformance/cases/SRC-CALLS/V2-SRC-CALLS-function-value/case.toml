@@ -1,0 +1,12 @@
+id = "V2-SRC-CALLS-function-value"
+rule = "V2-SRC-CALLS-function-value"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#functions-as-values: a function is a value of its Fn type and applies like one"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

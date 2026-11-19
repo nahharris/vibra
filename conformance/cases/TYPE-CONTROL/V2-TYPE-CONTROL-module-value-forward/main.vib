@@ -1,0 +1,3 @@
+let a: U8 be b endlet
+let b: U8 be 1u8 endlet
+fn main returns r: U8 do return a endfn

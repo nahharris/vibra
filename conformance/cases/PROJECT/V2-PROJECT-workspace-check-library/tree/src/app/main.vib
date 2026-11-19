@@ -1,0 +1,3 @@
+use @app.util enduse
+
+fn main returns r: I32 do return util.double(21i32) endfn

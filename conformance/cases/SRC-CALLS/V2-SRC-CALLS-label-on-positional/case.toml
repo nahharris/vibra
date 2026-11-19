@@ -1,0 +1,18 @@
+id = "V2-SRC-CALLS-label-on-positional"
+rule = "V2-SRC-CALLS-label-on-positional"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#application: a label the callee does not declare is an argument mismatch"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.argumentMismatch"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 106, end = 113 }

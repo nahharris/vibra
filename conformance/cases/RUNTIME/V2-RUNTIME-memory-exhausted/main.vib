@@ -1,0 +1,2 @@
+fn main returns r: I32 do return loop(0i32) endfn
+fn loop takes {n: I32} returns r: I32 do return I32.add(1i32 loop(n)) endfn

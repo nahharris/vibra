@@ -1,0 +1,19 @@
+id = "V2-PROJECT-workspace-check-bin-unavailable"
+rule = "V2-PROJECT-workspace-check-bin-unavailable"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "05-tooling.md#command-surface: a binary target is unavailable at its record and the library target is still checked"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "unsupported"
+types = "types.vibon"
+
+[[expect.diagnostics]]
+code = "@tool.unavailable"
+level = "@error"
+source = "project.vibon"
+span = { start = 113, end = 705 }

@@ -1,0 +1,1 @@
+fn main returns r: I64 do return -5 endfn

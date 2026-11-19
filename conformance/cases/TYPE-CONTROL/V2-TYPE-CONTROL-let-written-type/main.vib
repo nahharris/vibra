@@ -1,0 +1,1 @@
+fn main returns r: U64 do let count: U64 be 0u64 endlet return count endfn

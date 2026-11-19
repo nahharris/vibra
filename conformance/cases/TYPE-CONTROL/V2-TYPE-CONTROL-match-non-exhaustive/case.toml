@@ -1,0 +1,19 @@
+id = "V2-TYPE-CONTROL-match-non-exhaustive"
+rule = "V2-TYPE-CONTROL-match-non-exhaustive"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#coverage: a match that leaves a case uncovered names it"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@pattern.nonExhaustive"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 50, end = 119 }
+notes = ["Ordering.greater()"]

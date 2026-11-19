@@ -1,0 +1,1 @@
+fn f returns r: I32 do let n be 1i32 endlet return n(2i32) endfn

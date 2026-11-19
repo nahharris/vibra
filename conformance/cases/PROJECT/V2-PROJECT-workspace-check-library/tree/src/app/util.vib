@@ -1,0 +1,1 @@
+fn double takes {x: I32} returns r: I32 visibility @public do return I32.add(x x) endfn

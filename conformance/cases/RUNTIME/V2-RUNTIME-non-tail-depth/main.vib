@@ -1,0 +1,2 @@
+fn sum takes {n: I32} returns r: I32 do if Equatable.equal(n 0i32) then return 0i32 else return I32.add(1i32 sum(I32.sub(n 1i32))) endif endfn
+fn main returns r: I32 do return sum(100000i32) endfn

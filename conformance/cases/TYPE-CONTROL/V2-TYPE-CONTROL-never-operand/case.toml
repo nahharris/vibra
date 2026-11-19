@@ -1,0 +1,18 @@
+id = "V2-TYPE-CONTROL-never-operand"
+rule = "V2-TYPE-CONTROL-never-operand"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#return-and-never: Never in an operand position is unreachable code"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.unreachableCode"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 32, end = 43 }

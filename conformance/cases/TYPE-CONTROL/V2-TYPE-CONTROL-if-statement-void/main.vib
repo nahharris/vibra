@@ -1,0 +1,2 @@
+fn main returns r: I32 do return f(false) endfn
+fn f takes {b: Bool} returns r: I32 do if b then return 1i32 endif return 2i32 endfn

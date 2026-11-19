@@ -1,0 +1,18 @@
+id = "V2-TYPE-CONTROL-missing-return"
+rule = "V2-TYPE-CONTROL-missing-return"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "01-source-language.md#return-try-await: a body that can run off its end has no implicit result"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.missingReturn"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 39, end = 66 }
