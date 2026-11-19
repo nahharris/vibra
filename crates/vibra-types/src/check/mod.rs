@@ -19,6 +19,7 @@ mod generics;
 mod literal;
 mod lower;
 mod nominal;
+mod pattern;
 
 use std::sync::Arc;
 

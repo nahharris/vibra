@@ -7,11 +7,12 @@
 //! names here are looked up without reporting: a name that does not resolve
 //! leaves an error type that reports nothing again.
 //!
-//! The checker supports `fn` declarations with bare-name parameters, type
+//! The checker supports `fn` declarations with parameter patterns, type
 //! parameters bounded by `Any`, and written types of every form but `Proc`,
 //! `Intent`, and interface values; module values of those types; wrappers,
 //! declared tuples, declared records, and variant types, generic or not, with
-//! their members; and, in the embedded standard library, the intrinsic
+//! their members, a wrapper, declared tuple, or declared record with a bare
+//! `where` included; and, in the embedded standard library, the intrinsic
 //! scalar types and `List(T)` with their external members, and interfaces
 //! whose abstract members are not generic, with the implementations of them.
 //! A default member of such an interface is skipped with a note. Any other
@@ -30,10 +31,9 @@ use vibra_ir::external::compiler::CompilerIntrinsic;
 use vibra_ir::{FnType, Library, Type, TypeId};
 use vibra_syntax::source::{
     Callable, Declaration, ExprForm, Given, Impl, InterfaceDecl, Module, ModuleLet,
-    PatternForm, Primary, SourceOptions, Suffix, TypeBody, TypeDecl, TypeExpr,
-    TypeForm,
+    Primary, SourceOptions, Suffix, TypeBody, TypeDecl, TypeExpr, TypeForm,
 };
-use vibra_syntax::{Document, parse_source, parse_source_with};
+use vibra_syntax::{CstNode, Document, parse_source, parse_source_with};
 
 use crate::stdlib::declaration_identity;
 
@@ -100,6 +100,8 @@ pub(crate) struct ModuleData<'a> {
     pub(crate) in_scope: bool,
     /// The typed view.
     pub(crate) view: Option<Module<'a>>,
+    /// The document text, when it decoded.
+    pub(crate) text: Option<&'a str>,
     /// The flat module scope: the top-level declarations and the imports.
     pub(crate) scope: BTreeMap<String, Entity>,
 }
@@ -153,6 +155,8 @@ pub(crate) struct TypeData<'a> {
     /// type: the `representation` section, or else the type's own
     /// visibility.
     pub(crate) representation_public: bool,
+    /// Whether a bare `where` states an invariant of the type.
+    pub(crate) invariant: bool,
     /// The members, by name.
     pub(crate) members: BTreeMap<String, usize>,
 }
@@ -222,8 +226,6 @@ pub(crate) struct FnData<'a> {
     /// The signature, when this checker supports the header; a type
     /// parameter is a [`Type::Binder`] into `binders`.
     pub(crate) signature: Option<FnType>,
-    /// Each parameter's name and span, in order.
-    pub(crate) params: Vec<(String, ByteSpan)>,
     /// The intrinsic of an `external @compiler` member.
     pub(crate) external: Option<CompilerIntrinsic>,
 }
@@ -426,6 +428,7 @@ impl<'a> Program<'a> {
             embedded: source.embedded,
             in_scope: false,
             view,
+            text: document.text(),
             scope: BTreeMap::new(),
         });
         let Some(view) = view else { return };
@@ -474,6 +477,7 @@ impl<'a> Program<'a> {
                         id: None,
                         params: params.clone(),
                         representation_public,
+                        invariant: false,
                         members: BTreeMap::new(),
                     });
                     self.declare(module_index, &type_name, Entity::Type(index));
@@ -499,7 +503,6 @@ impl<'a> Program<'a> {
                             ),
                             binders,
                             signature: None,
-                            params: Vec::new(),
                             external: None,
                         });
                         if let Some(data) = self.types.get_mut(index) {
@@ -542,7 +545,6 @@ impl<'a> Program<'a> {
                             .map(|param| param.text().to_owned())
                             .collect(),
                         signature: None,
-                        params: Vec::new(),
                         external: None,
                     });
                     self.declare(module_index, name.text(), Entity::Fn(index));
@@ -938,8 +940,15 @@ impl<'a> Program<'a> {
                 .modules
                 .get(data.module)
                 .is_some_and(|module| module.embedded);
-            let plain =
-                data.view.invariant().is_none() && bounds_are_any(data.view.given());
+            // A bare `where` on a wrapper, declared tuple, or declared record
+            // is read; its predicate is not checked yet, and no value of the
+            // type is constructed.
+            let invariant = data.view.invariant();
+            let bare_where = invariant
+                .is_some_and(|section| section.consequence().is_none())
+                && matches!(data.view.body(), Some(TypeBody::Of(_)));
+            let plain = (invariant.is_none() || bare_where)
+                && bounds_are_any(data.view.given());
             let kind = match data.view.body() {
                 Some(TypeBody::Intrinsic(tag)) if plain && embedded => {
                     if tag.text() == "@list" && data.params.len() == 1 {
@@ -977,6 +986,7 @@ impl<'a> Program<'a> {
             if let Some(data) = self.types.get_mut(index) {
                 data.kind = kind;
                 data.id = id;
+                data.invariant = bare_where;
             }
         }
         self.ordered = self.ordered_receivers(pending_impls);
@@ -1183,7 +1193,7 @@ impl<'a> Program<'a> {
                     binders: &[],
                 };
                 match self.callable_type(data.module, &member, scope).ok() {
-                    Some((signature, _)) => {
+                    Some(signature) => {
                         let receiver = signature
                             .parameters
                             .iter()
@@ -1264,26 +1274,17 @@ impl<'a> Program<'a> {
         declaration_identity(&package.name, &package.version, module, owner, kind, name)
     }
 
-    /// The type of a callable header with bare-name parameters and written
-    /// supported types, read in `scope`, with the parameter names.
+    /// The type of a callable header with written supported types, read in
+    /// `scope`. Its parameter patterns are checked with its body.
     pub(crate) fn callable_type(
         &self,
         module: usize,
         view: &Callable<'_>,
         scope: Scope<'_>,
-    ) -> Result<(FnType, Vec<(String, ByteSpan)>), NoType> {
+    ) -> Result<FnType, NoType> {
         let mut parameters = Vec::new();
-        let mut names = Vec::new();
         let mut deepest: Option<ByteSpan> = None;
-        for (pattern, written) in view.takes() {
-            let PatternForm::Path(path) = pattern.form() else {
-                return Err(NoType::Unsupported);
-            };
-            let segments = path.segments();
-            let [name] = segments.as_slice() else {
-                return Err(NoType::Unsupported);
-            };
-            names.push((name.text().to_owned(), name.span()));
+        for (_, written) in view.takes() {
             let span = written.span();
             let ty = self.written(module, written, scope)?;
             if deepest.is_none() && ty.depth() >= Type::MAX_DEPTH {
@@ -1302,7 +1303,7 @@ impl<'a> Program<'a> {
         if let Some(span) = deepest {
             return Err(depth_fault(span));
         }
-        Ok((FnType::new(parameters, result), names))
+        Ok(FnType::new(parameters, result))
     }
 
     /// Reads the header of every `fn`.
@@ -1343,10 +1344,9 @@ impl<'a> Program<'a> {
             let span = data.view.construct().span();
             let what = format!("the function `{}`", data.qualified);
             match header {
-                Ok((signature, params)) => {
+                Ok(signature) => {
                     if let Some(data) = self.functions.get_mut(index) {
                         data.signature = Some(signature);
-                        data.params = params;
                         data.external = external;
                     }
                 }
@@ -1473,7 +1473,7 @@ impl<'a> Program<'a> {
                     .iter()
                     .find(|declared| declared.name == name.text());
                 let fits = match (&header, declared) {
-                    (Some((signature, _)), Some(declared)) => {
+                    (Some(signature), Some(declared)) => {
                         *signature == substitute_self(&declared.signature, &receiver)
                     }
                     _ => false,
@@ -1486,7 +1486,7 @@ impl<'a> Program<'a> {
                     complete = false;
                     continue;
                 }
-                let Some((signature, params)) = header else {
+                let Some(signature) = header else {
                     continue;
                 };
                 let owner_name = self
@@ -1513,7 +1513,6 @@ impl<'a> Program<'a> {
                     ),
                     binders: Vec::new(),
                     signature: Some(signature),
-                    params,
                     external,
                 });
                 members.push((name.text().to_owned(), fn_index));
@@ -1610,6 +1609,41 @@ impl<'a> Program<'a> {
                 (Entity::Value(next), [], false) => current = next,
                 _ => return None,
             }
+        }
+        None
+    }
+
+    /// The literal leaf the initializer of the module value `index` is,
+    /// directly or through the names of other module values.
+    pub(crate) fn constant_literal(&self, index: usize) -> Option<&'a CstNode> {
+        let mut current = index;
+        for _ in 0..=self.values.len() {
+            let data = self.values.get(current)?;
+            let expr = data.view.value()?;
+            if !expr.prefixes().is_empty() {
+                return None;
+            }
+            let ExprForm::Postfix(postfix) = expr.form() else {
+                return None;
+            };
+            let suffixes = postfix.suffixes();
+            let first = match postfix.primary()? {
+                Primary::Literal(node) => return suffixes.is_empty().then_some(node),
+                Primary::Name(first) => first,
+                _ => return None,
+            };
+            let mut entity = self.lookup(data.module, first.text())?;
+            for suffix in &suffixes {
+                let (Suffix::Field(name), Entity::Module(module)) = (suffix, entity)
+                else {
+                    return None;
+                };
+                entity = self.modules.get(module)?.scope.get(name.text()).copied()?;
+            }
+            let Entity::Value(next) = entity else {
+                return None;
+            };
+            current = next;
         }
         None
     }
