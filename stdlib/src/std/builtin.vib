@@ -136,6 +136,14 @@ type I8 of Intrinsic(@i8)
     external @compiler
     symbol "i8.shiftRightChecked"
   endfn
+  impl Equatable
+    fn equal
+      takes {left: Self right: Self}
+      returns same: Bool
+      external @compiler
+      symbol "i8.equal"
+    endfn
+  endimpl
 endtype
 
 type I16 of Intrinsic(@i16)
@@ -238,6 +246,14 @@ type I16 of Intrinsic(@i16)
     external @compiler
     symbol "i16.shiftRightChecked"
   endfn
+  impl Equatable
+    fn equal
+      takes {left: Self right: Self}
+      returns same: Bool
+      external @compiler
+      symbol "i16.equal"
+    endfn
+  endimpl
 endtype
 
 type I32 of Intrinsic(@i32)
@@ -340,6 +356,14 @@ type I32 of Intrinsic(@i32)
     external @compiler
     symbol "i32.shiftRightChecked"
   endfn
+  impl Equatable
+    fn equal
+      takes {left: Self right: Self}
+      returns same: Bool
+      external @compiler
+      symbol "i32.equal"
+    endfn
+  endimpl
 endtype
 
 type I64 of Intrinsic(@i64)
@@ -442,6 +466,14 @@ type I64 of Intrinsic(@i64)
     external @compiler
     symbol "i64.shiftRightChecked"
   endfn
+  impl Equatable
+    fn equal
+      takes {left: Self right: Self}
+      returns same: Bool
+      external @compiler
+      symbol "i64.equal"
+    endfn
+  endimpl
 endtype
 
 type U8 of Intrinsic(@u8)
@@ -530,6 +562,14 @@ type U8 of Intrinsic(@u8)
     external @compiler
     symbol "u8.shiftRightChecked"
   endfn
+  impl Equatable
+    fn equal
+      takes {left: Self right: Self}
+      returns same: Bool
+      external @compiler
+      symbol "u8.equal"
+    endfn
+  endimpl
 endtype
 
 type U16 of Intrinsic(@u16)
@@ -618,6 +658,14 @@ type U16 of Intrinsic(@u16)
     external @compiler
     symbol "u16.shiftRightChecked"
   endfn
+  impl Equatable
+    fn equal
+      takes {left: Self right: Self}
+      returns same: Bool
+      external @compiler
+      symbol "u16.equal"
+    endfn
+  endimpl
 endtype
 
 type U32 of Intrinsic(@u32)
@@ -706,6 +754,14 @@ type U32 of Intrinsic(@u32)
     external @compiler
     symbol "u32.shiftRightChecked"
   endfn
+  impl Equatable
+    fn equal
+      takes {left: Self right: Self}
+      returns same: Bool
+      external @compiler
+      symbol "u32.equal"
+    endfn
+  endimpl
 endtype
 
 type U64 of Intrinsic(@u64)
@@ -794,6 +850,14 @@ type U64 of Intrinsic(@u64)
     external @compiler
     symbol "u64.shiftRightChecked"
   endfn
+  impl Equatable
+    fn equal
+      takes {left: Self right: Self}
+      returns same: Bool
+      external @compiler
+      symbol "u64.equal"
+    endfn
+  endimpl
 endtype
 
 type F32 of Intrinsic(@f32)
