@@ -1476,6 +1476,7 @@ version = "0.0.1"
 dependencies = [
  "sha2",
  "vibra-diagnostics",
+ "vibra-fmt",
  "vibra-resolve",
  "vibra-syntax",
  "vibra-types",
