@@ -40,6 +40,8 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
     ("vibra-cli", &["vibra-diagnostics", "vibra-schema"]),
     // Checked IR names its traps by diagnostic code and knows no syntax.
     ("vibra-ir", &["vibra-diagnostics"]),
+    // The reference interpreter runs checked IR and knows no front end.
+    ("vibra-interp", &["vibra-diagnostics", "vibra-ir"]),
     // The leaf. Diagnostics are a language surface and know nothing else.
     ("vibra-diagnostics-v1", &[]),
     // The reader. Emits diagnostics; must not reach the formatter or schemas.
@@ -387,7 +389,7 @@ fn workspace_matches_the_declared_architecture() {
 }
 
 /// The number of rows, one for each crate directory.
-const ROWS: usize = 31;
+const ROWS: usize = 32;
 
 #[test]
 fn every_crate_directory_has_exactly_one_row() {
@@ -522,6 +524,7 @@ const SEMANTIC_CRATES: &[&str] = &[
     "vibra-syntax",
     "vibra-fmt",
     "vibra-ir",
+    "vibra-interp",
     "vibra-diagnostics-v1",
     "vibra-syntax-v1",
     "vibra-resolve-v1",
