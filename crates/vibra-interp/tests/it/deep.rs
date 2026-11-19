@@ -38,13 +38,14 @@ fn chain() -> Type {
     Type::Declared(id(CHAIN), Vec::new())
 }
 
-/// `Chain`: `link(next: Chain)` or `end`.
+/// `Chain`: `link(next: List(Chain))` or `end`, recursive through a list as
+/// the type chapter's "Recursive types" requires.
 fn chain_definition() -> TypeDefinition {
     TypeDefinition::new(
         id(CHAIN),
         Vec::new(),
         vibra_ir::TypeBody::Variant(vec![
-            Case::new("link", vec![("next".to_owned(), chain())]),
+            Case::new("link", vec![("next".to_owned(), Type::list(chain()))]),
             Case::new("end", Vec::new()),
         ]),
         None,
@@ -70,7 +71,13 @@ fn build() -> vibra_ir::CheckedFunction {
         chain(),
         Construction::Case {
             case: "link".to_owned(),
-            fields: vec![("next".to_owned(), var(1, chain()))],
+            fields: vec![(
+                "next".to_owned(),
+                construct(
+                    Type::list(chain()),
+                    Construction::List(vec![var(1, chain())]),
+                ),
+            )],
         },
     );
     function(
@@ -106,7 +113,7 @@ fn set_with_entry(
 fn expected_value(depth: u64) -> Value {
     let mut value = variant_value("end", Vec::new());
     for _ in 0..depth {
-        value = variant_value("link", vec![("next", value)]);
+        value = variant_value("link", vec![("next", Value::List(vec![value]))]);
     }
     value
 }
@@ -116,14 +123,16 @@ fn expected_value(depth: u64) -> Value {
 fn expected_document(depth: u64) -> String {
     let ty =
         format!("{{kind: @declared path: @{CHAIN} seed: \"{SEED}\" arguments: []}}");
-    let link = format!("{{kind: @enum typeInfo: {ty} variant: @link payload: {{next: ");
+    let link = format!(
+        "{{kind: @enum typeInfo: {ty} variant: @link payload: {{next: {{kind: @list values: ["
+    );
     let mut text = format!("{{format: @value.v2 typeInfo: {ty} value: ");
     for _ in 0..depth {
         text.push_str(&link);
     }
     text.push_str(&format!("{{kind: @enum typeInfo: {ty} variant: @end}}"));
     for _ in 0..depth {
-        text.push_str("}}");
+        text.push_str("]}}}");
     }
     text.push('}');
     text

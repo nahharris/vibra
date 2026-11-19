@@ -10,7 +10,7 @@ use vibra_ir::{
     CheckedModuleSet, Constant, Construction, ContractCall, Expr, FnType, FunctionBody,
     Implementation, ImplementationRecord, InterfaceDefinition, InterfaceKey,
     InterfaceMember, IrError, Library, ModuleSetParts, NamedTypes, Node,
-    SignatureRecord, Type, TypeId, Value,
+    SignatureRecord, Type, TypeBody, TypeDefinition, TypeId, Value, Visibility,
 };
 
 use crate::{
@@ -518,4 +518,210 @@ fn v3_a_lookup_needs_an_ordered_key() {
         lookup(Type::Atom, literal(Type::Atom, Value::Atom("a".to_owned()))).is_ok()
     );
     assert!(lookup(Type::I32, int(1)).is_err());
+}
+
+// -- V5: a supplied member over a default body --------------------------------
+
+fn describe_id() -> TypeId {
+    id("test.describe.Describe")
+}
+
+/// `Fn({Self} I32)`, a member with a receiver slot.
+fn receiver_member() -> SignatureRecord {
+    SignatureRecord::interface_member(
+        Vec::new(),
+        Some(0),
+        Type::function(FnType::new(vec![Type::SelfType], Type::I32)),
+        Vec::new(),
+    )
+    .unwrap()
+}
+
+/// `Describe` with `get` and the default `twice` (function 1), implemented
+/// for `I32` by `get` (function 0) and, when `supply_twice`, by `twice`
+/// (function 2) as well.
+fn describe_parts(supply_twice: bool) -> ModuleSetParts {
+    let own = || signature(vec![Type::I32], Type::I32);
+    let interface = InterfaceDefinition::new(
+        describe_id(),
+        Vec::new(),
+        Vec::new(),
+        vec![
+            InterfaceMember {
+                name: "get".to_owned(),
+                signature: receiver_member(),
+                default: None,
+            },
+            InterfaceMember {
+                name: "twice".to_owned(),
+                signature: receiver_member(),
+                default: Some(1),
+            },
+        ],
+    )
+    .unwrap();
+    let mut members = vec![("get".to_owned(), 0)];
+    if supply_twice {
+        members.push(("twice".to_owned(), 2));
+    }
+    let implementation = Implementation::new(
+        ImplementationRecord::new(
+            Vec::new(),
+            InterfaceKey::new(describe_id(), Vec::new()),
+            Type::I32,
+            NamedTypes::empty(),
+        )
+        .unwrap(),
+        members,
+    )
+    .unwrap();
+    let mut parts = library_parts();
+    parts.interfaces.push(interface);
+    parts.functions = vec![
+        function("get", own(), variable(0, Type::I32), 1),
+        function("twice", receiver_member(), int(2), 1),
+        function("twice", own(), int(3), 1),
+    ];
+    parts.implementations.push(implementation);
+    parts
+}
+
+#[test]
+fn v5_an_implementation_does_not_supply_a_default_member() {
+    assert!(CheckedModuleSet::try_new(describe_parts(false)).is_ok());
+    assert!(matches!(
+        CheckedModuleSet::try_new(describe_parts(true)),
+        Err(IrError::InvalidType(_))
+    ));
+}
+
+// -- V6: finite size ----------------------------------------------------------
+
+fn record_type(
+    name: &str,
+    parameters: &[&str],
+    fields: Vec<(&str, Type)>,
+) -> TypeDefinition {
+    TypeDefinition::new(
+        id(name),
+        parameters.iter().map(|name| (*name).to_owned()).collect(),
+        TypeBody::Record(
+            fields
+                .into_iter()
+                .map(|(name, ty)| (name.to_owned(), ty))
+                .collect(),
+        ),
+        None,
+        Visibility::Public,
+    )
+    .unwrap()
+}
+
+fn with_types(types: Vec<TypeDefinition>) -> Result<Arc<CheckedModuleSet>, IrError> {
+    let mut parts = library_parts();
+    parts.types.extend(types);
+    CheckedModuleSet::try_new(parts)
+}
+
+fn declared_at(name: &str, arguments: Vec<Type>) -> Type {
+    Type::Declared(id(name), arguments)
+}
+
+/// A declaration that holds itself inline, directly, through a variant, or
+/// through a parameter that another declaration holds inline, has no finite
+/// size.
+#[test]
+fn v6_a_declaration_holding_itself_inline_is_rejected() {
+    let direct = record_type(
+        "test.t.Loop",
+        &[],
+        vec![("next", declared_at("test.t.Loop", vec![]))],
+    );
+    assert!(matches!(
+        with_types(vec![direct]),
+        Err(IrError::InvalidType(_))
+    ));
+    let optional = record_type(
+        "test.t.Chain",
+        &[],
+        vec![("next", option(declared_at("test.t.Chain", vec![])))],
+    );
+    assert!(matches!(
+        with_types(vec![optional]),
+        Err(IrError::InvalidType(_))
+    ));
+    let holder = || record_type("test.t.Box", &["T"], vec![("value", Type::Binder(0))]);
+    let through = record_type(
+        "test.t.Bad",
+        &[],
+        vec![(
+            "inner",
+            Type::Tuple(vec![
+                Type::I32,
+                declared_at("test.t.Box", vec![declared_at("test.t.Bad", vec![])]),
+            ]),
+        )],
+    );
+    assert!(matches!(
+        with_types(vec![holder(), through]),
+        Err(IrError::InvalidType(_))
+    ));
+    let mutual = vec![
+        record_type(
+            "test.t.A",
+            &[],
+            vec![("b", declared_at("test.t.B", vec![]))],
+        ),
+        record_type(
+            "test.t.B",
+            &[],
+            vec![("a", declared_at("test.t.A", vec![]))],
+        ),
+    ];
+    assert!(matches!(with_types(mutual), Err(IrError::InvalidType(_))));
+}
+
+/// Recursion through a list, a dict, or a callable type has a finite size.
+#[test]
+fn v6_recursion_through_an_indirection_is_accepted() {
+    let tree = record_type(
+        "test.t.Tree",
+        &[],
+        vec![("children", Type::list(declared_at("test.t.Tree", vec![])))],
+    );
+    assert!(with_types(vec![tree]).is_ok());
+    let table = record_type(
+        "test.t.Table",
+        &[],
+        vec![(
+            "rows",
+            library_type(
+                Library::Dict,
+                vec![Type::Atom, declared_at("test.t.Table", vec![])],
+            ),
+        )],
+    );
+    assert!(with_types(vec![table]).is_ok());
+    let lazy = record_type(
+        "test.t.Lazy",
+        &[],
+        vec![(
+            "force",
+            Type::function(FnType::new(Vec::new(), declared_at("test.t.Lazy", vec![]))),
+        )],
+    );
+    assert!(with_types(vec![lazy]).is_ok());
+    let holder = record_type("test.t.Box", &["T"], vec![("value", Type::Binder(0))]);
+    let boxed = record_type(
+        "test.t.Good",
+        &[],
+        vec![(
+            "inner",
+            declared_at(
+                "test.t.Box",
+                vec![Type::list(declared_at("test.t.Good", vec![]))],
+            ),
+        )],
+    );
+    assert!(with_types(vec![holder, boxed]).is_ok());
 }

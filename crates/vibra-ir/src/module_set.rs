@@ -832,6 +832,7 @@ impl CheckedModuleSet {
                 }
             }
         }
+        check_finite_size(&self.table)?;
         let mut defaults = BTreeMap::new();
         for interface in self.interfaces.values() {
             for member in interface.members() {
@@ -929,6 +930,11 @@ impl CheckedModuleSet {
                 let member = interface.member(name).ok_or_else(|| {
                     IrError::InvalidType(format!("`{path}` has no member `{name}`"))
                 })?;
+                if member.default.is_some() {
+                    return Err(IrError::InvalidType(format!(
+                        "an implementation of `{path}` supplies the default member `{name}` again"
+                    )));
+                }
                 let expected = implemented_type(
                     &member.signature,
                     implementation,
@@ -1163,6 +1169,119 @@ impl Flow {
 
 fn table_bool(table: &TypeTable) -> Result<Type, IrError> {
     table.library().declared(Library::Bool, Vec::new())
+}
+
+/// The types a declaration's body holds inline: its fields, components,
+/// representation, or case fields.
+fn body_components(definition: &TypeDefinition) -> Vec<&Type> {
+    match definition.body() {
+        TypeBody::Record(fields) => fields.iter().map(|(_, ty)| ty).collect(),
+        TypeBody::Tuple(values) => values.iter().collect(),
+        TypeBody::Wrapper(value) => vec![value],
+        TypeBody::Variant(cases) => cases
+            .iter()
+            .flat_map(|case| case.fields.iter().map(|(_, ty)| ty))
+            .collect(),
+    }
+}
+
+/// The declarations and binders that `ty` holds inline, given for each
+/// declaration the parameters its own layout holds inline. A list, a
+/// callable, and an interface value hold their contents behind an
+/// indirection; a tuple and a record hold their components inline.
+fn layout_heads<'a>(
+    ty: &'a Type,
+    inline: &BTreeMap<&TypeId, BTreeSet<usize>>,
+    declarations: &mut BTreeSet<&'a TypeId>,
+    binders: &mut BTreeSet<usize>,
+) {
+    let mut pending = vec![ty];
+    while let Some(ty) = pending.pop() {
+        match ty {
+            Type::Tuple(_) | Type::Record(_) => pending.extend(ty.components()),
+            Type::Declared(id, arguments) => {
+                declarations.insert(id);
+                if let Some(parameters) = inline.get(id) {
+                    pending.extend(
+                        parameters.iter().filter_map(|index| arguments.get(*index)),
+                    );
+                }
+            }
+            Type::Binder(index) => {
+                binders.insert(*index);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// The type chapter's "Recursive types": a declaration may reach itself only
+/// through a list, a dict, or a callable type, so that every value of it has
+/// a finite layout.
+fn check_finite_size(table: &TypeTable) -> Result<(), IrError> {
+    let mut inline: BTreeMap<&TypeId, BTreeSet<usize>> = table
+        .types()
+        .keys()
+        .map(|id| (id, BTreeSet::new()))
+        .collect();
+    loop {
+        let mut changed = false;
+        for (id, definition) in table.types() {
+            let mut declarations = BTreeSet::new();
+            let mut binders = BTreeSet::new();
+            for component in body_components(definition) {
+                layout_heads(component, &inline, &mut declarations, &mut binders);
+            }
+            let entry = inline.entry(id).or_default();
+            if *entry != binders {
+                *entry = binders;
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    let mut edges: BTreeMap<&TypeId, BTreeSet<&TypeId>> = BTreeMap::new();
+    for (id, definition) in table.types() {
+        let mut declarations = BTreeSet::new();
+        let mut binders = BTreeSet::new();
+        for component in body_components(definition) {
+            layout_heads(component, &inline, &mut declarations, &mut binders);
+        }
+        declarations.retain(|target| table.types().contains_key(*target));
+        edges.insert(id, declarations);
+    }
+    let mut incoming: BTreeMap<&TypeId, usize> =
+        edges.keys().map(|id| (*id, 0)).collect();
+    for targets in edges.values() {
+        for target in targets {
+            *incoming.entry(target).or_default() += 1;
+        }
+    }
+    let mut ready: Vec<&TypeId> = incoming
+        .iter()
+        .filter(|(_, count)| **count == 0)
+        .map(|(id, _)| *id)
+        .collect();
+    while let Some(id) = ready.pop() {
+        for target in edges.get(id).into_iter().flatten() {
+            if let Some(count) = incoming.get_mut(target) {
+                *count -= 1;
+                if *count == 0 {
+                    ready.push(target);
+                }
+            }
+        }
+        incoming.remove(id);
+    }
+    match incoming.keys().next() {
+        Some(id) => Err(IrError::InvalidType(format!(
+            "`{}` holds itself inline and has no finite size",
+            id.path()
+        ))),
+        None => Ok(()),
+    }
 }
 
 /// Whether every `Self` in the result of the callable type `member` stands
