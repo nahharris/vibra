@@ -36,8 +36,9 @@
 //!   expression, and anything else in it is `@syntax.invalidForm` over the
 //!   section;
 //! - a named `fn` or `proc` member is shaped in the callable grammar, as a
-//!   member of its declaration kind (an abstract `interface` member, an
-//!   `impl` member with no guard); an `impl` is shaped in place; any other
+//!   member of its declaration kind (an abstract `interface` member with no
+//!   `visibility`, an `impl` member with neither a guard nor `visibility`);
+//!   an `impl` is shaped in place; any other
 //!   nested construct is `@syntax.invalidForm` over it.
 //!
 //! Cases keep their written order, which is the order of the variants.

@@ -133,9 +133,17 @@ pub const ADMISSIBLE_SECTIONS: &[(&str, &[&str])] = &[
 /// `proc`, named or anonymous, in the order of the `signature` production.
 pub const SIGNATURE_SECTIONS: &[&str] = &["takes", "labelled", "returns"];
 
-/// The guard sections a member of an `impl` does not declare, from the type
-/// chapter's "Implementations": the contract's guards are its guards.
-pub const IMPLEMENTATION_MEMBER_EXCLUDED: &[&str] = &["requires", "ensures", "where"];
+/// The sections a member of an `impl` does not declare: the guards, from the
+/// type chapter's "Implementations", because the contract's guards are its
+/// guards; and `visibility`, from the source chapter's "`impl`", because it
+/// has the access of the interface member it implements.
+pub const IMPLEMENTATION_MEMBER_EXCLUDED: &[&str] =
+    &["requires", "ensures", "where", "visibility"];
+
+/// The sections a member of an `interface` does not declare: `visibility`,
+/// from the source chapter's "`interface`", because a member has the
+/// interface's access.
+pub const INTERFACE_MEMBER_EXCLUDED: &[&str] = &["visibility"];
 
 /// The sections admissible only in the embedded standard library; elsewhere
 /// each is `@syntax.invalidSection`.
