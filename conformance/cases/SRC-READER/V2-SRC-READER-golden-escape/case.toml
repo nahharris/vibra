@@ -1,0 +1,12 @@
+id = "V2-SRC-READER-golden-escape"
+rule = "V2-SRC-READER-golden-escape"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#literals: a string with escapes is one string leaf holding the escapes as written"
+
+[inputs]
+data = ["input.vibon"]
+
+[expect]
+verdict = "accepted"
+tree = "tree.vibon"

@@ -1,0 +1,12 @@
+id = "V2-SRC-READER-golden-proc-decl"
+rule = "V2-SRC-READER-golden-proc-decl"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#fn-and-proc: a named proc is a @procDecl node"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "accepted"
+tree = "tree.vibon"

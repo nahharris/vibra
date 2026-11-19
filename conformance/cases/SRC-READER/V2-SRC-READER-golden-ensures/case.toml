@@ -1,0 +1,12 @@
+id = "V2-SRC-READER-golden-ensures"
+rule = "V2-SRC-READER-golden-ensures"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#fn-and-proc: an ensures section is an @ensures node holding its predicate"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "accepted"
+tree = "tree.vibon"

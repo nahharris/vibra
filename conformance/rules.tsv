@@ -116,6 +116,15 @@ V2-SRC-READER-encoding-nul	active	01-source-language.md#lexical-structure
 V2-SRC-READER-encoding-utf8	active	01-source-language.md#lexical-structure
 V2-SRC-READER-expr-recovery	active	07-diagnostics-and-conformance.md#recovery
 V2-SRC-READER-fn-recovery	active	07-diagnostics-and-conformance.md#recovery
+V2-SRC-READER-golden-anon-fn	active	01-source-language.md#fn-and-proc
+V2-SRC-READER-golden-anon-proc	active	01-source-language.md#fn-and-proc
+V2-SRC-READER-golden-ensures	active	01-source-language.md#fn-and-proc
+V2-SRC-READER-golden-escape	active	01-source-language.md#literals
+V2-SRC-READER-golden-exponent	active	01-source-language.md#literals
+V2-SRC-READER-golden-if	active	01-source-language.md#if-match-do
+V2-SRC-READER-golden-labelled	active	01-source-language.md#fn-and-proc
+V2-SRC-READER-golden-proc-decl	active	01-source-language.md#fn-and-proc
+V2-SRC-READER-golden-requires	active	01-source-language.md#fn-and-proc
 V2-SRC-READER-name-invalid	active	01-source-language.md#lexical-structure
 V2-SRC-READER-numeric-suffix	active	01-source-language.md#lexical-structure
 V2-SRC-READER-recovery-then-valid	active	07-diagnostics-and-conformance.md#recovery

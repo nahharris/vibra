@@ -1,0 +1,12 @@
+id = "V2-SRC-READER-golden-requires"
+rule = "V2-SRC-READER-golden-requires"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#fn-and-proc: a requires section is a @requires node holding its predicate"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "accepted"
+tree = "tree.vibon"
