@@ -43,6 +43,255 @@ impl Node {
     }
 }
 
+/// Dropping a tree of nodes moves each node's operands to a work list, so
+/// that no host stack grows with the depth of the tree.
+impl Drop for Node {
+    fn drop(&mut self) {
+        let mut pending = Vec::new();
+        self.expr.take_operands(&mut pending);
+        while let Some(mut expr) = pending.pop() {
+            expr.take_operands(&mut pending);
+        }
+    }
+}
+
+impl Expr {
+    /// Checks that every type written in this expression, its operands,
+    /// patterns, constants, and closure bodies included, nests at most
+    /// [`Type::MAX_DEPTH`] levels. The expression is walked with a work
+    /// list.
+    ///
+    /// # Errors
+    ///
+    /// [`IrError::InvalidType`] for the first type nested deeper.
+    pub fn check_type_depth(&self) -> Result<(), IrError> {
+        let mut exprs = vec![self];
+        let mut patterns: Vec<&Pattern> = Vec::new();
+        while let Some(expr) = exprs.pop() {
+            let mut types: Vec<&Type> = Vec::new();
+            let mut nodes: Vec<&Node> = Vec::new();
+            match expr {
+                Self::Literal(constant) => types.push(constant.value_type()),
+                Self::Intrinsic {
+                    type_arguments,
+                    arguments,
+                    ..
+                } => {
+                    types.extend(type_arguments);
+                    nodes.extend(arguments);
+                }
+                Self::Sequence(statements) => nodes.extend(statements),
+                Self::Variable { value_type, .. }
+                | Self::Captured { value_type, .. }
+                | Self::Default(value_type) => types.push(value_type),
+                Self::Global(_) => {}
+                Self::Function { type_arguments, .. } => types.extend(type_arguments),
+                Self::Closure { closure, captures } => {
+                    types.push(&closure.value_type);
+                    types.extend(&closure.captures);
+                    types.extend(closure.defaults.iter().map(|(_, c)| c.value_type()));
+                    nodes.extend(captures);
+                    nodes.push(&closure.body);
+                }
+                Self::Let { value, body, .. } => nodes.extend([&**value, &**body]),
+                Self::LetElse {
+                    pattern,
+                    value,
+                    fallback,
+                    body,
+                } => {
+                    patterns.push(pattern);
+                    nodes.extend([&**value, &**fallback, &**body]);
+                }
+                Self::Match {
+                    subject,
+                    arms,
+                    value_type,
+                } => {
+                    types.push(value_type);
+                    nodes.push(subject);
+                    for arm in arms {
+                        patterns.push(&arm.pattern);
+                        nodes.push(&arm.body);
+                    }
+                }
+                Self::If {
+                    condition,
+                    then_branch,
+                    else_branch,
+                } => {
+                    nodes.extend([&**condition, &**then_branch]);
+                    nodes.extend(else_branch.as_deref());
+                }
+                Self::Construct {
+                    value_type,
+                    construction,
+                } => {
+                    types.push(value_type);
+                    match construction {
+                        Construction::Tuple(operands)
+                        | Construction::List(operands) => {
+                            nodes.extend(operands);
+                        }
+                        Construction::Record(fields)
+                        | Construction::Case { fields, .. } => {
+                            nodes.extend(fields.iter().map(|(_, node)| node));
+                        }
+                        Construction::Wrapper(operand) => nodes.push(operand),
+                        Construction::Dict(entries) => {
+                            for (key, value) in entries {
+                                nodes.extend([key, value]);
+                            }
+                        }
+                    }
+                }
+                Self::Lookup { collection, key } => {
+                    nodes.extend([&**collection, &**key])
+                }
+                Self::Call { target, arguments }
+                | Self::TailCall { target, arguments } => {
+                    match target {
+                        CallTarget::Direct { type_arguments, .. } => {
+                            types.extend(type_arguments);
+                        }
+                        CallTarget::Value(callee) => nodes.push(callee),
+                        CallTarget::Contract(call) => {
+                            types.push(&call.receiver);
+                            types.extend(&call.arguments);
+                            types.extend(&call.member_arguments);
+                            types.extend(
+                                call.choices.entries().iter().map(|(_, ty)| ty),
+                            );
+                        }
+                    }
+                    nodes.extend(&arguments.positional);
+                    nodes.extend(arguments.labelled.iter().map(|(_, node)| node));
+                }
+                Self::WidenToInterface { value, value_type } => {
+                    types.push(value_type);
+                    nodes.push(value);
+                }
+                Self::Field { record: value, .. }
+                | Self::Return(value)
+                | Self::Try(value)
+                | Self::WidenAtom(value) => nodes.push(value),
+            }
+            while let Some(pattern) = patterns.pop() {
+                match pattern {
+                    Pattern::Literal(constant) => types.push(constant.value_type()),
+                    Pattern::Tuple(inner) | Pattern::List(inner) => {
+                        patterns.extend(inner)
+                    }
+                    Pattern::Record(fields) | Pattern::Case { fields, .. } => {
+                        patterns.extend(fields.iter().map(|(_, pattern)| pattern));
+                    }
+                    Pattern::Wrapper(inner) => patterns.push(inner),
+                    Pattern::Discard | Pattern::Bind(_) => {}
+                }
+            }
+            for ty in types {
+                ty.check_depth()?;
+            }
+            exprs.extend(nodes.into_iter().map(|node| &node.expr));
+        }
+        Ok(())
+    }
+
+    /// Moves the expression of each operand of this one to `pending`,
+    /// leaving a placeholder that owns nothing.
+    fn take_operands(&mut self, pending: &mut Vec<Self>) {
+        let mut take = |node: &mut Node| {
+            pending.push(std::mem::replace(&mut node.expr, Self::Default(Type::Void)));
+        };
+        match self {
+            Self::Intrinsic {
+                arguments: nodes, ..
+            }
+            | Self::Sequence(nodes) => {
+                nodes.iter_mut().for_each(&mut take);
+            }
+            Self::Closure { closure, captures } => {
+                captures.iter_mut().for_each(&mut take);
+                if let Some(closure) = Arc::get_mut(closure) {
+                    take(&mut closure.body);
+                }
+            }
+            Self::Let { value, body, .. } => {
+                take(value);
+                take(body);
+            }
+            Self::LetElse {
+                value,
+                fallback,
+                body,
+                ..
+            } => {
+                take(value);
+                take(fallback);
+                take(body);
+            }
+            Self::Match { subject, arms, .. } => {
+                take(subject);
+                for arm in arms {
+                    take(&mut arm.body);
+                }
+            }
+            Self::If {
+                condition,
+                then_branch,
+                else_branch,
+            } => {
+                take(condition);
+                take(then_branch);
+                if let Some(else_branch) = else_branch {
+                    take(else_branch);
+                }
+            }
+            Self::Construct { construction, .. } => match construction {
+                Construction::Tuple(nodes) | Construction::List(nodes) => {
+                    nodes.iter_mut().for_each(&mut take);
+                }
+                Construction::Record(fields) | Construction::Case { fields, .. } => {
+                    for (_, node) in fields {
+                        take(node);
+                    }
+                }
+                Construction::Wrapper(node) => take(node),
+                Construction::Dict(entries) => {
+                    for (key, value) in entries {
+                        take(key);
+                        take(value);
+                    }
+                }
+            },
+            Self::Lookup { collection, key } => {
+                take(collection);
+                take(key);
+            }
+            Self::Call { target, arguments } | Self::TailCall { target, arguments } => {
+                if let CallTarget::Value(callee) = target {
+                    take(callee);
+                }
+                arguments.positional.iter_mut().for_each(&mut take);
+                for (_, node) in &mut arguments.labelled {
+                    take(node);
+                }
+            }
+            Self::Field { record: node, .. }
+            | Self::Return(node)
+            | Self::Try(node)
+            | Self::WidenToInterface { value: node, .. }
+            | Self::WidenAtom(node) => take(node),
+            Self::Literal(_)
+            | Self::Variable { .. }
+            | Self::Global(_)
+            | Self::Function { .. }
+            | Self::Captured { .. }
+            | Self::Default(_) => {}
+        }
+    }
+}
+
 /// A checked expression.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Expr {

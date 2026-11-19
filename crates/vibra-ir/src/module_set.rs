@@ -308,26 +308,13 @@ pub(crate) fn may_match(created: &Type, callee: &Type) -> bool {
             .all(|(left, right)| may_match(left, right))
 }
 
-/// The facts a body's check gathers, kept beside the checker.
+/// The facts a body's check gathers, kept beside the checker: the body's
+/// own, and each closure it creates at any depth, numbered from zero in
+/// the order their bodies finish.
 #[derive(Debug, Default)]
 pub(crate) struct Gathered {
     pub(crate) facts: Facts,
     pub(crate) closures: Vec<(Type, Facts)>,
-}
-
-impl Gathered {
-    /// Takes in a closure whose body gathered `inner`, returning its number.
-    pub(crate) fn absorb(&mut self, closure_type: Type, mut inner: Self) -> usize {
-        let base = self.closures.len();
-        inner.facts.rebase(base);
-        for (_, facts) in &mut inner.closures {
-            facts.rebase(base);
-        }
-        self.closures.append(&mut inner.closures);
-        let number = self.closures.len();
-        self.closures.push((closure_type, inner.facts));
-        number
-    }
 }
 
 /// The functions a contract call of `member` on `interface` may select.

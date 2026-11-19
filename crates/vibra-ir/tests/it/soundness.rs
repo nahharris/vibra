@@ -819,3 +819,153 @@ fn v9_a_function_carries_a_default_for_each_label() {
         Err(IrError::InvalidExpression(_))
     ));
 }
+
+// -- V11: no host stack in proportion to depth ---------------------------------
+
+/// A depth far beyond what host recursion on a small stack survives.
+const DEEP: usize = 100_000;
+
+/// Runs `work` on a thread whose stack is 256 KiB.
+fn on_small_stack<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> T {
+    std::thread::Builder::new()
+        .stack_size(256 * 1024)
+        .spawn(work)
+        .expect("a thread")
+        .join()
+        .expect("the thread finished")
+}
+
+fn void() -> Node {
+    literal(Type::Void, Value::Void)
+}
+
+/// `depth` closures of `Fn({} Void)`, each the first statement of the
+/// body of the one around it.
+fn nested_closures(depth: usize) -> Node {
+    let mut body = void();
+    for _ in 0..depth {
+        let closure = node(Expr::Closure {
+            closure: Arc::new(vibra_ir::ClosureBody {
+                value_type: Type::function(FnType::new(Vec::new(), Type::Void)),
+                slot_count: 0,
+                captures: Vec::new(),
+                defaults: Vec::new(),
+                body,
+            }),
+            captures: Vec::new(),
+        });
+        body = node(Expr::Sequence(vec![closure, void()]));
+    }
+    body
+}
+
+/// A body of 100,000 nested closures is checked, its facts gathered with
+/// every closure numbered, and the set dropped, on a small stack.
+#[test]
+fn v11_a_body_nested_100_000_deep_validates_on_a_small_stack() {
+    let closures = on_small_stack(|| {
+        let mut parts = library_parts();
+        parts.functions = vec![function(
+            "main",
+            signature(Vec::new(), Type::Void),
+            nested_closures(DEEP),
+            0,
+        )];
+        CheckedModuleSet::try_new(parts).map(|set| set.flow().closures.len())
+    });
+    assert_eq!(closures, Ok(DEEP));
+}
+
+/// `List` applied `levels` times to `U8`.
+fn lists(levels: usize) -> Type {
+    (0..levels).fold(Type::U8, |ty, _| Type::list(ty))
+}
+
+/// A type nests at most `Type::MAX_DEPTH` levels; a deeper one is rejected
+/// before anything recurses over it, and a host-built one 100,000 deep is
+/// rejected and dropped on a small stack.
+#[test]
+fn v11_a_type_nested_deeper_than_the_bound_is_rejected() {
+    let empty = |levels: usize| {
+        let ty = lists(levels);
+        let mut parts = library_parts();
+        parts.globals = vec![global(
+            "empty",
+            ty.clone(),
+            node(Expr::Construct {
+                value_type: ty,
+                construction: Construction::List(Vec::new()),
+            }),
+        )];
+        CheckedModuleSet::try_new(parts)
+    };
+    assert!(empty(Type::MAX_DEPTH - 1).is_ok());
+    assert!(matches!(
+        empty(Type::MAX_DEPTH),
+        Err(IrError::InvalidType(_))
+    ));
+    let rejected = on_small_stack(|| {
+        matches!(
+            Constant::new(lists(DEEP), Value::List(Vec::new())),
+            Err(IrError::InvalidType(_))
+        )
+    });
+    assert!(rejected);
+}
+
+/// The debug form of a value is the one a derive would write.
+#[test]
+fn v11_a_value_formats_as_derived() {
+    let value = Value::Variant {
+        case: "some".to_owned(),
+        fields: vec![(
+            "value".to_owned(),
+            Value::Tuple(vec![
+                Value::I8(1),
+                Value::Dict(vec![(Value::Str("k".to_owned()), Value::Void)]),
+                Value::Interface {
+                    held_type: Type::U8,
+                    held: Box::new(Value::U8(2)),
+                },
+                Value::Wrapper(Box::new(Value::List(Vec::new()))),
+            ]),
+        )],
+    };
+    assert_eq!(
+        format!("{value:?}"),
+        "Variant { case: \"some\", fields: [(\"value\", Tuple([I8(1), \
+         Dict([(Str(\"k\"), Void)]), Interface { held_type: U8, held: U8(2) }, \
+         Wrapper(List([]))]))] }"
+    );
+}
+
+/// A value, a pattern, an expression tree, and a type each 100,000 deep
+/// are built, cloned or formatted, and dropped on a small stack.
+#[test]
+fn v11_deep_values_patterns_trees_and_types_are_handled_on_a_small_stack() {
+    let (same, formatted) = on_small_stack(|| {
+        let mut value = Value::Void;
+        let mut expected = String::from("Void");
+        for _ in 0..DEEP {
+            value = Value::Wrapper(Box::new(value));
+        }
+        expected.insert_str(0, &"Wrapper(".repeat(DEEP));
+        expected.push_str(&")".repeat(DEEP));
+        let copy = value.clone();
+        let same = copy == value;
+        let formatted = format!("{copy:?}") == expected;
+        let mut pattern = vibra_ir::Pattern::Discard;
+        for _ in 0..DEEP {
+            pattern = vibra_ir::Pattern::Wrapper(Box::new(pattern));
+        }
+        let mut tree = void();
+        for _ in 0..DEEP {
+            tree = node(Expr::Return(Box::new(tree)));
+        }
+        let ty = lists(DEEP);
+        drop((value, copy, pattern, tree, ty));
+        (same, formatted)
+    });
+    assert!(same);
+    assert!(formatted);
+}

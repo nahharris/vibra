@@ -343,3 +343,191 @@ fn v10_a_frame_larger_than_the_budget_is_not_built() {
     let set = set_with(vec![wide(16)], Vec::new(), Vec::new());
     assert!(run(&program(set, BASE), MemoryBudget::new(1 << 20)).is_ok());
 }
+
+// -- V11: no host stack in proportion to depth ---------------------------------
+
+/// A depth far beyond what host recursion on a small stack survives.
+const DEEP: usize = 100_000;
+
+/// Runs `work` on a thread whose stack is 256 KiB.
+fn on_small_stack<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> T {
+    std::thread::Builder::new()
+        .stack_size(256 * 1024)
+        .spawn(work)
+        .expect("a thread")
+        .join()
+        .expect("the thread finished")
+}
+
+/// `void` inside `depth` single-statement sequences.
+fn nested_sequences(depth: usize) -> Node {
+    let mut body = void();
+    for _ in 0..depth {
+        body = node(Expr::Sequence(vec![body]));
+    }
+    body
+}
+
+/// `void` as the `then` branch of `depth` nested `if true … else void`.
+fn nested_ifs(depth: usize) -> Node {
+    let mut body = void();
+    for _ in 0..depth {
+        body = crate::if_else(boolean(true), body, void());
+    }
+    body
+}
+
+/// An evaluation borrows its expression: one nested 100,000 deep reaches
+/// its reduction limit, or its value, and is typed and dropped without
+/// host recursion.
+#[test]
+fn v11_an_evaluation_of_a_deep_expression_runs_on_a_small_stack() {
+    let outcomes = on_small_stack(|| {
+        let set = set_with(Vec::new(), Vec::new(), Vec::new());
+        let limited = |reductions: u64| Limits {
+            reductions,
+            memory: MemoryBudget::DEFAULT,
+        };
+        let sequences = nested_sequences(DEEP);
+        let ifs = nested_ifs(DEEP);
+        [
+            evaluate(&set, &sequences.expr, &[], limited(1_000)),
+            evaluate(&set, &sequences.expr, &[], limited(u64::MAX)),
+            evaluate(&set, &ifs.expr, &[], limited(u64::MAX)),
+        ]
+    });
+    assert_eq!(
+        outcomes,
+        [
+            Evaluation::LimitReached(Limit::Reductions),
+            Evaluation::Value(Value::Void),
+            Evaluation::Value(Value::Void),
+        ]
+    );
+}
+
+/// A module set whose function body is nested 100,000 deep is checked,
+/// gathered, run, and dropped on a small stack.
+#[test]
+fn v11_a_deep_body_is_checked_and_run_on_a_small_stack() {
+    let ran = on_small_stack(|| {
+        let main = function(
+            "main",
+            signature(Vec::new(), Type::Void),
+            nested_ifs(DEEP),
+            0,
+        );
+        let set = set_with(vec![main], Vec::new(), Vec::new());
+        run(&program(set, BASE), MemoryBudget::DEFAULT).is_ok()
+    });
+    assert!(ran);
+}
+
+/// An expression whose written type nests deeper than the bound is an
+/// invalid checked program before anything recurses over the type.
+#[test]
+fn v11_an_evaluation_with_a_type_too_deep_is_rejected() {
+    let outcome = on_small_stack(|| {
+        let set = set_with(Vec::new(), Vec::new(), Vec::new());
+        let mut deep = Type::U8;
+        for _ in 0..DEEP {
+            deep = Type::list(deep);
+        }
+        let read = var(0, deep);
+        evaluate(&set, &read.expr, &[Value::List(Vec::new())], SMALL)
+    });
+    assert_eq!(outcome, Evaluation::Defect(Trap::InvalidCheckedProgram));
+}
+
+fn nest_id() -> vibra_ir::TypeId {
+    id("test.nest.Nest")
+}
+
+/// `List` applied `levels` times to `inner`.
+fn lists(levels: usize, inner: Type) -> Type {
+    (0..levels).fold(inner, |ty, _| Type::list(ty))
+}
+
+/// The levels of list around `Self` in `Nest.wrap`'s result: the member's
+/// type, `Fn({Self} List(…(Self)))`, is then exactly as deep as the bound.
+const WRAPS: usize = Type::MAX_DEPTH - 2;
+
+/// A result whose `Self` sits under the most lists a member's type allows
+/// is reboxed on a small stack.
+#[test]
+fn v11_a_self_result_as_deep_as_the_bound_is_reboxed_on_a_small_stack() {
+    let outcome = on_small_stack(|| {
+        let member = vibra_ir::SignatureRecord::interface_member(
+            Vec::new(),
+            Some(0),
+            crate::fn_type(vec![Type::SelfType], lists(WRAPS, Type::SelfType)),
+            Vec::new(),
+        )
+        .unwrap();
+        let interface = vibra_ir::InterfaceDefinition::new(
+            nest_id(),
+            Vec::new(),
+            Vec::new(),
+            vec![vibra_ir::InterfaceMember {
+                name: "wrap".to_owned(),
+                signature: member,
+                default: None,
+            }],
+        )
+        .unwrap();
+        let mut body = var(0, Type::U64);
+        for level in 1..=WRAPS {
+            body = crate::construct(
+                lists(level, Type::U64),
+                vibra_ir::Construction::List(vec![body]),
+            );
+        }
+        let wrap = function(
+            "wrap",
+            signature(vec![Type::U64], lists(WRAPS, Type::U64)),
+            body,
+            1,
+        );
+        let boxed = Type::Interface(nest_id(), Vec::new(), NamedTypes::empty());
+        let mut parts = crate::base_parts();
+        parts.interfaces.push(interface);
+        parts.functions.push(wrap);
+        parts.implementations.push(
+            vibra_ir::Implementation::new(
+                vibra_ir::ImplementationRecord::new(
+                    Vec::new(),
+                    vibra_ir::InterfaceKey::new(nest_id(), Vec::new()),
+                    Type::U64,
+                    NamedTypes::empty(),
+                )
+                .unwrap(),
+                vec![("wrap".to_owned(), BASE)],
+            )
+            .unwrap(),
+        );
+        let set = CheckedModuleSet::try_new(parts).unwrap();
+        let call = node(Expr::Call {
+            target: vibra_ir::CallTarget::Contract(Box::new(vibra_ir::ContractCall {
+                interface: nest_id(),
+                member: "wrap".to_owned(),
+                receiver: boxed.clone(),
+                arguments: Vec::new(),
+                choices: NamedTypes::empty(),
+                member_arguments: Vec::new(),
+            })),
+            arguments: crate::positional(vec![node(Expr::WidenToInterface {
+                value: Box::new(crate::u64_lit(5)),
+                value_type: boxed,
+            })]),
+        });
+        evaluate(&set, &call.expr, &[], crate::LIMITS)
+    });
+    let mut expected = Value::Interface {
+        held_type: Type::U64,
+        held: Box::new(Value::U64(5)),
+    };
+    for _ in 0..WRAPS {
+        expected = Value::List(vec![expected]);
+    }
+    assert_eq!(outcome, Evaluation::Value(expected));
+}

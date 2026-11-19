@@ -73,6 +73,9 @@ enum GlobalState<'a> {
 pub(crate) enum Step<'a> {
     /// Evaluate a node.
     Eval(&'a Node),
+    /// Evaluate an expression written at an origin: the root of an
+    /// evaluation, which is not a node of the module set.
+    Root(&'a Expr, &'a SourceOrigin),
     /// Hand a value to the top continuation.
     Ret(Val<'a>),
 }
@@ -335,7 +338,16 @@ impl<'a> Machine<'a> {
                         return Err(Halt::Reductions);
                     }
                     self.origin = Some(&node.origin);
-                    self.eval(node)?
+                    self.eval(&node.expr, &node.origin)?
+                }
+                Step::Root(expr, origin) => {
+                    self.stats.reduction_count =
+                        self.stats.reduction_count.saturating_add(1);
+                    if self.stats.reduction_count > self.reduction_limit {
+                        return Err(Halt::Reductions);
+                    }
+                    self.origin = Some(origin);
+                    self.eval(expr, origin)?
                 }
                 Step::Ret(value) => match self.konts.pop() {
                     None => return invalid("a value with no continuation"),
@@ -623,8 +635,12 @@ impl<'a> Machine<'a> {
     }
 
     #[allow(clippy::too_many_lines)]
-    fn eval(&mut self, node: &'a Node) -> Result<Step<'a>, Halt> {
-        Ok(match &node.expr {
+    fn eval(
+        &mut self,
+        expr: &'a Expr,
+        origin: &'a SourceOrigin,
+    ) -> Result<Step<'a>, Halt> {
+        Ok(match expr {
             Expr::Literal(constant) => self.literal(constant)?,
             Expr::Intrinsic {
                 intrinsic,
@@ -635,7 +651,7 @@ impl<'a> Machine<'a> {
                     intrinsic: *intrinsic,
                     type_arguments,
                     nodes: arguments,
-                    origin: &node.origin,
+                    origin,
                 },
                 Vec::new(),
             )?,
@@ -725,8 +741,8 @@ impl<'a> Machine<'a> {
                     Work::Call {
                         target,
                         arguments,
-                        tail: matches!(node.expr, Expr::TailCall { .. }),
-                        origin: &node.origin,
+                        tail: matches!(expr, Expr::TailCall { .. }),
+                        origin,
                     },
                     Vec::new(),
                 )?
@@ -1408,76 +1424,119 @@ impl<'a> Machine<'a> {
                     self_type: None,
                     associated: Some(choices),
                 });
-        let result = match signature {
-            Type::Fn(signature) => signature.result,
+        let result = match &signature {
+            Type::Fn(signature) => signature.result.clone(),
             _ => return invalid(format!("`{member}` is not a function")),
         };
         Ok((held.held_type.clone(), result))
     }
 
     /// `value`, with each `Self` position of `ty` widened to an interface
-    /// value holding `held_type`.
+    /// value holding `held_type`. The value is walked with a work list, so
+    /// no host stack grows with its depth or its type's.
     fn rebox(
         &self,
         value: Val<'a>,
         ty: &Type,
         held_type: &Type,
     ) -> Result<Val<'a>, Halt> {
+        let mut tasks = vec![Rebox::Enter(value, ty.clone())];
+        let mut built: Vec<Val<'a>> = Vec::new();
+        while let Some(task) = tasks.pop() {
+            match task {
+                Rebox::Enter(value, ty) => {
+                    self.rebox_enter(value, &ty, held_type, &mut tasks, &mut built)?;
+                }
+                Rebox::Build(shape, count) => {
+                    let children = built.split_off(built.len().saturating_sub(count));
+                    built.push(shape.build(children)?);
+                }
+            }
+        }
+        built
+            .pop()
+            .ok_or_else(|| Halt::Invalid("a rebox with no result".to_owned()))
+    }
+
+    /// Takes apart one value of `ty`: a value with no `Self` position is
+    /// done; otherwise its rebuilding and each of its components is queued.
+    fn rebox_enter(
+        &self,
+        value: Val<'a>,
+        ty: &Type,
+        held_type: &Type,
+        tasks: &mut Vec<Rebox<'a>>,
+        built: &mut Vec<Val<'a>>,
+    ) -> Result<(), Halt> {
         if *ty == Type::SelfType {
-            return Ok(Val(Repr::Interface(Rc::new(Held {
+            built.push(Val(Repr::Interface(Rc::new(Held {
                 held_type: held_type.clone(),
                 value,
             }))));
+            return Ok(());
         }
         if !mentions_self(ty) {
-            return Ok(value);
+            built.push(value);
+            return Ok(());
         }
-        let set = self.set;
-        let go = |value: &Val<'a>, ty: &Type| self.rebox(value.clone(), ty, held_type);
-        Ok(match (ty, &value.0) {
-            (Type::Tuple(types), Repr::Tuple(values)) => Val::tuple(
-                values
-                    .iter()
-                    .zip(types)
-                    .map(|(value, ty)| go(value, ty))
-                    .collect::<Result<_, _>>()?,
+        let mut queue = |shape: RebuildShape<'a>, parts: Vec<(Val<'a>, Type)>| {
+            tasks.push(Rebox::Build(shape, parts.len()));
+            tasks.extend(
+                parts
+                    .into_iter()
+                    .rev()
+                    .map(|(value, ty)| Rebox::Enter(value, ty)),
+            );
+        };
+        let field_of = |fields: &dyn Fn(&str) -> Option<Type>, name: &str| {
+            fields(name).ok_or_else(|| Halt::Invalid(format!("no field `{name}`")))
+        };
+        match (ty, &value.0) {
+            (Type::Tuple(types), Repr::Tuple(values)) => queue(
+                RebuildShape::Tuple,
+                values.iter().cloned().zip(types.iter().cloned()).collect(),
             ),
-            (Type::Record(fields), Repr::Record(values)) => Val(Repr::Record(Rc::new(
+            (Type::Record(fields), Repr::Record(values)) => {
+                let lookup = |name: &str| fields.get(name).cloned();
+                let parts = values
+                    .iter()
+                    .map(|(name, value)| Ok((value.clone(), field_of(&lookup, name)?)))
+                    .collect::<Result<Vec<_>, Halt>>()?;
+                queue(
+                    RebuildShape::Record(
+                        values.iter().map(|(name, _)| *name).collect(),
+                    ),
+                    parts,
+                );
+            }
+            (Type::List(element), Repr::List(values)) => queue(
+                RebuildShape::List,
                 values
                     .iter()
-                    .map(|(name, value)| {
-                        let ty = fields.get(name).ok_or_else(|| {
-                            Halt::Invalid(format!("no field `{name}`"))
-                        })?;
-                        Ok((*name, go(value, ty)?))
-                    })
-                    .collect::<Result<_, Halt>>()?,
-            ))),
-            (Type::List(element), Repr::List(values)) => Val::list(
-                values
-                    .iter()
-                    .map(|value| go(value, element))
-                    .collect::<Result<_, _>>()?,
+                    .map(|value| (value.clone(), element.as_ref().clone()))
+                    .collect(),
             ),
             (Type::Declared(id, arguments), _) => {
-                match (set.library().library_of(id), &value.0, arguments.as_slice()) {
-                    (Some(Library::Option), Repr::Opt(None), _) => value,
-                    (Some(Library::Option), Repr::Opt(Some(inner)), [item]) => {
-                        Val::some(go(inner, item)?)
-                    }
-                    (Some(Library::Dict), Repr::Dict(dict), [key, item]) => {
-                        Val(Repr::Dict(Rc::new(crate::value::DictVal {
-                            key: dict.key.clone(),
-                            entries: dict
-                                .entries
-                                .iter()
-                                .map(|(k, v)| Ok((go(k, key)?, go(v, item)?)))
-                                .collect::<Result<_, Halt>>()?,
-                        })))
-                    }
-                    _ => {
-                        self.rebox_declared(value.clone(), id, arguments, held_type)?
-                    }
+                match (
+                    self.set.library().library_of(id),
+                    &value.0,
+                    arguments.as_slice(),
+                ) {
+                    (Some(Library::Option), Repr::Opt(None), _) => built.push(value),
+                    (Some(Library::Option), Repr::Opt(Some(inner)), [item]) => queue(
+                        RebuildShape::Some,
+                        vec![(Val::clone(inner), item.clone())],
+                    ),
+                    (Some(Library::Dict), Repr::Dict(dict), [key, item]) => queue(
+                        RebuildShape::Dict(dict.key.clone()),
+                        dict.entries
+                            .iter()
+                            .flat_map(|(k, v)| {
+                                [(k.clone(), key.clone()), (v.clone(), item.clone())]
+                            })
+                            .collect(),
+                    ),
+                    _ => self.rebox_declared(value, id, arguments, tasks, built)?,
                 }
             }
             _ => {
@@ -1485,7 +1544,8 @@ impl<'a> Machine<'a> {
                     "a `Self` position in {ty} that cannot be reboxed"
                 ));
             }
-        })
+        }
+        Ok(())
     }
 
     fn rebox_declared(
@@ -1493,67 +1553,68 @@ impl<'a> Machine<'a> {
         value: Val<'a>,
         id: &TypeId,
         arguments: &[Type],
-        held_type: &Type,
-    ) -> Result<Val<'a>, Halt> {
+        tasks: &mut Vec<Rebox<'a>>,
+        built: &mut Vec<Val<'a>>,
+    ) -> Result<(), Halt> {
         let definition = self
             .set
             .types()
             .definition(id)
             .ok_or_else(|| Halt::Invalid(format!("no type `{}`", id.path())))?;
-        let go = |value: &Val<'a>, ty: &Type| {
-            self.rebox(value.clone(), &ty.instantiate(arguments), held_type)
+        let mut queue = |shape: RebuildShape<'a>, parts: Vec<(Val<'a>, Type)>| {
+            tasks.push(Rebox::Build(shape, parts.len()));
+            tasks.extend(
+                parts
+                    .into_iter()
+                    .rev()
+                    .map(|(value, ty)| Rebox::Enter(value, ty)),
+            );
         };
-        Ok(match (definition.body(), &value.0) {
-            (TypeBody::Record(fields), Repr::Record(values)) => {
-                Val(Repr::Record(Rc::new(
-                    values
+        let fields_of = |declared: &[(String, Type)], values: &[(&'a str, Val<'a>)]| {
+            values
+                .iter()
+                .map(|(name, value)| {
+                    let ty = declared
                         .iter()
-                        .map(|(name, value)| {
-                            let ty = fields
-                                .iter()
-                                .find_map(|(field, ty)| (field == name).then_some(ty))
-                                .ok_or_else(|| {
-                                    Halt::Invalid(format!("no field `{name}`"))
-                                })?;
-                            Ok((*name, go(value, ty)?))
-                        })
-                        .collect::<Result<_, Halt>>()?,
-                )))
-            }
-            (TypeBody::Tuple(types), Repr::Tuple(values)) => Val::tuple(
+                        .find_map(|(field, ty)| (field == name).then_some(ty))
+                        .ok_or_else(|| Halt::Invalid(format!("no field `{name}`")))?;
+                    Ok((value.clone(), ty.instantiate(arguments)))
+                })
+                .collect::<Result<Vec<_>, Halt>>()
+        };
+        match (definition.body(), &value.0) {
+            (TypeBody::Record(fields), Repr::Record(values)) => queue(
+                RebuildShape::Record(values.iter().map(|(name, _)| *name).collect()),
+                fields_of(fields, values)?,
+            ),
+            (TypeBody::Tuple(types), Repr::Tuple(values)) => queue(
+                RebuildShape::Tuple,
                 values
                     .iter()
-                    .zip(types)
-                    .map(|(value, ty)| go(value, ty))
-                    .collect::<Result<_, _>>()?,
+                    .cloned()
+                    .zip(types.iter().map(|ty| ty.instantiate(arguments)))
+                    .collect(),
             ),
-            (TypeBody::Wrapper(representation), Repr::Wrapper(inner)) => {
-                Val(Repr::Wrapper(Rc::new(go(inner, representation)?)))
-            }
+            (TypeBody::Wrapper(representation), Repr::Wrapper(inner)) => queue(
+                RebuildShape::Wrapper,
+                vec![(Val::clone(inner), representation.instantiate(arguments))],
+            ),
             (TypeBody::Variant(_), Repr::Case(case)) => {
                 let declared = definition
                     .case(case.case)
                     .ok_or_else(|| Halt::Invalid(format!("no case `{}`", case.case)))?;
-                Val::case(
-                    case.case,
-                    case.fields
-                        .iter()
-                        .map(|(name, value)| {
-                            let ty = declared
-                                .fields
-                                .iter()
-                                .find_map(|(field, ty)| (field == name).then_some(ty))
-                                .ok_or_else(|| {
-                                    Halt::Invalid(format!("no field `{name}`"))
-                                })?;
-                            Ok((*name, go(value, ty)?))
-                        })
-                        .collect::<Result<_, Halt>>()?,
-                )
+                queue(
+                    RebuildShape::Case(
+                        case.case,
+                        case.fields.iter().map(|(name, _)| *name).collect(),
+                    ),
+                    fields_of(&declared.fields, &case.fields)?,
+                );
             }
-            (TypeBody::Variant(_), Repr::Tag(_)) => value,
+            (TypeBody::Variant(_), Repr::Tag(_)) => built.push(value),
             _ => return invalid("a reboxed value that does not fit its type"),
-        })
+        }
+        Ok(())
     }
 
     // ----- intrinsics -----
@@ -1980,4 +2041,50 @@ fn failure(
         actual,
         origin: origin.clone(),
     }))
+}
+
+/// One step of a rebox: take a value of a type apart, or put a value back
+/// together from its last reboxed components.
+enum Rebox<'a> {
+    Enter(Val<'a>, Type),
+    Build(RebuildShape<'a>, usize),
+}
+
+/// What a reboxed value is rebuilt as, around its reboxed components.
+enum RebuildShape<'a> {
+    Tuple,
+    Record(Vec<&'a str>),
+    List,
+    Some,
+    Dict(Type),
+    Wrapper,
+    Case(&'a str, Vec<&'a str>),
+}
+
+impl<'a> RebuildShape<'a> {
+    fn build(self, components: Vec<Val<'a>>) -> Result<Val<'a>, Halt> {
+        let missing = || Halt::Invalid("a rebox lost a component".to_owned());
+        Ok(match self {
+            Self::Tuple => Val::tuple(components),
+            Self::Record(names) => Val(Repr::Record(Rc::new(
+                names.into_iter().zip(components).collect(),
+            ))),
+            Self::List => Val::list(components),
+            Self::Some => Val::some(components.into_iter().next().ok_or_else(missing)?),
+            Self::Dict(key) => {
+                let mut components = components.into_iter();
+                let mut entries = Vec::new();
+                while let Some(entry_key) = components.next() {
+                    entries.push((entry_key, components.next().ok_or_else(missing)?));
+                }
+                Val(Repr::Dict(Rc::new(crate::value::DictVal { key, entries })))
+            }
+            Self::Wrapper => Val(Repr::Wrapper(Rc::new(
+                components.into_iter().next().ok_or_else(missing)?,
+            ))),
+            Self::Case(case, names) => {
+                Val::case(case, names.into_iter().zip(components).collect())
+            }
+        })
+    }
 }

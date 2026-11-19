@@ -102,44 +102,44 @@ impl<'n> Frame<'n> {
 
 /// Where the gathered facts go: the body's own, or a closure's while its
 /// body is checked. Without a body to gather for, nothing is kept.
+///
+/// A closure is numbered when its body is done, after every closure inside
+/// it, in the one list of the body's closures: each closure's facts are
+/// written once, so gathering is linear in the body however deep its
+/// closures nest.
 struct Sink<'g> {
     root: Option<&'g mut Gathered>,
-    nested: Vec<Gathered>,
+    nested: Vec<Facts>,
 }
 
 impl Sink<'_> {
     fn facts(&mut self) -> Option<&mut Facts> {
         match self.nested.last_mut() {
-            Some(gathered) => Some(&mut gathered.facts),
+            Some(facts) => Some(facts),
             None => self.root.as_deref_mut().map(|gathered| &mut gathered.facts),
         }
     }
 
     fn enter_closure(&mut self) {
         if self.root.is_some() {
-            self.nested.push(Gathered::default());
+            self.nested.push(Facts::default());
         }
     }
 
     fn leave_closure(&mut self, closure_type: &Type) {
-        if self.root.is_none() {
-            return;
-        }
         let Some(inner) = self.nested.pop() else {
             return;
         };
-        let parent = match self.nested.last_mut() {
-            Some(gathered) => gathered,
-            None => match self.root.as_deref_mut() {
-                Some(gathered) => gathered,
-                None => return,
-            },
+        let Some(root) = self.root.as_deref_mut() else {
+            return;
         };
-        let number = parent.absorb(closure_type.clone(), inner);
-        parent
-            .facts
-            .values
-            .push((Callable::Closure(number), closure_type.clone()));
+        let number = root.closures.len();
+        root.closures.push((closure_type.clone(), inner));
+        if let Some(facts) = self.facts() {
+            facts
+                .values
+                .push((Callable::Closure(number), closure_type.clone()));
+        }
     }
 
     fn abandon_closure(&mut self) {
@@ -717,7 +717,7 @@ impl Checker<'_> {
         let outer = Activation {
             slots: mem::replace(&mut self.slots, Slots::new(closure.slot_count)),
             captures: mem::replace(&mut self.captures, closure.captures.clone()),
-            result: mem::replace(&mut self.result, Some(result)),
+            result: self.result.replace(result),
         };
         frame.outer = Some(Box::new(outer));
         sink.enter_closure();

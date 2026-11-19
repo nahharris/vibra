@@ -33,6 +33,33 @@ pub enum Pattern {
     },
 }
 
+/// Dropping a pattern moves its sub-patterns to a work list, so that no
+/// host stack grows with its depth.
+impl Drop for Pattern {
+    fn drop(&mut self) {
+        let mut pending = Vec::new();
+        self.take_inner(&mut pending);
+        while let Some(mut pattern) = pending.pop() {
+            pattern.take_inner(&mut pending);
+        }
+    }
+}
+
+impl Pattern {
+    fn take_inner(&mut self, pending: &mut Vec<Self>) {
+        match self {
+            Self::Tuple(patterns) | Self::List(patterns) => pending.append(patterns),
+            Self::Record(fields) | Self::Case { fields, .. } => {
+                pending.extend(fields.drain(..).map(|(_, pattern)| pattern));
+            }
+            Self::Wrapper(inner) => {
+                pending.push(std::mem::replace(&mut **inner, Self::Discard));
+            }
+            Self::Discard | Self::Bind(_) | Self::Literal(_) => {}
+        }
+    }
+}
+
 /// One arm of a `match`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MatchArm {

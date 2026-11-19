@@ -86,7 +86,7 @@ impl<'a> Ingress<'a> {
             | Then::Continue(Step::Ret(value)) => {
                 visit(value);
             }
-            Then::Continue(Step::Eval(_)) => {}
+            Then::Continue(Step::Eval(_) | Step::Root(..)) => {}
         }
     }
 }

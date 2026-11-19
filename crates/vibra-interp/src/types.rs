@@ -131,23 +131,125 @@ pub(crate) fn library_type(
         .map_err(|error| invalid(error.to_string()))
 }
 
+/// What is left to work out of a node's type once an operand's type is
+/// known.
+enum Pending<'n> {
+    /// The operand was the `then` branch of an `if` with this `else`.
+    Else(&'n Node),
+    /// The operand was a record whose field this is.
+    Field(&'n str),
+    /// The operand was the collection of a lookup.
+    Lookup,
+    /// The operand was the carrier of a `try`.
+    Try,
+    /// The operand was the callee of a call of a value.
+    Applied,
+}
+
 /// The static type of `node`, open in the binders of its activation.
 pub(crate) fn type_of(set: &CheckedModuleSet, node: &Node) -> Result<Type, Halt> {
-    let library = set.library();
-    let mut node = node;
-    // Follow the tail of sequences and `let`s without recursing.
+    type_of_expr(set, &node.expr)
+}
+
+/// The static type of `expr`, open in the binders of its activation. The
+/// operands the type depends on are followed with a work list.
+pub(crate) fn type_of_expr(set: &CheckedModuleSet, expr: &Expr) -> Result<Type, Halt> {
+    let mut pending = Vec::new();
+    let mut expr = expr;
     loop {
-        match &node.expr {
-            Expr::Sequence(statements) => {
-                node = statements
-                    .last()
-                    .ok_or_else(|| invalid("an empty sequence"))?;
+        let mut ty = loop {
+            match expr {
+                Expr::Sequence(statements) => {
+                    expr = &statements
+                        .last()
+                        .ok_or_else(|| invalid("an empty sequence"))?
+                        .expr;
+                }
+                Expr::Let { body, .. } | Expr::LetElse { body, .. } => {
+                    expr = &body.expr
+                }
+                Expr::If {
+                    then_branch,
+                    else_branch: Some(else_branch),
+                    ..
+                } => {
+                    pending.push(Pending::Else(else_branch));
+                    expr = &then_branch.expr;
+                }
+                Expr::Field { record, field } => {
+                    pending.push(Pending::Field(field));
+                    expr = &record.expr;
+                }
+                Expr::Lookup { collection, .. } => {
+                    pending.push(Pending::Lookup);
+                    expr = &collection.expr;
+                }
+                Expr::Try(value) => {
+                    pending.push(Pending::Try);
+                    expr = &value.expr;
+                }
+                Expr::Call {
+                    target: CallTarget::Value(callee),
+                    ..
+                }
+                | Expr::TailCall {
+                    target: CallTarget::Value(callee),
+                    ..
+                } => {
+                    pending.push(Pending::Applied);
+                    expr = &callee.expr;
+                }
+                other => break own_type(set, other)?,
             }
-            Expr::Let { body, .. } | Expr::LetElse { body, .. } => node = body,
-            _ => break,
+        };
+        loop {
+            match pending.pop() {
+                None => return Ok(ty),
+                Some(Pending::Else(else_branch)) => {
+                    if ty == Type::Never {
+                        expr = &else_branch.expr;
+                        break;
+                    }
+                }
+                Some(Pending::Field(field)) => ty = field_type(set, &ty, field)?,
+                Some(Pending::Lookup) => ty = lookup_type(set, &ty)?,
+                Some(Pending::Try) => ty = try_type(set, &ty)?,
+                Some(Pending::Applied) => ty = applied(&ty)?,
+            }
         }
     }
-    Ok(match &node.expr {
+}
+
+fn lookup_type(set: &CheckedModuleSet, collection: &Type) -> Result<Type, Halt> {
+    let library = set.library();
+    let item = if let Type::List(element) = collection {
+        element.as_ref().clone()
+    } else if library.arguments_of(Library::Str, collection).is_some() {
+        Type::Char
+    } else if library.arguments_of(Library::Bytes, collection).is_some() {
+        Type::U8
+    } else if let Some([_, value]) = library.arguments_of(Library::Dict, collection) {
+        value.clone()
+    } else {
+        return Err(invalid(format!("a lookup on {collection}")));
+    };
+    library_type(set, Library::Option, vec![item])
+}
+
+fn try_type(set: &CheckedModuleSet, carrier: &Type) -> Result<Type, Halt> {
+    let library = set.library();
+    library
+        .arguments_of(Library::Option, carrier)
+        .or_else(|| library.arguments_of(Library::Result, carrier))
+        .and_then(<[Type]>::first)
+        .cloned()
+        .ok_or_else(|| invalid(format!("a try on {carrier}")))
+}
+
+/// The type of a node whose type does not depend on an operand's.
+fn own_type(set: &CheckedModuleSet, expr: &Expr) -> Result<Type, Halt> {
+    let library = set.library();
+    Ok(match expr {
         Expr::Literal(constant) => constant.value_type().clone(),
         Expr::Intrinsic {
             intrinsic,
@@ -172,59 +274,21 @@ pub(crate) fn type_of(set: &CheckedModuleSet, node: &Node) -> Result<Type, Halt>
         } => function_type(set, *function, type_arguments)?,
         Expr::Closure { closure, .. } => closure.value_type.clone(),
         Expr::Match { value_type, .. } => value_type.clone(),
-        Expr::If {
-            then_branch,
-            else_branch,
-            ..
-        } => match else_branch {
-            None => Type::Void,
-            Some(else_branch) => {
-                let then_type = type_of(set, then_branch)?;
-                if then_type == Type::Never {
-                    type_of(set, else_branch)?
-                } else {
-                    then_type
-                }
-            }
-        },
+        Expr::If { .. } => Type::Void,
         Expr::Construct { value_type, .. } => construction_type(set, value_type)?,
-        Expr::Field { record, field } => {
-            field_type(set, &type_of(set, record)?, field)?
-        }
-        Expr::Lookup { collection, .. } => {
-            let collection = type_of(set, collection)?;
-            let item = if let Type::List(element) = &collection {
-                element.as_ref().clone()
-            } else if library.arguments_of(Library::Str, &collection).is_some() {
-                Type::Char
-            } else if library.arguments_of(Library::Bytes, &collection).is_some() {
-                Type::U8
-            } else if let Some([_, value]) =
-                library.arguments_of(Library::Dict, &collection)
-            {
-                value.clone()
-            } else {
-                return Err(invalid(format!("a lookup on {collection}")));
-            };
-            library_type(set, Library::Option, vec![item])?
-        }
         Expr::Call { target, .. } | Expr::TailCall { target, .. } => {
             applied(&callee_type(set, target)?)?
         }
         Expr::Return(_) => Type::Never,
-        Expr::Try(value) => {
-            let carrier = type_of(set, value)?;
-            library
-                .arguments_of(Library::Option, &carrier)
-                .or_else(|| library.arguments_of(Library::Result, &carrier))
-                .and_then(<[Type]>::first)
-                .cloned()
-                .ok_or_else(|| invalid(format!("a try on {carrier}")))?
-        }
         Expr::WidenToInterface { value_type, .. } => value_type.clone(),
         Expr::WidenAtom(_) => Type::Atom,
         Expr::Default(value_type) => value_type.clone(),
-        Expr::Sequence(_) | Expr::Let { .. } | Expr::LetElse { .. } => {
+        Expr::Sequence(_)
+        | Expr::Let { .. }
+        | Expr::LetElse { .. }
+        | Expr::Field { .. }
+        | Expr::Lookup { .. }
+        | Expr::Try(_) => {
             return Err(invalid("an unreachable node form"));
         }
     })

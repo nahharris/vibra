@@ -398,6 +398,52 @@ pub enum Type {
     Associated(String),
 }
 
+/// Dropping a type moves its components to a work list, so that a type a
+/// host builds deeper than [`Type::MAX_DEPTH`], which the checked IR
+/// rejects, is dropped without a host stack that grows with its depth.
+impl Drop for Type {
+    fn drop(&mut self) {
+        let mut pending = Vec::new();
+        self.take_components(&mut pending);
+        while let Some(mut ty) = pending.pop() {
+            ty.take_components(&mut pending);
+        }
+    }
+}
+
+impl Type {
+    fn take_components(&mut self, pending: &mut Vec<Self>) {
+        let mut named = |named: &mut NamedTypes| {
+            pending.extend(named.0.drain(..).map(|(_, ty)| ty));
+        };
+        match self {
+            Self::List(element) => {
+                pending.push(std::mem::replace(&mut **element, Self::Void))
+            }
+            Self::Tuple(values) | Self::Declared(_, values) => pending.append(values),
+            Self::Record(fields) => named(fields),
+            Self::Fn(signature) => {
+                named(&mut signature.labels);
+                pending.append(&mut signature.parameters);
+                pending.push(std::mem::replace(&mut signature.result, Self::Void));
+            }
+            Self::Proc(signature) => {
+                named(&mut signature.labels);
+                pending.append(&mut signature.parameters);
+                pending.push(std::mem::replace(&mut signature.result, Self::Void));
+            }
+            Self::Intent(intent) => {
+                pending.push(std::mem::replace(&mut intent.result, Self::Void));
+            }
+            Self::Interface(_, arguments, choices) => {
+                named(choices);
+                pending.append(arguments);
+            }
+            _ => {}
+        }
+    }
+}
+
 /// Where open forms are valid while a type is checked or encoded.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OpenScope<'a> {

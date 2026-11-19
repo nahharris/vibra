@@ -5,13 +5,13 @@ use std::rc::Rc;
 
 use vibra_diagnostics::ByteSpan;
 use vibra_ir::{
-    CheckedModuleSet, CheckedProgram, Expr, Node, ObservedValue, SourceOrigin, Trap,
-    Type, Value,
+    CheckedModuleSet, CheckedProgram, Expr, ObservedValue, SourceOrigin, Trap, Type,
+    Value,
 };
 
 use crate::encode::{ObserveError, observe, to_neutral};
 use crate::machine::{Halt, Machine, Mode, Resolved, Target};
-use crate::types::type_of;
+use crate::types::type_of_expr;
 use crate::value::Val;
 use crate::{
     Evaluation, Execution, Limit, Limits, MemoryBudget, RuntimeError, TestExecution,
@@ -173,8 +173,11 @@ pub fn evaluate(
     limits: Limits,
 ) -> Evaluation {
     let defect = Evaluation::Defect(Trap::InvalidCheckedProgram);
-    let root = Node::new(expr.clone(), SourceOrigin::new("", ByteSpan::empty_at(0)));
-    let Ok(value_type) = type_of(set, &root) else {
+    let origin = SourceOrigin::new("", ByteSpan::empty_at(0));
+    if expr.check_type_depth().is_err() {
+        return defect;
+    }
+    let Ok(value_type) = type_of_expr(set, expr) else {
         return defect;
     };
     let mut machine =
@@ -186,7 +189,7 @@ pub fn evaluate(
             frame.inputs = inputs;
             machine.enter_root(frame)
         })
-        .and_then(|()| machine.prelude(crate::machine::Step::Eval(&root)))
+        .and_then(|()| machine.prelude(crate::machine::Step::Root(expr, &origin)))
         .and_then(|step| machine.execute(step))
         .and_then(|value| to_neutral(set, &value, &value_type));
     match outcome {
