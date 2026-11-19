@@ -103,7 +103,7 @@ the vertical-slice rule.
 | 24 | [cli-skeleton](steps/24-cli-skeleton.md) | vertical | 02 | 03 to 23, 27 | `vibra-schema`, `vibra-cli` (new) | landed |
 | 25 | [cli-fmt-check](steps/25-cli-fmt-check.md) | vertical | 08, 15, 24 | 16 to 23, 27 | `vibra-cli`, `vibra-schema`, `vibra-workspace`, `vibra-conformance`, `conformance/cases` | planned |
 | 26 | [cli-test](steps/26-cli-test.md) | vertical | 23, 25 | 18 to 22, 27 | `vibra-cli`, `vibra-schema` | planned |
-| 27 | [runtime-crate-port](steps/27-runtime-crate-port.md) | infrastructure | 03, 13 | 04 to 11, 14 to 26 | `vibra-host`, `vibra-native` (new), `vibra-wasm`, `vibra-wasm-run`, `vibra-ir`, `vibra-conformance`, `vibra-conformance-v1` (its Wasm column removed) | planned |
+| 27 | [runtime-crate-port](steps/27-runtime-crate-port.md) | infrastructure | 03, 13 | 04 to 11, 14 to 26 | `vibra-host`, `vibra-native` (new), `vibra-wasm`, `vibra-wasm-run`, `vibra-ir`, `vibra-conformance`, `vibra-conformance-v1` (its Wasm column removed) | landed |
 | 28 | [cutover](steps/28-cutover.md) | infrastructure | 08, 20, 22, 23, 26, 27; X2-01 (Nexus plan) | — | every `-v1` crate (deleted), `Cargo.toml`, CI, `README.md`, `examples/`, `docs/roadmap` | planned |
 | 29 | [m1-exit](steps/29-m1-exit.md) | evidence | 28 | — | `examples/`, `conformance/cases`, this directory | planned |
 

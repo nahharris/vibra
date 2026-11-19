@@ -11,13 +11,15 @@
 //!
 //! The transition profile is fail-closed (`docs/spec/06-runtime.md`, "Wasm
 //! transition"): a program with a node the emitter does not lower is
-//! unavailable on this executor, never approximated. A module the runner
-//! refuses, or a run that breaks the protocol, is the toolchain's defect and
-//! ends as the trap `@runtime.invalidCheckedProgram` with no origin.
+//! unavailable on this executor, reported as `@tool.unavailable`, and never
+//! approximated. A module the runner refuses, or a run that breaks the
+//! protocol, is the toolchain's defect and ends as the trap
+//! `@runtime.invalidCheckedProgram` with no origin.
 
 use std::fmt;
 use std::sync::Arc;
 
+use vibra_diagnostics::DiagnosticCode;
 use vibra_interp::{FailureKind, MemoryBudget, RuntimeError};
 use vibra_ir::{CheckedModuleSet, CheckedProgram, SourceOrigin, Trap, Type};
 use vibra_wasm::{EmitError, OriginTable};
@@ -373,7 +375,8 @@ fn emitted(
     module.map_err(|error| match error {
         EmitError::Unsupported { node, .. } => CaseStatus::Unavailable {
             reason: format!(
-                "wasm executor: the transition profile does not run `{node}`"
+                "wasm executor: {}: the transition profile does not run `{node}`",
+                DiagnosticCode::ToolUnavailable.as_atom()
             ),
         },
         other => CaseStatus::Failed {

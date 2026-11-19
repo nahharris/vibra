@@ -176,6 +176,7 @@ fn wasm_column_reports_unavailable() {
         panic!("unavailable on the executor: {:?}", case.executor);
     };
     assert!(reason.contains("`entryGuard`"), "{reason}");
+    assert!(reason.contains("@tool.unavailable"), "{reason}");
     assert_eq!(
         report.executor_counts(),
         vec![(
