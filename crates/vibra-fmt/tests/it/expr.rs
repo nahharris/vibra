@@ -62,11 +62,12 @@ fn a_module_value_with_sections_is_one_line_when_it_fits() {
         format("let limit: U8\n  visibility @public\n  be 3u8\nendlet"),
         "let limit: U8 visibility @public be 3u8 endlet\n"
     );
-    // `be` is the last section.
-    assert_eq!(
-        format("let limit: U8 be 3u8 visibility @public endlet"),
-        "let limit: U8 visibility @public be 3u8 endlet\n"
-    );
+    // A section after the initializer is rejected, so the document is
+    // returned byte for byte.
+    let late = "let limit: U8 be 3u8 visibility @public endlet";
+    let document = parse_source(None, late.as_bytes());
+    assert!(!document.diagnostics().is_empty());
+    assert_eq!(format_document(&document).as_deref(), Some(late));
 }
 
 #[test]

@@ -288,10 +288,7 @@ fn module_let(node: &CstNode, text: &str, out: &mut Vec<Item>) -> Option<()> {
     let value: Vec<&CstNode> = contents
         .get(be + 1..)?
         .iter()
-        .filter(|child| {
-            child.kind() != SyntaxKind::Whitespace
-                && !matches!(child.kind(), SyntaxKind::Visibility | SyntaxKind::Doc)
-        })
+        .filter(|child| child.kind() != SyntaxKind::Whitespace)
         .collect();
     let mut opener_items = vec![Item::Text(format!("{} ", opener.text(text)))];
     let (name, written) = head.split_at(head.len().min(2));
@@ -961,7 +958,7 @@ mod tests {
     fn an_operand_keeps_its_token_order_and_its_anonymous_constructs() {
         assert_eq!(
             layout(
-                "let f: Fn({} I32) be fn returns r: I32 do return 1i32 endfn visibility @public endlet"
+                "let f: Fn({} I32) visibility @public be fn returns r: I32 do return 1i32 endfn endlet"
             ),
             "let f: Fn({} I32)\n  visibility @public\n  be\n    fn\n      returns r: I32\n      do\n        return 1i32\n    endfn\nendlet\n"
         );

@@ -1,0 +1,1 @@
+let n: U8 be 0u8 visibility @public endlet

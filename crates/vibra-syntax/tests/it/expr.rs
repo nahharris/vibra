@@ -738,6 +738,18 @@ fn module_value() {
         diagnostics("let a: U8 be 1u8 be 2u8 endlet"),
         [(SyntaxDuplicateSection, 17, 19)]
     );
+    // `visibility` and `doc` sit between the type and `be`: a section after
+    // the initializer is invalid at that section.
+    assert_eq!(
+        diagnostics("let n: U8 be 0u8 visibility @public endlet"),
+        [(SyntaxInvalidForm, 17, 35)]
+    );
+    let text = "let n: U8 be 0u8 doc \"\"\"A value.\"\"\" endlet";
+    assert_eq!(diagnostics(text), [(SyntaxInvalidForm, 17, text.len() - 7)]);
+    assert_eq!(
+        diagnostics("let n: U8 visibility @public be 0u8 where ready endlet"),
+        [(SyntaxInvalidForm, 36, 47)]
+    );
     assert_eq!(
         diagnostics("let do: U8 be 1u8 endlet"),
         [(NameReservedDeclaration, 4, 6)]
