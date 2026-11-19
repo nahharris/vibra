@@ -18,12 +18,15 @@
 //! # Handlers
 //!
 //! [`ReaderV2Handler`] runs the `reader` operation under `readerV2`;
-//! [`ProjectDecodeHandler`], [`SourceGraphHandler`], and [`ResolveHandler`]
-//! run `projectDecode`, `sourceGraph`, and `resolve` under `staticV2`.
+//! [`ProjectDecodeHandler`], [`SourceGraphHandler`], [`ResolveHandler`], and
+//! [`WorkspaceCheckHandler`] run `projectDecode`, `sourceGraph`, `resolve`,
+//! and `workspaceCheck` under `staticV2`; [`InterpretHandler`] runs
+//! `interpret` under `interpreterV2`.
 //! Every other case is unavailable until the step that makes its
 //! observations exist registers a handler.
 
 mod corpus;
+mod interpret;
 mod manifest;
 mod profile;
 mod project;
@@ -32,11 +35,13 @@ mod resolve;
 mod rules;
 mod runner;
 mod standard;
+mod workspace_check;
 
 pub use corpus::{
     Case, CaseInputDocument, CaseTreeFile, Corpus, CorpusError, corpus_root,
     workspace_root,
 };
+pub use interpret::{INTERPRET_BUDGET, InterpretHandler};
 pub use manifest::{
     CaseExpectations, CaseInputs, CaseManifest, ExpectedDiagnostic, ExpectedFix,
     ExpectedRelatedSpan, MANIFEST_FILE_NAME, ManifestError, Verdict,
@@ -54,3 +59,4 @@ pub use rules::{
 };
 pub use runner::{CaseReport, CaseStatus, ConformanceRunner, ProfileCounts, RunReport};
 pub use standard::{DispatchResult, ProfileDispatcher, standard_dispatcher};
+pub use workspace_check::WorkspaceCheckHandler;
