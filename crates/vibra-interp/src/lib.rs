@@ -1,7 +1,7 @@
 //! The reference interpreter of Vibra.
 //!
-//! It runs a [`CheckedProgram`] or evaluates one checked expression over a
-//! [`CheckedModuleSet`], with the semantics of `docs/spec/06-runtime.md`:
+//! It runs a [`vibra_ir::CheckedProgram`] or evaluates one checked expression
+//! over a [`vibra_ir::CheckedModuleSet`], with the semantics of `docs/spec/06-runtime.md`:
 //! strict written-order evaluation, frames that live on the heap, proper
 //! tail calls for every callee, lazy module values, callable contracts,
 //! dispatch by the receiver's runtime type, the pure rows of the compiler
