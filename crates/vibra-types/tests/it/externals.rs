@@ -232,3 +232,54 @@ fn the_loader_reports_an_external_fault_as_a_defect() {
     assert!(notes.contains("@external.unknownSymbol"), "{notes}");
     assert!(notes.contains("stdlib/src/std/builtin.vib"), "{notes}");
 }
+
+#[test]
+fn a_name_that_is_not_the_symbol_s_member_is_a_signature_mismatch() {
+    let source = i32_with(
+        "  fn plus\n    takes {left: Self right: Self}\n    returns sum: Self\n    \
+         visibility @public\n    external @compiler\n    symbol \"i32.add\"\n  endfn\n",
+    );
+    let found = check("@std.builtin", &source);
+    let [diagnostic] = found.as_slice() else {
+        assert_one(&found);
+        return;
+    };
+    assert_eq!(diagnostic.code(), DiagnosticCode::ExternalSignatureMismatch);
+    assert!(text(&source, diagnostic.primary_span()).starts_with("fn plus"));
+    assert!(text(&source, diagnostic.primary_span()).ends_with("endfn"));
+    assert_eq!(diagnostic.notes(), ["expected the name `add`"]);
+}
+
+/// The assertions are module-level functions; the owner of a module-level
+/// function is the last part of its module path, so the rows of `assert`
+/// fit `@std.assert` and no other module.
+#[test]
+fn the_assertion_rows_are_owned_by_the_module_assert() {
+    let source = embedded_source("@std.assert");
+    assert_eq!(check("@std.assert", &source), Vec::new());
+    let found = check("@std.check", &source);
+    let codes = found.iter().map(Diagnostic::code).collect::<Vec<_>>();
+    assert_eq!(codes, vec![DiagnosticCode::ExternalOwnerMismatch; 3]);
+}
+
+#[test]
+fn the_manifest_lists_the_assertion_module_and_its_three_symbols() {
+    let stdlib = load_stdlib().expect("the embedded standard library loads");
+    let assert = stdlib
+        .modules()
+        .iter()
+        .find(|module| module.path() == "@std.assert")
+        .expect("`@std.assert` is embedded");
+    assert!(assert.roles().is_empty());
+    for symbol in ["assert.equal", "assert.false", "assert.true"] {
+        assert!(
+            stdlib
+                .compiler_symbols()
+                .iter()
+                .any(|listed| listed == symbol),
+            "`{symbol}` is not listed"
+        );
+        let row = CompilerIntrinsic::from_symbol(symbol).expect("a registry row");
+        assert_eq!(row.owner(), "assert");
+    }
+}
