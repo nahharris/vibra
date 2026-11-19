@@ -1,0 +1,2 @@
+type A of B endtype
+type B of U8 endtype

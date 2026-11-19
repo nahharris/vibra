@@ -1,0 +1,19 @@
+id = "V2-PROJECT-import-private"
+rule = "V2-PROJECT-import-private"
+profile = "staticV2"
+operation = "resolve"
+description = "04-programs-and-packages.md#modules-and-imports: an import of a private declaration is @name.privateAccess, related to the declaration"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@name.privateAccess"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 4, end = 21 }
+related = [{ source = "src/app/model.vib", span = { start = 5, end = 11 } }]

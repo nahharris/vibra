@@ -1,0 +1,2 @@
+type A of U8 endtype
+type A of U16 endtype

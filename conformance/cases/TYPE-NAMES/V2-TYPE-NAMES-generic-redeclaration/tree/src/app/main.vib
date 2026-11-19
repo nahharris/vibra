@@ -1,0 +1,3 @@
+type Box(T) of {item: T}
+  fn f(T) takes {b: Self} returns r: T do return b.item endfn
+endtype

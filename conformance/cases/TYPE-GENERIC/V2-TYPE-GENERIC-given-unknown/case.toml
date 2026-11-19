@@ -1,0 +1,18 @@
+id = "V2-TYPE-GENERIC-given-unknown"
+rule = "V2-TYPE-GENERIC-given-unknown"
+profile = "staticV2"
+operation = "resolve"
+description = "02-type-system.md#bounds: a given key that is not a parameter of its header is @name.unknownSymbol"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@name.unknownSymbol"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 32, end = 33 }

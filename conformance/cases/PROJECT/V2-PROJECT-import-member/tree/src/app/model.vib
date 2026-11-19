@@ -1,0 +1,10 @@
+type User of {name: Str}
+  visibility @public
+  fn nameLength
+    takes {user: Self}
+    returns length: U64
+    visibility @public
+    do
+      return 0u64
+  endfn
+endtype

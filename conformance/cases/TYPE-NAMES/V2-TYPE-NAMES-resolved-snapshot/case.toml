@@ -1,0 +1,13 @@
+id = "V2-TYPE-NAMES-resolved-snapshot"
+rule = "V2-TYPE-NAMES-resolved-snapshot"
+profile = "staticV2"
+operation = "resolve"
+description = "07-diagnostics-and-conformance.md#persistent-observations: the @resolved.v2 snapshot records modules, declarations with anchors and access, imports, and references"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+resolved = "resolved.vibon"

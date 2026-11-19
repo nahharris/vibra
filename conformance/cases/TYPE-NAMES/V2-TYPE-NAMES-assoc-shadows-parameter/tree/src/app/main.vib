@@ -1,0 +1,1 @@
+interface Source(Item) type Item endtype endinterface

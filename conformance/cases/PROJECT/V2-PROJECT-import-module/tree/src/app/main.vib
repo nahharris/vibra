@@ -1,0 +1,3 @@
+use @app.model enduse
+
+type Account of model.User endtype

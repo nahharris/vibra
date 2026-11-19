@@ -1,0 +1,18 @@
+id = "V2-TYPE-NAMES-reserved-type-parameter"
+rule = "V2-TYPE-NAMES-reserved-type-parameter"
+profile = "staticV2"
+operation = "resolve"
+description = "02-type-system.md#the-prelude: a type parameter named as a prelude type is @name.reservedDeclaration"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@name.reservedDeclaration"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 9, end = 15 }

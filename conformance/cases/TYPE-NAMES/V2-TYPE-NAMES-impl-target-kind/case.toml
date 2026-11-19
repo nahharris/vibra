@@ -1,0 +1,18 @@
+id = "V2-TYPE-NAMES-impl-target-kind"
+rule = "V2-TYPE-NAMES-impl-target-kind"
+profile = "staticV2"
+operation = "resolve"
+description = "02-type-system.md#implementations: the target of an impl in a type resolves to an interface; a type there is @name.wrongEntityKind"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@name.wrongEntityKind"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 18, end = 21 }
