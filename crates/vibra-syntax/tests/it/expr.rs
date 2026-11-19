@@ -496,6 +496,30 @@ fn return_try_await_nest_as_prefixes() {
 }
 
 #[test]
+fn return_is_not_the_operand_of_try_or_await() {
+    // `unary = "try", unary | "await", unary | postfix`: `return` starts an
+    // `expr`, never a `unary`, so it cannot follow `try` or `await`.
+    let text = "fn f returns r: Void do try return void endfn";
+    assert_eq!(diagnostics(text), [(SyntaxInvalidForm, 0, text.len())]);
+    assert_eq!(
+        diagnostics("let n: I32 be do await return f() enddo endlet"),
+        [(SyntaxInvalidForm, 14, 39)]
+    );
+    assert_eq!(
+        diagnostics("let n: I32 be do try await return f() enddo endlet"),
+        [(SyntaxInvalidForm, 14, 43)]
+    );
+    assert_eq!(
+        diagnostics("let n: I32 be g(try return x) endlet"),
+        [(SyntaxInvalidForm, 15, 29)]
+    );
+    // `return` before them, and `return` after `return`, stay valid.
+    accepted("let n: I32 be do return try await f() enddo endlet");
+    accepted("let n: I32 be do return return f() enddo endlet");
+    accepted("fn f returns r: Void do return try void endfn");
+}
+
+#[test]
 fn a_paren_where_an_expression_is_expected_is_invalid_once() {
     assert_eq!(
         diagnostics("let n: I32 be (a) endlet"),
