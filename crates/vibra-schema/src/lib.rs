@@ -35,7 +35,10 @@ pub use diagnostic::{
     DiagnosticDocument, DiagnosticRenderError, FixDocument, PositionDocument,
     RelatedSpanDocument, SpanDocument,
 };
-pub use envelope::{CommandOutcome, Envelope, HelpPayload, Limits, Payload, Status};
+pub use envelope::{
+    CheckPayload, CommandOutcome, Envelope, FmtPayload, HelpPayload, Limits,
+    ObligationKind, ObligationRecord, Payload, Status,
+};
 pub use validate::{SchemaViolation, validate_command_result, validate_diagnostic};
 
 /// The major version of every document this crate publishes.
