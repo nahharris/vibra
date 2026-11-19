@@ -10,13 +10,15 @@
 //! VIBON data documents get the source-preserving formatter of
 //! `docs/spec/04-programs-and-packages.md`. Source documents get the layout
 //! of their top-level forms: one blank line between forms, comments kept,
-//! and sections in canonical order.
+//! sections in canonical order, and the expressions, statements, and
+//! patterns of module values.
 //!
 //! # Position in the architecture
 //!
 //! This crate consumes the reader's tree; no language crate depends on it.
 
 mod data;
+mod expr;
 mod layout;
 mod source;
 

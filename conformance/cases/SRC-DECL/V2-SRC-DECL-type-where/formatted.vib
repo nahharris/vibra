@@ -1,1 +1,4 @@
-type Percent of U8 where valid else zero visibility @public endtype
+type Percent of U8
+  where valid else zero
+  visibility @public
+endtype

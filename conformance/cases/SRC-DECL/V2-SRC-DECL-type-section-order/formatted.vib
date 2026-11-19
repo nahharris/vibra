@@ -1,1 +1,4 @@
-type A of {x: T} given {T: Any} visibility @public endtype
+type A of {x: T}
+  given {T: Any}
+  visibility @public
+endtype

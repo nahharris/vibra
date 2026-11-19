@@ -13,6 +13,10 @@
 //!   fits within 88 columns; otherwise its opener line, each section on its
 //!   own line one step in, and its closer on its own line at the opener's
 //!   indentation;
+//! - a `type`, `interface`, `impl`, `fn`, `proc`, or `test` construct always
+//!   on several lines when it has a member or any section other than `of`,
+//!   whatever its length; in a multi-line declaration `of` stays on the
+//!   opener's line when that line fits;
 //! - sections in the canonical order of [`vibra_syntax::source::keyword::SECTIONS`],
 //!   with the `case` list in the place of `of`, then the associated types of
 //!   an interface or the choices of an `impl`, then named `fn` and `proc`
@@ -21,10 +25,13 @@
 //!   reordered, and an empty `given {}` is removed;
 //! - a type expression on one line when it fits, otherwise its brace or
 //!   parenthesized forms one entry per line, one step in, with the closing
-//!   token on its own line.
+//!   token on its own line;
+//! - a module value laid out as a `let` ([`crate::expr`]); with a
+//!   `visibility` or `doc` section, as a declaration whose last section is
+//!   `be` and its value.
 //!
-//! The grammar of `fn`, `proc`, `let`, and `test` arrives in later steps, and
-//! their bodies are written flat here, one space between tokens. A form whose
+//! The grammar of `fn`, `proc`, and `test` arrives in later steps, and their
+//! bodies are written flat here, one space between tokens. A form whose
 //! comments cannot be placed by these rules (a comment between the tokens of
 //! one operand) leaves the whole document unchanged.
 
@@ -32,6 +39,7 @@ use vibra_syntax::source::keyword::{SECTIONS, section_rank};
 use vibra_syntax::source::{Construct, is_construct};
 use vibra_syntax::{CstNode, SyntaxKind};
 
+use crate::expr::{expr_items, let_items};
 use crate::layout::{Item, render};
 
 /// The rank of the groups after the sections.
@@ -248,13 +256,119 @@ fn declaration(node: &CstNode, text: &str, out: &mut Vec<Item>) -> Option<()> {
         | SyntaxKind::Impl
         | SyntaxKind::AssocType
         | SyntaxKind::AssocChoice => typed(node, text, out),
+        SyntaxKind::ModuleLet => module_let(node, text, out),
         _ => generic(node, text, out),
     }
 }
 
+/// A module value: the layout of a `let` when it has only `be`, otherwise
+/// the declaration layout with `be` and its value as the last section.
+fn module_let(node: &CstNode, text: &str, out: &mut Vec<Item>) -> Option<()> {
+    let children = node.children();
+    if children
+        .iter()
+        .any(|child| child.kind() == SyntaxKind::Comment)
+    {
+        return None;
+    }
+    let sections: Vec<&CstNode> = children
+        .iter()
+        .filter(|child| {
+            matches!(child.kind(), SyntaxKind::Visibility | SyntaxKind::Doc)
+        })
+        .collect();
+    if sections.is_empty() {
+        out.extend(let_items(node, text)?);
+        return Some(());
+    }
+    let opener = children.first()?;
+    let closer = children
+        .last()
+        .filter(|last| last.kind() != SyntaxKind::Missing)?;
+    let contents = children.get(1..children.len().saturating_sub(1))?;
+    let be = contents.iter().position(|child| {
+        child.kind() == SyntaxKind::ReservedWord && child.text(text) == "be"
+    })?;
+    let head: Vec<&CstNode> = contents
+        .get(..be)?
+        .iter()
+        .filter(|child| {
+            child.kind() != SyntaxKind::Whitespace
+                && !matches!(child.kind(), SyntaxKind::Visibility | SyntaxKind::Doc)
+        })
+        .collect();
+    let value: Vec<&CstNode> = contents
+        .get(be + 1..)?
+        .iter()
+        .filter(|child| {
+            child.kind() != SyntaxKind::Whitespace
+                && !matches!(child.kind(), SyntaxKind::Visibility | SyntaxKind::Doc)
+        })
+        .collect();
+    let mut opener_items = vec![Item::Text(format!("{} ", opener.text(text)))];
+    let (name, written) = head.split_at(head.len().min(2));
+    opener_items.push(Item::Text(flat(name, text)?));
+    opener_items.push(Item::Text(" ".to_owned()));
+    opener_items.extend(type_items(written, text)?);
+    let mut units: Vec<Unit<'_>> = sections
+        .iter()
+        .map(|section| {
+            let keyword = section
+                .children()
+                .first()
+                .map_or("", |word| word.text(text));
+            Some(Unit {
+                rank: section_rank(keyword)?,
+                leading: Vec::new(),
+                nodes: vec![*section],
+                trailing: None,
+            })
+        })
+        .collect::<Option<_>>()?;
+    units.sort_by_key(|unit| unit.rank);
+    let mut laid: Vec<(&Unit<'_>, Vec<Item>)> = Vec::with_capacity(units.len() + 1);
+    for unit in &units {
+        laid.push((unit, vec![Item::Text(flat(&unit.nodes, text)?)]));
+    }
+    let be_unit = Unit {
+        rank: BODY,
+        leading: Vec::new(),
+        nodes: Vec::new(),
+        trailing: None,
+    };
+    // The value on the line of `be` when it fits, otherwise on the next line
+    // one step in, as in a `let`.
+    let mut be_items = vec![
+        Item::Text("be".to_owned()),
+        Item::Begin,
+        Item::Indent,
+        Item::Space,
+    ];
+    be_items.extend(expr_items(&value, text)?);
+    be_items.extend([Item::Dedent, Item::End]);
+    laid.push((&be_unit, be_items));
+    let parts = Parts {
+        head: Vec::new(),
+        head_trailing: None,
+        units: Vec::new(),
+        closing: Vec::new(),
+    };
+    lay_out(
+        opener_items,
+        &parts,
+        laid,
+        closer.text(text),
+        false,
+        false,
+        out,
+    );
+    Some(())
+}
+
 /// A declaration whose grammar is not typed yet: sections and members by
-/// keyword, each operand written flat.
-fn generic(node: &CstNode, text: &str, out: &mut Vec<Item>) -> Option<()> {
+/// keyword, each operand written flat. A `fn`, `proc`, or `test` with any
+/// section or member is always on several lines.
+pub(crate) fn generic(node: &CstNode, text: &str, out: &mut Vec<Item>) -> Option<()> {
     let construct = Construct::new(node, text)?;
     let closer = construct.closer()?;
     let parts = split(construct.contents(), text, |child| match child.kind() {
@@ -288,12 +402,15 @@ fn generic(node: &CstNode, text: &str, out: &mut Vec<Item>) -> Option<()> {
         generic_unit(unit, text, &mut items)?;
         units.push((unit, items));
     }
+    let always_broken = matches!(construct.keyword(), "fn" | "proc" | "test")
+        && !parts.units.is_empty();
     lay_out(
         vec![Item::Text(opener)],
         &parts,
         units,
         closer.text(text),
-        has_nested_let(node, text),
+        always_broken || has_nested_let(node, text),
+        false,
         out,
     );
     Some(())
@@ -302,6 +419,11 @@ fn generic(node: &CstNode, text: &str, out: &mut Vec<Item>) -> Option<()> {
 /// A generic unit's items; the body of `do` goes on the next line, one step
 /// further in, when the declaration does not fit on one line.
 fn generic_unit(unit: &Unit<'_>, text: &str, out: &mut Vec<Item>) -> Option<()> {
+    if let [member] = unit.nodes.as_slice()
+        && is_construct(member.kind())
+    {
+        return declaration(member, text, out);
+    }
     if unit.rank != BODY {
         out.push(Item::Text(flat(&unit.nodes, text)?));
         return Some(());
@@ -366,12 +488,24 @@ fn typed(node: &CstNode, text: &str, out: &mut Vec<Item>) -> Option<()> {
         typed_unit(unit, text, &mut items)?;
         units.push((unit, items));
     }
+    // Every unit but `of` and the cases, which take the place of `of`, is a
+    // section other than `of` or a member.
+    let of_rank = section_rank("of");
+    let always_broken = parts.units.iter().any(|unit| Some(unit.rank) != of_rank);
+    let of_first = parts.units.first().is_some_and(|unit| {
+        unit.leading.is_empty()
+            && unit
+                .nodes
+                .first()
+                .is_some_and(|node| node.kind() == SyntaxKind::ReservedWord)
+    });
     lay_out(
         opener_items,
         &parts,
         units,
         closer.text(text),
-        has_nested_let(node, text),
+        always_broken || has_nested_let(node, text),
+        of_first,
         out,
     );
     Some(())
@@ -438,6 +572,27 @@ fn typed_unit(unit: &Unit<'_>, text: &str, out: &mut Vec<Item>) -> Option<()> {
             out.push(Item::Text("given ".to_owned()));
             out.extend(type_items(&brace, text)?);
         }
+        SyntaxKind::Where => {
+            let operand: Vec<&CstNode> = first
+                .children()
+                .iter()
+                .skip(1)
+                .filter(|child| child.kind() != SyntaxKind::Whitespace)
+                .collect();
+            let split = operand.iter().position(|node| {
+                node.kind() == SyntaxKind::ReservedWord && node.text(text) == "else"
+            });
+            let (predicate, consequence) = match split {
+                Some(at) => (operand.get(..at)?, operand.get(at + 1..)),
+                None => (operand.as_slice(), None),
+            };
+            out.push(Item::Text("where ".to_owned()));
+            out.extend(expr_items(predicate, text)?);
+            if let Some(consequence) = consequence {
+                out.push(Item::Text(" else ".to_owned()));
+                out.extend(expr_items(consequence, text)?);
+            }
+        }
         SyntaxKind::AssocType
         | SyntaxKind::AssocChoice
         | SyntaxKind::Impl
@@ -448,40 +603,51 @@ fn typed_unit(unit: &Unit<'_>, text: &str, out: &mut Vec<Item>) -> Option<()> {
 }
 
 /// Lays out a declaration: on one line when it fits, holds no comment, and
-/// holds no nested `let`; otherwise its opener line, each unit on its own
-/// line one step in, and the closer on its own line.
+/// is not `broken`; otherwise its opener line, each unit on its own line one
+/// step in, and the closer on its own line. With `of_first`, the first unit
+/// is `of`, which stays on the opener's line when that line fits.
 fn lay_out(
     opener: Vec<Item>,
     parts: &Parts<'_>,
     units: Vec<(&Unit<'_>, Vec<Item>)>,
     closer: &str,
-    nested_let: bool,
+    broken: bool,
+    of_first: bool,
     out: &mut Vec<Item>,
 ) {
     out.push(Item::Begin);
+    if broken {
+        out.push(Item::Force);
+    }
     out.extend(opener);
     if let Some(trailing) = &parts.head_trailing {
         out.push(Item::TrailingComment(trailing.clone()));
     }
     out.push(Item::Indent);
-    let mut first_break = if nested_let { Item::Hard } else { Item::Space };
-    for (unit, items) in units {
+    let glue = of_first && parts.head_trailing.is_none();
+    for (index, (unit, items)) in units.into_iter().enumerate() {
         for leading in &unit.leading {
-            out.push(std::mem::replace(&mut first_break, Item::Space));
+            out.push(Item::Space);
             out.push(Item::Comment(leading.clone()));
         }
-        out.push(std::mem::replace(&mut first_break, Item::Space));
-        out.extend(items);
+        if index == 0 && glue {
+            out.extend([Item::Begin, Item::Space]);
+            out.extend(items);
+            out.push(Item::End);
+        } else {
+            out.push(Item::Space);
+            out.extend(items);
+        }
         if let Some(trailing) = &unit.trailing {
             out.push(Item::TrailingComment(trailing.clone()));
         }
     }
     for closing in &parts.closing {
-        out.push(std::mem::replace(&mut first_break, Item::Space));
+        out.push(Item::Space);
         out.push(Item::Comment(closing.clone()));
     }
     out.push(Item::Dedent);
-    out.push(first_break);
+    out.push(Item::Space);
     out.push(Item::Text(closer.to_owned()));
     out.push(Item::End);
 }
@@ -540,7 +706,7 @@ fn entries<'a>(nodes: &[&'a CstNode], text: &str) -> Vec<Vec<&'a CstNode>> {
 /// The layout items of a type expression: on one line when it fits,
 /// otherwise each bracket form one entry per line. `None` when a comment is
 /// among its tokens. Iterative.
-fn type_items(nodes: &[&CstNode], text: &str) -> Option<Vec<Item>> {
+pub(crate) fn type_items(nodes: &[&CstNode], text: &str) -> Option<Vec<Item>> {
     let significant: Vec<&CstNode> = nodes
         .iter()
         .copied()
@@ -608,7 +774,7 @@ fn type_items(nodes: &[&CstNode], text: &str) -> Option<Vec<Item>> {
 /// The tokens below `nodes` on one line: one space between tokens, none
 /// after an opening bracket or before a closing one, none before `(` or
 /// `:`, and none around `.`. `None` when a comment is among them.
-fn flat(nodes: &[&CstNode], text: &str) -> Option<String> {
+pub(crate) fn flat(nodes: &[&CstNode], text: &str) -> Option<String> {
     let mut out = String::new();
     let mut previous: Option<&str> = None;
     for leaf in nodes.iter().flat_map(|node| node.leaves()) {
@@ -640,9 +806,9 @@ mod tests {
 
     use super::format;
 
-    /// The layout of a document, whatever its diagnostics: the forms other
-    /// than `use`, `type`, and `interface` are `@tool.unavailable` in this
-    /// step, so their layout is reachable only here.
+    /// The layout of a document, whatever its diagnostics: `fn`, `proc`,
+    /// and `test`, named or anonymous, are `@tool.unavailable` in this step,
+    /// so their layout is reachable only here.
     fn layout(source: &str) -> String {
         let document = parse_source(None, source.as_bytes());
         format(document.root().unwrap(), document.text().unwrap()).unwrap()
@@ -652,11 +818,11 @@ mod tests {
     fn sections_are_written_in_the_canonical_order() {
         assert_eq!(
             layout("fn f returns r: I32 takes {x: I32} do return x endfn"),
-            "fn f takes {x: I32} returns r: I32 do return x endfn\n"
+            "fn f\n  takes {x: I32}\n  returns r: I32\n  do\n    return x\nendfn\n"
         );
         assert_eq!(
             layout("type A visibility @public of U8 endtype"),
-            "type A of U8 visibility @public endtype\n"
+            "type A of U8\n  visibility @public\nendtype\n"
         );
     }
 
@@ -703,11 +869,11 @@ mod tests {
             layout(
                 "interface A impl B endimpl fn g returns r: I32 endfn visibility @public type C endtype endinterface"
             ),
-            "interface A\n  visibility @public\n  type C endtype\n  fn g returns r: I32 endfn\n  impl B endimpl\nendinterface\n"
+            "interface A\n  visibility @public\n  type C endtype\n  fn g\n    returns r: I32\n  endfn\n  impl B endimpl\nendinterface\n"
         );
         assert_eq!(
             layout("fn f fn g returns r: I32 endfn returns r: I32 do return x endfn"),
-            "fn f returns r: I32 fn g returns r: I32 endfn do return x endfn\n"
+            "fn f\n  returns r: I32\n  fn g\n    returns r: I32\n  endfn\n  do\n    return x\nendfn\n"
         );
     }
 
@@ -717,7 +883,82 @@ mod tests {
             layout(
                 "let f: Fn({} I32) be fn returns r: I32 do return 1i32 endfn visibility @public endlet"
             ),
-            "let f: Fn({} I32) visibility @public be fn returns r: I32 do return 1i32 endfn endlet\n"
+            "let f: Fn({} I32)\n  visibility @public\n  be\n    fn\n      returns r: I32\n      do\n        return 1i32\n    endfn\nendlet\n"
+        );
+    }
+
+    #[test]
+    fn a_declaration_with_only_of_stays_on_one_line() {
+        assert_eq!(
+            layout("type Celsius of F64 endtype"),
+            "type Celsius of F64 endtype\n"
+        );
+        assert_eq!(
+            layout("type Color case red case green endtype"),
+            "type Color case red case green endtype\n"
+        );
+        assert_eq!(layout("fn f endfn"), "fn f endfn\n");
+        assert_eq!(
+            layout("type A of U8 impl B endimpl endtype"),
+            "type A of U8\n  impl B endimpl\nendtype\n"
+        );
+    }
+
+    #[test]
+    fn a_short_type_with_visibility_breaks() {
+        assert_eq!(
+            layout("type A of U8 visibility @public endtype"),
+            "type A of U8\n  visibility @public\nendtype\n"
+        );
+        assert_eq!(
+            layout("type A of U8 doc \"\"\"An A.\"\"\" endtype"),
+            "type A of U8\n  doc \"\"\"An A.\"\"\"\nendtype\n"
+        );
+    }
+
+    #[test]
+    fn of_leaves_the_opener_line_only_when_it_does_not_fit() {
+        let fields = "first: Str second: Str third: U64 fourth: Bool fifth: Bool";
+        assert_eq!(
+            layout(&format!(
+                "type Wide of {{{fields}}} visibility @public endtype"
+            )),
+            format!("type Wide of {{{fields}}}\n  visibility @public\nendtype\n")
+        );
+        let fields = format!("{fields} sixth: Bool seven: U8");
+        assert_eq!(
+            layout(&format!(
+                "type Wide of {{{fields}}} visibility @public endtype"
+            )),
+            format!("type Wide\n  of {{{fields}}}\n  visibility @public\nendtype\n")
+        );
+    }
+
+    #[test]
+    fn an_interface_member_with_takes_and_returns_breaks() {
+        assert_eq!(
+            layout(
+                "interface Printable fn render takes {value: Self} returns text: Str endfn endinterface"
+            ),
+            "interface Printable\n  fn render\n    takes {value: Self}\n    returns text: Str\n  endfn\nendinterface\n"
+        );
+        assert_eq!(
+            layout("interface Iter type Item endtype endinterface"),
+            "interface Iter\n  type Item endtype\nendinterface\n"
+        );
+    }
+
+    #[test]
+    fn an_anonymous_callable_breaks_like_a_declaration() {
+        assert_eq!(
+            layout(
+                "let f: Fn({} I32) be fn returns r: I32 do return 1i32 endfn endlet"
+            ),
+            "let f: Fn({} I32) be\n  fn\n    returns r: I32\n    do\n      return 1i32\n  endfn\nendlet\n"
+        );
+        assert_eq!(
+            layout("let f: Fn({} Void) be fn endfn endlet"),
+            "let f: Fn({} Void) be fn endfn endlet\n"
         );
     }
 

@@ -132,8 +132,7 @@ fn corpus_inputs(directory: &Path, found: &mut Vec<PathBuf>) {
 fn formatting_is_idempotent_over_the_corpus_inputs() {
     let cases = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../conformance/cases");
     let mut inputs = Vec::new();
-    corpus_inputs(&cases.join("SRC-READER"), &mut inputs);
-    corpus_inputs(&cases.join("SRC-DECL"), &mut inputs);
+    corpus_inputs(&cases, &mut inputs);
     assert!(
         inputs.len() >= 44,
         "the reader corpus has its inputs: {inputs:?}"

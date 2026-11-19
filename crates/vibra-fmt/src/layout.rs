@@ -42,6 +42,9 @@ pub(crate) enum Item {
     TrailingComment(String),
     /// A comment on a line of its own.
     Comment(String),
+    /// Nothing written; the group it is in breaks, and so does every group
+    /// around it.
+    Force,
 }
 
 /// What the layout needs to know about one group.
@@ -88,7 +91,10 @@ fn measure(items: &[Item]) -> Vec<Option<Group>> {
                         group.forced |= text.contains(['\n', '\r']);
                     }
                     Item::Space => group.width += 1,
-                    Item::Hard | Item::TrailingComment(_) | Item::Comment(_) => {
+                    Item::Hard
+                    | Item::TrailingComment(_)
+                    | Item::Comment(_)
+                    | Item::Force => {
                         group.forced = true;
                     }
                     Item::Soft
@@ -111,7 +117,7 @@ fn trailing(items: &[Item], from: usize) -> usize {
         match item {
             Item::Text(text) => total += width(text),
             Item::TrailingComment(comment) => total += 1 + width(comment),
-            Item::End | Item::Indent | Item::Dedent => {}
+            Item::End | Item::Indent | Item::Dedent | Item::Force => {}
             Item::Space | Item::Soft | Item::Hard | Item::Begin | Item::Comment(_) => {
                 break;
             }
@@ -199,6 +205,7 @@ pub(crate) fn render(items: &[Item]) -> String {
             Item::Hard => writer.newline(),
             Item::Indent => writer.indent += 1,
             Item::Dedent => writer.indent = writer.indent.saturating_sub(1),
+            Item::Force => {}
             Item::TrailingComment(comment) => {
                 writer.write(" ");
                 writer.write(comment);
@@ -268,5 +275,24 @@ mod tests {
             Item::End,
         ]);
         assert_eq!(render(&items), "{\n  [a] // c\n}");
+    }
+
+    #[test]
+    fn a_force_breaks_every_group_around_it_and_writes_nothing() {
+        let mut items = vec![
+            Item::Begin,
+            Item::Text("{".to_owned()),
+            Item::Indent,
+            Item::Soft,
+            Item::Force,
+        ];
+        items.extend(group(&["a"]));
+        items.extend([
+            Item::Dedent,
+            Item::Soft,
+            Item::Text("}".to_owned()),
+            Item::End,
+        ]);
+        assert_eq!(render(&items), "{\n  [a]\n}");
     }
 }

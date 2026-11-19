@@ -9,5 +9,6 @@
 )]
 
 mod data;
+mod expr;
 mod source;
 mod types;
