@@ -21,22 +21,21 @@ use crate::{
 
 /// `value` with every NaN replaced by the canonical NaN of its width, as
 /// every observation writes it.
-fn canonical_nan(value: Value) -> Value {
-    match value {
-        Value::F32(bits) if f32::from_bits(bits).is_nan() => {
+fn canonical_nan(mut value: Value) -> Value {
+    match &mut value {
+        Value::F32(bits) if f32::from_bits(*bits).is_nan() => {
             Value::F32(CANONICAL_NAN_F32)
         }
-        Value::F64(bits) if f64::from_bits(bits).is_nan() => {
+        Value::F64(bits) if f64::from_bits(*bits).is_nan() => {
             Value::F64(CANONICAL_NAN_F64)
         }
-        Value::Variant { case, fields } => Value::Variant {
-            case,
-            fields: fields
-                .into_iter()
-                .map(|(name, value)| (name, canonical_nan(value)))
-                .collect(),
-        },
-        other => other,
+        Value::Variant { fields, .. } => {
+            for (_, field) in fields.iter_mut() {
+                *field = canonical_nan(std::mem::replace(field, Value::Void));
+            }
+            value
+        }
+        _ => value,
     }
 }
 

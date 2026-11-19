@@ -14,6 +14,7 @@
     missing_docs
 )]
 
+mod deep;
 mod depth;
 mod evaluation;
 mod intrinsics;
