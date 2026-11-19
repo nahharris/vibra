@@ -796,6 +796,8 @@ impl<'a> Machine<'a> {
             )),
             GlobalState::Unread => {
                 *state = GlobalState::Evaluating;
+                self.stats.module_value_initializations =
+                    self.stats.module_value_initializations.saturating_add(1);
                 self.konts.push(Kont::Global(index));
                 let env = Rc::clone(&self.empty_env);
                 let frame = self.new_frame(global.slot_count, env, &[])?;
