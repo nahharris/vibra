@@ -175,9 +175,11 @@ fn construct_keyword<'t>(node: &CstNode, text: &'t str) -> Option<&'t str> {
 
 /// Whether a generic `fn` or `proc` construct is named.
 fn is_named_callable(node: &CstNode) -> bool {
-    node.children()
+    let children = node.children();
+    children
+        .get(1..children.len().saturating_sub(1))
+        .unwrap_or_default()
         .iter()
-        .skip(1)
         .find(|child| !is_trivia(child))
         .is_some_and(|first| {
             matches!(
