@@ -8,7 +8,7 @@ use vibra_diagnostics::DiagnosticCode;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Trap {
     /// Impossible typed IR, descriptor, or continuation, or another
-    /// toolchain failure. An unknown engine trap is reported as this one.
+    /// toolchain failure. An unrecognized trap is reported as this one.
     InvalidCheckedProgram,
     /// A boundary value that is invalid, stale, foreign, or of the wrong
     /// kind; an unsealed access; an illegal builder mutation; an invalid

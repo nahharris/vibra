@@ -3,7 +3,7 @@
 //!
 //! The registry has one row for each host operation: the registry **symbol**,
 //! the **owner** root, the exact **signature**, and `since`, the registry minor
-//! that added it. The table is data: the emitter reads the symbols and
+//! that added it. The table is data: a code generator reads the symbols and
 //! signatures, the checker binds `external: @host` declarations against the
 //! rows, and the providers and the audit event of `vibra-host` follow the same
 //! rows. A row's audit-event shape is determined by the row.
@@ -159,7 +159,7 @@ pub struct HostParameter {
 /// One row of the host registry: `(symbol, owner, signature, since)`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct HostRow {
-    /// The registry symbol, the entry's identity and its Wasm import field.
+    /// The registry symbol, the entry's identity.
     pub symbol: &'static str,
     /// The operation's source name, such as `io.stdin.text`.
     pub operation: &'static str,

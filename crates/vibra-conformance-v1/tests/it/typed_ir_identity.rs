@@ -2,7 +2,7 @@
 //! (ledger D2.2, `docs/spec/06-runtime.md`, "The value arena").
 //!
 //! The canonical form of a checked program is what a snapshot records and what
-//! the Wasm backend consumes. It names positions in the program itself, such as
+//! every backend consumes. It names positions in the program itself, such as
 //! an activation slot, a module value or function by its place in the program,
 //! a union member, and a tuple component, because those are structure and not
 //! references to values. It must never name a place in an instance: an arena

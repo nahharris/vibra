@@ -28,19 +28,13 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
     ("vibra-syntax", &["vibra-diagnostics"]),
     // The new formatter: the layout rules over the reader's tree.
     ("vibra-fmt", &["vibra-diagnostics", "vibra-syntax"]),
-    // The new harness. It grows a dependency with each handler. Its Wasm
-    // column joins the emitter and the runner and compares them with the
-    // reference interpreter on the same checked IR.
+    // The new harness. It grows a dependency with each handler.
     (
         "vibra-conformance",
         &[
             "vibra-diagnostics",
             "vibra-fmt",
-            "vibra-interp",
-            "vibra-ir",
             "vibra-syntax",
-            "vibra-wasm",
-            "vibra-wasm-run",
             "vibra-workspace",
         ],
     ),
@@ -56,9 +50,8 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
     ("vibra-workspace", &["vibra-diagnostics", "vibra-syntax"]),
     // The reference interpreter runs checked IR and knows no front end.
     ("vibra-interp", &["vibra-diagnostics", "vibra-ir"]),
-    // The toolchain-owned native code of a transition module: it reads the
-    // closed table of native imports and the arena layout of `vibra-ir` and
-    // reaches no engine and no emitter.
+    // The toolchain-owned native code: it reads the closed table of native
+    // rows and the arena layout of `vibra-ir` and reaches no code generator.
     ("vibra-native", &["vibra-ir"]),
     // The host provider over the major-1 host rows: the provider trait, the
     // system provider, the in-memory world, and the audit event. It reads the
@@ -145,43 +138,20 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
         "vibra-resolve-v1",
         &["vibra-diagnostics-v1", "vibra-syntax-v1"],
     ),
-    // The WebAssembly emitter is the second consumer of checked IR, beside the
-    // interpreter. It reaches no engine, and it does not reach the native-code
-    // crate either: a module names a native only by the import names recorded
-    // in `vibra-ir`. Its tests read diagnostic codes.
-    ("vibra-wasm", &["vibra-diagnostics", "vibra-ir"]),
     // The toolchain-owned native code, written once against a value-access
-    // interface that the interpreter and the runner each implement. It reaches
-    // no engine and no emitter: it reads the closed table of native imports and
-    // the shape of an arena object recorded in `vibra-ir-v1`.
+    // interface that the interpreter and Nexus each implement. It reaches no
+    // code generator: it reads the closed table of native rows and the shape
+    // of an arena object recorded in `vibra-ir-v1`.
     ("vibra-native-v1", &["vibra-ir-v1"]),
     // The host provider: the provider trait, the system provider, the in-memory
     // host world, and the audit event (Milestone 4, Step 16a). It reads the
     // closed host registry of `vibra-ir-v1`, and the reader's VIBON data for the
-    // two documents it owns, the world and the event. It reaches no engine, no
-    // emitter, and no checker. The reference interpreter and the runner call it;
+    // two documents it owns, the world and the event. It reaches no code
+    // generator and no checker. The reference interpreter and Nexus call it;
     // the harness decodes a case's world and hands each backend a fresh provider.
-    // The emitter never depends on it: a module names a host operation only by
-    // the symbol and signature recorded in `vibra-ir-v1`.
     (
         "vibra-host-v1",
         &["vibra-diagnostics-v1", "vibra-ir-v1", "vibra-syntax-v1"],
-    ),
-    // The runner is the only crate that depends on the engine. It reads the
-    // boundary names and codes recorded in `vibra-ir`, and it supplies the
-    // imports of the native-code crate over the instance memory; a module
-    // imports nothing else. It does not depend on the emitter: the harness
-    // joins them. Its tests emit programs and run them beside the reference
-    // interpreter.
-    (
-        "vibra-wasm-run",
-        &[
-            "vibra-diagnostics",
-            "vibra-interp",
-            "vibra-ir",
-            "vibra-native",
-            "vibra-wasm",
-        ],
     ),
     // The actor kernel is generic over an executor and knows no language, no
     // value layout, and no backend: it needs no other crate (N19).
@@ -421,7 +391,7 @@ fn workspace_matches_the_declared_architecture() {
 }
 
 /// The number of rows, one for each crate directory.
-const ROWS: usize = 35;
+const ROWS: usize = 33;
 
 #[test]
 fn every_crate_directory_has_exactly_one_row() {
@@ -565,7 +535,6 @@ const SEMANTIC_CRATES: &[&str] = &[
     "vibra-ir-v1",
     "vibra-interp-v1",
     "vibra-fmt-v1",
-    "vibra-wasm",
     "vibra-native-v1",
     "vibra-exec",
     "vibra-actors",
@@ -579,15 +548,6 @@ const SEMANTIC_CRATES: &[&str] = &[
     "vibra-nexus-eval",
 ];
 
-/// The one crate that may depend on the WebAssembly engine, and the engine's
-/// package name. Every other crate, the emitter included, reaches a module only
-/// through bytes.
-const ENGINE_CRATE: &str = "vibra-wasm-run";
-const ENGINE: &str = "wasmtime";
-
-/// The crates only the harness may depend on, because they run modules.
-const RUNNER_CRATE: &str = "vibra-wasm-run";
-
 /// Every dependency, of any package, named in any dependency section.
 fn all_dependencies(manifest: &toml::Table) -> BTreeSet<String> {
     let mut found = BTreeSet::new();
@@ -599,77 +559,12 @@ fn all_dependencies(manifest: &toml::Table) -> BTreeSet<String> {
     found
 }
 
-#[test]
-fn only_the_runner_depends_on_the_engine() {
-    for (path, manifest) in crate_manifests(&workspace_root()) {
-        let name = manifest
-            .get("package")
-            .and_then(|package| package.get("name"))
-            .and_then(toml::Value::as_str)
-            .expect("a package name");
-        let dependencies = all_dependencies(&manifest);
-        assert_eq!(
-            dependencies.contains(ENGINE),
-            name == ENGINE_CRATE,
-            "{}: `{ENGINE}` is a dependency of `{ENGINE_CRATE}` and of no other crate",
-            path.display()
-        );
-    }
-}
-
-#[test]
-fn only_the_harness_depends_on_the_runner() {
-    for (name, edges) in workspace_graph(&workspace_root()) {
-        assert_eq!(
-            edges.contains(RUNNER_CRATE),
-            name == "vibra-conformance",
-            "`{name}`: only `vibra-conformance` depends on `{RUNNER_CRATE}`"
-        );
-    }
-}
-
-#[test]
-fn the_emitter_has_no_engine_and_no_native_code_crate() {
-    let mut checked = false;
-    for (_, manifest) in crate_manifests(&workspace_root()) {
-        let is_emitter = manifest
-            .get("package")
-            .and_then(|package| package.get("name"))
-            .and_then(toml::Value::as_str)
-            == Some("vibra-wasm");
-        if !is_emitter {
-            continue;
-        }
-        checked = true;
-        let section = |name: &str| -> BTreeSet<String> {
-            manifest
-                .get(name)
-                .and_then(toml::Value::as_table)
-                .map(|table| table.keys().cloned().collect())
-                .unwrap_or_default()
-        };
-        assert_eq!(
-            section("dependencies"),
-            BTreeSet::from(["vibra-ir".to_owned(), "wasm-encoder".to_owned()]),
-            "the emitter depends on `vibra-ir` and the encoder only"
-        );
-        assert!(
-            section("dev-dependencies")
-                .is_subset(&BTreeSet::from(["vibra-diagnostics".to_owned()])),
-            "the emitter's tests may use `vibra-diagnostics` and nothing else"
-        );
-        assert!(section("build-dependencies").is_empty());
-    }
-    assert!(checked, "the emitter crate exists");
-}
-
 /// The v1 toolchain-owned native code crate, which the v1 reference
-/// interpreter and Nexus call. The emitter never depends on it.
+/// interpreter and Nexus call.
 const NATIVE_CRATE: &str = "vibra-native-v1";
 
 #[test]
-fn only_the_two_backends_run_the_native_code_and_it_reaches_neither_the_engine_nor_the_emitter()
- {
+fn only_the_two_backends_run_the_native_code() {
     let graph = workspace_graph(&workspace_root());
     let dependents = graph
         .iter()
@@ -686,28 +581,15 @@ fn only_the_two_backends_run_the_native_code_and_it_reaches_neither_the_engine_n
     assert_eq!(
         own,
         &BTreeSet::from(["vibra-ir-v1".to_owned()]),
-        "the native code depends on the closed tables of `vibra-ir-v1` and on no engine or emitter"
+        "the native code depends on the closed tables of `vibra-ir-v1` and on nothing else"
     );
-    for (_, manifest) in crate_manifests(&workspace_root()) {
-        let is_native = manifest
-            .get("package")
-            .and_then(|package| package.get("name"))
-            .and_then(toml::Value::as_str)
-            == Some(NATIVE_CRATE);
-        if is_native {
-            assert!(
-                !all_dependencies(&manifest).contains(ENGINE),
-                "the native code has no engine dependency"
-            );
-        }
-    }
 }
 
 /// The v1 host provider crate. The v1 reference interpreter and the native
 /// track may call it, and the v1 harness depends on it to decode a case's host
-/// world and hand each backend a fresh provider. The emitter and the language phases never do: a
-/// module names a host operation only by the registry symbol and signature that
-/// `vibra-ir-v1` records.
+/// world and hand each backend a fresh provider. The language phases never do:
+/// the checker binds a host operation only by the registry symbol and signature
+/// that `vibra-ir-v1` records.
 const HOST_CRATE: &str = "vibra-host-v1";
 
 #[test]
@@ -745,27 +627,6 @@ fn only_the_backends_and_the_harness_depend_on_the_host_provider() {
         ]),
         "the host provider reads the registry and the reader's data and nothing above them"
     );
-    for (_, manifest) in crate_manifests(&workspace_root()) {
-        let is_host = manifest
-            .get("package")
-            .and_then(|package| package.get("name"))
-            .and_then(toml::Value::as_str)
-            == Some(HOST_CRATE);
-        if is_host {
-            assert!(
-                !all_dependencies(&manifest).contains(ENGINE),
-                "the host provider has no engine dependency"
-            );
-        }
-    }
-}
-
-#[test]
-fn a_dependency_on_the_engine_is_reported() {
-    let manifest = "[package]\nname = \"vibra-other\"\n[dependencies]\nwasmtime.workspace = true\n"
-        .parse::<toml::Table>()
-        .expect("a manifest");
-    assert!(all_dependencies(&manifest).contains(ENGINE));
 }
 
 /// Filesystem entry points a semantic crate must not name.
@@ -1223,9 +1084,7 @@ fn the_bridge_carries_no_compiler_ir() {
     }
 }
 
-/// The one crate that may depend on Cranelift (decision N12). The Wasm runner
-/// reaches it only through Wasmtime, which is not a `cranelift-*` dependency
-/// of any manifest here.
+/// The one crate that may depend on Cranelift (decision N12).
 const CODEGEN_CRATE: &str = "vibra-codegen";
 
 /// The Cranelift packages the generator names, all pinned to one version.
@@ -1321,8 +1180,8 @@ fn the_lock_file_holds_one_cranelift_and_the_generator_pins_it() {
             "`{package}` is locked once, at the version of `cranelift-codegen`"
         );
     }
-    // The packages the object writer shares with Wasmtime's graph are not
-    // duplicated by the generator.
+    // No Cranelift package, and no package the object writer shares with it,
+    // is locked twice.
     let all = lock
         .get("package")
         .and_then(toml::Value::as_array)

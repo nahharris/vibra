@@ -223,7 +223,7 @@ With `vibra_exec::verify`, this is the admission clause of the M4 slice.
 ### The store
 
 One growable block of bytes per context, with the header and payload layouts
-of `vibra_ir::arena`: the layout the M4 Wasm arena proved and the
+of `vibra_ir::arena`: the layout the M4 arena proved and the
 toolchain-owned native code already reads (N7). A `Ref` is a 32-bit offset
 into its own store: a context-local handle, never a pointer. Blocks are
 power-of-two size classes from 32 bytes to 1 GiB with a free list per class.
@@ -235,10 +235,9 @@ Release walks a worklist threaded through the freed blocks, so it uses no
 stack at any depth. Counts are non-atomic because a context is used by one
 thread at a time.
 
-A native program has **no host value IDs and no handle table** (N7). Those
-exist in the Wasm boundary because the host is outside the module. In a native
-executable the host operations are toolchain Rust in the same process, and
-they reach values through `vibra_host::HostValues` over cells.
+A native program has **no host value IDs and no handle table** (N7). In a
+native executable the host operations are toolchain Rust in the same process,
+and they reach values through `vibra_host::HostValues` over cells.
 
 ### Function values, module values, descriptors
 
@@ -251,7 +250,7 @@ they reach values through `vibra_host::HostValues` over cells.
   pushes its initializer as a frame; the return stores the value and gives the
   reader its own reference. Each execution starts fresh.
 - Generic code receives type descriptors as ordinary values in slots, as the
-  interpreter and the Wasm backend pass type arguments at run time (N15).
+  interpreter passes type arguments at run time (N15).
 - A plan is a function value of a distinct kind (N45).
 - A grant is a sealed value: a reference to a broker entry, with the world
   and generation that issued it (N42). The store holds the reference; the
@@ -374,12 +373,11 @@ trap are separate outcomes and never appear as an application code.
 ## 8. Parity
 
 There is one expectation per case and the interpreter is the oracle. During
-the transition a case is executed by up to four executors:
+the transition a case is executed by up to three executors:
 
 | Executor | Compares | Exists on |
 | --- | --- | --- |
 | Reference interpreter | The specification | Everywhere |
-| Wasm backend | Interpreter (existing, stays until cutover) | Everywhere |
 | Reference stepper | Lowering against the interpreter | Everywhere, no linker |
 | Native executable | Code generation and link against the stepper and the interpreter | Its own platform |
 
@@ -390,10 +388,7 @@ disagree, a package only moves cells toward `matched`, and `pending` is never
 a pass: v0.0.3 M2 exits at zero pending cells (N14).
 
 X2-04 builds this inventory for the corpus of the redesigned language
-(N49). The Wasm backend runs only the v0.0.1 corpus,
-under the transition profile, until X3-26 removes it; a case that needs
-grants, plans, or the new entry is unsupported there and is not a Wasm
-parity failure.
+(N49).
 
 Every native and stepper comparison runs twice: unbounded, and with quota 1.
 

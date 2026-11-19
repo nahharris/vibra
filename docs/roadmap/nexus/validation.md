@@ -82,7 +82,7 @@ when the package merges.
 | [v0.0.2 M4](../v0.0.2/m4/README.md): first native slice | X2-01 to X2-04 | The X2-04 table: three-way agreement, no repeated submission, refusals, the inventory |
 | [v0.0.3 M1](../v0.0.3/m1/README.md): the whole language | X3-10 to X3-19, X3-28, X3-29 | Inventory rows `matched` on the stepper and Windows, twice |
 | [v0.0.3 M2](../v0.0.3/m2/README.md): three platforms | X3-08, X3-20, X3-21, X3-22 | A linked executable per target; `smoke_<target>_<aspect>` tests; zero pending cells; the baseline; two audits |
-| [v0.0.3 M3](../v0.0.3/m3/README.md): build and cutover | X3-23 to X3-27 | Schema-validated build results; identity tests; byte-equal builds; the clean-machine job; an empty Wasm search; the audit record |
+| [v0.0.3 M3](../v0.0.3/m3/README.md): build and cutover | X3-23 to X3-27 | Schema-validated build results; identity tests; byte-equal builds; the clean-machine job; the audit record |
 | [v0.0.4 M2](../v0.0.4/m2/README.md): semantics and simulation | X4-S1, X4-01 to X4-04 | The approved specification change; kernel tests with their source-level cases; the causal-path query |
 | [v0.0.4 M3](../v0.0.4/m3/README.md): native workers | X4-05 to X4-09 | Kernel tests on the Nexus executor; the replay inventory; the ownership and placement tests; the X4-08 table; overlap intervals with the hardware recorded |
 

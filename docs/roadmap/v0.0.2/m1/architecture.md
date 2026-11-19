@@ -25,8 +25,7 @@ merged step, because no step changes a type another live crate depends on.
 
 - `cargo test --locked --offline --workspace --all-targets --all-features`
   and the conformance job pass on the integration branch after every merge.
-- The WebAssembly backend keeps a differential run until the native cutover
-  of v0.0.3 ([runtime chapter](../../../spec/06-runtime.md#wasm-transition)).
+
 - The native track (`vibra-exec`, `vibra-lower`, `vibra-nexus`,
   `vibra-nexus-eval`, `vibra-nexus-bridge`, `vibra-codegen`, `vibra-build`)
   keeps compiling, and package X2-01 of the [Nexus
@@ -45,9 +44,8 @@ AST (`vibra-fmt`, `vibra-resolve`, `vibra-types`, `vibra-host`,
 `vibra-workspace`, `vibra-cli`, `vibra-schema`, `vibra-conformance`) until
 every one is rewritten. The branch is red for weeks, the native track loses
 the host tests it is written against (`crates/vibra-conformance/tests/it/`
-holds its lowering, differential, and linking tests in old syntax), and the
-Wasm backend runs nothing until the new checker produces IR. Rejected: fails
-every requirement above.
+holds its lowering, differential, and linking tests in old syntax).
+Rejected: fails every requirement above.
 
 **(ii) New module trees inside the same crates, old modules deleted at a
 cutover.** Compiles green, because new modules are additive. But every crate
@@ -81,7 +79,7 @@ rather than a rename of everything that survives.
    `conformance/v1/native-parity.tsv`, `stdlib/` becomes `stdlib-v1/` (the
    old `vibra-types` embeds it by path with `include_bytes!`,
    `crates/vibra-types/src/stdlib.rs:64`), `examples/` becomes
-   `examples-v1/`, and `fuzz/` becomes `fuzz-v1/`. The eleven other crates,
+   `examples-v1/`, and `fuzz/` becomes `fuzz-v1/`. The nine other crates,
    `vibra-fs-scope` among them, keep their names. CI runs the renamed
    binaries. Nothing else changes; the diff is mechanical and the tests
    prove it.
@@ -91,8 +89,7 @@ rather than a rename of everything that survives.
    architecture test for the whole workspace, old and new rows alike, from
    step 02.
 3. **Two corpora, two runners, one CI job.** The v1 runner keeps running
-   `conformance/v1/cases` with the v1 handlers, and on the Wasm backend
-   until step 27 moves the backend to the new IR. The
+   `conformance/v1/cases` with the v1 handlers. The
    new runner runs `conformance/cases` with the `readerV2`, `staticV2`, and
    `interpreterV2` handlers as they land. Both lines are in the conformance
    job until the cutover.
@@ -105,32 +102,18 @@ rather than a rename of everything that survives.
    `vibra-host`. Until then the v1 pipeline
    is live and green, and the `vibra` binary, which is new from step 24, is
    the only command surface a user sees.
-5. **What the Wasm backend needs.** It consumes checked IR, not source. The
-   v0.0.1 corpus can run on it only while it reads the v1 IR, that is,
-   until step 27. Step 27 ports `vibra-wasm` and `vibra-wasm-run` to the new
-   `vibra-ir` fail-closed: a node the port does not lower is reported
-   unsupported, never guessed. The module is the transition module of the
-   runtime chapter: it runs only the pure part of the language (a test
-   without `takes`, the evaluation of a pure function), imports only the
-   native routines of `vibra_native_v1`, and has no builder export. From
-   step 27 the backend runs the pure executable cases of the new corpus it
-   supports, under the `wasmTransitionV2` profile, and reports what it does
-   not. No M1 gate requires the Wasm column; its counts are recorded. Step
-   27 also updates the sentence of the release README that says what the
-   backend runs.
-6. **What the native track needs.** From step 01 the native crates depend
+5. **What the native track needs.** From step 01 the native crates depend
    on `vibra-ir-v1`, `vibra-host-v1`, and `vibra-native-v1`. Step 12
    publishes the new `vibra-ir` with the complete M1 node set and a
    migration table from the old nodes, step 13 the new interpreter, and
    step 27 the new `vibra-native` and `vibra-host`. Package X2-01 then
    moves the native track to them and re-homes the native host tests out
    of `vibra-conformance-v1`; in the same PR the v1 runner loses the
-   executor columns of the crates that moved, as it loses its Wasm column
-   in step 27. If X2-01 has not landed when every other prerequisite of
-   step 28 has, step 28 does the mechanical re-pointing itself and records
-   the tests it had to drop as X2-01's remaining list; it never deletes
-   the native crates.
-7. **`vibra-native` and `vibra-host` exist twice until the cutover.** The
+   executor columns of the crates that moved. If X2-01 has not landed
+   when every other prerequisite of step 28 has, step 28 does the
+   mechanical re-pointing itself and records the tests it had to drop as
+   X2-01's remaining list; it never deletes the native crates.
+6. **`vibra-native` and `vibra-host` exist twice until the cutover.** The
    `-v1` crates serve the v1 pipeline and, until X2-01, the native track.
    Step 27 creates the crates of the final names on the new `vibra-ir`
    from the `-v1` sources, with behaviour unchanged: the natives are the
@@ -140,9 +123,7 @@ rather than a rename of everything that survives.
    under the format atoms `@hostWorld.v1` and `@auditTrace.v1`. The M2
    packages N7 to N12 change the new `vibra-host` to registry major 2.
    The new interpreter has no host dependency in M1, because the pure
-   language performs no operation. `vibra-wasm` and `vibra-wasm-run` are
-   ported in place by step 27, and `vibra-wasm-run` drops its host
-   dependency there.
+   language performs no operation.
 
 ### The three ignored tests
 
@@ -167,7 +148,7 @@ that implements v0.0.1:
 | 12 to 14 | yes | new crates and `stdlib/`; nothing else reads them yet |
 | 15 to 23 | yes | the checker grows inside new crates; each step's cases pass before merge |
 | 24 to 26 | yes | the new `vibra` binary; the v1 binary is `vibra-v1` |
-| 27 | yes | the new `vibra-native` and `vibra-host` are additive; `vibra-wasm` and `vibra-wasm-run` compile against the new IR with their tests ported, and the v1 runner loses its Wasm column in the same PR |
+| 27 | yes | the new `vibra-native` and `vibra-host` are additive |
 | 28 | yes | the cutover deletes code and its tests together; the new corpus and both suites pass |
 | 29 | yes | evidence only |
 
@@ -181,7 +162,7 @@ that implements v0.0.1:
 | `vibra-syntax` | rewritten (step 03) | Lexer for the keyword-led grammar, lossless CST with recovery, typed source views, VIBON values, document mode by extension. No S-expression reader. |
 | `vibra-fmt` | rewritten (step 03) | Canonical format of the source chapter; never reorders operands; returns recovered documents unchanged. No binding facts from the checker: the `BoundFormat` path of v1 (`crates/vibra-fmt/src/lib.rs:88`) has no successor because the formatter never reorders arguments. |
 | `vibra-resolve` | rewritten (step 10) | Flat module scope, derived import names, anchor identities, namespaces, paths against field reads, acyclic imports. The neutral filesystem-free input shape of v1 (`crates/vibra-resolve/src/lib.rs:123`) is kept as a design. |
-| `vibra-ir` | rewritten (step 12; runtime modules in step 27) | The checked IR of the new language: variant types with named fields, no unions, no variadics, guard consequences, `List` instead of `Array`, library roles bound to declared types, two defect traps, the `@type.v2` and `@value.v2` encodings with its own canonical writer. Compiler intrinsic registry major 2, with dotted camelCase wire symbols. Step 27 adds `arena`, `boundary`, and the host and native registries. |
+| `vibra-ir` | rewritten (step 12; runtime modules in step 27) | The checked IR of the new language: variant types with named fields, no unions, no variadics, guard consequences, `List` instead of `Array`, library roles bound to declared types, two defect traps, the `@type.v2` and `@value.v2` encodings with its own canonical writer. Compiler intrinsic registry major 2, with dotted camelCase wire symbols. Step 27 adds `arena` and the host and native registries. |
 | `vibra-types` | rewritten (steps 14 to 22) | Stdlib loader, declaration collection, nominal checks, local inference, bodies, coverage, interfaces, dispatch, associated types, widening, the certified fragment, the seven discharge rules, compile-time evaluation through the interpreter, lowering to checked IR. |
 | `vibra-interp` | rewritten (step 13) | Heap activations, tail calls, lazy module values, memory budget, `@value.v2` observation, the compiler intrinsics, guard consequences, an evaluation entry for the checker. The design of v1 (`crates/vibra-interp/src/lib.rs:40`) is carried over; the code is not, because every value kind changes. |
 | `vibra-workspace` | rewritten from kept modules (steps 09, 15, 23) | `confined_fs`, `discovery`, `snapshot` are copied and adapted; `project` decodes `@project.v2`; `source_graph`, `semantic`, `test_runner` are rewritten. `query` and `index` are M3's. |
@@ -189,8 +170,7 @@ that implements v0.0.1:
 | `vibra-cli` | rewritten (steps 24 to 26) | `help`, `fmt`, `check`, `test` with the version 2 envelope. Every other command of the [tooling chapter](../../../spec/05-tooling.md#command-surface) is `@command.unavailable` and listed as unsupported in `help`. |
 | `vibra-conformance` | rewritten from the kept runner core (step 02) | Corpus loader, `case.toml` manifest with V2 identities and camelCase profile and operation atoms, dispatcher, runner, binary. Handlers arrive with the steps that make them observable. The workspace architecture test lives here from step 02. |
 | `vibra-host` | recreated on the new IR (step 27; old → `-v1`, deleted in 28) | The same operations and providers, compiled against the new `vibra-ir`; documents in the data grammar. Not used by the M1 interpreter. The M2 packages N7 to N12 change it. |
-| `vibra-native` | recreated on the new IR (step 27; old → `-v1`, deleted in 28) | The same routines against the new registry rows. The M1 interpreter runs Vibra bodies and intrinsics and uses no native implementation; the Wasm transition imports these routines. |
-| `vibra-wasm`, `vibra-wasm-run` | kept, ported in place fail-closed (step 27) | The transition module of the runtime chapter: pure code only, native imports only, the closed export table. Lower what maps one-to-one, report the rest unsupported. Removed in v0.0.3. |
+| `vibra-native` | recreated on the new IR (step 27; old → `-v1`, deleted in 28) | The same routines against the new registry rows. The M1 interpreter runs Vibra bodies and intrinsics and uses no native implementation; the native track calls these routines. |
 | `vibra-fs-scope` | kept, unrenamed, untouched by M1 | The Windows file-scope adapter. It depends on no workspace crate and none depends on it until package N9 puts it behind the filesystem provider in M2. |
 | `vibra-exec`, `vibra-lower`, `vibra-nexus`, `vibra-nexus-eval`, `vibra-nexus-bridge`, `vibra-codegen`, `vibra-build`, `vibra-actors` | kept, unrenamed | Moved to the new `vibra-ir`, `vibra-native`, and `vibra-host` by package X2-01, not by M1. |
 | every `-v1` crate | deleted (step 28) | With `stdlib-v1/`, `examples-v1/`, `fuzz-v1/`, `conformance/v1/`. |
@@ -199,7 +179,7 @@ that implements v0.0.1:
 
 The [native contract](../m0/native-contract.md#7-suggested-package-cut)
 cuts the adaptation of the IR, the interpreter, and the host into the
-packages N1 to N13 and describes them as edits of the existing crates.
+packages N1 to N12 and describes them as edits of the existing crates.
 This plan builds `vibra-ir` and `vibra-interp` as new crates instead, so
 each package is either absorbed by the M1 steps that write the same
 content into the new crates, or stays a package that M2 runs on the new
@@ -208,8 +188,8 @@ crate: the old IR and interpreter are never adapted, they are deleted.
 
 | Package | Where the work is done | What is left outside M1 |
 | --- | --- | --- |
-| N1 IR removals and renames | absorbed: step 12 (the new IR never has the removed nodes and names `List`), step 13 (interpreter), step 27 (`vibra-native`, `vibra-wasm`, `vibra-wasm-run`). The current checker is not adapted | the native-track consumers (`vibra-lower`, `vibra-exec`, `vibra-nexus`, `vibra-nexus-bridge`), which X2-01 moves |
-| N2 Two defect traps | absorbed: step 02 (registry rows of the new `vibra-diagnostics`), step 12 (the trap type), step 13 (interpreter), step 27 (the Wasm boundary's own codes) | `vibra-lower` and `vibra-exec`, in X2-01 |
+| N1 IR removals and renames | absorbed: step 12 (the new IR never has the removed nodes and names `List`), step 13 (interpreter), step 27 (`vibra-native`). The current checker is not adapted | the native-track consumers (`vibra-lower`, `vibra-exec`, `vibra-nexus`, `vibra-nexus-bridge`), which X2-01 moves |
+| N2 Two defect traps | absorbed: step 02 (registry rows of the new `vibra-diagnostics`), step 12 (the trap type), step 13 (interpreter) | `vibra-lower` and `vibra-exec`, in X2-01 |
 | N3 Encodings and identities v2 | absorbed: step 12 (`@type.v2`, `@value.v2`, `seed`, signature records, `ObservedValue`), step 13 (observation), step 15 (the cross-check with the reader) | the host's use of the encodings, in N10; `vibra-nexus-bridge`, in X2-04 |
 | N4 Callable kinds, plans, and `await` | split: step 12 defines the `Fn`, `Proc`, and `Intent` types and their encodings, because type expressions and signature records need them in M1 | stays N4 in M2, on the new crates: plan and `await` nodes in the IR, the three value kinds and invocation in the interpreter |
 | N5 Guards with consequences and `where … else` | absorbed: step 12 (IR fields, construction results, the tail flag), step 13 (continuations and the `try` path), step 21 (the checker that produces them) | guards on `proc` and their run at `await`, with N4 in M2 |
@@ -220,7 +200,6 @@ crate: the old IR and interpreter are never adapted, they are deleted.
 | N10 Host world v2 and audit trace v2 | not in M1 | stays N10 in M2 |
 | N11 Startup and the `ExitCode` entry | not in M1 | stays N11 in M2, on the new `vibra-cli` |
 | N12 `TestWorld` | not in M1 | stays N12 in M2, on the test runner of step 23 |
-| N13 Wasm transition profile | absorbed: step 27, whole. The refusals for requirements that arrive in M2 are already total, because the emitter rejects every node kind it does not lower | nothing |
 
 The native track's order follows: X2-01 starts after steps 12, 13, and 27
 (its N1 and N2); X2-02 after N4 in M2 and step 21; X2-03 after N7 to N11;
@@ -358,6 +337,7 @@ that owns a trusted property tests it at the checker.
 | A widening, a call through an interface value, a generic instantiation, a contract call on an open receiver, and a dict key have conformance evidence: a bound, `Self` in a default body, a matching implementation with its bounds, or the structural rule for atoms, tuples, and records | validates | step 12 |
 | An implementation supplies every abstract member, supplies no default member, and overlaps no other implementation | validates | step 12 |
 | A declared type holds itself only through `List`, `Dict`, a callable, or an interface value | validates | step 12 |
+| No generic function reaches itself at a type built around one of its own type parameters: no cycle of the instantiation graph holds an expanding type argument. The instantiations are direct calls, function values, the member a contract call's receiver selects, and the members of each implementation that satisfies a bound. A contract call on a type parameter, a default body's call on `Self`, and the evidence of a widening or a dict key add no edge | validates the edges named; trusts the checker for the rest | steps 16 and 19 |
 | Every labelled parameter of a function or a closure has one constant default of its type, and a closure value carries its defaults | validates | step 12 |
 | A constant fits its type | validates | step 12 |
 | A constant or an evaluation's input satisfies every invariant its type carries, and every dict in it holds its keys ascending and distinct | the interpreter checks it where the value comes in: `@runtime.invalidCheckedProgram` for a constant, `@runtime.invalidHostValue` for an input | step 13 |
@@ -397,8 +377,7 @@ pub fn format(&WorkspaceSnapshot, source_id) -> FormatOutcome;
 
 **`vibra-conformance`:** `ProfileHandler { can_run(&Case) -> bool; run(&Case) ->
 Result<CaseObservation, HandlerError> }` and `CaseObservation { accepted,
-diagnostics, formatted, tree, graph, resolved, types, result, test_run, wasm:
-Option<..> }`.
+diagnostics, formatted, tree, graph, resolved, types, result, test_run }`.
 
 ## 3. The conformance corpus
 
@@ -406,13 +385,13 @@ Option<..> }`.
 
 They are written in the old surface, the old `(record …)` data notation,
 kebab-case codes, and `V1-` identities. They move to `conformance/v1/cases` in
-step 01, keep running on the v1 interpreter until step 28 and on the Wasm
-backend until step 27, and are deleted in step 28 with the v1 crates. None is
+step 01, keep running on the v1 interpreter until step 28, and are deleted
+in step 28 with the v1 crates. None is
 mechanically translated: no translator exists, writing one is a compatibility
 bridge in disguise, and a translated expectation is not an expectation written
-from the specification. None is kept for Wasm after the cutover (decision 5
-above). The rules whose meaning did not change (source-graph sorting, project
-discovery, module path rules, diagnostic ordering) are re-authored by hand under
+from the specification. The rules whose meaning did not change (source-graph
+sorting, project discovery, module path rules, diagnostic ordering) are
+re-authored by hand under
 their `V1-` identity with new-notation inputs, as the [conformance
 chapter](../../../spec/07-diagnostics-and-conformance.md#rule-identities-and-example-coverage)
 allows; everything else gets a `V2-` identity. The retired identities are listed
@@ -435,9 +414,9 @@ in `conformance/rules.tsv`.
   the cases it adds. A removed rule stays as `retired`. The runner rejects
   a case whose rule is not `active`.
 - `case.toml` stays the neutral oracle, so the VIBON decoder is never its
-  own judge: `id`, `rule`, `profile` (one of the seven of the chapter:
+  own judge: `id`, `rule`, `profile` (one of the six of the chapter:
   `readerV2`, `staticV2`, `interpreterV2`, `toolingV2`, `nativeV1`,
-  `wasmTransitionV2`, `fullV2`), `operation` (one of the ten of the
+  `fullV2`), `operation` (one of the ten of the
   chapter: `reader`, `projectDecode`, `sourceGraph`, `resolve`,
   `workspaceCheck`, `format`, `query`, `interpret`, `workspaceRun`,
   `workspaceTest`), `description` with the specification anchor,
@@ -517,10 +496,7 @@ v0.0.3 concern. The `host` list is empty until M2.
    soundness hole. Mitigation: `evaluate` returns a three-way result and the
    contract step has a case per outcome; the interpreter's reduction count
    is the only limit the checker consults.
-7. **The Wasm port is scoped by what maps one-to-one.** If less maps than
-   expected the backend's column is small. Mitigation: the column is not a
-   gate; the count is recorded; v0.0.3 removes the backend.
-8. **Parallel agents touch `Cargo.toml`, CI, and the architecture table.**
+7. **Parallel agents touch `Cargo.toml`, CI, and the architecture table.**
    Mitigation: only steps 01, 02, 03, 09, 10, 12, 13, 14, 24, 27, and 28 add
    crates or CI lines; every other step touches only its crates and
    `conformance/cases`.

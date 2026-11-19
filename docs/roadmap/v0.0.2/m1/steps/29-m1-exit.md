@@ -105,14 +105,12 @@ $env:RUSTFLAGS='-D warnings'
 cargo clippy --locked --offline --workspace --all-targets --all-features -- -D warnings
 cargo test --locked --offline --workspace --all-targets --all-features
 cargo run --locked --offline -p vibra-conformance --bin vibra-conformance -- --root conformance/cases
-cargo run --locked --offline -p vibra-conformance --bin vibra-conformance -- --root conformance/cases --executor wasm
 cargo run --locked --offline -p vibra-cli --bin vibra -- --workspace examples/gate-pure test
 cargo run --locked --offline -p vibra-cli --bin vibra -- --workspace examples/pilot-pure test
 ```
 
 Read: no failed, unknown, or unavailable required case under `readerV2`,
-`staticV2`, or `interpreterV2`; the Wasm row is recorded, not gated; both
-`test` runs exit 0.
+`staticV2`, or `interpreterV2`; both `test` runs exit 0.
 
 ## Excluded
 

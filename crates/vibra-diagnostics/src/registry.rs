@@ -342,6 +342,10 @@ diagnostic_registry! {
         "the call does not determine a type argument";
     TypeInfiniteSize => "@type.infiniteSize", Type, Error, None,
         "a declared type's expansion repeats";
+    TypeDepthExceeded => "@type.depthExceeded", Type, Error, None,
+        "a type nests more than 64 levels";
+    TypeExpandingInstantiation => "@type.expandingInstantiation", Type, Error, None,
+        "a generic callable reaches itself at a type built around its own type parameter";
     TypeInvalidDictKey => "@type.invalidDictKey", Type, Error, None,
         "a dict key type is not admissible";
     TypeInvalidTry => "@type.invalidTry", Type, Error, None,
@@ -482,7 +486,7 @@ mod tests {
     use std::collections::BTreeSet;
 
     /// The count of the specification table.
-    const REGISTERED_CODES: usize = 116;
+    const REGISTERED_CODES: usize = 118;
 
     #[test]
     fn the_registry_has_every_code_in_the_specification_table() {

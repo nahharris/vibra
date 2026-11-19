@@ -15,6 +15,7 @@ use crate::conformance::Evidence;
 use crate::encode::{TypeTable, encode_value};
 use crate::expr::{Checker, Tables, expect};
 use crate::external::CompilerIntrinsic;
+use crate::instantiation::check_instantiations;
 use crate::{
     Constant, ExitGuard, FnType, Guard, Implementation, InterfaceDefinition, IrError,
     Library, LibraryTypes, Node, OpenScope, SignatureRecord, SourceOrigin,
@@ -678,6 +679,7 @@ impl CheckedModuleSet {
             )?;
             flow.absorb_owner(gathered, |flow, facts| flow.functions.push(facts));
         }
+        check_instantiations(&tables)?;
         Ok(flow)
     }
 

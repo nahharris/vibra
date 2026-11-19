@@ -297,9 +297,8 @@ proposal.
    `vibra-codegen`, instead of relying on `host-arch`. Without that, a Windows
    or Linux build cannot look up the macOS target, and a macOS arm64 build
    cannot look up either x86-64 target. The features exist in 0.136.2
-   (`x86 = []`, `arm64 = []`). Feature unification adds the two ISAs to the
-   Cranelift that Wasmtime already uses in the same graph; the compile cost of
-   that is not measured here.
+   (`x86 = []`, `arm64 = []`). The compile cost of the two ISAs is not
+   measured here.
 3. Select the ISA by triple (`lookup_by_name` or `lookup` with a
    `target_lexicon::Triple`), not by `cranelift-native`.
 

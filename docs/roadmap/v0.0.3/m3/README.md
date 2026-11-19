@@ -2,7 +2,7 @@
 
 **Planned.** [M2](../m2/README.md) qualifies all three platforms. This
 milestone ships `vibra build`, makes builds reproducible, proves a clean
-install, and removes the WebAssembly backend.
+install, and makes native execution a qualified profile of the release.
 
 ## Scope
 
@@ -27,10 +27,11 @@ The work packages are X3-23 to X3-27 of the
    the package, inspect what it requires, build the release program of
    v0.0.2, and run it with its arguments, streams, scoped files, and exit
    code. A linker or SDK the user must install is stated up front.
-5. **Cutover.** The Wasm profile, emitter, runner, dependencies, build
-   contract, and packaging references are removed together. The interpreter
-   and native conformance remain, and `run`, `test`, and `eval` still work
-   without a linker. The shipped v0.0.1 evidence is not touched.
+5. **Cutover.** Native execution becomes a qualified profile of the
+   release: the specification, the conformance job, the README, and the
+   packaging name interpreter and native conformance on the three targets.
+   `run`, `test`, and `eval` still work without a linker. The shipped v0.0.1
+   evidence is not touched.
 6. **Release audit.** Admission, the bridge, driver authority, memory
    limits, error and exit mapping, schemas, release metadata, and the
    support inventory. Both suites and the tooling regressions on all three
@@ -57,9 +58,6 @@ The work packages are X3-23 to X3-27 of the
 ## Exit evidence
 
 - Per platform, the commands and counts, and the complete parity inventory.
-- A search of the active crates, manifests, workflows, and specification for
-  Wasm dependencies and references, with each remaining historical mention
-  listed.
 - The clean-machine record: the whole workflow of create, repair, test,
   build, distribute, and run, on Windows.
 - No failure was removed, and nothing that was not run is reported as

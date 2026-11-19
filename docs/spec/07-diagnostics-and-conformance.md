@@ -68,6 +68,8 @@ its level MUST agree with it.
 | `@type.mismatch` | `@error` |
 | `@type.ambiguousInference` | `@error` |
 | `@type.infiniteSize` | `@error` |
+| `@type.depthExceeded` | `@error` |
+| `@type.expandingInstantiation` | `@error` |
 | `@type.invalidDictKey` | `@error` |
 | `@type.invalidTry` | `@error` |
 | `@type.unhandledFallible` | `@error` |
@@ -273,6 +275,8 @@ Resolution reads only the captured source graph.
 | a literal that does not fit its type | `@type.numericOutOfRange`, the literal |
 | a module value whose initializer reaches itself | `@type.initializerCycle`, the `let`, related along the cycle |
 | a declared type whose expansion repeats | `@type.infiniteSize`, the declaration whose expansion first repeats |
+| a type nested more than 64 levels | `@type.depthExceeded`, the written type, or the expression whose type it is |
+| a generic callable that reaches itself at a type built around one of its own type parameters | `@type.expandingInstantiation`, the call or callable reference with the expanding type argument, related along the cycle |
 | an inadmissible dict key type | `@type.invalidDictKey`, the key type |
 | a callable as a dict key, or an `assert.equal` operand whose type contains a callable, plan, or grant | `@type.functionNotEquatable`, the type or the operand |
 | `try` on a wrong carrier, in a callable with another carrier, or directly in a test | `@type.invalidTry`, the `try` |
@@ -940,13 +944,12 @@ smaller profile.
 | `interpreterV2` | `staticV2` plus reference execution, the operation registry, fake and system worlds |
 | `toolingV2` | `staticV2` plus the query, edit, schema, CLI, and MCP contracts in the reported inventory |
 | `nativeV1` | `staticV2` plus verified execution IR, the native runtime, code generation, linking, launch, and native observations |
-| `wasmTransitionV2` | the transitional WebAssembly path, until native execution is qualified |
+
 | `fullV2` | everything a release requires: language, library, projects, tooling, interpreter, and native targets |
 
 `nativeV1` does not include `interpreterV2`; a differential gate needs
-both. The WebAssembly profile, its backend, and its dependencies are removed
-together when native execution is qualified. The interpreter stays, for
-`run`, `test`, `eval`, and compile-time evaluation.
+both. The interpreter serves `run`, `test`, `eval`, and compile-time
+evaluation.
 
 ### Differential execution
 
@@ -958,9 +961,8 @@ specification, and not one per backend.
   comparison covers canonical values, exit codes, typed errors, assertion
   outcomes, trap codes and origins, startup results, and the ordered audit
   events. A mismatch names the executor and the first difference.
-- Before the WebAssembly backend is removed, its supported cases also run
-  there. Afterwards the pair is interpreter and native, with the
-  execution-IR stepper used to isolate lowering defects.
+- The executors are the interpreter and native code, with the execution-IR
+  stepper used to isolate lowering defects.
 - Every stepper and native case runs with an unbounded scheduler quota and
   with a quota of one. The observations MUST agree. Equal step counts
   between engines are not required.

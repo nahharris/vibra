@@ -12,7 +12,7 @@
 //! an `I32` cell holding the value canonically: a signed type sign-extended to
 //! 32 bits, an unsigned one zero-extended. A 64-bit type is an `I64` cell
 //! holding all 64 bits. This is the representation the lowering writes for a
-//! literal and the one the Wasm backend keeps.
+//! literal.
 //!
 //! Every operation decodes its operands to their exact integer in an `i128`,
 //! which holds any value of any integer type and any product of two of them
@@ -225,7 +225,7 @@ mod tests {
     }
 
     /// The shared sample vectors of `vibra_ir_v1::external::vectors`, which the
-    /// interpreter and the Wasm backend are held to, run through the Nexus
+    /// interpreter is held to, run through the Nexus
     /// operation. `neg` and `compare` are not operations of their own here: the
     /// lowering writes `neg` as `0 - x` and `compare` as `less` and `equal`, so
     /// they are checked by the same vectors through those operations.

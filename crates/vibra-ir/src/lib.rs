@@ -1,7 +1,7 @@
 //! The checked IR of Vibra: the types, values, and expressions a checked
 //! module set is made of, the canonical encodings of types and values, the
-//! closed `@compiler` intrinsic registry, and the boundary of a WebAssembly
-//! transition module: the arena layout and the export table.
+//! closed `@compiler` intrinsic registry, the host registry, and the arena
+//! layout that toolchain-owned native code reads.
 //!
 //! The authority is `docs/spec`: the type chapter for [`Type`] and the
 //! declarations, the runtime chapter for evaluation, the encodings, the
@@ -12,13 +12,13 @@
 use std::fmt;
 
 pub mod arena;
-pub mod boundary;
 mod check;
 mod conformance;
 mod constant;
 mod encode;
 mod expr;
 pub mod external;
+mod instantiation;
 mod library;
 mod module_set;
 mod nominal;
@@ -153,6 +153,16 @@ pub enum IrError {
         /// Its name.
         name: String,
     },
+    /// A generic function that reaches itself at a type built around one
+    /// of its own type parameters, through any chain of instantiations.
+    ExpandingInstantiation {
+        /// The index of the function the instantiation is in.
+        function: usize,
+        /// Its name.
+        name: String,
+        /// The name of the function it instantiates.
+        callee: String,
+    },
 }
 
 impl fmt::Display for IrError {
@@ -202,6 +212,10 @@ impl fmt::Display for IrError {
             Self::InitializerCycle { name, .. } => {
                 write!(formatter, "the initializer of `{name}` reads itself")
             }
+            Self::ExpandingInstantiation { name, callee, .. } => write!(
+                formatter,
+                "`{name}` instantiates `{callee}` at a type built around a type parameter that the instantiation reaches again"
+            ),
         }
     }
 }

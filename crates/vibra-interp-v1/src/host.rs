@@ -1,6 +1,6 @@
 //! The interpreter's half of the host value-access interface.
 //!
-//! `docs/spec/06-runtime.md`, "WebAssembly boundary": each host operation is
+//! `docs/spec/06-runtime.md`, "Host calls": each host operation is
 //! written once, in `vibra-host-v1`, against an interface that reads arguments and
 //! builds results. This module supplies that interface over the interpreter's
 //! own values and holds no algorithm of an operation: it reads a `str`, a

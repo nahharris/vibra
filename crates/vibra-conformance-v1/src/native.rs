@@ -5,8 +5,7 @@
 //! reference stepper. It lowers the checked program to execution IR, verifies
 //! it, admits it, and steps it on Nexus with a fresh copy of the case's host
 //! world under the runner's memory limit, twice: unbounded, and with quota 1.
-//! Both runs are held to the case's one expectation, by the comparison the Wasm
-//! backend uses.
+//! Both runs are held to the case's one expectation.
 //!
 //! The stepper reports in the terms of [`ExecutorObservation`]: it completed with a
 //! canonical result and an audit trace, it trapped with a code, it ended in the
@@ -23,8 +22,8 @@
 //! value nested deeper than the reader follows) cannot be observed yet, and a
 //! case that needs one is `pending X3-18`. The origin of a trap is not
 //! compared, because no expectation states one and the other executors do not
-//! compare it. The arena balance that the Wasm backend checks is not checked:
-//! the context does not expose what its module values keep.
+//! compare it. The arena balance is not checked: the context does not expose
+//! what its module values keep.
 //!
 //! A test suite (`workspace-test`) needs the test table and the harness test
 //! runs, which are package X3-18, so its cases are `pending` there or at the
@@ -93,7 +92,7 @@ pub fn owning_package(name: &str) -> Option<&'static str> {
 pub struct StepperRun {
     /// The quota of the run: [`u64::MAX`] for unbounded.
     pub quota: u64,
-    /// What the run observed, in the terms the Wasm backend uses.
+    /// What the run observed, in the terms every executor reports.
     pub observation: BackendObservation<ExecutorObservation>,
     /// The origin ordinal of the trap that ended the run, when one did.
     pub trap_origin: Option<u32>,

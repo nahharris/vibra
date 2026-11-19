@@ -10,9 +10,8 @@
 //! - [`HostWorld`] is the decoded `@host-world.v1` document and
 //!   [`WorldProvider::new`] makes a fresh copy of it for each test and each
 //!   backend, so a world is a value that nothing shares.
-//! - [`HostValues`] is the value-access trait that each backend implements: the
-//!   interpreter over its values, and the Wasm runner through the exported
-//!   accessors and builders, never through the instance's linear memory. With
+//! - [`HostValues`] is the value-access trait that each backend implements:
+//!   the interpreter over its values, and Nexus over its value store. With
 //!   [`HostCall`] it is the one place a host operation reads its arguments and
 //!   builds its result, so the operations are written once.
 //! - [`AuditEvent`] is the event of the audit trace, built by one function from
@@ -20,8 +19,8 @@
 //!
 //! # Position in the architecture
 //!
-//! Only the reference interpreter, the Wasm runner, and the hosts that hand them
-//! a provider depend on this crate. The emitter never does: it needs only the
+//! Only the reference interpreter, Nexus, and the hosts that hand them a
+//! provider depend on this crate. A code generator never does: it needs only the
 //! registry's symbols and signatures, which sit in `vibra-ir-v1`. This crate and the
 //! tooling crates that read a project, a command line, or a corpus are the only
 //! places that read ambient filesystem, environment, clock, or random state, as

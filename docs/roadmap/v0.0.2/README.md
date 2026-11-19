@@ -38,12 +38,8 @@ After M0, M1 through M3 are ordered by their gates. Native foundation work
 for M4 that depends only on M0's contracts may proceed alongside them; M4's
 gate is claimed last.
 
-The interpreter is the execution path of this release. The WebAssembly
-backend runs the pure part of this language under the fail-closed transition
-profile of the [runtime chapter](../../spec/06-runtime.md#wasm-transition),
-beside the interpreter on the same checked IR; it is not extended to grants,
-plans, or the new entry contract. This release does not ship `vibra build`
-and does not claim the clean-machine distribution gate.
+The interpreter is the execution path of this release. This release does not
+ship `vibra build` and does not claim the clean-machine distribution gate.
 
 Out of this release: dependency acquisition and locking beyond local inputs,
 MCP and editor adapters, concurrency, network operations, a content-addressed

@@ -32,10 +32,6 @@ The meaning of a program does not depend on what executes it.
 - **Pure means pure.** A pure operation MUST NOT read the filesystem, the
   environment, a clock, a random source, or the network.
 
-WebAssembly is a transition backend only. It runs pure code, and
-[Wasm transition](#wasm-transition) states what it owes while it is part of
-the toolchain. Source has no Wasm provider, no Wasm or WASI import, and no
-interoperability bridge.
 
 ## Evaluation
 
@@ -914,8 +910,8 @@ declarations of the embedded standard library may bind them.
   interface and its audit contract.
 - An unknown symbol or provider, a wrong owner, or a wrong signature MUST
   be rejected before execution.
-- A user package MUST NOT add a foreign function interface, WASI, a Wasm or
-  native import, or a foreign driver through these declarations.
+- A user package MUST NOT add a foreign function interface, a native
+  import, or a foreign driver through these declarations.
 - A host operation takes values and returns a value, through its explicit
   sealed receiver. File contents, stream data, the environment, clocks, and
   randomness are ordinary typed results.
@@ -1664,77 +1660,6 @@ typed outcomes, and the order of completed events MUST agree.
   replay at observable kernel actions. It does not require the interpreter
   and native code to take equal numbers of reduction steps.
 
-## Wasm transition
-
-The WebAssembly backend is a narrow transition substrate. It is not another
-source language and not a grant ABI, and it is part of the toolchain only
-while the native profile is unqualified.
-
-- It runs checked IR of this language, and only its pure part: a test
-  without `takes`, and the evaluation of a pure function. Every binary
-  target has the grant-receiving entry and every host operation needs a
-  grant, so neither is admitted: a program that needs the entry, a grant
-  receiver, a host operation, or the host registry MUST be reported as
-  unsupported.
-- It imports no host symbol. Its only imports are the pure native routines
-  of `vibra_native_v1`.
-- It has no grant ABI and gains none.
-- An unsupported case stays an explicit gap. A compatibility parser, an
-  unsafe import shim, and a false parity pass are all forbidden.
-
-**The module.** A transition module validates with core WebAssembly 2.0 MVP
-instructions, function tables, multiple results, bulk memory, sign
-extension, and non-trapping float-to-integer conversion. It MUST NOT
-require tail calls, GC, exceptions, SIMD, threads, reference types,
-memory64, or multiple memories. It has one 32-bit linear memory, exported
-as `vibra_v1_memory`, and no exported global. Only toolchain-owned native
-code reads its layout.
-
-**Imports** are closed: the pure native routines of `vibra_native_v1`, and
-nothing else. Source chooses no import.
-
-- Scalar parameters use `i32`, `i64`, `f32`, and `f64`. A `Char` is a
-  validated `i32` scalar. Smaller integers are sign- or zero-extended into
-  `i32`.
-- Every other value is an instance-local `U64` value ID. No guest pointer
-  or offset crosses the boundary.
-- An ID is non-zero, issued by its instance, never reused within it, and
-  held live in the instance's handle table until it is released.
-- Native in-process execution needs no such table; its offsets stay local
-  to the context.
-
-**Exports** are closed and carry the prefix `vibra_v1_`:
-
-| Export | Signature and meaning |
-| --- | --- |
-| `eval` | no parameters, no result: call the module's first function with no parameters, as the `interpret` operation does |
-| `test` | `i32` index, no result: run one test without `takes` in a fresh instance |
-| `status` | to `i32`: 0 none, 1 recorded trap, 2 memory host event, 3 assertion failure |
-| `trap_code` | to `i32`: 1 invalidCheckedProgram, 3 invalidHostValue; 2 and 4 are unassigned and never returned |
-| `origin` | to `i32`: zero for no origin, otherwise a table ordinal |
-| `failure` | to `i32`: 1 `assert.true`, 2 `assert.false`, 3 `assert.equal` |
-| `failure_expected`, `failure_actual`, `result` | to `i64`: typed scalar bits or a held value ID, according to the checked type |
-| `live_size` | to `i64`: live arena and handle-table bytes |
-| `release` | `i64` held ID, no result: drop the host's hold |
-| `variant` | `i64` ID to `i32`: the variant or member index |
-| `length` | `i64` ID to `i64`: the count of scalars, bytes, elements, entries, or components for the value's kind |
-| `read_i32`, `read_i64`, `read_f32`, `read_f64` | `i64` ID and `i64` index, to the named scalar class |
-| `read_id` | `i64` ID and `i64` index, to a new held child ID, which the host must release |
-
-An evaluation module has `eval` and a test module has `test`, never both.
-Returning is completion. An engine stop without the matching recorded
-status is a compiler defect. The module has no builder exports, because no
-host value ever enters it. The host never receives a raw pointer, and every
-accessor checks instance, kind, and liveness. The kind codes the boundary
-uses are constants of this boundary alone; the native value arena has its
-own private kinds.
-
-**Artifacts.** A transition artifact records its ABI and registry
-requirements and its source-origin mapping. Build metadata MUST NOT reuse
-an incompatible custom section or version. The substrate, its differential
-profile, its emitter and runner dependencies, and its packaging references
-are one unit: a toolchain ships all of them or none.
-
 ## Determinism and observability
 
 **Execution.** For identical checked code and equivalent deterministic
@@ -1782,7 +1707,7 @@ This chapter provides none of the following:
 - exactly-once external delivery, or universal journaling and recovery;
 - shared mutable references, or cycle collection;
 - a hard time bound;
-- a foreign function interface, native or Wasm;
+- a foreign function interface;
 - an operating-system sandbox for foreign binaries.
 
 Capability confinement in source is a contract of trusted compilation
@@ -1790,10 +1715,9 @@ together with reviewed issuers, runtime, and adapters. It is not safe
 execution of arbitrary machine code, and not a proof that a provider is
 correct.
 
-Nothing in the wire encodings or the WebAssembly backend provides an
-untagged union, union injection, a narrowing pattern, a tuple
-index, an ascription expression, a variadic call, or unchecked integer
-division and remainder. There is no implicit `await`, no permission prompt,
+Nothing in the wire encodings provides an untagged union, union injection,
+a narrowing pattern, a tuple index, an ascription expression, a variadic
+call, or unchecked integer division and remainder. There is no implicit `await`, no permission prompt,
 no ambient grant, no widening of a resource, no default error substituted
 for a bare `where`, no trap for a failed contract, and no erasing of a
 proof obligation by sampling.

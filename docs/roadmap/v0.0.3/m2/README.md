@@ -43,9 +43,6 @@ platform. A cell marked matched that fails, fails the run. A case cannot
 leave the table because the corpus changed. A pass on the stepper is not a
 pass on a platform. A platform without a runner stays pending.
 
-Until cutover the Wasm backend runs only the v0.0.1 corpus under the
-transition profile. A case it cannot express is unsupported there and is not
-counted as passed. Native qualification does not wait on it.
 
 ## Exit evidence
 
@@ -64,5 +61,4 @@ exactly-once external behavior or of durability across a crash.
 ## Not in this milestone
 
 Remote targets, cross-compilation as a product, an optimizer, and
-concurrency. [M3](../m3/README.md) packages what is qualified here and
-removes Wasm.
+concurrency. [M3](../m3/README.md) packages what is qualified here.

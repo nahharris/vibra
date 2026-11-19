@@ -2,8 +2,7 @@
 //!
 //! `docs/spec/06-runtime.md`, "Compiler intrinsic registry": these are the
 //! primitive rows whose algorithm loops, so they have no Vibra body and are the
-//! toolchain's own code, written once. A transition module reaches these
-//! functions through an import.
+//! toolchain's own code, written once.
 //!
 //! - `toStr` of an integer is its shortest decimal digits with a leading `-`
 //!   only for a negative value; of a float it is the canonical float

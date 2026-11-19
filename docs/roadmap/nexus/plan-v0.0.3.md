@@ -72,7 +72,7 @@ it; move the inventory rows.
 3. For a registry row: the shared sample vectors of
    `vibra_ir::external::vectors` pass through the Nexus routine,
    `every_vector_of_<family>_matches`, so the routine is held to the same
-   table as the interpreter and the Wasm backend.
+   table as the interpreter.
 4. A rejection case: the nearest invalid program still fails in the checker
    with its existing diagnostic, and nothing reaches the lowering.
 5. A balance check: after each of the feature's host tests the context's live
@@ -81,7 +81,7 @@ it; move the inventory rows.
 
 | Package | Feature | Sub-items, in order | Port from |
 | --- | --- | --- | --- |
-| X3-10 | Scalars and arithmetic | saturating integer operations at the extremes; checked operations, with `divChecked` and `remChecked` returning typed errors and no trapping form; integer conversions through `From` and `TryFrom`; floats and NaN canonicalization at observation; text conversion through `vibra-native::number` | `vibra-wasm/src/primitive.rs`; M4 guides 08a, 08c |
+| X3-10 | Scalars and arithmetic | saturating integer operations at the extremes; checked operations, with `divChecked` and `remChecked` returning typed errors and no trapping form; integer conversions through `From` and `TryFrom`; floats and NaN canonicalization at observation; text conversion through `vibra-native::number` | M4 guides 08a, 08c |
 | X3-11 | Aggregates and construction | tuple and record; variant types and `Bool`; wrapper; widening to an interface value; field reads; private representation; a bare `where` leaving no check; `where … else` returning a `Result` with the constant error; validation on every other way a value comes into being | `lower.rs`, `types.rs`; M4 05b |
 | X3-12 | Patterns and typed failure | `match` over every pattern kind, exact-length list patterns and constant patterns included; destructuring `let` and parameters; `let … else`; `try` with its expected type; `Never` | `pattern.rs`; M4 07, D2.15, D3.10 |
 | X3-13 | Generic instantiation | type descriptors; generic functions and types; closures at their creator's type arguments; generic anonymous callables | `desc.rs`; M4 D9.2, D9.5 |
@@ -90,7 +90,7 @@ it; move the inventory rows.
 | X3-16 | Collections and text | `List`, `Dict` and key order with the later duplicate winning, `Str`, `Bytes`; lookups returning `Option`; `Iter` over each, the lazy adapters, and the strict left `fold`; native implementations beside their Vibra bodies | `vibra-native/src/arena.rs`; M4 08b, 08d, 10 |
 | X3-17 | Module initialization | lazy once across modules; forward references; an initializer reached through a function value; the kept size exposed for the balance check (N35). Initializers are pure, so none performs a host call | M4 D2.13 |
 | X3-18 | Assertions, tests, observation | observation of every value kind as `ObservedValue`; `assert.true`, `assert.false`, `assert.equal`; the test table and harness test runs with a `TestWorld`; the explicit observation error for a value that hides a function, plan, or grant | `canon_typed.rs` for cases only; M4 11, D8.4, D8.5 |
-| X3-19 | Host operations | the seventeen operations of registry major 2 behind grants: standard streams; filesystem with scope policies; environment and arguments; clocks and random. The four shared error cases. The operand-list bound of N36 | `vibra-wasm-run/src/host.rs`; M4 16b–19; X2-03 |
+| X3-19 | Host operations | the seventeen operations of registry major 2 behind grants: standard streams; filesystem with scope policies; environment and arguments; clocks and random. The four shared error cases. The operand-list bound of N36 | M4 16b–19; X2-03 |
 | X3-28 | Guards, completed | guards on anonymous callables and interface members; a guarded callable converted to a callable type keeping its checks; a proven `… else` guard removed without a change of type; the tail-position table of the runtime chapter, row by row | X2-02 |
 | X3-29 | Plans and startup, completed | plans stored in values and returned; plans through interface values with their rows; `requires … else` per `await`; record and tuple grant parameters; every provider of the binding table; reverse release after a failed startup | X2-02, X2-03 |
 
@@ -147,8 +147,7 @@ run.
 
 - `native-parity.tsv` has **zero** `pending` cells in every column, and the
   runner's native line reports zero failed.
-- The interpreter line reports zero failed, the Wasm line still matches the
-  v0.0.1 corpus under the transition profile, and the repair scenario of the
+- The interpreter line reports zero failed, and the repair scenario of the
   v0.0.2 release gate passes.
 - `docs/roadmap/v0.0.3/m2/performance-baseline.md` records, per target, the
   same metrics as the [M4 baseline](../v0.0.1/m4/performance-baseline.md) for
@@ -205,24 +204,19 @@ inventory is published in the docs and matches `vibra --help`.
 
 ## X3-26 · Cutover
 
-**Decisions:** N39. **Precondition:** X3-22 and X3-24
+**Decisions:** N39, N55. **Precondition:** X3-22 and X3-24
 green on all three targets. If one target is not, this package does not
 start and the release stays incomplete until the support plan is changed on
-review. Removal is settled; only its date depends on readiness.
+review.
 
 **Sub-items, one PR each:** (1) the specification cutover: charter,
-`04`, `05`, `06`, `07`, profiles `wasm-v1` out and `nativeV1` in;
-(2) conformance switches to interpreter/native and the Wasm differential
-retires; (3) `vibra-wasm`, `vibra-wasm-run`, Wasmtime,
-`wasm-encoder`, and `wasmparser` leave the workspace, and `vibra_ir::boundary`
-keeps only what Nexus uses under a name without "WebAssembly"; (4) packaging
-and README references.
+`04`, `05`, `06`, `07` state native execution as qualified on the three
+targets, and `nativeV1` joins the profiles the release requires;
+(2) the conformance job requires the interpreter and native pair on every
+executable case; (3) packaging and README references.
 
 **Validation:**
 
-- `rg -i 'wasm|wasmtime'` over `crates/`, `Cargo.toml`, `.github/`, and
-  `docs/spec/` returns only historical references the PR lists one by one.
-- `Cargo.lock` has no `wasmtime`, `wasm-encoder`, or `wasmparser`.
 - v0.0.1 evidence under `docs/roadmap/v0.0.1/` is unchanged, and the reusable
   fixtures still run as native differential cases.
 - Both suites pass on the support matrix.

@@ -2,9 +2,8 @@
 
 This record is the "Native contract" item of [M0](README.md). It compares
 the code at and below checked IR with the active specification: the checked
-IR, the reference interpreter, the host world and natives, the native
-pipeline, and the WebAssembly transition substrate. Each item has one
-status:
+IR, the reference interpreter, the host world and natives, and the native
+pipeline. Each item has one status:
 
 - **kept**: the code already does what the specification requires;
 - **changed**: the construct stays, and the concrete change is named;
@@ -43,8 +42,6 @@ corrected before a package relies on the answer.
 | `vibra-nexus-bridge` | changed | Build kinds, descriptor entry field, launcher exit mapping, startup, and the harness observation change |
 | `vibra-build` | changed | `entry_outcome` leaves; the build carries the binding recipes |
 | `vibra-actors` | kept | Untouched in v0.0.2; it depends on no other crate |
-| `vibra-wasm` | changed | Narrowed to the fail-closed transition profile: renamed IR, removed forms gone, every new requirement refused |
-| `vibra-wasm-run` | changed | Narrowed with the emitter; keeps the closed `vibra_v1_*` boundary |
 
 ## 1. Checked IR
 
@@ -82,7 +79,7 @@ table has one row per construct family. Paths are under `crates/vibra-ir/src/`.
 | Host calls | `Host` `lib.rs:1029` | changed | The first argument is the grant, and the row is a registry-major-2 row | 06 Host registry |
 | Host registry | `HOST_ROWS` `external/host.rs:229`; `HostRow` `external/host.rs:154` | changed | Section 3 lists the row changes | 06 Host registry; 06 Registry versioning |
 | Native rows | `NATIVE_ROWS` `external/native.rs:252` | changed | The `ArrayOf` row (`external/native.rs:323`) leaves; `ObjectKind::Array` (`external/native.rs:112`) becomes `List` | 06 Native implementations |
-| Arena kinds | `arena.rs:68` to `arena.rs:90` | changed | New kinds for `Proc`, `Intent`, and sealed authority; `ARRAY` (`arena.rs:78`) becomes `LIST`; `UNION` (`arena.rs:88`) remains a historical transition code only (G32) | 06 Value arena; 06 Wasm transition |
+| Arena kinds | `arena.rs:68` to `arena.rs:90` | changed | New kinds for `Proc`, `Intent`, and sealed authority; `ARRAY` (`arena.rs:78`) becomes `LIST`; `UNION` (`arena.rs:88`) leaves (G32) | 06 Value arena |
 | Trap codes | `TrapCode` `boundary.rs:154` | changed | Checked programs have two traps (section 1.3) | 06 Traps |
 | Observed values | `ObservedValue` `observed.rs:16`; `Array` `observed.rs:51`; `Union` `observed.rs:55`; `is_err_variant` `observed.rs:77`; `canonical_observation` `observed.rs:182` | changed | `Array` becomes `List`; `Union` and `is_err_variant` are removed; the encoding becomes `@value.v2` | 06 Canonical value encoding |
 | Type encoding | `canonical_type` `lib.rs:5921`; `canonical_function_signature` `lib.rs:5987`; `CheckedModuleSet::canonical_vibon` `lib.rs:3262` | changed | S-expression records become the brace records of 06 Types under `@type.v2`. A declared type gains `seed` and `arguments`; the anonymous variant (`lib.rs:5950`) and union (`lib.rs:5954`) records go; the atom singleton tag becomes `@atomSingleton` (`lib.rs:5961`); a signature loses its variadic tail and, for `Fn`, its row | 06 Types |
@@ -165,9 +162,7 @@ division trap (`crates/vibra-lower/src/lib.rs:1111`).
 - A result that contains a function is rejected statically where a value
   must be observed. One hidden behind an interface value is
   `@tool.unsupportedValue`, a tool outcome.
-- The native trap type has the two codes. The four historical codes stay
-  only inside the Wasm transition boundary, whose `trap_code` export fixes
-  them (06 Wasm transition).
+- The native trap type has the two codes.
 - The two removed diagnostic codes leave the registry, which 07 owns.
 
 Fully specified.
@@ -268,8 +263,7 @@ descriptor's guessed error-variant flag MUST NOT decide how `ExitCode`
 behaves").
 
 **Code.** The entry takes no parameter: the lowering refuses one
-(`crates/vibra-lower/src/lib.rs:227`), the Wasm emitter refuses one
-(`crates/vibra-wasm/src/lib.rs:222`), and the interpreter fills only
+(`crates/vibra-lower/src/lib.rs:227`), and the interpreter fills only
 defaults (`crates/vibra-interp/src/lib.rs:496`). Failure is guessed from a
 variant named `err`: `ObservedValue::is_err_variant`
 (`crates/vibra-ir/src/observed.rs:77`), the interpreter
@@ -355,9 +349,7 @@ immutable sequence `List(T)`"); 06 Types ("`List` has the wire tag
   `Values::build_array` (`crates/vibra-nexus/src/host.rs:109`), and
   `HostValues::build_array` (`crates/vibra-host/src/operation.rs:83`).
 
-**Changed.** Renamed everywhere. The one exception is the number 4, named
-"array" among the historical builder kind codes of 06 Wasm transition: it
-stays a number of the transition boundary.
+**Changed.** Renamed everywhere.
 
 Fully specified.
 
@@ -473,47 +465,6 @@ implementations, "No user natives").
    G16.
 4. Before X2-04: the v2 encodings (N3), which the observation document
    uses.
-
-## 5. Wasm
-
-06 Wasm transition keeps the major-1 boundary until the native cutover,
-and the v0.0.2 [README](../README.md) "Scope and priorities" does not
-extend it to grants, plans, or the new entry.
-
-**Keep doing.**
-
-- Validate exactly the transition feature set
-  (`crates/vibra-wasm-run/src/validate.rs:30`, `validate.rs:113`).
-- Keep the closed exports with the prefix `vibra_v1_`
-  (`crates/vibra-ir/src/boundary.rs:14` to `boundary.rs:42`), the status
-  codes, the four historical trap codes, the builders and their
-  `invalidHostValue` checks, and the instance-local value IDs.
-- Import only `vibra_native_v1` (`boundary.rs:23`) and, where needed, the
-  major-1 host symbols of `vibra_v1` (`boundary.rs:19`).
-- Refuse an entry with parameters (`crates/vibra-wasm/src/lib.rs:222`).
-
-**Refuse, as unsupported, never by a shim.**
-
-- An entry with grant parameters or an `ExitCode` result: that is every
-  binary target of the new language.
-- A grant receiver, a host row of registry major 2, or a new error case.
-- A plan, an `await`, or a `proc`.
-- A guard with `else` and a `where … else` construction, until a package
-  adds them explicitly; neither is in the four refusals 06 names, but no
-  package extends the transition to them.
-
-**Forced by the IR changes.** The emitter matches on forms that leave:
-`Type::Union` (`crates/vibra-wasm/src/desc.rs:105`, `types.rs:53`,
-`key.rs:86`), `Expr::Widen` into a union (`lower.rs:1735`), `Expr::Array`
-(`lower.rs:1758`), `Expr::TupleProject` (`lower.rs:1791`),
-`Pattern::Member` (`pattern.rs:311`), the major-1 rows (`lower.rs:125`,
-`lower.rs:998`), the division trap (`lower.rs:4757`), and the unobservable
-trap (`lower/assertion.rs:244`). The runner reads host rows by symbol
-(`crates/vibra-wasm-run/src/host.rs:336`) and reports the unobservable trap
-(`crates/vibra-wasm-run/src/observe.rs:536`). Each of these is removed or
-renamed with N1.
-
-What the profile still runs once the front end is replaced is G31.
 
 ## 6. Specification gaps
 
@@ -949,33 +900,15 @@ answer, and a recommended answer. Coverage of the call-outs of section 1:
 - **Recommendation.** `dict.next`, `Fn({Dict(K V)} Option({{K V} Dict(K V)}))`:
   the first entry in key order and the remainder.
 
-### G31. What the Wasm transition runs after the front end is replaced
-
-- **Where.** The v0.0.2 [README](../README.md) "Scope and priorities": the
-  WebAssembly backend "keeps running the v0.0.1 corpus", while the same
-  section says the source surface is replaced and "nothing accepts both".
-  06 Wasm transition refuses the new entry, grant receivers, the new error
-  shapes, and registry major 2.
-- **Question.** Once the reader accepts only the new surface, which
-  programs does the transition profile run?
-- **Recommendation.** It runs checked IR of the new language and refuses
-  what 06 lists. Every binary target has the new entry, and every host
-  operation needs a grant, so what remains is pure: tests without `takes`,
-  and evaluation of pure expressions. Keep it for that, drop its host
-  imports, and say so in the README. The other choice, retiring the
-  substrate at the start of v0.0.2, is Hannah's call; nothing in M4
-  depends on it.
-
 ### G32. Arena kind codes
 
-- **Where.** 06 Value arena says arena layout is private; 06 Wasm
-  transition fixes historical kind codes (array 4, union 9). Both backends
-  read kinds from `crates/vibra-ir/src/arena.rs:68`.
+- **Where.** 06 Value arena says arena layout is private. The native code
+  and the runtime read kinds from `crates/vibra-ir/src/arena.rs:68`.
 - **Question.** Must native kind codes keep the historical numbers?
-- **Recommendation.** No. Keep the historical codes as constants of the
-  transition boundary only, and give Nexus its own private kinds, including
-  `List`, `Proc`, `Intent`, and sealed authority. No specification change
-  is needed; this records the decision.
+- **Recommendation.** No. The kinds are private to the toolchain, and Nexus
+  gives itself the kinds it needs, including `List`, `Proc`, `Intent`, and
+  sealed authority. No specification change is needed; this records the
+  decision.
 
 ## 7. Suggested package cut
 
@@ -990,13 +923,11 @@ checker are written.
    classification; rename `Array` to `List` everywhere. Crates: `vibra-ir`
    and every consumer that must keep building (`vibra-interp`,
    `vibra-lower`, `vibra-exec`, `vibra-nexus`, `vibra-nexus-bridge`,
-   `vibra-native`, `vibra-wasm`, `vibra-wasm-run`, and the current
-   checker). Depends: M0. Beside the front end: no; it lands first, and the
-   new checker targets the result.
-2. **N2. Two defect traps.** The native trap type with two codes; the four
-   historical codes moved into the Wasm boundary; the registry rows of the
-   removed codes deleted; fixtures rewritten (X2-01 item 3). Crates:
-   `vibra-ir`, `vibra-interp`, `vibra-lower`, `vibra-exec`,
+   `vibra-native`, and the current checker). Depends: M0. Beside the
+   front end: no; it lands first, and the new checker targets the result.
+2. **N2. Two defect traps.** The native trap type with two codes; the
+   registry rows of the removed codes deleted; fixtures rewritten (X2-01
+   item 3). Crates: `vibra-ir`, `vibra-interp`, `vibra-lower`, `vibra-exec`,
    `vibra-diagnostics`, `vibra-conformance`. Depends: N1. Beside: yes.
 3. **N3. Encodings and identities v2.** `@type.v2` and `@value.v2` brace
    records, `seed`, rows, `ObservedValue`, and the interpreter's and
@@ -1044,10 +975,7 @@ checker are written.
     root grant. Crates: `vibra-host`, `vibra-interp`, `vibra-workspace` (its
     test runner).
     Depends: N8, N10; G19, G20. Beside: yes.
-13. **N13. Wasm transition profile.** Refusals for every new requirement,
-    host imports dropped if G31 is accepted, and the transition's own kind
-    and trap codes. Crates: `vibra-wasm`, `vibra-wasm-run`. Depends: N1,
-    N2, N7; G31, G32. Beside: yes.
+
 
 The native track then runs as planned: X2-01 after N1 and N2; X2-02 after
 N4 and N5; X2-03 after N7 to N11; X2-04 after N3 and N10.

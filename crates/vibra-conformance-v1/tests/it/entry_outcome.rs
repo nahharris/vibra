@@ -1,5 +1,5 @@
 //! M4 Step 19: the interpreter classifies an entry's result by its variant, not
-//! by the content of the error, and the Wasm backend's classification agrees.
+//! by the content of the error.
 
 use vibra_interp_v1::Interpreter;
 use vibra_types_v1::check_source;

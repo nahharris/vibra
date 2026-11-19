@@ -31,5 +31,4 @@ milestone's gate is claimed after M3's.
 
 ## Not in this milestone
 
-`vibra build`, Linux and macOS, the full language on native code, and
-removal of the WebAssembly backend.
+`vibra build`, Linux and macOS, and the full language on native code.

@@ -1,7 +1,7 @@
-//! The number-text natives over linear memory, without an engine.
+//! The number-text natives over arena memory.
 //!
 //! Like `arena_natives`, these tests lay arena objects out by hand and call
-//! each native as the runner does. A `toStr` row builds a `Str`, so it measures
+//! each native as a runtime does. A `toStr` row builds a `Str`, so it measures
 //! with no destination and fills the one it is given; a `parse` row reads a `Str`
 //! and writes the number into the 8-byte cell it is given, answering a status. No
 //! native allocates, and a destination outside the memory is a fault, never a

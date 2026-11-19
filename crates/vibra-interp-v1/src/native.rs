@@ -1,9 +1,8 @@
 //! The interpreter's side of the native code.
 //!
-//! The rows of the closed table of native imports (`vibra_ir_v1::external`,
-//! `NATIVE_ROWS`) are implemented once, in `vibra-native-v1`, and a WebAssembly
-//! module reaches them through an import. The interpreter calls the same
-//! functions directly. This module is the interpreter's half of the
+//! The rows of the closed table of native rows (`vibra_ir_v1::external`,
+//! `NATIVE_ROWS`) are implemented once, in `vibra-native-v1`. The interpreter
+//! calls those functions directly. This module is the interpreter's half of the
 //! value-access interface: it reads a `str`, `bytes`, array, or dict value as a
 //! [`Source`] of its units, and builds the result from a [`Sink`]. It holds no
 //! algorithm of its own.

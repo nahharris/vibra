@@ -817,9 +817,8 @@ major version.
 Read queries, bounded eval, and revision-checked edits belong to the
 language release. The MCP server and editor adapters follow in a named
 milestone of the [roadmap](../roadmap/README.md). `build` produces native
-executables for the qualified targets; the WebAssembly backend is removed
-when native execution is qualified; `run`, `test`, and `eval` stay on the
-interpreter. A tool reports what it supports at every stage.
+executables for the qualified targets; `run`, `test`, and `eval` stay on
+the interpreter. A tool reports what it supports at every stage.
 
 Excluded:
 

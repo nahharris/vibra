@@ -561,13 +561,13 @@ interpreter = {{ result = "result.vibon", audit_trace = "audit.{extension}" }}
 }
 
 #[test]
-fn no_case_carries_a_second_expectation_for_the_wasm_backend() {
+fn no_case_carries_a_second_expectation_for_another_backend() {
     // `docs/spec/07-diagnostics-and-conformance.md`, "Differential execution":
-    // both backends are held to the one expectation, so the manifest has no
-    // field for a WebAssembly result or trace.
+    // every executor is held to the one expectation, so the manifest has no
+    // field for another backend's result or trace.
     let error = CaseManifest::from_str(
         r#"
-id = "V1-RUNTIME-wasm-expectation"
+id = "V1-RUNTIME-native-expectation"
 rule = "V1-RUNTIME"
 profile = "full-v1"
 operation = "interpret"
@@ -577,12 +577,12 @@ source = "input.vib"
 
 [expect]
 accepted = true
-wasm = { result = "result.vibon", audit_trace = "audit.vibon" }
+native = { result = "result.vibon", audit_trace = "audit.vibon" }
 "#,
     )
-    .expect_err("a Wasm-specific expectation must be rejected");
+    .expect_err("a backend-specific expectation must be rejected");
     assert!(
-        error.to_string().contains("wasm"),
+        error.to_string().contains("native"),
         "unexpected error: {error}"
     );
 }

@@ -1,13 +1,13 @@
-//! The natives over a module's linear memory.
+//! The natives over the bytes of a value arena.
 //!
-//! This is what the runner calls for an import of `vibra_native_v1`. It
-//! implements [`Source`] and [`Sink`] over the arena objects of
-//! `vibra_ir::arena` and runs the one set of algorithms of this crate.
+//! This is what a runtime calls for a native row. It implements [`Source`]
+//! and [`Sink`] over the arena objects of `vibra_ir::arena` and runs the one
+//! set of algorithms of this crate.
 //!
-//! Every offset the module hands over is checked before it is read: an object
+//! Every offset the caller hands over is checked before it is read: an object
 //! must lie inside the memory, have the kind and stride the row expects, and
 //! hold the payload its header claims. A violation is a [`Fault`], which the
-//! runner reports as a defect of the toolchain, and never a read or a write
+//! caller reports as a defect of the toolchain, and never a read or a write
 //! outside the arena.
 
 use std::cell::Cell;
@@ -21,7 +21,7 @@ use vibra_ir::external::{
 use crate::number::Parsed;
 use crate::{Count, Element, Sink, Source};
 
-/// A module's linear memory, as bytes that a source and a sink can share.
+/// The bytes of a value arena, which a source and a sink can share.
 pub type Memory<'m> = &'m [Cell<u8>];
 
 /// Views a mutable byte slice as [`Memory`].
@@ -30,7 +30,7 @@ pub fn memory(bytes: &mut [u8]) -> Memory<'_> {
     Cell::from_mut(bytes).as_slice_of_cells()
 }
 
-/// Why a native import refused its operands.
+/// Why a native row refused its operands.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Fault {
     /// An offset or a payload lies outside the memory.
@@ -522,10 +522,10 @@ fn arguments(row: &NativeRow, scalars: &[i64]) -> Result<Vec<Argument>, Fault> {
     Ok(out)
 }
 
-/// Runs a native import of `row` against `memory`.
+/// Runs the native routine of `row` against `memory`.
 ///
-/// `scalars` are the import's parameters in order, each widened to an `i64`, and
-/// the result is the import's result: an `Ordering` as `-1`, `0`, or `1`, or the
+/// `scalars` are the row's parameters in order, each widened to an `i64`, and
+/// the result is the row's result: an `Ordering` as `-1`, `0`, or `1`, or the
 /// component count of what a building row built or would build, or `-1` for
 /// the absence of one. See `vibra_ir::external::NativeRow` for the protocol of
 /// the destination.

@@ -1,4 +1,4 @@
-//! Helpers shared by the `vibra-native` integration tests: a block of linear
+//! Helpers shared by the `vibra-native` integration tests: a block of arena
 //! memory the tests lay arena objects out in by hand, and the native each
 //! intrinsic names.
 
@@ -9,7 +9,7 @@ use vibra_native::arena::{Fault, call, memory};
 /// Where a test puts the destination it hands a native.
 pub(crate) const OUT: usize = 1024;
 
-/// The native import row of `intrinsic`.
+/// The native row of `intrinsic`.
 pub(crate) fn row(intrinsic: CompilerIntrinsic) -> NativeRow {
     intrinsic.native_import().expect("a native row")
 }
@@ -41,7 +41,7 @@ impl Heap {
         }
     }
 
-    /// Calls the native `intrinsic` names over this memory, as the runner does.
+    /// Calls the native `intrinsic` names over this memory, as a runtime does.
     pub(crate) fn run(
         &mut self,
         intrinsic: CompilerIntrinsic,

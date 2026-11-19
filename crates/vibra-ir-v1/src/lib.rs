@@ -784,8 +784,8 @@ impl TestAssertion {
         }
     }
 
-    /// The code a module returns from `vibra_v1_failure` after this assertion
-    /// failed: its place in [`Self::ALL`], counted from one.
+    /// The numeric code of this assertion at the execution boundary: its
+    /// place in [`Self::ALL`], counted from one.
     #[must_use]
     pub fn code(self) -> i32 {
         Self::ALL
