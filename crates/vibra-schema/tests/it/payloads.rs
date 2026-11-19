@@ -79,6 +79,13 @@ fn the_three_rows_of_the_fmt_outcome_table_validate() {
         .push(diagnostic(DiagnosticCode::TypeMismatch));
     blocked.payload = fmt(true, false, Some("planned\n"));
     validate_command_result(&value(&blocked)).expect("a blocked write validates");
+
+    let mut unread = envelope("fmt", Status::Refuted, CommandOutcome::Diagnostics);
+    unread
+        .diagnostics
+        .push(diagnostic(DiagnosticCode::ModuleIoError));
+    unread.payload = fmt(false, false, None);
+    validate_command_result(&value(&unread)).expect("a file never read has no text");
 }
 
 #[test]

@@ -45,8 +45,12 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
     // The version 2 wire contracts. They render the diagnostic model; no
     // language phase depends on them.
     ("vibra-schema", &["vibra-diagnostics"]),
-    // The command line: the grammar, the support inventory, and the envelope.
-    ("vibra-cli", &["vibra-diagnostics", "vibra-schema"]),
+    // The command line: the grammar, the support inventory, the envelope,
+    // and the commands, each an adapter over the workspace engine.
+    (
+        "vibra-cli",
+        &["vibra-diagnostics", "vibra-schema", "vibra-workspace"],
+    ),
     // Checked IR names its traps by diagnostic code and knows no syntax.
     ("vibra-ir", &["vibra-diagnostics"]),
     // The workspace reads a project's files and hands later phases a

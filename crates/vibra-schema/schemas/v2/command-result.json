@@ -95,7 +95,7 @@
       }
     },
     {
-      "description": "fmt that admitted its path carries the fmt payload; diagnostics prevent writing.",
+      "description": "fmt that admitted its path carries the fmt payload. Diagnostics prevent writing, and the planned text is null only when the file was never read; a preview always carries its text.",
       "if": { "$ref": "#/$defs/fmtResponse" },
       "then": {
         "properties": { "payload": { "$ref": "#/$defs/fmtPayload" } },
@@ -106,6 +106,14 @@
         "then": {
           "properties": {
             "payload": { "properties": { "written": { "const": false } } }
+          }
+        },
+        "else": {
+          "properties": {
+            "payload": {
+              "if": { "properties": { "written": { "const": false } } },
+              "then": { "properties": { "text": { "type": "string" } } }
+            }
           }
         }
       }
@@ -223,10 +231,7 @@
           }
         },
         {
-          "properties": {
-            "written": { "const": false },
-            "text": { "type": "string" }
-          }
+          "properties": { "written": { "const": false } }
         }
       ]
     },

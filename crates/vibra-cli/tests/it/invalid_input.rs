@@ -158,7 +158,7 @@ fn a_valid_line_follows_an_invalid_one() {
     assert_eq!(run(&["--format", "xml", "help"]).code, 2);
     assert_eq!(run(&["help"]).code, 0);
     assert_eq!(run(&["--format", "json", "check", "@app", "@lib"]).code, 2);
-    assert_eq!(run(&["--format", "json", "check", "@app"]).code, 4);
+    assert_eq!(run(&["--format", "json", "lint", "@app"]).code, 4);
 }
 
 #[test]

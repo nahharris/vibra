@@ -27,7 +27,7 @@ fn help_json() {
         .filter(|capability| capability["supported"] == true)
         .map(|capability| capability["command"].as_str().expect("command"))
         .collect::<Vec<_>>();
-    assert_eq!(supported, ["help"]);
+    assert_eq!(supported, ["fmt", "check", "help"]);
     assert!(
         document["payload"]["usage"]
             .as_str()
@@ -44,11 +44,33 @@ fn help_names_what_it_supports_and_nothing_else() {
         .expect("array")
     {
         if capability["supported"] == true {
-            assert_eq!(capability["command"], "help");
-            assert_eq!(
-                capability["schemaIds"],
-                json!(["urn:vibra:schema:v2:command-result"])
-            );
+            let (operations, profiles, schemas) = match capability["command"].as_str() {
+                Some("help") => (
+                    json!(["help"]),
+                    json!(["toolingV2"]),
+                    json!(["urn:vibra:schema:v2:command-result"]),
+                ),
+                Some("fmt") => (
+                    json!(["format"]),
+                    json!(["readerV2"]),
+                    json!([
+                        "urn:vibra:schema:v2:command-result",
+                        "urn:vibra:schema:v2:diagnostic"
+                    ]),
+                ),
+                Some("check") => (
+                    json!(["workspaceCheck"]),
+                    json!(["staticV2"]),
+                    json!([
+                        "urn:vibra:schema:v2:command-result",
+                        "urn:vibra:schema:v2:diagnostic"
+                    ]),
+                ),
+                other => panic!("{other:?} is not supported"),
+            };
+            assert_eq!(capability["operations"], operations);
+            assert_eq!(capability["profiles"], profiles);
+            assert_eq!(capability["schemaIds"], schemas);
         } else {
             assert_eq!(capability["operations"], json!([]));
             assert_eq!(capability["profiles"], json!([]));
@@ -104,7 +126,7 @@ fn help_marks_unavailable() {
         .collect::<Vec<_>>();
     assert_eq!(commands.len(), 18);
     for line in &commands {
-        if *line == "help" {
+        if ["help", "fmt PATH [--write]", "check [TARGET]"].contains(line) {
             assert!(!line.contains("unavailable"), "{line}");
         } else {
             assert!(line.ends_with(" (unavailable)"), "{line}");
@@ -115,8 +137,8 @@ fn help_marks_unavailable() {
             .iter()
             .filter(|line| !line.contains("unavailable"))
             .count(),
-        1,
-        "exactly one command is shown as working"
+        3,
+        "exactly help, fmt, and check are shown as working"
     );
     assert!(outcome.stderr.is_empty());
 }

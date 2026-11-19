@@ -26,8 +26,8 @@ fn exit_table() {
 fn json_single_document() {
     for arguments in [
         &["--format", "json", "help"][..],
-        &["--format", "json", "check"],
-        &["--format", "json", "fmt", "a.vib", "--write"],
+        &["--format", "json", "lint"],
+        &["--format", "json", "edit", "imports", "a.vib", "--write"],
         &["--format", "json", "frobnicate"],
         &["--format", "json", "help", "extra"],
     ] {
@@ -47,7 +47,7 @@ fn the_binary_writes_one_envelope_and_exits_with_its_result() {
     let binary = env!("CARGO_BIN_EXE_vibra");
     for (arguments, code, result) in [
         (&["--format", "json", "help"][..], 0, "@command.ok"),
-        (&["--format", "json", "check"], 4, "@command.unavailable"),
+        (&["--format", "json", "lint"], 4, "@command.unavailable"),
         (
             &["--format", "json", "frobnicate"],
             2,

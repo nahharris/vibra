@@ -10,7 +10,9 @@
 
 mod support;
 
+mod check;
 mod exit;
+mod fmt;
 mod help;
 mod invalid_input;
 mod inventory;

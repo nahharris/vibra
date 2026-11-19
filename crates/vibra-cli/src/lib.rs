@@ -1,6 +1,6 @@
 //! The `vibra` command line: the argument grammar of the whole command
-//! surface, `help`, the support inventory, invalid input, and the unavailable
-//! outcome of every command no step has landed yet.
+//! surface, `help`, `fmt`, `check`, the support inventory, invalid input, and
+//! the unavailable outcome of every command no step has landed yet.
 //!
 //! `docs/spec/05-tooling.md`, "Command surface" and "Versioned envelope and
 //! results", are the normative definitions. [`run`] is a pure function of its
@@ -21,6 +21,8 @@
 )]
 
 pub mod args;
+pub mod check;
+pub mod fmt;
 pub mod help;
 pub mod inventory;
 pub mod render;
@@ -79,49 +81,61 @@ pub fn run<W: Write, E: Write>(
 fn execute(invocation: &Invocation) -> Response {
     let line = invocation.line;
     let format = invocation.globals.format;
-    if line.supported {
-        let usage = help::usage();
-        return Response {
+    match line.words {
+        ["help"] => Response::new(
             format,
-            command: line.name(),
-            result: CommandOutcome::Ok,
-            diagnostics: Vec::new(),
-            payload: Payload::Help(HelpPayload {
-                usage,
+            line.name(),
+            CommandOutcome::Ok,
+            Payload::Help(HelpPayload {
+                usage: help::usage(),
                 capabilities: inventory::capabilities(),
             }),
-            notice: None,
-        };
+        ),
+        ["fmt"] => fmt::run(invocation),
+        ["check"] => check::run(invocation),
+        _ => unavailable(format, line.name()),
     }
-    let name = line.name();
+}
+
+/// The response to a known command this tool does not support.
+fn unavailable(format: OutputFormat, name: String) -> Response {
     let diagnostic = Diagnostic::new(
         DiagnosticCode::ToolUnavailable,
         ByteSpan::empty_at(0),
         format!("`{name}` is not available in this release"),
     )
     .with_note(format!("the command `{name}` is known but not supported"));
-    Response {
-        format,
-        command: name,
-        result: CommandOutcome::Unavailable,
-        diagnostics: vec![diagnostic],
-        payload: Payload::Empty {},
-        notice: None,
-    }
+    let mut response =
+        Response::new(format, name, CommandOutcome::Unavailable, Payload::Empty {});
+    response.diagnostics.push(diagnostic);
+    response
 }
 
 /// The response to a command line that is invalid input: no diagnostics, the
 /// recognized command name or an empty one, and the empty payload.
 fn invalid_input(rejection: &Rejection) -> Response {
-    Response {
-        format: rejection.format,
-        command: rejection.command.clone(),
-        result: CommandOutcome::InvalidInput,
-        diagnostics: Vec::new(),
-        payload: Payload::Empty {},
-        notice: Some(format!(
-            "invalid input: {}; run `vibra help` for the usage",
-            rejection.reason
-        )),
-    }
+    refusal(
+        rejection.format,
+        rejection.command.clone(),
+        &rejection.reason,
+    )
+}
+
+/// Invalid input for `command`: no snapshot, no diagnostics, the empty
+/// payload, and one line for a person.
+pub(crate) fn refusal(
+    format: OutputFormat,
+    command: impl Into<String>,
+    reason: &dyn std::fmt::Display,
+) -> Response {
+    let mut response = Response::new(
+        format,
+        command,
+        CommandOutcome::InvalidInput,
+        Payload::Empty {},
+    );
+    response.notice = Some(format!(
+        "invalid input: {reason}; run `vibra help` for the usage"
+    ));
+    response
 }

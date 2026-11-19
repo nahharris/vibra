@@ -7,9 +7,9 @@ use crate::support::{envelope, run};
 
 #[test]
 fn unavailable_command() {
-    let (code, document) = envelope(&["--format", "json", "check"]);
+    let (code, document) = envelope(&["--format", "json", "lint"]);
     assert_eq!(code, 4);
-    assert_eq!(document["command"], "check");
+    assert_eq!(document["command"], "lint");
     assert_eq!(document["status"], "unsupported");
     assert_eq!(document["result"], "@command.unavailable");
     assert_eq!(document["workspaceRevision"], json!(null));
@@ -34,7 +34,7 @@ fn unavailable_command() {
     assert!(
         notes
             .iter()
-            .any(|note| note.as_str().is_some_and(|text| text.contains("`check`"))),
+            .any(|note| note.as_str().is_some_and(|text| text.contains("`lint`"))),
         "a note names the command: {notes:?}"
     );
 }
@@ -69,20 +69,21 @@ fn unavailable_each() {
         assert_eq!(document["payload"], json!({}));
         checked += 1;
     }
-    assert_eq!(checked, 17, "every line of the inventory but `help`");
+    assert_eq!(
+        checked, 15,
+        "every line of the inventory but `help`, `fmt`, and `check`"
+    );
 }
 
 #[test]
 fn well_formed_lines_with_operands_and_options_are_unavailable() {
-    let lines: [&[&str]; 21] = [
+    let lines: [&[&str]; 19] = [
         &["project", "init"],
         &["project", "init", "dest"],
         &["project", "inspect"],
         &["project", "add", "target", "(record name: @app)", "--write"],
         &["project", "remove", "dependency", "@lib", "--write"],
         &["project", "sync"],
-        &["fmt", "src/a.vib", "--write"],
-        &["check", "@app"],
         &["lint", "@app", "--write"],
         &["test", "@tests.math::\"adds one\""],
         &["run"],
@@ -97,7 +98,7 @@ fn well_formed_lines_with_operands_and_options_are_unavailable() {
         &["mcp", "--read-only", "x"],
         &["check", "--write-nothing"],
     ];
-    for line in &lines[..20] {
+    for line in &lines[..18] {
         let mut arguments = vec!["--format", "json"];
         arguments.extend_from_slice(line);
         let (code, document) = envelope(&arguments);
@@ -106,18 +107,18 @@ fn well_formed_lines_with_operands_and_options_are_unavailable() {
     }
     // The last row is not well formed: it names an option no line has.
     let mut arguments = vec!["--format", "json"];
-    arguments.extend_from_slice(lines[20]);
+    arguments.extend_from_slice(lines[18]);
     assert_eq!(run(&arguments).code, 2);
 }
 
 #[test]
 fn unavailable_in_human_format_is_one_line_on_standard_error() {
-    let outcome = run(&["fmt", "a.vib"]);
+    let outcome = run(&["edit", "imports", "a.vib"]);
     assert_eq!(outcome.code, 4);
     assert!(outcome.stdout.is_empty());
     assert_eq!(outcome.stderr.lines().count(), 1, "{:?}", outcome.stderr);
     assert!(outcome.stderr.starts_with("@error @tool.unavailable:"));
-    assert!(outcome.stderr.contains("`fmt`"));
+    assert!(outcome.stderr.contains("`edit imports`"));
 }
 
 #[test]

@@ -188,3 +188,36 @@ fn without_a_project_a_document_is_formatted_with_no_revision() {
     assert_eq!(plan.revision(), None);
     assert_eq!(plan.text(), Some(CANONICAL));
 }
+
+#[test]
+fn every_standard_library_module_is_canonical() {
+    // `vibra fmt` reads a file outside the embedded library with the ordinary
+    // reader, which keeps the library's `role` and `external` sections byte
+    // for byte; this test formats each module in its own reader mode.
+    let directory =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../stdlib");
+    let mut pending = vec![directory];
+    let mut modules = 0;
+    while let Some(directory) = pending.pop() {
+        for entry in std::fs::read_dir(&directory).expect("a readable directory") {
+            let path = entry.expect("an entry").path();
+            if path.is_dir() {
+                pending.push(path);
+            } else if path.extension().and_then(|text| text.to_str()) == Some("vib") {
+                let bytes = std::fs::read(&path).expect("a module");
+                let document = vibra_syntax::parse_source_with(
+                    None,
+                    &bytes,
+                    vibra_syntax::SourceOptions {
+                        standard_library: true,
+                    },
+                );
+                assert!(document.diagnostics().is_empty(), "{}", path.display());
+                let formatted = vibra_fmt::format_document(&document).expect("text");
+                assert_eq!(formatted.as_bytes(), bytes, "{}", path.display());
+                modules += 1;
+            }
+        }
+    }
+    assert!(modules >= 6, "{modules} modules");
+}

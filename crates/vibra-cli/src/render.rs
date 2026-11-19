@@ -5,6 +5,7 @@
 //! human format the usage text goes to standard output and each diagnostic is
 //! one line on standard error.
 
+use std::collections::BTreeMap;
 use std::io::Write;
 
 use vibra_diagnostics::{Diagnostic, LineIndex};
@@ -28,12 +29,43 @@ pub struct Response {
     pub command: String,
     /// The command result.
     pub result: CommandOutcome,
+    /// The status of the observation.
+    pub status: Status,
+    /// The workspace revision, `None` when no snapshot was taken.
+    pub workspace_revision: Option<String>,
     /// The diagnostics, once each.
     pub diagnostics: Vec<Diagnostic>,
+    /// The text of each source a diagnostic names, by source identity, from
+    /// which display positions are derived.
+    pub sources: BTreeMap<String, String>,
     /// The payload.
     pub payload: Payload,
     /// A line for a person when the response carries no diagnostic to show.
     pub notice: Option<String>,
+}
+
+impl Response {
+    /// A response with the status `result` fixes, no snapshot, no
+    /// diagnostic, and no notice.
+    #[must_use]
+    pub fn new(
+        format: OutputFormat,
+        command: impl Into<String>,
+        result: CommandOutcome,
+        payload: Payload,
+    ) -> Self {
+        Self {
+            format,
+            command: command.into(),
+            result,
+            status: status_for(result),
+            workspace_revision: None,
+            diagnostics: Vec::new(),
+            sources: BTreeMap::new(),
+            payload,
+            notice: None,
+        }
+    }
 }
 
 /// The status an envelope reports for `result`.
@@ -71,16 +103,28 @@ fn envelope(response: &Response) -> Result<Envelope, String> {
     let mut envelope = Envelope::new(
         env!("CARGO_PKG_VERSION"),
         response.command.clone(),
-        status_for(response.result),
+        response.status,
         response.result,
         limits(),
     );
-    // Every diagnostic of this command line has no location, so the index is
-    // the empty document's.
-    let index = LineIndex::new("");
+    envelope
+        .workspace_revision
+        .clone_from(&response.workspace_revision);
+    let indexes = response
+        .sources
+        .iter()
+        .map(|(source_id, text)| (source_id.clone(), LineIndex::new(text)))
+        .collect::<BTreeMap<_, _>>();
+    // A diagnostic with no location, or naming a source that was never read,
+    // is at offset 0 of the empty document.
+    let empty = LineIndex::new("");
     for diagnostic in &response.diagnostics {
+        let index = diagnostic
+            .source_id()
+            .and_then(|source_id| indexes.get(source_id))
+            .unwrap_or(&empty);
         envelope.diagnostics.push(
-            DiagnosticDocument::render(diagnostic, &index)
+            DiagnosticDocument::render_with_source_indexes(diagnostic, index, &indexes)
                 .map_err(|error| error.to_string())?,
         );
     }
@@ -88,12 +132,20 @@ fn envelope(response: &Response) -> Result<Envelope, String> {
     Ok(envelope)
 }
 
-/// One line per diagnostic on standard error.
-fn write_diagnostics<E: Write>(diagnostics: &[Diagnostic], stderr: &mut E) {
-    for diagnostic in diagnostics {
+/// One line per diagnostic on standard error, with its location when it has
+/// one.
+fn write_diagnostics<E: Write>(response: &Response, stderr: &mut E) {
+    for diagnostic in &response.diagnostics {
+        let location = diagnostic.source_id().map(|source_id| {
+            let text = response.sources.get(source_id).map_or("", String::as_str);
+            let position =
+                LineIndex::new(text).position(diagnostic.primary_span().start());
+            format!("{source_id}:{}:{}: ", position.line, position.column)
+        });
         let _ = writeln!(
             stderr,
-            "{} {}: {}",
+            "{}{} {}: {}",
+            location.unwrap_or_default(),
             diagnostic.level().as_atom(),
             diagnostic.code().as_atom(),
             diagnostic.message()
@@ -127,10 +179,20 @@ pub fn emit<W: Write, E: Write>(
             }
         }
         OutputFormat::Human => {
-            if let Payload::Help(help) = &response.payload {
-                let _ = write!(stdout, "{}", help.usage);
+            match &response.payload {
+                Payload::Help(help) => {
+                    let _ = write!(stdout, "{}", help.usage);
+                }
+                Payload::Fmt(fmt)
+                    if !fmt.written && response.diagnostics.is_empty() =>
+                {
+                    if let Some(text) = &fmt.text {
+                        let _ = write!(stdout, "{text}");
+                    }
+                }
+                _ => {}
             }
-            write_diagnostics(&response.diagnostics, stderr);
+            write_diagnostics(response, stderr);
             if let Some(notice) = &response.notice {
                 let _ = writeln!(stderr, "{notice}");
             }
@@ -147,13 +209,16 @@ fn trap<W: Write, E: Write>(
     serialize: &dyn Fn(&Envelope) -> Result<String, SchemaViolation>,
 ) -> i32 {
     let _ = writeln!(stderr, "internal error: {message}");
-    let trapped = Envelope::new(
+    let mut trapped = Envelope::new(
         env!("CARGO_PKG_VERSION"),
         response.command.clone(),
         status_for(CommandOutcome::Trap),
         CommandOutcome::Trap,
         limits(),
     );
+    trapped
+        .workspace_revision
+        .clone_from(&response.workspace_revision);
     if let Ok(json) = serialize(&trapped) {
         let _ = writeln!(stdout, "{json}");
     }
@@ -165,14 +230,12 @@ mod tests {
     use super::*;
 
     fn response() -> Response {
-        Response {
-            format: OutputFormat::Json,
-            command: "help".to_owned(),
-            result: CommandOutcome::Ok,
-            diagnostics: Vec::new(),
-            payload: Payload::Empty {},
-            notice: None,
-        }
+        Response::new(
+            OutputFormat::Json,
+            "help",
+            CommandOutcome::Ok,
+            Payload::Empty {},
+        )
     }
 
     #[test]
