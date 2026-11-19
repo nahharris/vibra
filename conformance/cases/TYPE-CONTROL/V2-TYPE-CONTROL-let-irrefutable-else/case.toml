@@ -1,0 +1,18 @@
+id = "V2-TYPE-CONTROL-let-irrefutable-else"
+rule = "V2-TYPE-CONTROL-let-irrefutable-else"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "01-source-language.md#let: an irrefutable pattern with else is reported at the pattern"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@pattern.irrefutableLetElse"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 48, end = 53 }

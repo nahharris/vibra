@@ -91,7 +91,7 @@ the vertical-slice rule.
 | 14 | [stdlib-bootstrap](steps/14-stdlib-bootstrap.md) | infrastructure | 07, 12 | 08, 09, 10, 11, 13, 24, 27 | `stdlib/` (new), `vibra-types` (new) | landed |
 | 15 | [check-core](steps/15-check-core.md) | vertical | 11, 13, 14 | 08, 24, 27 | `vibra-types`, `vibra-interp`, `vibra-workspace`, `vibra-conformance`, `stdlib/`, `conformance/cases` | landed |
 | 16 | [check-data](steps/16-check-data.md) | vertical | 15 | 08, 24, 27 | `vibra-types`, `vibra-interp`, `stdlib/`, `conformance/cases` | landed |
-| 17 | [check-bodies](steps/17-check-bodies.md) | vertical | 16 | 08, 24, 27 | `vibra-types`, `vibra-interp`, `conformance/cases` | planned |
+| 17 | [check-bodies](steps/17-check-bodies.md) | vertical | 16 | 08, 24, 27 | `vibra-types`, `vibra-interp`, `conformance/cases` | landed |
 | 18 | [check-callables](steps/18-check-callables.md) | vertical | 17 | 08, 23, 24, 25, 27 | `vibra-types`, `vibra-interp`, `conformance/cases` | planned |
 | 19 | [check-interfaces](steps/19-check-interfaces.md) | vertical | 18 | 08, 23, 24, 25, 26, 27 | `vibra-types`, `vibra-interp`, `stdlib/`, `conformance/cases` | planned |
 | 20 | [stdlib-pure](steps/20-stdlib-pure.md) | vertical | 19 | 08, 23, 24, 25, 26, 27 | `stdlib/`, `vibra-types`, `vibra-interp`, `conformance/cases` | planned |

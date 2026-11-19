@@ -1,0 +1,1 @@
+fn f takes {items: List(I32)} returns r: I32 do let Option.some(value: h) be items(0u64) endlet return h endfn

@@ -1,0 +1,18 @@
+id = "V2-TYPE-CONTROL-let-else-not-never"
+rule = "V2-TYPE-CONTROL-let-else-not-never"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "01-source-language.md#let: a fallback that can complete is a mismatch at the else body"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.mismatch"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 94, end = 114 }

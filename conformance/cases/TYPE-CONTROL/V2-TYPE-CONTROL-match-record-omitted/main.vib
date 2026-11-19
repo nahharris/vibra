@@ -1,0 +1,3 @@
+fn main returns r: Str do return name(User(name: "Ada" id: 1u64)) endfn
+fn name takes {user: User} returns r: Str do match user case User(name: n) return n endmatch endfn
+type User of {name: Str id: U64} endtype

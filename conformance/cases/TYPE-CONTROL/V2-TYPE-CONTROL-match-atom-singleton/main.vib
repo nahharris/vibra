@@ -1,0 +1,2 @@
+fn main returns r: I32 do return f(@ok) endfn
+fn f takes {a: @ok} returns r: I32 do match a case @ok return 1i32 endmatch endfn

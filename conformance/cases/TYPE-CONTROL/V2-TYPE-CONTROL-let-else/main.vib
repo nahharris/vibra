@@ -1,0 +1,2 @@
+fn main returns r: {I32 I32} do return {first([]) first([7i32 8i32])} endfn
+fn first takes {items: List(I32)} returns r: I32 do let Option.some(value: head) be items(0u64) else return 0i32 endlet return head endfn

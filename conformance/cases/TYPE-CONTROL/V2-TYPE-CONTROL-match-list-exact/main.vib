@@ -1,0 +1,2 @@
+fn main returns r: I32 do return second([1i32 2i32]) endfn
+fn second takes {items: List(I32)} returns r: I32 do match items case [a b] return b case _ return 0i32 endmatch endfn

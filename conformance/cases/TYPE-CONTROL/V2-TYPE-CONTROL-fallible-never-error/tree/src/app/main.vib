@@ -1,0 +1,2 @@
+fn pass takes {x: Result(Void Never)} returns r: Result(Void Never) do return x endfn
+fn f takes {x: Result(Void Never)} returns r: Void do pass(x) return void endfn

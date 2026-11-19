@@ -5,6 +5,8 @@ use vibra_interp::MemoryBudget;
 
 use super::{check_source, interpret};
 
+mod bodies;
+
 const SOURCE: &str = "main.vib";
 
 /// The canonical result of running `source`, or the diagnostics.

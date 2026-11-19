@@ -1,0 +1,2 @@
+fn main returns r: {Option(I32) Option(I32)} do return {f(Option.some(value: 1i32)) f(Option.none())} endfn
+fn f takes {o: Option(I32)} returns r: Option(I32) do let v be try o endlet return Option.some(value: I32.add(v 1i32)) endfn

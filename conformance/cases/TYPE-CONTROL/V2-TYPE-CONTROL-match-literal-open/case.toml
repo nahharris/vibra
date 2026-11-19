@@ -1,0 +1,19 @@
+id = "V2-TYPE-CONTROL-match-literal-open"
+rule = "V2-TYPE-CONTROL-match-literal-open"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#coverage: literal patterns never cover a numeric type"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@pattern.nonExhaustive"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 38, end = 98 }
+notes = ["_"]

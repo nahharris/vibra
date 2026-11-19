@@ -1,0 +1,1 @@
+fn f takes {t: {I32 I32}} returns r: I32 do let {a b} be t else return 0i32 endlet return I32.add(a b) endfn

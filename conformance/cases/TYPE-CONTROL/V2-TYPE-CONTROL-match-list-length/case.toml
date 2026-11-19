@@ -1,0 +1,19 @@
+id = "V2-TYPE-CONTROL-match-list-length"
+rule = "V2-TYPE-CONTROL-match-list-length"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#coverage: a fixed-length list pattern never covers List(T); only a binder covers the rest"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@pattern.nonExhaustive"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 48, end = 106 }
+notes = ["_"]

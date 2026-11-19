@@ -1,0 +1,19 @@
+id = "V2-TYPE-CONTROL-match-nested-missing"
+rule = "V2-TYPE-CONTROL-match-nested-missing"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#coverage: the note names the first uncovered shape in declaration order, nested in its constructors"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@pattern.nonExhaustive"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 104, end = 214 }
+notes = ["Option.some(value: Shape.empty())"]

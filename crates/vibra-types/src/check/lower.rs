@@ -90,8 +90,14 @@ fn check_bodies(
             .and_then(|owner| program.types.get(owner))
             .and_then(TypeData::self_type);
         let mut checker = BodyChecker::new(program, layout, data.module, text);
+        let patterns = data
+            .view
+            .takes()
+            .into_iter()
+            .map(|(pattern, _)| pattern)
+            .collect::<Vec<_>>();
         let checked =
-            checker.callable(signature, &data.params, &data.binders, self_type, body);
+            checker.callable(signature, &patterns, &data.binders, self_type, body);
         pass.functions.insert(index, checked);
         pass.instantiations
             .extend(checker.instantiations.drain(..).map(

@@ -11,6 +11,9 @@
 //! machine over an explicit stack of tasks: no host stack grows with the
 //! depth of the program.
 
+mod patterns;
+
+use std::rc::Rc;
 use std::sync::Arc;
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
@@ -20,8 +23,8 @@ use vibra_ir::{
     Type, Value,
 };
 use vibra_syntax::source::{
-    Argument, Body, Expr, ExprForm, If, Match, MatchArm as ArmView, Pattern,
-    PatternForm, Postfix, Primary, Statement, Suffix, TypeExpr,
+    Argument, Body, Expr, ExprForm, If, Match, MatchArm as ArmView, Pattern, Postfix,
+    Primary, Statement, Suffix, TypeExpr,
 };
 use vibra_syntax::{CstNode, SyntaxKind};
 
@@ -29,6 +32,8 @@ use super::declare::{
     Entity, NoType, Program, Scope, TypeKind, key_diagnostic, substitute_self,
 };
 use super::literal::{self, LiteralFault};
+use super::pattern::{Coverage, LimitReached, Pat};
+use patterns::pattern_span;
 
 /// Where each supported declaration lands in the checked module set.
 #[derive(Debug, Default)]
@@ -94,6 +99,8 @@ impl Ctx {
 enum BodyMode {
     /// The body of a callable: every path MUST leave.
     Callable,
+    /// The fallback of a `let … else`: every path MUST leave.
+    Fallback,
     /// A branch, an arm, or a `do` block, whose value is used or not.
     Branch(Ctx),
 }
@@ -235,14 +242,6 @@ struct IfState<'a> {
     failed: bool,
 }
 
-/// What one arm of a `match` covers.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Cover {
-    All,
-    Case(usize),
-    Nothing,
-}
-
 struct MatchState<'a> {
     view: Match<'a>,
     ctx: Ctx,
@@ -254,11 +253,10 @@ struct MatchState<'a> {
     lowered: Vec<Option<MatchArm>>,
     pending_pattern: Option<IrPattern>,
     mark: usize,
-    /// The cases of the subject's variant type, when it is one.
-    cases: Option<(String, Vec<String>)>,
-    covered: Vec<Option<ByteSpan>>,
-    covered_all: Option<ByteSpan>,
-    first_cover: Option<ByteSpan>,
+    /// Each arm's shape for coverage and the span of its pattern.
+    covers: Vec<(Rc<Pat>, ByteSpan)>,
+    /// Whether a pattern had a fault, so that coverage is not decided.
+    patterns_failed: bool,
     types: Vec<Option<Type>>,
     join: Option<Type>,
     failed: bool,
@@ -269,16 +267,25 @@ struct MatchState<'a> {
 enum Piece {
     Expr(Node),
     Let(Option<usize>, Node),
+    /// An irrefutable `let` whose pattern takes the value apart.
+    Destructure(Box<(IrPattern, Node)>),
+    /// A `let … else`: the pattern, the initializer, and the fallback.
+    LetElse(Box<(IrPattern, Node, Node)>),
 }
 
 #[derive(Debug)]
-enum Pending {
+enum Pending<'a> {
     Nothing,
     Let {
-        binder: Option<String>,
+        pattern: Option<Pattern<'a>>,
+        pattern_span: ByteSpan,
+        fallback: Option<Body<'a>>,
         written: Option<Type>,
         value_span: ByteSpan,
     },
+    /// A `let … else` whose fallback is being checked: the pattern's
+    /// binders, the pattern, and the initializer.
+    Fallback(Box<(Vec<Local>, Option<IrPattern>, Option<Node>)>),
     Expr {
         span: ByteSpan,
         last: bool,
@@ -291,7 +298,7 @@ struct BodyState<'a> {
     next: usize,
     mode: BodyMode,
     mark: usize,
-    pending: Pending,
+    pending: Pending<'a>,
     never_at: Option<ByteSpan>,
     unreachable_reported: bool,
     pieces: Vec<Option<Piece>>,
@@ -302,6 +309,8 @@ struct BodyState<'a> {
 enum Task<'a> {
     Expr(Expr<'a>, Ctx),
     Return(ByteSpan),
+    /// A `try`, and its operand's span.
+    Try(ByteSpan, ByteSpan),
     Postfix(Box<PostfixState<'a>>),
     Call(Box<CallState<'a>>),
     Product(Box<ProductState<'a>>),
@@ -350,6 +359,8 @@ pub(crate) struct BodyChecker<'p, 'a> {
     /// The span of a `let` initializer whose written type is faulty and
     /// already reported, so that nothing fixing its type is not reported.
     unfixed: Option<ByteSpan>,
+    /// The number of patterns coverage does not take apart so far.
+    opaque: usize,
 }
 
 /// The value of one checked callable body or initializer.
@@ -388,16 +399,19 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             instantiations: Vec::new(),
             argument: None,
             unfixed: None,
+            opaque: 0,
         }
     }
 
     /// Checks the body of a callable of type `params -> result` whose
-    /// parameters are named `names`, with the type parameters `binders` and
-    /// `self_type` for `Self` in scope.
+    /// parameters are written as `patterns`, with the type parameters
+    /// `binders` and `self_type` for `Self` in scope. Each parameter is
+    /// bound to its slot, and a pattern that takes it apart is a `match` of
+    /// one arm around the body.
     pub(crate) fn callable(
         &mut self,
         signature: &FnType,
-        names: &[(String, ByteSpan)],
+        patterns: &[Pattern<'a>],
         binders: &[String],
         self_type: Option<Type>,
         body: Body<'a>,
@@ -409,19 +423,66 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         self.binders = binders.to_vec();
         self.self_type = self_type;
         self.result = Some(result.clone());
-        for (slot, (ty, (name, _))) in params.iter().zip(names).enumerate() {
-            self.slots.push(ty.clone());
-            self.locals.push(Local {
-                name: name.clone(),
-                slot,
-                ty: Some(ty.clone()),
-            });
+        self.slots.extend(params.iter().cloned());
+        let mut failed = false;
+        let mut destructured = Vec::new();
+        for (slot, (ty, pattern)) in params.iter().zip(patterns).enumerate() {
+            let span = pattern_span(*pattern, self.text);
+            let typed = self.type_pattern(*pattern, span, Some(ty));
+            if typed.lowered.is_some()
+                && self.irrefutable(&typed.cover, ty, span) == Some(false)
+            {
+                self.report(
+                    DiagnosticCode::PatternRefutableBinding,
+                    span,
+                    "this parameter pattern does not cover every value of its type",
+                );
+                failed = true;
+            }
+            match typed.lowered {
+                Some(IrPattern::Bind(fresh)) if fresh + 1 == self.slots.len() => {
+                    // A bare name binds the parameter's own slot.
+                    self.slots.pop();
+                    self.locals.extend(
+                        typed
+                            .bindings
+                            .into_iter()
+                            .map(|local| Local { slot, ..local }),
+                    );
+                }
+                Some(IrPattern::Discard) => {}
+                Some(lowered) => {
+                    self.locals.extend(typed.bindings);
+                    destructured.push((slot, ty.clone(), lowered, span));
+                }
+                None => {
+                    self.locals.extend(typed.bindings);
+                    failed = true;
+                }
+            }
         }
         let out = self.run(Task::Body(Box::new(
             self.body_state(body, BodyMode::Callable),
         )));
+        let node = out.node.filter(|_| !failed).map(|body| {
+            destructured.into_iter().rev().fold(
+                body,
+                |body, (slot, value_type, pattern, span)| {
+                    let subject =
+                        self.node(IrExpr::Variable { slot, value_type }, span);
+                    self.node(
+                        IrExpr::Match {
+                            subject: Box::new(subject),
+                            arms: vec![MatchArm { pattern, body }],
+                            value_type: Type::Never,
+                        },
+                        span,
+                    )
+                },
+            )
+        });
         Checked {
-            node: out.node,
+            node,
             slot_count: self.slots.len(),
         }
     }
@@ -546,6 +607,9 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             let step = match task {
                 Task::Expr(expr, ctx) => self.start_expr(expr, ctx),
                 Task::Return(span) => self.finish_return(span, input.take()),
+                Task::Try(span, operand) => {
+                    self.finish_try(span, operand, input.take())
+                }
                 Task::Postfix(state) => self.step_postfix(state, input.take()),
                 Task::Call(state) => self.step_call(state, input.take()),
                 Task::Product(state) => self.step_product(state, input.take()),
@@ -582,12 +646,51 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                     Task::Expr(operand, Ctx::Value(Some(result))),
                 )
             }
-            ExprForm::Try(_) => {
-                self.unavailable(span, "`try`");
-                Step::Done(Out::error())
+            ExprForm::Try(operand) => {
+                let carrier = self
+                    .result
+                    .as_ref()
+                    .filter(|result| self.carrier(result))
+                    .and_then(|result| match result {
+                        Type::Declared(id, arguments) => {
+                            Some((id.clone(), arguments.clone()))
+                        }
+                        _ => None,
+                    });
+                let Some((id, mut arguments)) = carrier else {
+                    let found = self.result.as_ref().map_or_else(
+                        || "no result".to_owned(),
+                        |result| format!("`{result}`"),
+                    );
+                    self.report(
+                        DiagnosticCode::TypeInvalidTry,
+                        span,
+                        format!(
+                            "`try` needs an enclosing callable whose result is an \
+                             `Option` or a `Result`, but it has {found}"
+                        ),
+                    );
+                    return Step::Done(Out::error());
+                };
+                // The operand is the carrier of the value the context
+                // expects, with the enclosing error type.
+                let expected = ctx.expected().and_then(|value| {
+                    let first = arguments.first_mut()?;
+                    *first = value.clone();
+                    Some(Type::Declared(id, arguments))
+                });
+                let operand_span = expr_span(&operand);
+                Step::Child(
+                    Task::Try(span, operand_span),
+                    Task::Expr(operand, Ctx::Value(expected)),
+                )
             }
             ExprForm::Await(_) => {
-                self.unavailable(span, "`await`");
+                self.report(
+                    DiagnosticCode::EffectInvalidAwait,
+                    span,
+                    "`await` is valid only in a `proc`",
+                );
                 Step::Done(Out::error())
             }
             ExprForm::Let(_) => Step::Done(Out::error()),
@@ -632,6 +735,70 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         });
         Step::Done(Out {
             ty: Some(Type::Never),
+            node,
+        })
+    }
+
+    /// Whether `ty` is a `try` carrier: an `Option` or a `Result`.
+    fn carrier(&self, ty: &Type) -> bool {
+        let Type::Declared(id, _) = ty else {
+            return false;
+        };
+        matches!(
+            self.program.library_of(id),
+            Some(Library::Option | Library::Result)
+        )
+    }
+
+    /// A `try` at `span` whose operand at `operand_span` arrived: the
+    /// operand is a carrier of the enclosing result's kind, and a `Result`
+    /// has its error type.
+    fn finish_try(
+        &mut self,
+        span: ByteSpan,
+        operand_span: ByteSpan,
+        input: Option<Out>,
+    ) -> Step<'a> {
+        let out = input.unwrap_or_else(Out::error);
+        let (Some(actual), Some(result)) = (out.ty, self.result.clone()) else {
+            return Step::Done(Out::error());
+        };
+        if actual == Type::Never {
+            self.report(
+                DiagnosticCode::TypeUnreachableCode,
+                operand_span,
+                "this operand never completes, so `try` has nothing to unwrap",
+            );
+            return Step::Done(Out::error());
+        }
+        let fits = match (&actual, &result) {
+            (Type::Declared(own, values), Type::Declared(enclosing, errors)) => {
+                let kind = self.program.library_of(own);
+                kind.is_some()
+                    && kind == self.program.library_of(enclosing)
+                    && values.get(1) == errors.get(1)
+            }
+            _ => false,
+        };
+        let value = match &actual {
+            Type::Declared(_, values) if fits => values.first().cloned(),
+            _ => None,
+        };
+        let Some(value) = value else {
+            self.report(
+                DiagnosticCode::TypeInvalidTry,
+                span,
+                format!(
+                    "`try` on `{actual}` does not fit the enclosing result `{result}`"
+                ),
+            );
+            return Step::Done(Out::error());
+        };
+        let node = out
+            .node
+            .map(|operand| self.node(IrExpr::Try(Box::new(operand)), span));
+        Step::Done(Out {
+            ty: Some(value),
             node,
         })
     }
@@ -699,10 +866,8 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                     lowered: Vec::new(),
                     pending_pattern: None,
                     mark: 0,
-                    cases: None,
-                    covered: Vec::new(),
-                    covered_all: None,
-                    first_cover: None,
+                    covers: Vec::new(),
+                    patterns_failed: false,
                     types: Vec::new(),
                     join: None,
                     failed: false,
@@ -998,6 +1163,15 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         let program = self.program;
         let data = program.types.get(index)?;
         match data.kind {
+            TypeKind::Wrapper(_) | TypeKind::Tuple(_) | TypeKind::Record(_)
+                if data.invariant =>
+            {
+                self.unavailable(
+                    callee_span,
+                    "constructing a value of a type with an invariant",
+                );
+                None
+            }
             TypeKind::Wrapper(_) | TypeKind::Tuple(_) | TypeKind::Record(_)
                 if data.id.is_some() =>
             {
@@ -2352,13 +2526,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                     );
                     state.failed = true;
                 }
-                Some(ty) => {
-                    state.cases = self.variant_cases(&ty);
-                    if let Some((_, cases)) = &state.cases {
-                        state.covered = vec![None; cases.len()];
-                    }
-                    state.subject = Some(ty);
-                }
+                Some(ty) => state.subject = Some(ty),
                 None => state.failed = true,
             }
             state.subject_node = out.node;
@@ -2389,11 +2557,22 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             state.next += 1;
             state.mark = self.locals.len();
             let pattern_span = arm_pattern_span(&arm).unwrap_or(arm.node().span());
-            let pattern = arm
-                .pattern()
-                .and_then(|pattern| self.pattern(pattern, pattern_span, &mut state));
+            let pattern = match arm.pattern() {
+                Some(pattern) => {
+                    let typed = self.type_pattern(
+                        pattern,
+                        pattern_span,
+                        state.subject.as_ref(),
+                    );
+                    self.locals.extend(typed.bindings);
+                    state.covers.push((typed.cover, pattern_span));
+                    typed.lowered
+                }
+                None => None,
+            };
             if pattern.is_none() {
                 state.failed = true;
+                state.patterns_failed = true;
             }
             state.pending_pattern = pattern;
             let Some(body) = arm.body() else {
@@ -2409,31 +2588,11 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                 Task::Body(Box::new(self.body_state(body, BodyMode::Branch(ctx))));
             return Step::Child(Task::Match(state), child);
         }
-        // Coverage.
-        if state.subject.is_some() {
-            let uncovered = if state.covered_all.is_some() {
-                None
-            } else if let Some((owner, cases)) = &state.cases {
-                state
-                    .covered
-                    .iter()
-                    .position(Option::is_none)
-                    .and_then(|at| cases.get(at))
-                    .map(|case| format!("{owner}.{case}()"))
-            } else {
-                Some("_".to_owned())
-            };
-            if let Some(shape) = uncovered {
-                let diagnostic = Diagnostic::new(
-                    DiagnosticCode::PatternNonExhaustive,
-                    span,
-                    "this `match` does not cover its subject",
-                )
-                .with_source_id(self.source_id.as_ref())
-                .with_note(shape);
-                self.diagnostics.push(diagnostic);
-                state.failed = true;
-            }
+        if let Some(subject) = state.subject.clone()
+            && !state.patterns_failed
+            && !self.match_coverage(&state.covers, &subject, span)
+        {
+            state.failed = true;
         }
         let ty = join(&state.ctx, &state.types);
         let node = match (state.failed, state.subject_node.take(), ty.clone()) {
@@ -2457,131 +2616,85 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         Step::Done(Out { ty, node })
     }
 
-    /// The owner name and the cases of a variant subject type.
-    fn variant_cases(&self, ty: &Type) -> Option<(String, Vec<String>)> {
-        let Type::Declared(id, _) = ty else {
-            return None;
-        };
-        self.program
-            .types
-            .iter()
-            .find_map(|data| match (&data.kind, &data.id) {
-                (TypeKind::Variant(cases), Some(own)) if own == id => Some((
-                    data.name.clone(),
-                    cases.iter().map(|case| case.name.clone()).collect(),
-                )),
-                _ => None,
-            })
-    }
-
-    /// Checks one arm's pattern against the subject, records its coverage,
-    /// and binds its binder.
-    fn pattern(
+    /// Decides the coverage of a `match` at `span` on `subject` whose arms
+    /// have the shapes `covers`, reporting each unreachable arm, the first
+    /// uncovered shape, or a question too large to decide. Whether nothing
+    /// was reported.
+    fn match_coverage(
         &mut self,
-        pattern: Pattern<'a>,
+        covers: &[(Rc<Pat>, ByteSpan)],
+        subject: &Type,
         span: ByteSpan,
-        state: &mut MatchState<'a>,
-    ) -> Option<IrPattern> {
-        let (cover, lowered) = match pattern.form() {
-            PatternForm::Discard => (Cover::All, Some(IrPattern::Discard)),
-            PatternForm::Path(path) => {
-                let segments = path.segments();
-                match segments.as_slice() {
-                    [name] => match self.program.lookup(self.module, name.text()) {
-                        Some(Entity::Value(index)) => {
-                            self.constant_pattern(index, span, state)
-                        }
-                        Some(Entity::Fn(_) | Entity::Other(..)) => {
-                            (Cover::Nothing, None)
-                        }
-                        _ => {
-                            let slot = self.new_slot(state.subject.as_ref());
-                            self.locals.push(Local {
-                                name: name.text().to_owned(),
-                                slot,
-                                ty: state.subject.clone(),
-                            });
-                            (Cover::All, Some(IrPattern::Bind(slot)))
-                        }
-                    },
-                    _ => {
-                        let names = segments
-                            .iter()
-                            .map(|segment| segment.text())
-                            .collect::<Vec<_>>();
-                        self.path_pattern(&names, span, state)
-                    }
-                }
-            }
-            PatternForm::Apply {
-                path,
-                positional,
-                labelled,
-            } => {
-                if !positional.is_empty() || !labelled.is_empty() {
-                    self.unavailable(span, "a pattern with fields");
-                    (Cover::Nothing, None)
-                } else {
-                    let segments = path.segments();
-                    let names = segments
-                        .iter()
-                        .map(|segment| segment.text())
-                        .collect::<Vec<_>>();
-                    match self.case_of(&names) {
-                        Some((ty, case)) => self.case_pattern(ty, &case, span, state),
-                        None => (Cover::Nothing, None),
-                    }
-                }
-            }
-            PatternForm::Literal(_) => {
-                self.unavailable(span, "a literal pattern");
-                (Cover::Nothing, None)
-            }
-            PatternForm::Tuple(_) | PatternForm::Record(_) | PatternForm::List(_) => {
-                self.unavailable(span, "a product or list pattern");
-                (Cover::Nothing, None)
+    ) -> bool {
+        let rows = covers
+            .iter()
+            .map(|(cover, _)| Rc::clone(cover))
+            .collect::<Vec<_>>();
+        let coverage = match Coverage::new(self.program).match_coverage(&rows, subject)
+        {
+            Ok(coverage) => coverage,
+            Err(LimitReached) => {
+                self.too_large(span, "this `match`");
+                return false;
             }
         };
-        if state.subject.is_some() {
-            self.cover(cover, span, state);
-        }
-        lowered
-    }
-
-    fn cover(&mut self, cover: Cover, span: ByteSpan, state: &mut MatchState<'a>) {
-        let earlier = match cover {
-            Cover::Nothing => return,
-            Cover::All => state.covered_all.or_else(|| {
-                let all_cases = !state.covered.is_empty()
-                    && state.covered.iter().all(Option::is_some);
-                all_cases.then_some(state.first_cover).flatten()
-            }),
-            Cover::Case(at) => state
-                .covered_all
-                .or_else(|| state.covered.get(at).copied().flatten()),
-        };
-        if let Some(earlier) = earlier {
-            let diagnostic = Diagnostic::new(
+        let mut clean = true;
+        for (at, by) in coverage.unreachable {
+            let Some((_, arm_span)) = covers.get(at) else {
+                continue;
+            };
+            let mut diagnostic = Diagnostic::new(
                 DiagnosticCode::PatternUnreachableArm,
-                span,
+                *arm_span,
                 "no value reaches this arm",
             )
-            .with_source_id(self.source_id.as_ref())
-            .with_related(earlier, "an earlier arm already covers it");
-            self.diagnostics.push(diagnostic);
-            state.failed = true;
-            return;
-        }
-        state.first_cover.get_or_insert(span);
-        match cover {
-            Cover::All => state.covered_all = Some(span),
-            Cover::Case(at) => {
-                if let Some(slot) = state.covered.get_mut(at) {
-                    *slot = Some(span);
-                }
+            .with_source_id(self.source_id.as_ref());
+            if let Some((_, earlier)) = by.and_then(|by| covers.get(by)) {
+                diagnostic = diagnostic
+                    .with_related(*earlier, "the arms up to this one cover it");
             }
-            Cover::Nothing => {}
+            self.diagnostics.push(diagnostic);
+            clean = false;
         }
+        if let Some(shape) = coverage.uncovered {
+            let diagnostic = Diagnostic::new(
+                DiagnosticCode::PatternNonExhaustive,
+                span,
+                "this `match` does not cover its subject",
+            )
+            .with_source_id(self.source_id.as_ref())
+            .with_note(shape);
+            self.diagnostics.push(diagnostic);
+            clean = false;
+        }
+        clean
+    }
+
+    /// Whether the binding pattern of shape `cover` at `span` covers every
+    /// value of `ty`, reporting a question too large to decide as `None`.
+    fn irrefutable(
+        &mut self,
+        cover: &Rc<Pat>,
+        ty: &Type,
+        span: ByteSpan,
+    ) -> Option<bool> {
+        match Coverage::new(self.program).irrefutable(cover, ty) {
+            Ok(irrefutable) => Some(irrefutable),
+            Err(LimitReached) => {
+                self.too_large(span, "this pattern");
+                None
+            }
+        }
+    }
+
+    /// Reports a coverage question about `what` at `span` that needs more
+    /// work than the checker gives one.
+    fn too_large(&mut self, span: ByteSpan, what: &str) {
+        self.report(
+            DiagnosticCode::PatternUnsupportedCoverage,
+            span,
+            format!("the coverage of {what} is too large to decide"),
+        );
     }
 
     /// The type and case a dotted constructor path names.
@@ -2613,83 +2726,6 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         Some(entity)
     }
 
-    fn path_pattern(
-        &mut self,
-        names: &[&str],
-        span: ByteSpan,
-        state: &mut MatchState<'a>,
-    ) -> (Cover, Option<IrPattern>) {
-        if let Some((ty, case)) = self.case_of(names) {
-            return self.case_pattern(ty, &case, span, state);
-        }
-        match self.static_path(names) {
-            Some(Entity::Value(index)) => self.constant_pattern(index, span, state),
-            _ => (Cover::Nothing, None),
-        }
-    }
-
-    fn case_pattern(
-        &mut self,
-        ty: usize,
-        case: &str,
-        span: ByteSpan,
-        state: &MatchState<'a>,
-    ) -> (Cover, Option<IrPattern>) {
-        let Some(data) = self.program.types.get(ty) else {
-            return (Cover::Nothing, None);
-        };
-        let own = data.self_type();
-        if let (Some(subject), Some(own)) = (&state.subject, &own)
-            && subject != own
-        {
-            self.report(
-                DiagnosticCode::TypeMismatch,
-                span,
-                format!("expected a pattern of `{subject}`, found one of `{own}`"),
-            );
-            return (Cover::Nothing, None);
-        }
-        let at = data
-            .cases()
-            .and_then(|cases| cases.iter().position(|known| known.name == case));
-        let cover = at.map_or(Cover::Nothing, Cover::Case);
-        (
-            cover,
-            Some(IrPattern::Case {
-                case: case.to_owned(),
-                fields: Vec::new(),
-            }),
-        )
-    }
-
-    fn constant_pattern(
-        &mut self,
-        index: usize,
-        span: ByteSpan,
-        state: &MatchState<'a>,
-    ) -> (Cover, Option<IrPattern>) {
-        let Some((ty, case)) = self.program.constant_case(index) else {
-            self.unavailable(span, "this constant pattern");
-            return (Cover::Nothing, None);
-        };
-        let (cover, _) = self.case_pattern(ty, &case, span, state);
-        if cover == Cover::Nothing {
-            return (Cover::Nothing, None);
-        }
-        let Some(own) = self.program.types.get(ty).and_then(|data| data.self_type())
-        else {
-            return (Cover::Nothing, None);
-        };
-        let value = Value::Variant {
-            case,
-            fields: Vec::new(),
-        };
-        match Constant::new(own, value) {
-            Ok(constant) => (cover, Some(IrPattern::Literal(constant))),
-            Err(_) => (Cover::Nothing, None),
-        }
-    }
-
     fn body_state(&self, body: Body<'a>, mode: BodyMode) -> BodyState<'a> {
         BodyState {
             span: body.node().span(),
@@ -2711,8 +2747,10 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         mut state: Box<BodyState<'a>>,
         input: Option<Out>,
     ) -> Step<'a> {
-        if let Some(out) = input {
-            self.arrive(&mut state, out);
+        if let Some(out) = input
+            && let Some(child) = self.arrive(&mut state, out)
+        {
+            return Step::Child(Task::Body(state), child);
         }
         if let Some(statement) = state.statements.get(state.next).cloned() {
             let last = state.next + 1 == state.statements.len();
@@ -2734,28 +2772,9 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             }
             match statement {
                 Statement::Let(view) => {
-                    let binder = match view.pattern().map(|pattern| pattern.form()) {
-                        Some(PatternForm::Discard) => None,
-                        Some(PatternForm::Path(path)) if path.segments().len() == 1 => {
-                            path.segments().first().map(|name| name.text().to_owned())
-                        }
-                        Some(_) => {
-                            let pattern_span = view
-                                .pattern()
-                                .map_or(span, |pattern| pattern.node().span());
-                            self.unavailable(pattern_span, "this binding pattern");
-                            state.failed = true;
-                            None
-                        }
-                        None => {
-                            state.failed = true;
-                            None
-                        }
-                    };
-                    if view.fallback().is_some() {
-                        self.unavailable(span, "`let … else`");
-                        state.failed = true;
-                    }
+                    let pattern = view.pattern();
+                    let pattern_span = pattern
+                        .map_or(span, |pattern| pattern_span(pattern, self.text));
                     let written = match view.written_type() {
                         Some(written) => self.written(written),
                         None => None,
@@ -2770,7 +2789,9 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                         return self.step_body(state, None);
                     };
                     state.pending = Pending::Let {
-                        binder,
+                        pattern,
+                        pattern_span,
+                        fallback: view.fallback(),
                         written: written.clone(),
                         value_span: expr_span(&value),
                     };
@@ -2798,11 +2819,15 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         }
     }
 
-    fn arrive(&mut self, state: &mut BodyState<'a>, out: Out) {
+    /// Takes the value of the statement or fallback that `state` waits for,
+    /// returning the fallback of a `let … else` to check next.
+    fn arrive(&mut self, state: &mut BodyState<'a>, out: Out) -> Option<Task<'a>> {
         match std::mem::replace(&mut state.pending, Pending::Nothing) {
             Pending::Nothing => {}
             Pending::Let {
-                binder,
+                pattern,
+                pattern_span,
+                fallback,
                 written,
                 value_span,
             } => {
@@ -2830,25 +2855,97 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                     },
                     None => (written, None),
                 };
-                let slot = binder.as_ref().map(|_| self.new_slot(ty.as_ref()));
-                if let (Some(name), Some(slot)) = (binder, slot) {
-                    self.locals.push(Local {
-                        name,
-                        slot,
-                        ty: ty.clone(),
-                    });
-                }
                 state.last_type = None;
-                if node.is_none() {
+                let Some(pattern) = pattern else {
+                    state.failed = true;
+                    state.pieces.push(None);
+                    return None;
+                };
+                let typed = self.type_pattern(pattern, pattern_span, ty.as_ref());
+                let irrefutable = match (&ty, &typed.lowered) {
+                    (Some(ty), Some(_)) => {
+                        self.irrefutable(&typed.cover, ty, pattern_span)
+                    }
+                    _ => None,
+                };
+                if let Some(fallback) = fallback {
+                    if irrefutable == Some(true) {
+                        self.report(
+                            DiagnosticCode::PatternIrrefutableLetElse,
+                            pattern_span,
+                            "this pattern covers every value, so the `else` never runs",
+                        );
+                        state.failed = true;
+                    }
+                    state.pending = Pending::Fallback(Box::new((
+                        typed.bindings,
+                        typed.lowered,
+                        node,
+                    )));
+                    return Some(Task::Body(Box::new(
+                        self.body_state(fallback, BodyMode::Fallback),
+                    )));
+                }
+                if irrefutable == Some(false) {
+                    self.report(
+                        DiagnosticCode::PatternRefutableBinding,
+                        pattern_span,
+                        "this pattern does not cover every value; add an `else`",
+                    );
                     state.failed = true;
                 }
-                state.pieces.push(node.map(|node| Piece::Let(slot, node)));
+                self.locals.extend(typed.bindings);
+                let piece = match (typed.lowered, node) {
+                    (Some(IrPattern::Discard), Some(node)) => {
+                        Some(Piece::Let(None, node))
+                    }
+                    (Some(IrPattern::Bind(slot)), Some(node)) => {
+                        Some(Piece::Let(Some(slot), node))
+                    }
+                    (Some(pattern), Some(node)) => {
+                        Some(Piece::Destructure(Box::new((pattern, node))))
+                    }
+                    _ => None,
+                };
+                if piece.is_none() {
+                    state.failed = true;
+                }
+                state.pieces.push(piece);
+            }
+            Pending::Fallback(waiting) => {
+                let (bindings, pattern, value) = *waiting;
+                self.locals.extend(bindings);
+                let piece = match (pattern, value, out.node) {
+                    (Some(pattern), Some(value), Some(fallback)) => {
+                        Some(Piece::LetElse(Box::new((pattern, value, fallback))))
+                    }
+                    _ => None,
+                };
+                if piece.is_none() {
+                    state.failed = true;
+                }
+                state.pieces.push(piece);
             }
             Pending::Expr { span, last } => {
                 let mut node = out.node;
                 let mut ty = out.ty;
                 if ty == Some(Type::Never) && state.never_at.is_none() {
                     state.never_at = Some(span);
+                }
+                let used = last && matches!(state.mode, BodyMode::Branch(_));
+                if !used
+                    && let Some(actual) = &ty
+                    && self.fallible(actual)
+                {
+                    self.report(
+                        DiagnosticCode::TypeUnhandledFallible,
+                        span,
+                        format!(
+                            "this statement leaves a fallible `{actual}` unused; \
+                             handle it, or bind it with `let _`"
+                        ),
+                    );
+                    node = None;
                 }
                 if last {
                     match &state.mode {
@@ -2881,7 +2978,9 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                                 node = None;
                             }
                         }
-                        BodyMode::Branch(Ctx::Value(None)) | BodyMode::Callable => {}
+                        BodyMode::Branch(Ctx::Value(None))
+                        | BodyMode::Callable
+                        | BodyMode::Fallback => {}
                     }
                     state.last_type = Some(ty);
                 } else {
@@ -2893,6 +2992,20 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                 state.pieces.push(node.map(Piece::Expr));
             }
         }
+        None
+    }
+
+    /// Whether `ty` is fallible: a `Result` whose error type has a value.
+    fn fallible(&self, ty: &Type) -> bool {
+        let Type::Declared(id, arguments) = ty else {
+            return false;
+        };
+        if self.program.library_of(id) != Some(Library::Result) {
+            return false;
+        }
+        arguments
+            .get(1)
+            .is_some_and(|error| !Coverage::new(self.program).is_uninhabited(error))
     }
 
     fn finish_body(&mut self, state: BodyState<'a>) -> Out {
@@ -2907,6 +3020,16 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                         DiagnosticCode::TypeMissingReturn,
                         state.span,
                         "this body can run off its end without a `return`",
+                    );
+                    failed = true;
+                    None
+                }
+                BodyMode::Fallback => {
+                    self.report(
+                        DiagnosticCode::TypeMismatch,
+                        state.span,
+                        "expected `Never`: the `else` of a `let … else` can run off \
+                         its end, but every path of it must leave",
                     );
                     failed = true;
                     None
@@ -2937,30 +3060,55 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             return Out { ty, node: None };
         }
         let pieces = state.pieces.into_iter().collect::<Option<Vec<_>>>();
-        let node = pieces.map(|pieces| self.sequence(pieces, state.span));
+        let value_type = ty.clone().unwrap_or(Type::Void);
+        let node = pieces.map(|pieces| self.sequence(pieces, state.span, &value_type));
         Out { ty, node }
     }
 
-    /// Lowers the statements of a body, from the last to the first, into
-    /// sequences and `let` nodes.
-    fn sequence(&self, pieces: Vec<Piece>, span: ByteSpan) -> Node {
+    /// Lowers the statements of a body of type `value_type`, from the last to
+    /// the first, into sequences and `let` nodes; a `let` whose pattern
+    /// takes its value apart is a `match` of one arm.
+    fn sequence(&self, pieces: Vec<Piece>, span: ByteSpan, value_type: &Type) -> Node {
         let mut tail: Vec<Node> = Vec::new();
         for piece in pieces.into_iter().rev() {
-            match piece {
-                Piece::Expr(node) => tail.push(node),
-                Piece::Let(slot, value) => {
-                    let body = self.close(std::mem::take(&mut tail), span);
-                    let let_span = value.origin.span();
-                    tail.push(self.node(
-                        IrExpr::Let {
-                            slot,
-                            value: Box::new(value),
-                            body: Box::new(body),
-                        },
-                        let_span,
-                    ));
-                }
+            if let Piece::Expr(node) = piece {
+                tail.push(node);
+                continue;
             }
+            let body = Box::new(self.close(std::mem::take(&mut tail), span));
+            let (expr, let_span) = match piece {
+                Piece::Expr(_) => continue,
+                Piece::Let(slot, value) => {
+                    let let_span = value.origin.span();
+                    let value = Box::new(value);
+                    (IrExpr::Let { slot, value, body }, let_span)
+                }
+                Piece::Destructure(destructure) => {
+                    let (pattern, value) = *destructure;
+                    let let_span = value.origin.span();
+                    let expr = IrExpr::Match {
+                        subject: Box::new(value),
+                        arms: vec![MatchArm {
+                            pattern,
+                            body: *body,
+                        }],
+                        value_type: value_type.clone(),
+                    };
+                    (expr, let_span)
+                }
+                Piece::LetElse(let_else) => {
+                    let (pattern, value, fallback) = *let_else;
+                    let let_span = value.origin.span();
+                    let expr = IrExpr::LetElse {
+                        pattern,
+                        value: Box::new(value),
+                        fallback: Box::new(fallback),
+                        body,
+                    };
+                    (expr, let_span)
+                }
+            };
+            tail.push(self.node(expr, let_span));
         }
         self.close(tail, span)
     }
