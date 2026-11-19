@@ -85,7 +85,7 @@ the vertical-slice rule.
 | 06 | [expressions-and-patterns](steps/06-expressions-and-patterns.md) | vertical | 05 | 09, 12, 13, 24, 27 | `vibra-syntax`, `vibra-fmt`, `conformance/cases` | planned |
 | 07 | [callables-and-tests-syntax](steps/07-callables-and-tests-syntax.md) | vertical | 06 | 09, 12, 13, 24, 27 | `vibra-syntax`, `vibra-fmt`, `conformance/cases` | planned |
 | 08 | [reader-exit](steps/08-reader-exit.md) | evidence | 07 | 09, 10, 11, 12, 13, 14, 24, 27 | `vibra-conformance`, `vibra-conformance-v1` (the ignored inventory test deleted), `fuzz/`, `conformance/cases` | planned |
-| 09 | [project-and-source-graph](steps/09-project-and-source-graph.md) | vertical | 03 | 04, 05, 06, 07, 08, 12, 13, 14, 24, 27 | `vibra-workspace` (new), `vibra-conformance`, `conformance/cases` | planned |
+| 09 | [project-and-source-graph](steps/09-project-and-source-graph.md) | vertical | 03 | 04, 05, 06, 07, 08, 12, 13, 14, 24, 27 | `vibra-workspace` (new), `vibra-conformance`, `conformance/cases` | landed |
 | 10 | [resolve-declarations](steps/10-resolve-declarations.md) | vertical | 07, 09 | 08, 12, 13, 14, 24, 27 | `vibra-resolve` (new), `vibra-workspace`, `vibra-conformance`, `conformance/cases` | planned |
 | 11 | [resolve-bodies](steps/11-resolve-bodies.md) | vertical | 10 | 08, 12, 13, 14, 24, 27 | `vibra-resolve`, `conformance/cases` | planned |
 | 12 | [checked-ir](steps/12-checked-ir.md) | infrastructure | 02 | 03 to 11, 24 | `vibra-ir` (new) | landed |

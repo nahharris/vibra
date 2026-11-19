@@ -107,7 +107,9 @@ pub(crate) fn capture(root: &Path) -> Result<SourceSnapshot, Vec<Diagnostic>> {
 }
 
 /// The codes and source identities of a failure.
-pub(crate) fn faults(diagnostics: &[Diagnostic]) -> Vec<(DiagnosticCode, Option<String>)> {
+pub(crate) fn faults(
+    diagnostics: &[Diagnostic],
+) -> Vec<(DiagnosticCode, Option<String>)> {
     diagnostics
         .iter()
         .map(|diagnostic| {
