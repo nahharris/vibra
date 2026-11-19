@@ -180,6 +180,42 @@ fn an_unknown_host_symbol_is_reported_at_the_symbol() {
 }
 
 #[test]
+fn the_loader_reports_a_signature_mismatch_as_a_defect() {
+    let builtin = embedded_source("@std.builtin");
+    let changed = replace_once(
+        &builtin,
+        "returns sum: Result(Self ArithmeticError)\n    visibility @public\n    \
+         external @compiler\n    symbol \"i32.addChecked\"\n",
+        "returns sum: I32\n    visibility @public\n    \
+         external @compiler\n    symbol \"i32.addChecked\"\n",
+    );
+    let error = load_with_module("@std.builtin", &changed);
+    assert_eq!(
+        error.as_ref().map(|error| error.diagnostic().code()),
+        Some(DiagnosticCode::RuntimeInvalidCheckedProgram)
+    );
+    let notes = notes(error.as_ref());
+    assert!(notes.contains("@external.signatureMismatch"), "{notes}");
+}
+
+#[test]
+fn the_loader_reports_an_owner_mismatch_as_a_defect() {
+    let builtin = embedded_source("@std.builtin");
+    let changed = replace_once(
+        &builtin,
+        "symbol \"i64.addChecked\"\n",
+        "symbol \"i32.addChecked\"\n",
+    );
+    let error = load_with_module("@std.builtin", &changed);
+    assert_eq!(
+        error.as_ref().map(|error| error.diagnostic().code()),
+        Some(DiagnosticCode::RuntimeInvalidCheckedProgram)
+    );
+    let notes = notes(error.as_ref());
+    assert!(notes.contains("@external.ownerMismatch"), "{notes}");
+}
+
+#[test]
 fn the_loader_reports_an_external_fault_as_a_defect() {
     let builtin = embedded_source("@std.builtin");
     let changed = replace_once(

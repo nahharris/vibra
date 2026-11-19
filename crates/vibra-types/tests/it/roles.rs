@@ -31,16 +31,16 @@ fn every_role_is_claimed_exactly_once() {
 
 #[test]
 fn a_missing_role_is_a_fault() {
-    let option = embedded_source("@std.option");
-    let changed = replace_once(&option, "  role @option\n", "");
-    let error = load_with_module("@std.option", &changed);
+    let bool_module = embedded_source("@std.bool");
+    let changed = replace_once(&bool_module, "  role @bool\n", "");
+    let error = load_with_module("@std.bool", &changed);
     assert_eq!(
         error.as_ref().map(|error| error.diagnostic().code()),
         Some(DiagnosticCode::RuntimeInvalidCheckedProgram)
     );
     let notes = notes(error.as_ref());
     assert!(
-        notes.contains("@option: no declaration claims the role"),
+        notes.contains("@bool: no declaration claims the role"),
         "{notes}"
     );
 }
@@ -49,15 +49,30 @@ fn a_missing_role_is_a_fault() {
 fn a_repeated_role_is_a_fault() {
     let result = embedded_source("@std.result");
     let changed = format!(
-        "{result}\ntype Maybe(T)\n  case none\n  case some {{value: T}}\n  role @option\n  \
+        "{result}\ntype Flag\n  case false\n  case true\n  role @bool\n  \
          visibility @public\nendtype\n"
     );
-    let notes = notes(load_with_module("@std.result", &changed).as_ref());
+    let error = load_with_module("@std.result", &changed);
+    assert_eq!(
+        error.as_ref().map(|error| error.diagnostic().code()),
+        Some(DiagnosticCode::RuntimeInvalidCheckedProgram)
+    );
+    let notes = notes(error.as_ref());
     assert!(
-        notes.contains("@option: 2 declarations claim the role; `Option` of `@std.option` repeats it")
-            || notes.contains(
-                "@option: 2 declarations claim the role; `Maybe` of `@std.result` repeats it"
-            ),
+        notes.contains(
+            "@bool: 2 declarations claim the role; `Flag` of `@std.result` repeats it"
+        ),
+        "{notes}"
+    );
+}
+
+#[test]
+fn a_missing_option_role_is_a_fault() {
+    let option = embedded_source("@std.option");
+    let changed = replace_once(&option, "  role @option\n", "");
+    let notes = notes(load_with_module("@std.option", &changed).as_ref());
+    assert!(
+        notes.contains("@option: no declaration claims the role"),
         "{notes}"
     );
 }
