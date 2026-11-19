@@ -17,6 +17,7 @@ fn source_of(program: &Program<'_>, target: Target) -> Option<String> {
     let module = match target {
         Target::Function(index) => program.functions.get(index)?.module,
         Target::Value(index) => program.values.get(index)?.module,
+        Target::Test(index) => program.tests.get(index)?.module,
     };
     program
         .modules
@@ -35,6 +36,11 @@ fn name_of(program: &Program<'_>, target: Target) -> String {
             .values
             .get(index)
             .map(|data| data.name.clone())
+            .unwrap_or_default(),
+        Target::Test(index) => program
+            .tests
+            .get(index)
+            .map(|data| data.qualified.clone())
             .unwrap_or_default(),
     }
 }
