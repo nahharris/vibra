@@ -3,14 +3,15 @@
 
 use vibra_diagnostics::DiagnosticCode::{
     self, NameReservedDeclaration, SyntaxDuplicateSection, SyntaxInvalidForm,
-    SyntaxInvalidSection, SyntaxMissingSeparator, SyntaxUnmatchedDelimiter, ToolUnavailable,
+    SyntaxInvalidSection, SyntaxMissingSeparator, SyntaxUnmatchedDelimiter,
+    ToolUnavailable,
 };
 use vibra_syntax::source::keyword::{
     BODY_CONSTRUCTS, CONSTRUCTS, EXPRESSION_WORDS, SECTIONS, SEPARATORS, TOP_LEVEL,
 };
 use vibra_syntax::{
-    Declaration, Document, RESERVED_WORDS, SyntaxKind, TokenKind, lex, module, parse_source,
-    tree_document,
+    Declaration, Document, RESERVED_WORDS, SyntaxKind, TokenKind, lex, module,
+    parse_source, tree_document,
 };
 
 use crate::support::{Random, codes};
@@ -39,7 +40,10 @@ fn the_reserved_words_are_47_and_each_has_exactly_one_role() {
     words.sort_unstable();
     assert_eq!(roles, words);
     for word in TOP_LEVEL.iter().chain(BODY_CONSTRUCTS) {
-        assert!(CONSTRUCTS.iter().any(|(opener, _)| opener == word), "{word}");
+        assert!(
+            CONSTRUCTS.iter().any(|(opener, _)| opener == word),
+            "{word}"
+        );
     }
 }
 
@@ -62,7 +66,10 @@ fn every_reserved_word_is_rejected_as_an_identifier() {
             // The closer closes the `use`; the name is missing.
             assert_eq!(
                 codes(document.diagnostics()),
-                [(SyntaxInvalidForm, 0, 16), (SyntaxUnmatchedDelimiter, 17, 23)],
+                [
+                    (SyntaxInvalidForm, 0, 16),
+                    (SyntaxUnmatchedDelimiter, 17, 23)
+                ],
                 "{text}"
             );
             continue;
@@ -114,7 +121,10 @@ fn use_alias_and_exact_case() {
 #[test]
 fn use_alias_reserved() {
     let document = source("use @billing.cents as where enduse");
-    assert_eq!(codes(document.diagnostics()), [(NameReservedDeclaration, 22, 27)]);
+    assert_eq!(
+        codes(document.diagnostics()),
+        [(NameReservedDeclaration, 22, 27)]
+    );
     let uses = module(&document).unwrap().uses();
     assert_eq!(uses[0].alias().unwrap().text(), "where");
 }
@@ -136,7 +146,10 @@ fn use_late() {
 
 #[test]
 fn as_outside_use() {
-    assert_eq!(diagnostics("use @std.io enduse\nas"), [(SyntaxInvalidForm, 19, 21)]);
+    assert_eq!(
+        diagnostics("use @std.io enduse\nas"),
+        [(SyntaxInvalidForm, 19, 21)]
+    );
     assert_eq!(
         diagnostics("fn f as x endfn"),
         [(ToolUnavailable, 0, 15), (SyntaxInvalidForm, 5, 7)]
@@ -150,15 +163,27 @@ fn as_outside_use() {
 #[test]
 fn use_missing_locator_string_locator_and_missing_alias() {
     assert_eq!(diagnostics("use enduse"), [(SyntaxInvalidForm, 0, 10)]);
-    assert_eq!(diagnostics("use \"std.io\" enduse"), [(SyntaxInvalidForm, 0, 19)]);
-    assert_eq!(diagnostics("use @std.io as enduse"), [(SyntaxInvalidForm, 0, 21)]);
+    assert_eq!(
+        diagnostics("use \"std.io\" enduse"),
+        [(SyntaxInvalidForm, 0, 19)]
+    );
+    assert_eq!(
+        diagnostics("use @std.io as enduse"),
+        [(SyntaxInvalidForm, 0, 21)]
+    );
     assert_eq!(diagnostics("use as a enduse"), [(SyntaxInvalidForm, 0, 15)]);
 }
 
 #[test]
 fn use_extra_tokens_repeated_as_and_other_sections() {
-    assert_eq!(diagnostics("use @a @b enduse"), [(SyntaxInvalidForm, 0, 16)]);
-    assert_eq!(diagnostics("use @a as b c enduse"), [(SyntaxInvalidForm, 0, 20)]);
+    assert_eq!(
+        diagnostics("use @a @b enduse"),
+        [(SyntaxInvalidForm, 0, 16)]
+    );
+    assert_eq!(
+        diagnostics("use @a as b c enduse"),
+        [(SyntaxInvalidForm, 0, 20)]
+    );
     assert_eq!(
         diagnostics("use @a if x endif enduse"),
         [(SyntaxInvalidForm, 0, 24)]
@@ -193,7 +218,10 @@ fn a_run_of_top_level_tokens_is_one_invalid_form_and_keeps_its_constructs_whole(
         diagnostics("x y z\nuse @a enduse"),
         [(SyntaxInvalidForm, 0, 5)]
     );
-    assert_eq!(diagnostics("if c then x endif"), [(SyntaxInvalidForm, 0, 17)]);
+    assert_eq!(
+        diagnostics("if c then x endif"),
+        [(SyntaxInvalidForm, 0, 17)]
+    );
     assert_eq!(diagnostics("endfn"), [(SyntaxUnmatchedDelimiter, 0, 5)]);
 }
 
@@ -202,15 +230,20 @@ fn closer_wrong() {
     let document = source("use @std.io endfn");
     assert_eq!(
         codes(document.diagnostics()),
-        [(SyntaxUnmatchedDelimiter, 0, 3), (SyntaxUnmatchedDelimiter, 12, 17)]
+        [
+            (SyntaxUnmatchedDelimiter, 0, 3),
+            (SyntaxUnmatchedDelimiter, 12, 17)
+        ]
     );
     let uses = module(&document).unwrap().uses();
     assert_eq!(uses[0].locator().unwrap().text(), "@std.io");
     let use_node = uses[0].construct().node();
-    assert!(use_node
-        .children()
-        .iter()
-        .any(|child| child.kind() == SyntaxKind::Error));
+    assert!(
+        use_node
+            .children()
+            .iter()
+            .any(|child| child.kind() == SyntaxKind::Error)
+    );
     assert_eq!(
         use_node.children().last().unwrap().kind(),
         SyntaxKind::Missing
@@ -307,7 +340,11 @@ fn check_invariants(text: &str) {
     let mut at = 0;
     for leaf in root.leaves() {
         assert_eq!(leaf.span().start(), at, "leaves are contiguous in {text:?}");
-        assert_eq!(leaf.kind() == SyntaxKind::Missing, leaf.span().is_empty(), "{text:?}");
+        assert_eq!(
+            leaf.kind() == SyntaxKind::Missing,
+            leaf.span().is_empty(),
+            "{text:?}"
+        );
         at = leaf.span().end();
     }
     assert_eq!(at, text.len(), "the leaves cover {text:?}");
@@ -329,8 +366,24 @@ fn check_invariants(text: &str) {
 #[test]
 fn random_keyword_sequences_never_panic_and_keep_every_byte_in_one_leaf() {
     const OTHER: &[&str] = &[
-        "f", "x", "I32", "@std.io", "\"s\"", "1i32", "{", "}", "(", ")", "[", "]", ":", ".",
-        "_", "?", "// c\n", "\"\"\"d\"\"\"",
+        "f",
+        "x",
+        "I32",
+        "@std.io",
+        "\"s\"",
+        "1i32",
+        "{",
+        "}",
+        "(",
+        ")",
+        "[",
+        "]",
+        ":",
+        ".",
+        "_",
+        "?",
+        "// c\n",
+        "\"\"\"d\"\"\"",
     ];
     const GAPS: &[&str] = &[" ", "\n", "", "  ", "\r\n"];
     let mut random = Random::new(0x5EC7_10A5);
@@ -360,7 +413,10 @@ fn deep_construct_nesting_is_parsed_checked_and_dropped_without_recursion() {
         " endif".repeat(DEPTH)
     );
     let document = source(&text);
-    assert_eq!(codes(document.diagnostics()), [(ToolUnavailable, 0, text.len())]);
+    assert_eq!(
+        codes(document.diagnostics()),
+        [(ToolUnavailable, 0, text.len())]
+    );
     assert!(tree_document(&document).unwrap().len() > DEPTH);
     let open = format!("fn f do {}", "match x ".repeat(DEPTH));
     let recovered = source(&open);

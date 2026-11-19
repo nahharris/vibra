@@ -42,6 +42,8 @@ pub fn format_document(document: &Document) -> Option<String> {
     }
     Some(match document.mode() {
         DocumentMode::Data => layout::render(&data::document_items(root, text)),
-        DocumentMode::Source => source::format(root, text).unwrap_or_else(|| text.to_owned()),
+        DocumentMode::Source => {
+            source::format(root, text).unwrap_or_else(|| text.to_owned())
+        }
     })
 }

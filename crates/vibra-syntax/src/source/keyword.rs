@@ -33,7 +33,8 @@ pub const CONSTRUCTS: &[(&str, &str)] = &[
 
 /// The openers of the seven top-level forms, in the order of the `top`
 /// production.
-pub const TOP_LEVEL: &[&str] = &["use", "type", "interface", "fn", "proc", "let", "test"];
+pub const TOP_LEVEL: &[&str] =
+    &["use", "type", "interface", "fn", "proc", "let", "test"];
 
 /// The constructs in which `do` is the body section.
 pub const BODY_CONSTRUCTS: &[&str] = &["fn", "proc", "test"];

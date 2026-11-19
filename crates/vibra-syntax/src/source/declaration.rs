@@ -265,7 +265,11 @@ pub(crate) fn check_use(node: &CstNode, text: &str, diagnostics: &mut Vec<Diagno
 /// Applies the generic section rules to every construct in `node`, a
 /// top-level form: repeated sections, `do` last, the name first, and `as`
 /// outside a `use`. The walk is iterative.
-pub(crate) fn check_sections(node: &CstNode, text: &str, diagnostics: &mut Vec<Diagnostic>) {
+pub(crate) fn check_sections(
+    node: &CstNode,
+    text: &str,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
     if let Some(construct) = Construct::new(node, text)
         && construct.keyword() != "use"
         && construct
@@ -296,7 +300,13 @@ pub(crate) fn check_sections(node: &CstNode, text: &str, diagnostics: &mut Vec<D
         if let Some(construct) = Construct::new(current, text) {
             check_construct(construct, diagnostics);
             let is_use = construct.keyword() == "use";
-            stack.extend(current.children().iter().skip(1).map(|child| (child, is_use)));
+            stack.extend(
+                current
+                    .children()
+                    .iter()
+                    .skip(1)
+                    .map(|child| (child, is_use)),
+            );
             continue;
         }
         if current.kind().is_leaf() {
@@ -318,7 +328,10 @@ fn report_as(leaf: &CstNode, text: &str, diagnostics: &mut Vec<Diagnostic>) {
 }
 
 /// Repeated sections, and `do` last in a `fn`, `proc`, or `test`.
-pub(crate) fn check_construct(construct: Construct<'_>, diagnostics: &mut Vec<Diagnostic>) {
+pub(crate) fn check_construct(
+    construct: Construct<'_>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
     let mut seen: Vec<&str> = Vec::new();
     let mut after_do = false;
     let mut misplaced = false;

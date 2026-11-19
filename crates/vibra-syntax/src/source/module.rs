@@ -48,7 +48,9 @@ pub(crate) fn shape_module(
             check_form(&item, text, after_other_form, diagnostics);
             after_other_form |= item.kind() != SyntaxKind::Use;
             out.push(item);
-        } else if run.is_empty() && (is_trivia(&item) || item.kind() == SyntaxKind::Error) {
+        } else if run.is_empty()
+            && (is_trivia(&item) || item.kind() == SyntaxKind::Error)
+        {
             out.push(item);
         } else {
             run.push(item);
@@ -89,7 +91,11 @@ fn check_form(
 /// Ends a run of tokens that open no top-level form: its trailing trivia
 /// stays outside, the rest goes into one `@error` node, and one
 /// `@syntax.invalidForm` covers it.
-fn flush_run(run: &mut Vec<CstNode>, out: &mut Vec<CstNode>, diagnostics: &mut Vec<Diagnostic>) {
+fn flush_run(
+    run: &mut Vec<CstNode>,
+    out: &mut Vec<CstNode>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
     if run.is_empty() {
         return;
     }

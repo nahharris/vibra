@@ -1,0 +1,16 @@
+id = "V2-SRC-DECL-use-alias-missing"
+rule = "V2-SRC-DECL-use-alias-missing"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#use: as without its name is an invalid form over the use"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@syntax.invalidForm"
+level = "@error"
+span = { start = 0, end = 21 }

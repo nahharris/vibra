@@ -130,7 +130,8 @@ fn member_rank(node: &CstNode, text: &str) -> Option<usize> {
 fn has_nested_let(node: &CstNode, text: &str) -> bool {
     let mut stack: Vec<&CstNode> = node.children().iter().collect();
     while let Some(current) = stack.pop() {
-        if Construct::new(current, text).is_some_and(|nested| nested.keyword() == "let") {
+        if Construct::new(current, text).is_some_and(|nested| nested.keyword() == "let")
+        {
             return true;
         }
         stack.extend(current.children());
@@ -193,7 +194,9 @@ fn declaration(node: &CstNode, text: &str, out: &mut Vec<Item>) -> Option<()> {
                     return None;
                 }
                 match units.last_mut() {
-                    Some(unit) if is_construct(child.kind()) && unit.trailing.is_none() => {
+                    Some(unit)
+                        if is_construct(child.kind()) && unit.trailing.is_none() =>
+                    {
                         unit.nodes.push(child);
                     }
                     None if head_trailing.is_none() => head.push(child),
@@ -278,7 +281,8 @@ fn flat(nodes: &[&CstNode], text: &str) -> Option<String> {
         let punctuation = leaf.kind() == SyntaxKind::Punctuation;
         if let Some(previous) = previous {
             let glued_after = matches!(previous, "(" | "{" | "[" | ".");
-            let glued_before = punctuation && matches!(token, ")" | "}" | "]" | "(" | ":" | ".");
+            let glued_before =
+                punctuation && matches!(token, ")" | "}" | "]" | "(" | ":" | ".");
             if !glued_after && !glued_before {
                 out.push(' ');
             }
@@ -290,6 +294,7 @@ fn flat(nodes: &[&CstNode], text: &str) -> Option<String> {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use vibra_syntax::parse_source;
 
@@ -331,7 +336,9 @@ mod tests {
     #[test]
     fn a_comment_breaks_the_declaration_and_moves_with_its_section() {
         assert_eq!(
-            layout("fn f\n  // the result\n  returns r: I32 takes {x: I32} // one\nendfn"),
+            layout(
+                "fn f\n  // the result\n  returns r: I32 takes {x: I32} // one\nendfn"
+            ),
             "fn f\n  takes {x: I32} // one\n  // the result\n  returns r: I32\nendfn\n"
         );
     }

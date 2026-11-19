@@ -8,7 +8,11 @@ use vibra_syntax::parse_source;
 fn format(text: &str) -> String {
     let output = format_document(&parse_source(None, text.as_bytes())).expect("a text");
     let again = format_document(&parse_source(None, output.as_bytes()));
-    assert_eq!(again.as_deref(), Some(output.as_str()), "idempotent for {text:?}");
+    assert_eq!(
+        again.as_deref(),
+        Some(output.as_str()),
+        "idempotent for {text:?}"
+    );
     output
 }
 
@@ -32,7 +36,9 @@ fn top_level_forms_are_separated_by_one_blank_line() {
 #[test]
 fn comments_stay_on_their_line_or_before_the_next_form() {
     assert_eq!(
-        format("// head\nuse @std.io enduse // trail\n\n\n// own line\nuse @std.fs enduse"),
+        format(
+            "// head\nuse @std.io enduse // trail\n\n\n// own line\nuse @std.fs enduse"
+        ),
         "// head\nuse @std.io enduse // trail\n\n// own line\nuse @std.fs enduse\n"
     );
     assert_eq!(

@@ -23,7 +23,11 @@ use crate::cst::CstNode;
 use crate::lexer::Token;
 
 /// Parses the tokens of a source text into its `@source` document node.
-pub(crate) fn parse(text: &str, tokens: &[Token], diagnostics: &mut Vec<Diagnostic>) -> CstNode {
+pub(crate) fn parse(
+    text: &str,
+    tokens: &[Token],
+    diagnostics: &mut Vec<Diagnostic>,
+) -> CstNode {
     let items = construct::match_constructs(text, tokens, diagnostics);
     module::shape_module(items, text, diagnostics)
 }

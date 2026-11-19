@@ -248,7 +248,8 @@ impl Matcher<'_> {
 
     /// Resolves a closer by kind: `matches` selects the frames it can close.
     fn close_by_kind(&mut self, closer: Token, matches: impl Fn(FrameKind) -> bool) {
-        let Some(position) = self.stack.iter().rposition(|frame| matches(frame.kind)) else {
+        let Some(position) = self.stack.iter().rposition(|frame| matches(frame.kind))
+        else {
             self.diagnostics.push(Diagnostic::new(
                 DiagnosticCode::SyntaxUnmatchedDelimiter,
                 closer.span,
@@ -256,7 +257,10 @@ impl Matcher<'_> {
             ));
             let error = CstNode::interior(
                 SyntaxKind::Error,
-                vec![CstNode::leaf(SyntaxKind::of_token(closer.kind), closer.span)],
+                vec![CstNode::leaf(
+                    SyntaxKind::of_token(closer.kind),
+                    closer.span,
+                )],
                 closer.span.start(),
             );
             self.target().push(error);
@@ -288,9 +292,10 @@ impl Matcher<'_> {
         frame.close_section();
         let mut trivia = Vec::new();
         match closer {
-            Some(closer) => frame
-                .items
-                .push(CstNode::leaf(SyntaxKind::of_token(closer.kind), closer.span)),
+            Some(closer) => frame.items.push(CstNode::leaf(
+                SyntaxKind::of_token(closer.kind),
+                closer.span,
+            )),
             None => {
                 trivia = split_trailing_trivia(&mut frame.items);
                 let at = frame

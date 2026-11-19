@@ -1,0 +1,21 @@
+id = "V2-SRC-READER-closer-wrong"
+rule = "V2-SRC-READER-closer-wrong"
+profile = "readerV2"
+operation = "reader"
+description = "07-diagnostics-and-conformance.md#recovery: a closer with no construct of its kind open closes nothing, and the open use is never closed"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@syntax.unmatchedDelimiter"
+level = "@error"
+span = { start = 0, end = 3 }
+
+[[expect.diagnostics]]
+code = "@syntax.unmatchedDelimiter"
+level = "@error"
+span = { start = 12, end = 17 }

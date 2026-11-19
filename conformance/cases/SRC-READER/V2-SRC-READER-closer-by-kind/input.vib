@@ -1,0 +1,1 @@
+fn f returns r: I32 do match x endfn
