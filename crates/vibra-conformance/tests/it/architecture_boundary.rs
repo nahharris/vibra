@@ -54,6 +54,14 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
     // closed table of native imports and the arena layout of `vibra-ir` and
     // reaches no engine and no emitter.
     ("vibra-native", &["vibra-ir"]),
+    // The host provider over the major-1 host rows: the provider trait, the
+    // system provider, the in-memory world, and the audit event. It reads the
+    // registry of `vibra-ir` and the data grammar of `vibra-syntax` for the two
+    // documents it owns. No crate of the pipeline depends on it.
+    (
+        "vibra-host",
+        &["vibra-diagnostics", "vibra-ir", "vibra-syntax"],
+    ),
     // The leaf. Diagnostics are a language surface and know nothing else.
     ("vibra-diagnostics-v1", &[]),
     // The reader. Emits diagnostics; must not reach the formatter or schemas.
@@ -401,7 +409,7 @@ fn workspace_matches_the_declared_architecture() {
 }
 
 /// The number of rows, one for each crate directory.
-const ROWS: usize = 34;
+const ROWS: usize = 35;
 
 #[test]
 fn every_crate_directory_has_exactly_one_row() {

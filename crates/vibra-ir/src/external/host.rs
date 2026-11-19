@@ -19,7 +19,7 @@ use std::collections::BTreeMap;
 use super::RowType;
 use crate::{Library, Type};
 
-/// The registry minor that Milestone 4 ships: the greatest `since` of any row.
+/// The registry minor of the major-1 table: the greatest `since` of any row.
 pub const HOST_REGISTRY_MINOR: u32 = 0;
 
 /// A type that appears in a host signature, spelled as the standard library

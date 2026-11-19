@@ -1576,6 +1576,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "vibra-host"
+version = "0.0.1"
+dependencies = [
+ "getrandom",
+ "serde_json",
+ "vibra-diagnostics",
+ "vibra-ir",
+ "vibra-syntax",
+]
+
+[[package]]
 name = "vibra-host-v1"
 version = "0.0.1"
 dependencies = [
