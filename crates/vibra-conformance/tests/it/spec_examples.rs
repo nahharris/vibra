@@ -113,8 +113,9 @@ const FORM: DiagnosticCode = DiagnosticCode::SyntaxInvalidForm;
 /// `vibra` and `vibon` fence reads with no diagnostic and is already in the
 /// canonical format.
 const READINGS: &[Row] = &[
-    // An anonymous `fn`, an expression: no top-level form.
-    row(SOURCE, 6, Reading::Rejected(&[FORM])),
+    // An anonymous `fn`, an expression: as a top-level form it has no name,
+    // and its `takes` and `returns` sections stand where the name belongs.
+    row(SOURCE, 6, Reading::Rejected(&[FORM, FORM])),
     // The `addChecked` excerpt of `@std.builtin`.
     row(SOURCE, 7, Reading::StandardLibrary),
     // Construction expressions, one run of tokens that opens no form.

@@ -405,7 +405,7 @@ diagnostic_registry! {
     ProjectAmbiguousDependencyTarget => "@project.ambiguousDependencyTarget", Project, Error, None,
         "a dependency without `target` names a package with several library targets";
     ProjectReservedUnitName => "@project.reservedUnitName", Project, Error, None,
-        "a target or dependency is named `tests`";
+        "a target or dependency is named `tests` or `std`";
     ProjectDuplicateName => "@project.duplicateName", Project, Error, None,
         "two targets, or a target and a dependency, share a name";
     ProjectOverlappingTargetRoots => "@project.overlappingTargetRoots", Project, Error, None,

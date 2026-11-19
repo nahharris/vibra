@@ -1,0 +1,1 @@
+fn returns r: I32 f do return 1i32 endfn
