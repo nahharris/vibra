@@ -2,7 +2,11 @@
 
 use vibra_diagnostics::DiagnosticCode as C;
 
-use crate::support::{assert_clean, codes, flat, resolve_modules, span_of};
+use vibra_resolve::{Anchor, DeclarationId, DeclarationKind};
+
+use crate::support::{
+    STD_PACKAGE, assert_clean, codes, flat, resolve_modules, span_of, std_identity,
+};
 
 const MODEL: &str = "type User of {name: Str}\n  visibility @public\n  fn nameLength\n    takes {user: Self}\n    returns length: U64\n    visibility @public\n    do\n      return 0u64\n  endfn\nendtype\n\ntype Secret of U8 endtype\n";
 
@@ -17,7 +21,12 @@ fn module_declaration_and_alias_imports_resolve() {
         assert_clean(&resolution);
         assert_eq!(resolution.imports().len(), 1);
         assert!(resolution.imports()[0].to().is_some());
-        assert_eq!(resolution.references().len(), 1, "{main}");
+        let in_main = resolution
+            .references()
+            .iter()
+            .filter(|reference| reference.source_id() == "src/app/main.vib")
+            .count();
+        assert_eq!(in_main, 1, "{main}");
     }
 }
 
@@ -184,13 +193,58 @@ fn a_test_module_names_every_local_target() {
 }
 
 #[test]
-fn the_standard_library_unit_resolves_by_its_module_list() {
+fn the_standard_library_unit_resolves_by_its_modules() {
     let resolution = resolve_modules(&[("@app.main", "use @std.core enduse\n")]);
     assert_clean(&resolution);
-    assert_eq!(resolution.imports()[0].to(), None);
-    let declaration =
-        resolve_modules(&[("@app.main", "use @std.io.StdoutText enduse\n")]);
-    assert_eq!(codes(&declaration), [C::ToolUnavailable]);
+    let core = Anchor::new(
+        STD_PACKAGE.0,
+        STD_PACKAGE.1,
+        "@std.core",
+        "",
+        DeclarationKind::Module,
+        "core",
+    )
+    .identity();
+    assert_eq!(resolution.imports()[0].to(), Some(&core));
+    let absent = resolve_modules(&[("@app.main", "use @std.io enduse\n")]);
+    assert_eq!(codes(&absent), [C::ModuleUnknownPath], "no `@std.io` in M1");
+}
+
+#[test]
+fn a_declaration_of_the_standard_library_is_imported_with_its_identity() {
+    let text =
+        "use @std.core.ArithmeticError enduse\n\ntype A of ArithmeticError endtype\n";
+    let resolution = resolve_modules(&[("@app.main", text)]);
+    assert_clean(&resolution);
+    let error = std_identity("@std.core", DeclarationKind::Type, "ArithmeticError");
+    assert_eq!(
+        resolution.imports()[0].to().map(DeclarationId::as_str),
+        Some(error.as_str())
+    );
+    let (start, end) = span_of(text, "ArithmeticError", 1);
+    let references = resolution
+        .references()
+        .iter()
+        .map(|reference| {
+            (
+                reference.span().start(),
+                reference.span().end(),
+                reference.to().as_str().to_owned(),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(references, [(start, end, error)]);
+}
+
+#[test]
+fn an_import_inside_the_standard_library_is_no_re_export() {
+    let text = "use @std.builtin.ArithmeticError enduse\n";
+    let resolution = resolve_modules(&[("@app.main", text)]);
+    assert_eq!(
+        codes(&resolution),
+        [C::NameUnknownSymbol],
+        "an import is no re-export"
+    );
 }
 
 #[test]

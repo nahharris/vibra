@@ -201,3 +201,5 @@ V2-PROJECT-import-case-exact	active	04-programs-and-packages.md#modules-and-impo
 V2-PROJECT-import-tests-from-target	active	04-programs-and-packages.md#packages-units-and-targets
 V2-DIAG-style-casing	active	01-source-language.md#identifiers
 V2-TYPE-NAMES-resolved-snapshot	active	07-diagnostics-and-conformance.md#persistent-observations
+V2-PROJECT-import-std-declaration	active	04-programs-and-packages.md#the-standard-library
+V2-TYPE-NAMES-prelude-name	active	02-type-system.md#the-prelude

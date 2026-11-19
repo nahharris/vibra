@@ -47,10 +47,16 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
     // Checked IR names its traps by diagnostic code and knows no syntax.
     ("vibra-ir", &["vibra-diagnostics"]),
     // The workspace reads a project's files and hands later phases a
-    // snapshot; no language crate depends on it.
+    // snapshot with the embedded standard library; no language crate depends
+    // on it.
     (
         "vibra-workspace",
-        &["vibra-diagnostics", "vibra-resolve", "vibra-syntax"],
+        &[
+            "vibra-diagnostics",
+            "vibra-resolve",
+            "vibra-syntax",
+            "vibra-types",
+        ],
     ),
     // Resolution reads the reader's views of the modules a caller hands it.
     ("vibra-resolve", &["vibra-diagnostics", "vibra-syntax"]),
@@ -68,11 +74,18 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
         &["vibra-diagnostics", "vibra-ir", "vibra-syntax"],
     ),
     // The checker: the embedded standard library and its loader. It reads the
-    // registry and library names of `vibra-ir` and the reader's tree; only its
-    // tests use the formatter, to hold the modules and the manifest canonical.
+    // registry and library names of `vibra-ir` and the reader's tree, and
+    // hands resolution the library as its embedded unit; only its tests use
+    // the formatter, to hold the modules and the manifest canonical.
     (
         "vibra-types",
-        &["vibra-diagnostics", "vibra-fmt", "vibra-ir", "vibra-syntax"],
+        &[
+            "vibra-diagnostics",
+            "vibra-fmt",
+            "vibra-ir",
+            "vibra-resolve",
+            "vibra-syntax",
+        ],
     ),
     // The leaf. Diagnostics are a language surface and know nothing else.
     ("vibra-diagnostics-v1", &[]),

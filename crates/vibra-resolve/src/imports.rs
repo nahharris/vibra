@@ -15,7 +15,8 @@
 //!
 //! "Packages, units, and targets": a module names its own unit, `@std`, and
 //! its project's dependencies; a module of `@tests` also names every local
-//! target. Any other unit is `@module.unknownPath` at the reference.
+//! target. Any other unit is `@module.unknownPath` at the reference. The
+//! modules of `@std` are the embedded unit's, walked like any other unit's.
 
 use std::collections::VecDeque;
 
@@ -25,7 +26,6 @@ use crate::graph::{Access, Graph, ImportTarget, atom_part_span};
 use crate::identity::DeclarationKind;
 use crate::input::UnitKind;
 use crate::namespaces::at;
-use crate::prelude::{STD_UNIT, std_module};
 
 /// One import edge between two local modules.
 #[derive(Clone, Copy, Debug)]
@@ -44,9 +44,9 @@ pub(crate) fn resolve_imports(graph: &mut Graph<'_>, out: &mut Vec<Diagnostic>) 
             import.target = target;
         }
         let to = match target {
-            ImportTarget::LocalModule(module) => Some(module),
+            ImportTarget::Module(module) => Some(module),
             ImportTarget::Decl(decl) => graph.decls.get(decl).map(|decl| decl.module),
-            ImportTarget::Unresolved | ImportTarget::StdModule(_) => None,
+            ImportTarget::Unresolved => None,
         };
         if let (Some(to), Some(import)) = (to, graph.imports.get(index)) {
             edges.push(Edge {
@@ -97,29 +97,8 @@ fn resolve_import(
         return ImportTarget::Unresolved;
     };
     let unit = format!("@{first}");
-    if unit == STD_UNIT {
-        let path = parts
-            .get(..2)
-            .map(|parts| format!("@{}", parts.join(".")))
-            .unwrap_or_default();
-        let Some(std) = std_module(&path) else {
-            return unknown_path(
-                out,
-                format!("`{}` reaches no module", locator.text()),
-            );
-        };
-        if parts.len() > 2 {
-            out.push(at(
-                DiagnosticCode::ToolUnavailable,
-                source_id,
-                locator.span(),
-                "the declarations of the standard library are not available to resolution yet",
-            ));
-            return ImportTarget::Unresolved;
-        }
-        return ImportTarget::StdModule(std);
-    }
     let visible = unit == module.unit
+        || unit == graph.embedded_unit
         || (module.unit_kind == UnitKind::Tests
             && graph
                 .modules
@@ -155,7 +134,7 @@ fn resolve_import(
         return unknown_path(out, format!("`{}` reaches no module", locator.text()));
     };
     let Some(name) = parts.get(position + 1) else {
-        return ImportTarget::LocalModule(target);
+        return ImportTarget::Module(target);
     };
     let part_span = |at: usize| {
         atom_part_span(locator.text(), locator.span(), at).unwrap_or(locator.span())

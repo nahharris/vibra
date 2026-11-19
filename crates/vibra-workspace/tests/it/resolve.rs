@@ -6,7 +6,7 @@ use vibra_workspace::resolve_input;
 use crate::support::{LIBRARY, TempDir, capture};
 
 #[test]
-fn the_input_carries_the_package_and_every_unit_with_its_bytes() {
+fn the_input_carries_the_package_every_unit_with_its_bytes_and_the_library() {
     let project = TempDir::project(
         "resolve",
         LIBRARY,
@@ -19,7 +19,7 @@ fn the_input_carries_the_package_and_every_unit_with_its_bytes() {
         ],
     );
     let snapshot = capture(project.path()).expect("captured");
-    let input = resolve_input(&snapshot);
+    let input = resolve_input(&snapshot).expect("the embedded library loads");
     assert_eq!(input.package().name(), "hello");
     assert_eq!(input.package().version(), "0.1.0");
     let units = input
@@ -65,6 +65,8 @@ fn the_input_carries_the_package_and_every_unit_with_its_bytes() {
             ),
         ]
     );
+    assert_eq!(input.embedded().name(), "@std");
+    assert_eq!(input.embedded().modules().len(), 6);
     let resolution = resolve(&input);
     assert!(
         resolution.diagnostics().is_empty(),

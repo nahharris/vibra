@@ -1,2 +1,2 @@
-use @std.io enduse
-let io: U8 be 1u8 endlet
+use @std.core enduse
+let core: U8 be 1u8 endlet

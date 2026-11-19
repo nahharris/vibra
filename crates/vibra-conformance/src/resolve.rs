@@ -38,7 +38,9 @@ impl ProfileHandler for ResolveHandler {
                     return Ok(observation);
                 }
             };
-        let resolution = resolve(&resolve_input(&snapshot));
+        let input = resolve_input(&snapshot)
+            .map_err(|error| HandlerError::new(error.to_string()))?;
+        let resolution = resolve(&input);
         let verdict = if resolution.has_errors() {
             Verdict::Refuted
         } else {

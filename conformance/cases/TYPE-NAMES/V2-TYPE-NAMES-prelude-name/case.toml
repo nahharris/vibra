@@ -1,0 +1,13 @@
+id = "V2-TYPE-NAMES-prelude-name"
+rule = "V2-TYPE-NAMES-prelude-name"
+profile = "staticV2"
+operation = "resolve"
+description = "02-type-system.md#the-prelude: a prelude name resolves to its real declaration in the embedded standard library, without an import"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+resolved = "resolved.vibon"

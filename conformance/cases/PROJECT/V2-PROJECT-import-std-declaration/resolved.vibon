@@ -1,0 +1,15 @@
+{
+  format: @resolved.v2
+  package: {name: "hello" version: "0.1.0"}
+  modules: [{path: @app.main unit: @app sourceId: "src/app/main.vib"}]
+  declarations: []
+  imports: [
+    {
+      span: {sourceId: "src/app/main.vib" start: 0u64 end: 36u64}
+      path: @std.core.ArithmeticError
+      name: "ArithmeticError"
+      to: "sha256:a62e29d3b786b56f18a1469f799fee8dd8b68ac6072f3ba4d3767a125e5d9d71"
+    }
+  ]
+  references: []
+}

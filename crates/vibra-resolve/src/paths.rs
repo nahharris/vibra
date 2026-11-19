@@ -30,19 +30,17 @@ use crate::graph::{
 use crate::identity::{DeclarationId, DeclarationKind};
 use crate::imports::top_level;
 use crate::namespaces::at;
-use crate::prelude::{PreludeKind, SELF, prelude};
+use crate::prelude::{ANY, SELF};
 
 /// What a name or a path denotes.
 #[derive(Clone, Copy, Debug)]
 enum Entity {
     /// A local declaration.
     Decl(usize),
-    /// A local module, through an import.
+    /// A module, local or embedded, through an import.
     Module(usize),
-    /// A module of `@std`, through an import.
-    StdModule,
-    /// A prelude name.
-    Prelude(PreludeKind),
+    /// The predeclared interface `Any`.
+    Any,
     /// A type parameter, declared at the span.
     Param(ByteSpan),
     /// `Self`: the enclosing type, or the receiver of an interface.
@@ -434,17 +432,20 @@ impl<'a> Walker<'_, 'a, '_> {
                 Binding::Decl(index) => Entity::Decl(index),
                 Binding::Import(index) => {
                     match self.graph.imports.get(index).map(|import| import.target) {
-                        Some(ImportTarget::LocalModule(module)) => {
-                            Entity::Module(module)
-                        }
-                        Some(ImportTarget::StdModule(_)) => Entity::StdModule,
+                        Some(ImportTarget::Module(module)) => Entity::Module(module),
                         Some(ImportTarget::Decl(decl)) => Entity::Decl(decl),
                         Some(ImportTarget::Unresolved) | None => Entity::Failed,
                     }
                 }
             });
         }
-        prelude(name).map(Entity::Prelude)
+        if name == ANY {
+            return Some(Entity::Any);
+        }
+        self.graph
+            .prelude
+            .get(name)
+            .map(|decl| decl.map_or(Entity::Failed, Entity::Decl))
     }
 
     /// Resolves one path in `position`; returns what it denotes, or `None`
@@ -565,13 +566,12 @@ impl<'a> Walker<'_, 'a, '_> {
                 }
                 Some(Entity::Decl(index))
             }
-            Entity::StdModule | Entity::Prelude(_) => {
-                self.report(at(
-                    DiagnosticCode::ToolUnavailable,
-                    &source_id,
-                    span,
-                    "the declarations of the standard library are not available to resolution yet",
+            Entity::Any => {
+                let diagnostic = unknown(format!(
+                    "the predeclared interface `Any` has no member `{}`",
+                    part.text()
                 ));
+                self.report(diagnostic);
                 None
             }
             Entity::Decl(index) => {
@@ -632,10 +632,8 @@ impl<'a> Walker<'_, 'a, '_> {
                     DeclarationKind::Test => Found::Other("a test"),
                 },
             ),
-            Entity::Module(_) | Entity::StdModule => Found::Other("a module"),
-            Entity::Prelude(PreludeKind::Type) => Found::Type,
-            Entity::Prelude(PreludeKind::Interface) => Found::Interface,
-            Entity::Prelude(PreludeKind::Value) => Found::Other("a module value"),
+            Entity::Module(_) => Found::Other("a module"),
+            Entity::Any => Found::Interface,
             Entity::Param(_) => Found::Parameter,
             Entity::SelfType(_) | Entity::Associated(..) => Found::Type,
         };

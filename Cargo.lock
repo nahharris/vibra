@@ -1451,6 +1451,7 @@ dependencies = [
  "vibra-diagnostics",
  "vibra-fmt",
  "vibra-ir",
+ "vibra-resolve",
  "vibra-syntax",
 ]
 
@@ -1473,6 +1474,7 @@ dependencies = [
  "vibra-diagnostics",
  "vibra-resolve",
  "vibra-syntax",
+ "vibra-types",
 ]
 
 [[package]]

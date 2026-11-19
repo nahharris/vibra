@@ -28,7 +28,7 @@
         name: "User"
       }
       access: @public
-      span: {sourceId: "src/app/model.vib" start: 0u64 end: 47u64}
+      span: {sourceId: "src/app/model.vib" start: 0u64 end: 53u64}
     }
   ]
   imports: [
@@ -43,6 +43,10 @@
     {
       span: {sourceId: "src/app/main.vib" start: 39u64 end: 49u64}
       to: "sha256:ab9ab700ecafc45005e26482ae70ef043dcc6afeb827589f4f9c7d38950d21de"
+    }
+    {
+      span: {sourceId: "src/app/model.vib" start: 20u64 end: 23u64}
+      to: "sha256:7a82cdb199f4a619d2da02c737c85a64243099c0385ac0e4442f1cb2d6e0ad5e"
     }
   ]
 }

@@ -24,7 +24,6 @@ use vibra_syntax::source::{Given, Ident, TypeBody, TypeForm};
 use crate::graph::{Decl, DeclView, Graph, ImportTarget};
 use crate::identity::DeclarationKind;
 use crate::namespaces::{at, repeated};
-use crate::prelude::is_prelude_name;
 
 /// The type parameters `decl`'s view declares.
 pub(crate) fn own_params<'a>(view: DeclView<'a>) -> Vec<Ident<'a>> {
@@ -57,7 +56,14 @@ pub(crate) fn headers(graph: &Graph<'_>, out: &mut Vec<Diagnostic>) {
             | DeclView::Case(_)
             | DeclView::Assoc(_) => None,
         };
-        header(source_id, &own_params(decl.view), &inherited, given, out);
+        header(
+            graph,
+            (source_id, graph.is_embedded(decl.module)),
+            &own_params(decl.view),
+            &inherited,
+            given,
+            out,
+        );
         if decl.kind() == DeclarationKind::AssociatedType
             && let Some(parameter) = inherited
                 .iter()
@@ -86,7 +92,8 @@ pub(crate) fn headers(graph: &Graph<'_>, out: &mut Vec<Diagnostic>) {
                 .unwrap_or_default();
             for member in block.view.members() {
                 header(
-                    &module.source_id,
+                    graph,
+                    (&module.source_id, module.embedded),
                     &member.params(),
                     &inherited,
                     member.given(),
@@ -97,10 +104,12 @@ pub(crate) fn headers(graph: &Graph<'_>, out: &mut Vec<Diagnostic>) {
     }
 }
 
-/// Checks one header: its parameters against each other, against the
-/// `inherited` ones, and against the prelude, and its `given` keys.
+/// Checks one header of the module `source_id`: its parameters against each
+/// other, against the `inherited` ones, and, outside the embedded unit,
+/// against the prelude; and its `given` keys.
 fn header(
-    source_id: &str,
+    graph: &Graph<'_>,
+    (source_id, embedded): (&str, bool),
     params: &[Ident<'_>],
     inherited: &[Ident<'_>],
     given: Option<Given<'_>>,
@@ -127,12 +136,15 @@ fn header(
                 ),
             ));
         }
-        reserve(
-            source_id,
-            *parameter,
-            DiagnosticCode::NameReservedDeclaration,
-            out,
-        );
+        if !embedded {
+            reserve(
+                graph,
+                source_id,
+                *parameter,
+                DiagnosticCode::NameReservedDeclaration,
+                out,
+            );
+        }
     }
     let Some(given) = given else {
         return;
@@ -166,13 +178,14 @@ fn header(
 
 /// Reports `name` as `code` when it is a prelude name. A reserved word in a
 /// name position is the reader's diagnostic and is not reported again.
-fn reserve(
+pub(crate) fn reserve(
+    graph: &Graph<'_>,
     source_id: &str,
     name: Ident<'_>,
     code: DiagnosticCode,
     out: &mut Vec<Diagnostic>,
 ) {
-    if !name.is_reserved() && is_prelude_name(name.text()) {
+    if !name.is_reserved() && graph.is_prelude_name(name.text()) {
         out.push(at(
             code,
             source_id,
@@ -183,8 +196,13 @@ fn reserve(
 }
 
 /// Reports every declaration, member, and import spelled as a prelude name.
+/// The embedded standard library introduces the prelude names, so its
+/// modules are not checked.
 pub(crate) fn reservations(graph: &Graph<'_>, out: &mut Vec<Diagnostic>) {
     for decl in &graph.decls {
+        if graph.is_embedded(decl.module) {
+            continue;
+        }
         let code = match decl.kind() {
             DeclarationKind::Type
             | DeclarationKind::Interface
@@ -199,14 +217,15 @@ pub(crate) fn reservations(graph: &Graph<'_>, out: &mut Vec<Diagnostic>) {
             }
         };
         if let Some(name) = declared_name(decl.view) {
-            reserve(graph.source_id(decl.module), name, code, out);
+            reserve(graph, graph.source_id(decl.module), name, code, out);
         }
     }
-    for module in &graph.modules {
+    for module in graph.modules.iter().filter(|module| !module.embedded) {
         for block in &module.impls {
             for member in block.view.members() {
                 if let Some(name) = member.name() {
                     reserve(
+                        graph,
                         &module.source_id,
                         name,
                         DiagnosticCode::NameReservedValueSpelling,
@@ -221,7 +240,7 @@ pub(crate) fn reservations(graph: &Graph<'_>, out: &mut Vec<Diagnostic>) {
             continue;
         };
         let written = import.view.alias().is_none_or(|alias| !alias.is_reserved());
-        if written && is_prelude_name(name) {
+        if written && !graph.is_embedded(import.module) && graph.is_prelude_name(name) {
             out.push(at(
                 DiagnosticCode::NameReservedValueSpelling,
                 graph.source_id(import.module),
@@ -332,7 +351,7 @@ pub(crate) fn casing(graph: &Graph<'_>, out: &mut Vec<Diagnostic>) {
                 }
                 _ => Casing::Camel,
             },
-            ImportTarget::LocalModule(_) | ImportTarget::StdModule(_) => Casing::Camel,
+            ImportTarget::Module(_) => Casing::Camel,
             ImportTarget::Unresolved => continue,
         };
         case(graph.source_id(import.module), alias, casing, out);

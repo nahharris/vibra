@@ -30,23 +30,23 @@ fn names_collide_across_namespaces() {
 
 #[test]
 fn an_import_name_collides_with_a_declaration() {
-    let text = "use @std.io enduse\nlet io: U8 be 1u8 endlet\n";
+    let text = "use @std.core enduse\nlet core: U8 be 1u8 endlet\n";
     assert_one(
         &resolve_main(text),
         C::NameRedeclaration,
-        span_of(text, "io", 1),
-        &[span_of(text, "io", 0)],
+        span_of(text, "core", 1),
+        &[span_of(text, "core", 0)],
     );
 }
 
 #[test]
 fn two_imports_with_one_name_collide() {
-    let text = "use @std.io enduse\nuse @std.core as io enduse\n";
+    let text = "use @std.core enduse\nuse @std.bool as core enduse\n";
     assert_one(
         &resolve_main(text),
         C::NameRedeclaration,
-        span_of(text, "io", 1),
-        &[span_of(text, "io", 0)],
+        span_of(text, "core", 1),
+        &[span_of(text, "core", 0)],
     );
 }
 
@@ -216,7 +216,23 @@ fn a_reserved_declaration_still_binds() {
     let text = "type Option of U8 endtype\ntype A of Option endtype\n";
     let resolution = resolve_main(text);
     assert_eq!(codes(&resolution), [C::NameReservedDeclaration]);
-    assert_eq!(resolution.references().len(), 1);
+    let local = vibra_resolve::Anchor::new(
+        "hello",
+        "0.1.0",
+        "@app.main",
+        "",
+        vibra_resolve::DeclarationKind::Type,
+        "Option",
+    )
+    .identity();
+    let (start, end) = span_of(text, "Option", 1);
+    let reference = resolution
+        .references()
+        .iter()
+        .find(|reference| reference.span().start() == start)
+        .expect("the use of `Option`");
+    assert_eq!(reference.span().end(), end);
+    assert_eq!(reference.to(), &local, "the local declaration binds");
 }
 
 #[test]

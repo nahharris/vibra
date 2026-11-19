@@ -13,12 +13,14 @@ use std::collections::BTreeMap;
 use vibra_diagnostics::{ByteSpan, Diagnostic};
 use vibra_syntax::source::{
     AssocType, Callable, CallableKind, Case, Declaration, Ident, Impl, InterfaceDecl,
-    Module, ModuleLet, TagSection, Test, TypeBody, TypeDecl, TypeForm, Use,
+    Module, ModuleLet, SourceOptions, TagSection, Test, TypeBody, TypeDecl, TypeForm,
+    Use,
 };
 use vibra_syntax::{Document, SyntaxKind};
 
 use crate::identity::{Anchor, DeclarationId, DeclarationKind};
-use crate::input::{PackageId, ResolveInput, UnitKind};
+use crate::input::{PackageId, ResolveInput, SourceUnit, UnitKind};
+use crate::prelude::{self, ANY, SELF};
 
 /// Who may name a declaration from another module.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -56,12 +58,17 @@ pub(crate) enum Binding {
     Import(usize),
 }
 
-/// One module of a local unit.
+/// One module of a local unit or of the embedded unit.
 #[derive(Debug)]
 pub(crate) struct ModuleData<'a> {
     pub(crate) path: String,
     pub(crate) unit: String,
     pub(crate) unit_kind: UnitKind,
+    /// The package the module belongs to: the local one, or the embedded
+    /// standard library's.
+    pub(crate) package: &'a PackageId,
+    /// Whether the module is a module of the embedded standard library.
+    pub(crate) embedded: bool,
     pub(crate) source_id: String,
     pub(crate) identity: DeclarationId,
     /// The flat module scope: every top-level declaration and import name.
@@ -161,10 +168,8 @@ pub(crate) struct Import<'a> {
 pub(crate) enum ImportTarget {
     /// Resolution failed and was reported.
     Unresolved,
-    /// A local module.
-    LocalModule(usize),
-    /// A module of `@std`.
-    StdModule(&'static str),
+    /// A module, local or embedded.
+    Module(usize),
     /// A top-level declaration.
     Decl(usize),
 }
@@ -172,28 +177,46 @@ pub(crate) enum ImportTarget {
 /// The modules, declarations, and imports of one input.
 #[derive(Debug)]
 pub(crate) struct Graph<'a> {
+    /// The local package.
     pub(crate) package: &'a PackageId,
     pub(crate) modules: Vec<ModuleData<'a>>,
     pub(crate) decls: Vec<Decl<'a>>,
     pub(crate) imports: Vec<Import<'a>>,
+    /// The name of the embedded unit, `@std`.
+    pub(crate) embedded_unit: &'a str,
+    /// Each name of the prelude table and the declaration it resolves to.
+    pub(crate) prelude: BTreeMap<String, Option<usize>>,
 }
 
-/// Parses every module of `input`. The reader's diagnostics go to `out`.
+/// Parses every module of `input`, the embedded unit's in standard-library
+/// mode. The reader's diagnostics go to `out`.
 pub(crate) fn parse(input: &ResolveInput, out: &mut Vec<Diagnostic>) -> Vec<Document> {
-    let mut documents = Vec::new();
-    for unit in input.units() {
-        for module in unit.modules() {
-            let document =
-                vibra_syntax::parse_source(Some(module.source_id()), module.bytes());
+    let local = input
+        .units()
+        .iter()
+        .flat_map(SourceUnit::modules)
+        .map(|module| (module, false));
+    let embedded = input
+        .embedded()
+        .modules()
+        .iter()
+        .map(|module| (module, true));
+    local
+        .chain(embedded)
+        .map(|(module, standard_library)| {
+            let document = vibra_syntax::parse_source_with(
+                Some(module.source_id()),
+                module.bytes(),
+                SourceOptions { standard_library },
+            );
             out.extend(
                 document.diagnostics().iter().map(|diagnostic| {
                     with_source(diagnostic.clone(), module.source_id())
                 }),
             );
-            documents.push(document);
-        }
-    }
-    documents
+            document
+        })
+        .collect()
 }
 
 /// `diagnostic` with its source identity, unless it already names one.
@@ -226,45 +249,73 @@ impl<'a> Graph<'a> {
     /// Collects every module's declarations and imports. `documents` are the
     /// parsed modules of `input`, in its order.
     pub(crate) fn collect(input: &'a ResolveInput, documents: &'a [Document]) -> Self {
-        let package = input.package();
+        let embedded = input.embedded();
         let mut graph = Self {
-            package,
+            package: input.package(),
             modules: Vec::new(),
             decls: Vec::new(),
             imports: Vec::new(),
+            embedded_unit: embedded.name(),
+            prelude: BTreeMap::new(),
         };
-        let mut documents = documents.iter();
-        for unit in input.units() {
-            for module in unit.modules() {
-                let view = documents.next().and_then(vibra_syntax::module);
-                let name = module.path().rsplit('.').next().unwrap_or_default();
-                let identity = Anchor::new(
-                    package.name(),
-                    package.version(),
-                    module.path(),
-                    "",
-                    DeclarationKind::Module,
-                    name,
-                )
-                .identity();
-                graph.modules.push(ModuleData {
-                    path: module.path().to_owned(),
-                    unit: unit.name().to_owned(),
-                    unit_kind: unit.kind(),
-                    source_id: module.source_id().to_owned(),
-                    identity,
-                    scope: BTreeMap::new(),
-                    top: Vec::new(),
-                    imports: Vec::new(),
-                    impls: Vec::new(),
-                });
-                let index = graph.modules.len() - 1;
-                if let Some(view) = view {
-                    graph.collect_module(index, view);
-                }
+        let local = input.units().iter().flat_map(|unit| {
+            unit.modules().iter().map(move |module| {
+                (input.package(), unit.name(), unit.kind(), false, module)
+            })
+        });
+        let standard = embedded.modules().iter().map(|module| {
+            (
+                embedded.package(),
+                embedded.name(),
+                UnitKind::Lib,
+                true,
+                module,
+            )
+        });
+        for ((package, unit, unit_kind, is_embedded, module), document) in
+            local.chain(standard).zip(documents)
+        {
+            let name = module.path().rsplit('.').next().unwrap_or_default();
+            let identity = Anchor::new(
+                package.name(),
+                package.version(),
+                module.path(),
+                "",
+                DeclarationKind::Module,
+                name,
+            )
+            .identity();
+            graph.modules.push(ModuleData {
+                path: module.path().to_owned(),
+                unit: unit.to_owned(),
+                unit_kind,
+                package,
+                embedded: is_embedded,
+                source_id: module.source_id().to_owned(),
+                identity,
+                scope: BTreeMap::new(),
+                top: Vec::new(),
+                imports: Vec::new(),
+                impls: Vec::new(),
+            });
+            let index = graph.modules.len() - 1;
+            if let Some(view) = vibra_syntax::module(document) {
+                graph.collect_module(index, view);
             }
         }
+        graph.prelude = prelude::bind(&graph, embedded);
         graph
+    }
+
+    /// Whether `name` is a prelude name: a name of the prelude table, or a
+    /// predeclared name.
+    pub(crate) fn is_prelude_name(&self, name: &str) -> bool {
+        name == SELF || name == ANY || self.prelude.contains_key(name)
+    }
+
+    /// Whether `module` is a module of the embedded standard library.
+    pub(crate) fn is_embedded(&self, module: usize) -> bool {
+        self.modules.get(module).is_some_and(|data| data.embedded)
     }
 
     fn collect_module(&mut self, module: usize, view: Module<'a>) {
@@ -529,18 +580,17 @@ impl<'a> Graph<'a> {
         span: ByteSpan,
         access: Access,
     ) -> usize {
-        let path = self
-            .modules
-            .get(module)
-            .map(|data| data.path.clone())
-            .unwrap_or_default();
+        let (package, path) = self.modules.get(module).map_or_else(
+            || (self.package, String::new()),
+            |data| (data.package, data.path.clone()),
+        );
         let owner_path = owner
             .and_then(|owner| self.decls.get(owner))
             .map(|owner| owner.name.clone())
             .unwrap_or_default();
         let anchor = Anchor::new(
-            self.package.name(),
-            self.package.version(),
+            package.name(),
+            package.version(),
             path,
             owner_path,
             kind,

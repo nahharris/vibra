@@ -1,3 +1,3 @@
-type User of @user
+type User of {name: Str}
   visibility @public
 endtype

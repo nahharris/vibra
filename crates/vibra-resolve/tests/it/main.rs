@@ -15,3 +15,4 @@ mod identity;
 mod imports;
 mod paths;
 mod snapshot;
+mod stdlib;

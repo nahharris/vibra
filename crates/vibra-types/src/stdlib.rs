@@ -26,6 +26,7 @@ use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 use vibra_ir::external::CompilerIntrinsic;
 use vibra_ir::external::host::host_row;
 use vibra_ir::{IrError, Library, LibraryTypes, TypeId};
+use vibra_resolve::{EmbeddedUnit, PackageId, PreludeBinding, SourceModule};
 use vibra_syntax::source::{Declaration, Module, SourceOptions, TypeBody, module};
 use vibra_syntax::{Document, parse_source_with};
 
@@ -337,6 +338,34 @@ pub struct StdlibOverlay {
     pub modules: Vec<OverlayModule>,
     /// Each prelude name that is a declaration, with that declaration.
     pub prelude: BTreeMap<String, StdlibDeclaration>,
+}
+
+impl StdlibOverlay {
+    /// The overlay as resolution's input: the unit, its modules as sources,
+    /// and the prelude table with each declaration's identity.
+    #[must_use]
+    pub fn embedded_unit(&self) -> EmbeddedUnit {
+        EmbeddedUnit::new(
+            PackageId::new(&self.package_name, &self.package_version),
+            self.unit,
+            self.modules
+                .iter()
+                .map(|module| {
+                    SourceModule::new(
+                        &module.path,
+                        &module.source_id,
+                        module.bytes.clone(),
+                    )
+                })
+                .collect(),
+            self.prelude
+                .iter()
+                .map(|(name, declaration)| {
+                    PreludeBinding::new(name, declaration.identity())
+                })
+                .collect(),
+        )
+    }
 }
 
 /// The loaded standard library.
