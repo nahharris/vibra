@@ -415,6 +415,28 @@ fn an_unsuffixed_opaque_float_keeps_its_exact_exponent() {
 }
 
 #[test]
+fn a_format_of_the_wrong_form_is_a_shape_fault() {
+    for value in ["[]", "\"@sample.v1\"", "{}", "true", "1u8"] {
+        let text = format!("{{format: {value} name: \"a\" count: 1}}");
+        assert_eq!(
+            faults(&read(&text)),
+            [(DiagnosticCode::DataInvalidShape, at(&text, value, 0))],
+            "{text}"
+        );
+    }
+    // A well-formed atom of another version, and an unsuffixed number in the
+    // atom slot, are value faults.
+    for value in ["@other", "@sample.v2", "1"] {
+        let text = format!("{{format: {value} name: \"a\" count: 1}}");
+        assert_eq!(
+            faults(&read(&text)),
+            [(DiagnosticCode::DataInvalidValue, at(&text, value, 0))],
+            "{text}"
+        );
+    }
+}
+
+#[test]
 fn diagnostics_carry_the_source_identity() {
     let decoded = read("{format: @sample.v1 name: \"a\"}");
     assert_eq!(

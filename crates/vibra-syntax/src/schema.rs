@@ -583,15 +583,38 @@ fn select_format(schema: &Schema, root: &DataNode) -> Option<Diagnostic> {
             "the required field `format` is missing",
         ));
     };
+    // An atom of another version is a format the reader does not implement;
+    // an unsuffixed number in this atom slot is a value fault, as in any
+    // slot with no number type; any other form is the wrong shape.
+    let span = format.value().span();
     match format.value().value() {
         DataValue::Atom(atom) if atom == schema.format => None,
-        _ => Some(Diagnostic::new(
+        DataValue::Atom(_) => Some(Diagnostic::new(
             DiagnosticCode::DataInvalidValue,
-            format.value().span(),
+            span,
             format!(
                 "this reader implements the format `{}` and no other",
                 schema.format
             ),
+        )),
+        DataValue::Integer(literal) if literal.suffix().is_none() => {
+            Some(Diagnostic::new(
+                DiagnosticCode::DataInvalidValue,
+                span,
+                "an unsuffixed number in a slot of type an atom",
+            ))
+        }
+        DataValue::Float(literal) if literal.suffix().is_none() => {
+            Some(Diagnostic::new(
+                DiagnosticCode::DataInvalidValue,
+                span,
+                "an unsuffixed number in a slot of type an atom",
+            ))
+        }
+        _ => Some(Diagnostic::new(
+            DiagnosticCode::DataInvalidShape,
+            span,
+            "the field `format` holds the format atom",
         )),
     }
 }

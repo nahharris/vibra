@@ -1,0 +1,17 @@
+id = "V2-PROJECT-decode-format-shape"
+rule = "V2-PROJECT-decode-format-shape"
+profile = "staticV2"
+operation = "projectDecode"
+description = "04-programs-and-packages.md#schemas: a format field of the wrong form is a shape fault at the value, not an unsupported version"
+
+[inputs]
+project = "project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@data.invalidShape"
+level = "@error"
+source = "project.vibon"
+span = { start = 9, end = 11 }
