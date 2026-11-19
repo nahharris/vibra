@@ -55,7 +55,6 @@ type List(T) of Intrinsic(@list)
     fn next
       takes {value: Self}
       returns step: Option({T Self})
-      visibility @public
       external @compiler
       symbol "list.next"
     endfn
