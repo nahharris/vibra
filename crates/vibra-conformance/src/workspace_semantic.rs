@@ -97,8 +97,25 @@ impl ProfileHandler for InterpreterV1WorkspaceRunHandler {
         );
         let accepted =
             result.check().status() == vibra_workspace::semantic::CheckStatus::Accepted;
+        let entry = if accepted {
+            result
+                .check()
+                .program_for_target(target)
+                .and_then(|program| crate::native::entry_job(case, program, true))
+        } else {
+            None
+        };
         let mut host_event = None;
         // Both backends run the one checked program of the target.
+        // The reference stepper runs the same program over a fresh world.
+        let native = if accepted {
+            result
+                .check()
+                .program_for_target(target)
+                .map(|program| crate::native::observe_entry(program, &world))
+        } else {
+            None
+        };
         let wasm = if accepted {
             result
                 .check()
@@ -164,6 +181,8 @@ impl ProfileHandler for InterpreterV1WorkspaceRunHandler {
             interpreter,
             host_event,
             wasm,
+            native,
+            entry,
             ..CaseObservation::default()
         })
     }
@@ -236,6 +255,9 @@ impl ProfileHandler for InterpreterV1WorkspaceTestHandler {
                             &world,
                         ),
                     )),
+                    native: Some(crate::native::observe_tests(
+                        result.stopped_programs(),
+                    )),
                     ..CaseObservation::default()
                 });
             }
@@ -254,6 +276,11 @@ impl ProfileHandler for InterpreterV1WorkspaceTestHandler {
                 )),
                 audit_trace: Vec::new(),
             })),
+            native: accepted.then(|| {
+                crate::native::observe_tests(
+                    result.items().iter().filter_map(|item| item.program()),
+                )
+            }),
             // Both backends run the tests of the one workspace.
             wasm: accepted.then(|| {
                 BackendObservation::new(

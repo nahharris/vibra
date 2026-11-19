@@ -1,44 +1,175 @@
-# Milestone 1 — Content-addressed codebase
+# v0.0.2 M1: pure language
 
-M1 imports a checked local project into a durable codebase, publishes safe immutable revisions, and lets an authorized reader find a definition by canonical identity and retrieve its exact checked version after a restart.
+**Planned.** The pure part of the language, checked and run on the reference
+interpreter.
 
-**Status:** active on integration branch <code>v0.0.2/m1</code>. C1–C12 decisions are approved. Local implementation, schema/registry updates, independent conformance scenarios, reviewed address vectors, measurements, and evidence are recorded in [M1 evidence](evidence.md). Delivery remains in progress until the cumulative draft merges with green CI. No release support claim is made before the milestone is merged.
+Design record: [architecture.md](architecture.md). Owner table for M0:
+[../m0/owners.md](../m0/owners.md). Step guides: [steps/](steps/).
+Integration branch: `v0.0.2/m1`, created from `main` after M0 exits.
 
-This run uses focused commits and one cumulative draft PR into <code>main</code>, as explicitly requested for the full M1 delivery. That is the delivery exception to the repository's usual one-PR-per-step model. A step may have complete local evidence while the cumulative PR is open, but it is not landed or complete until that PR merges.
+## Scope, in slices
 
-## Execution sequence
+1. **Reader and formatter.** Lexical structure, the full grammar, recovery,
+   the lossless tree, and the canonical format, with golden trees for every
+   production and an idempotence corpus.
+2. **Names and modules.** Imports with derived names, the flat module scope,
+   paths against field reads, acyclic imports, case rules for module paths.
+3. **Types and construction.** Scalars, structural tuples and records,
+   declared wrappers, tuples, records, and variant types, representation
+   visibility, generics with `given`, recursive types with the finite-size
+   check.
+4. **Bodies.** `let` with patterns, optional type, and `else`; `if`,
+   `match`, and `do` as statements and expressions; explicit `return`;
+   `try` with its expected type; written evaluation order; coverage.
+5. **Callables and interfaces.** Named and anonymous `fn`, labelled
+   defaults, interfaces, nested `impl`, dispatch, interface values, the two
+   widenings.
+6. **Standard library.** The pure modules: `Iter` with `fold` and the
+   adapters, `Equatable`, `Ordered` with its defaults, `From` and `TryFrom`,
+   saturating and checked arithmetic with no trapping operation, nested
+   `Iter` implementations for the builtin collections.
+7. **Guards.** The certified fragment; bare `requires`, `ensures`, and
+   `where` discharged by the seven rules or rejected; the `else` forms;
+   fallible construction; conversion of guarded callables.
+8. **Module values and tests.** Lazy, acyclic module values; `test`
+   declarations without grants; assertions.
+9. **Compile-time evaluation.** The interpreter evaluates constant
+   predicates and constant expressions for the checker, under tool limits
+   that report "not established", never "true".
 
-| Step | Slice | Status | Guide |
+Each slice lands with its diagnostics, schemas, conformance cases, and
+formatter support.
+
+## Fixed design decisions
+
+The decisions and their reasons are in [architecture.md](architecture.md).
+In one line each:
+
+- New crates under the final names beside the old crates, which step 01
+  renames with a `-v1` suffix and step 28 deletes.
+- The checked IR is closed in step 12 for the whole of M1, with a migration
+  table for the native track; package X2-01 moves the native track to it.
+- The packages N1 to N13 of the native contract are each assigned once:
+  N1, N2, N3, N5, N6, and N13 are absorbed by steps 02, 12, 13, 15, 19,
+  21, and 27; N4 and N7 to N12 are M2 packages on the new crates. The
+  [architecture](architecture.md#native-contract-packages) has the table.
+- The checker calls the interpreter for compile-time evaluation; that arrow
+  is part of language semantics.
+- The Wasm backend is ported fail-closed to the new IR in step 27 and runs
+  the new corpus's pure executable cases it supports; its column is not an
+  M1 gate.
+- The three host tests ignored when the specification merged are settled
+  by steps 02 (the registry test, restored), 08 (the example inventory,
+  deleted and replaced by a test that reads every fenced block of the
+  specification), and 28 (the native parity inventory, deleted).
+- The corpus is re-authored under `V2-` identities at
+  `conformance/cases/<PREFIX>/<id>/`, from the specification, with no
+  snapshot-writing mode in the runner.
+- `stdlib/` is rewritten; the roles land in step 14 before the first
+  checker step.
+
+## Step table
+
+Status values: `planned`, `in progress`, `landed`. Kind: `vertical` unless
+marked `infrastructure`, `specification prerequisite`, or `evidence`, which
+the [execution model](../../execution.md#decomposition-rule) exempts from
+the vertical-slice rule.
+
+| Id | Name | Kind | Depends on | Can run in parallel with | Crates touched | Status |
+| --- | --- | --- | --- | --- | --- | --- |
+| 01 | [rename-v1](steps/01-rename-v1.md) | infrastructure | — | — | every existing crate, `Cargo.toml`, CI, `stdlib-v1/`, `examples-v1/`, `fuzz-v1/`, `conformance/v1/` | planned |
+| 02 | [diagnostics-and-harness](steps/02-diagnostics-and-harness.md) | infrastructure, specification prerequisite | 01 | — | `vibra-diagnostics`, `vibra-conformance` (new) | planned |
+| 03 | [lexer-and-vibon](steps/03-lexer-and-vibon.md) | vertical | 02 | 12, 13, 24 | `vibra-syntax`, `vibra-fmt` (new), `vibra-conformance`, `conformance/cases`, CI | planned |
+| 04 | [source-skeleton](steps/04-source-skeleton.md) | vertical | 03 | 09, 12, 13, 24, 27 | `vibra-syntax`, `vibra-fmt`, `conformance/cases` | planned |
+| 05 | [type-declarations](steps/05-type-declarations.md) | vertical | 04 | 09, 12, 13, 24, 27 | `vibra-syntax`, `vibra-fmt`, `conformance/cases` | planned |
+| 06 | [expressions-and-patterns](steps/06-expressions-and-patterns.md) | vertical | 05 | 09, 12, 13, 24, 27 | `vibra-syntax`, `vibra-fmt`, `conformance/cases` | planned |
+| 07 | [callables-and-tests-syntax](steps/07-callables-and-tests-syntax.md) | vertical | 06 | 09, 12, 13, 24, 27 | `vibra-syntax`, `vibra-fmt`, `conformance/cases` | planned |
+| 08 | [reader-exit](steps/08-reader-exit.md) | evidence | 07 | 09, 10, 11, 12, 13, 14, 24, 27 | `vibra-conformance`, `vibra-conformance-v1` (the ignored inventory test deleted), `fuzz/`, `conformance/cases` | planned |
+| 09 | [project-and-source-graph](steps/09-project-and-source-graph.md) | vertical | 03 | 04, 05, 06, 07, 08, 12, 13, 14, 24, 27 | `vibra-workspace` (new), `vibra-conformance`, `conformance/cases` | planned |
+| 10 | [resolve-declarations](steps/10-resolve-declarations.md) | vertical | 07, 09 | 08, 12, 13, 14, 24, 27 | `vibra-resolve` (new), `vibra-workspace`, `vibra-conformance`, `conformance/cases` | planned |
+| 11 | [resolve-bodies](steps/11-resolve-bodies.md) | vertical | 10 | 08, 12, 13, 14, 24, 27 | `vibra-resolve`, `conformance/cases` | planned |
+| 12 | [checked-ir](steps/12-checked-ir.md) | infrastructure | 02 | 03 to 11, 24 | `vibra-ir` (new) | planned |
+| 13 | [interpreter](steps/13-interpreter.md) | infrastructure | 12 | 03 to 11, 14, 24 | `vibra-interp` (new) | planned |
+| 14 | [stdlib-bootstrap](steps/14-stdlib-bootstrap.md) | infrastructure | 07, 12 | 08, 09, 10, 11, 13, 24, 27 | `stdlib/` (new), `vibra-types` (new) | planned |
+| 15 | [check-core](steps/15-check-core.md) | vertical | 11, 13, 14 | 08, 24, 27 | `vibra-types`, `vibra-interp`, `vibra-workspace`, `vibra-conformance`, `stdlib/`, `conformance/cases` | planned |
+| 16 | [check-data](steps/16-check-data.md) | vertical | 15 | 08, 24, 27 | `vibra-types`, `vibra-interp`, `stdlib/`, `conformance/cases` | planned |
+| 17 | [check-bodies](steps/17-check-bodies.md) | vertical | 16 | 08, 24, 27 | `vibra-types`, `vibra-interp`, `conformance/cases` | planned |
+| 18 | [check-callables](steps/18-check-callables.md) | vertical | 17 | 08, 23, 24, 25, 27 | `vibra-types`, `vibra-interp`, `conformance/cases` | planned |
+| 19 | [check-interfaces](steps/19-check-interfaces.md) | vertical | 18 | 08, 23, 24, 25, 26, 27 | `vibra-types`, `vibra-interp`, `stdlib/`, `conformance/cases` | planned |
+| 20 | [stdlib-pure](steps/20-stdlib-pure.md) | vertical | 19 | 08, 23, 24, 25, 26, 27 | `stdlib/`, `vibra-types`, `vibra-interp`, `conformance/cases` | planned |
+| 21 | [guards-with-else](steps/21-guards-with-else.md) | vertical | 20 | 08, 23, 24, 25, 26, 27 | `vibra-types`, `vibra-interp`, `conformance/cases` | planned |
+| 22 | [discharge](steps/22-discharge.md) | vertical | 21 | 08, 23, 24, 25, 26, 27 | `vibra-types`, `conformance/cases` | planned |
+| 23 | [tests-and-assertions](steps/23-tests-and-assertions.md) | vertical | 17 | 18 to 22, 24, 25, 27 | `vibra-workspace`, `vibra-types`, `vibra-interp`, `vibra-conformance`, `stdlib/`, `conformance/cases` | planned |
+| 24 | [cli-skeleton](steps/24-cli-skeleton.md) | vertical | 02 | 03 to 23, 27 | `vibra-schema`, `vibra-cli` (new) | planned |
+| 25 | [cli-fmt-check](steps/25-cli-fmt-check.md) | vertical | 08, 15, 24 | 16 to 23, 27 | `vibra-cli`, `vibra-schema`, `vibra-workspace`, `vibra-conformance`, `conformance/cases` | planned |
+| 26 | [cli-test](steps/26-cli-test.md) | vertical | 23, 25 | 18 to 22, 27 | `vibra-cli`, `vibra-schema` | planned |
+| 27 | [runtime-crate-port](steps/27-runtime-crate-port.md) | infrastructure | 03, 13 | 04 to 11, 14 to 26 | `vibra-host`, `vibra-native` (new), `vibra-wasm`, `vibra-wasm-run`, `vibra-ir`, `vibra-conformance`, `vibra-conformance-v1` (its Wasm column removed) | planned |
+| 28 | [cutover](steps/28-cutover.md) | infrastructure | 08, 20, 22, 23, 26, 27; X2-01 (Nexus plan) | — | every `-v1` crate (deleted), `Cargo.toml`, CI, `README.md`, `examples/`, `docs/roadmap` | planned |
+| 29 | [m1-exit](steps/29-m1-exit.md) | evidence | 28 | — | `examples/`, `conformance/cases`, this directory | planned |
+
+After 01 and 02 land, steps 03, 12, and 24 are in flight at once; after 03,
+steps 04, 09, 12, 13, and 24 are. The widest front is during the checker
+chain, when 08, 23, 24 to 27 run beside it.
+
+## Slices and steps
+
+| Slice | Steps that implement it | Step | Slices it serves |
 | --- | --- | --- | --- |
-| 1 | Freeze identity, persistence, import/export, schemas, and evidence contracts | in progress | [Approved contract ledger](01-contracts.md) |
-| 2 | Encode and address a checked graph deterministically | in progress | [Step 2](execution.md#step-2--checked-graph-addressing) |
-| 3 | Import, publish, reopen, and retrieve a checked revision | in progress | [Step 3](execution.md#step-3--first-durable-revision) |
-| 4 | Resolve names and read revision-scoped relations | in progress | [Step 4](execution.md#step-4--revision-scoped-reads) |
-| 5 | Export exact source into an absent destination | in progress | [Step 5](execution.md#step-5--source-export) |
-| 6 | Prove publication under contention and interruption | in progress | [Step 6](execution.md#step-6--publication-failure-paths) |
-| 7 | Verify integrity, version rejection, and index rebuilding | in progress | [Step 7](execution.md#step-7--integrity-and-recovery) |
-| 8 | Back up and restore an independently usable store | in progress | [Step 8](execution.md#step-8--backup-and-restore) |
-| 9 | Measure the local store and select journal settings | in progress | [Step 9](execution.md#step-9--local-store-measurements) |
-| 10 | Sweep the demo, exit gate, and M2 handoff | in progress | [Step 10](execution.md#step-10--exit-evidence) |
+| 1 Reader and formatter | 03, 04, 05, 06, 07, 08 | 01, 02 | all (infrastructure) |
+| 2 Names and modules | 09, 10, 11 | 03 to 08 | 1 |
+| 3 Types and construction | 15, 16 | 09, 10, 11 | 2 |
+| 4 Bodies | 15, 17 | 12, 13 | 3 to 9 (infrastructure) |
+| 5 Callables and interfaces | 18, 19 | 14 | 6 (and the roles 3, 4, 7 need) |
+| 6 Standard library | 14, 16, 19, 20 | 15 | 3, 4, 8 |
+| 7 Guards | 21, 22 | 16 | 3, 6 |
+| 8 Module values and tests | 15, 23 | 17 | 4 |
+| 9 Compile-time evaluation | 21, 22 | 18, 19 | 5, 6 |
+| | | 20 | 6 |
+| | | 21, 22 | 7, 9 |
+| | | 23 | 8 |
+| | | 24, 25, 26 | tool surface of 1, 3 to 8 |
+| | | 27, 28 | transition (infrastructure) |
+| | | 29 | exit evidence |
 
-## Approved design
+Every slice maps to at least one step and every step maps to a slice or to
+the transition.
 
-The workspace engine projects an immutable checked graph from its existing snapshot, resolver, and checker. The workspace-owned implementation is split into the pure <code>workspace::codebase::graph</code>, the SQLite <code>store</code>, and the explicit <code>export</code> boundary. Graph encoding performs no I/O or resolution. Persistence validates canonical records; workspace recovery replays exact attachments through the existing engine to verify and rebuild derived facts. Neither service defines a second checker or resolver.
+## Exit evidence
 
-The store is one project-local SQLite file at <code>.vibra/codebase.sqlite</code> by default. It contains exact canonical VIBON payloads and private derived indexes. Domain-separated SHA-256 addresses cover canonical checked-component records, source wrappers, and complete revision manifests. Checked objects, entity identities, raw source hashes, source-attachment addresses, codebase revisions, and file-workspace revisions are distinct.
+- Positive, negative, recovery, and format cases for every form of the
+  slices above, in both suites.
+- Contract cases: discharged, refuted, and unproved obligations with their
+  diagnostics; guard consequence values; a handled constant
+  construction error; no run-time check emitted for a bare guard.
+- Deep tail and non-tail recursion; invariant checks on every ingress path.
+- A list of every gate-program construction the contract rules rejected,
+  with the repair used.
+- The reference solutions and controls of the model-writing pilot's pure tasks
+  pass.
 
-Objects are top-level declarations, tests, and explicit implementation blocks. Nested members are owned parts with their own entity mappings and part paths. References include resolved types, interfaces, effects, values, calls, initializers, and implementation contracts. SCCs sort members by complete canonical key and encode internal references by member index. Named heads publish a revision with expected-absence or expected-address compare-and-publish. A busy store is retryable; a stale head is not silently rebased.
+| Exit clause | Steps that produce it | Recorded by |
+| --- | --- | --- |
+| cases for every form, both suites | 03 to 07, 09 to 11, 15 to 23 | 29 |
+| contract cases | 21, 22 | 29 |
+| deep recursion, ingress invariants | 13, 15, 21 | 29 |
+| gate-program rejections and repairs | 29 | 29 |
+| pilot pure tasks | 29 | 29 |
 
-Import is explicit. File project commands remain file-authoritative. Codebase reads pin one head or explicit revision and never refresh from files. Export writes exact stored project and source attachments to an absent destination only. It previews a canonical plan and applies it with an exclusive no-replace directory publication. M1 does not overwrite, delete, update, or merge into an existing destination tree.
+## Plan validation
 
-See [the accepted contract ledger](01-contracts.md) and the normative [program data](../../../spec/04-programs-and-packages.md#m1-addressed-codebase-data) and [tooling](../../../spec/05-tooling.md#m1-codebase-commands) chapters for the complete schemas, grammar, outcomes, and boundaries.
+Recorded when this plan was written, by the scripts named in each line:
 
-Local validation and the remaining integration evidence are tracked in [M1 evidence](evidence.md).
+- Every EBNF production of the source chapter appears in
+  [../m0/owners.md](../m0/owners.md): `check-owners.ps1`, empty diff.
+- Every diagnostic code cited in this directory and in the owner table is a
+  row of the registry table of the diagnostics chapter: `check-codes.ps1`,
+  no unknown code.
+- The step graph is acyclic and every `-p` package in a validation command is
+  known to `cargo metadata` or marked proposed: `check-graph.ps1`.
 
-## Gates and exclusions
+The scripts and their output are in the planning report, not in the
+repository.
 
-**Demo:** Import a multi-module project with mutually recursive definitions, publish a second checked revision, reopen the store, and retrieve both versions and their resolved dependency edges by address.
+## Not in this milestone
 
-**Exit:** Independent imports and reordered traversal produce the same object addresses; alpha-renaming and trivia-only edits preserve checked objects while exact source addresses change; dependent addresses change with dependency bodies; unrelated components deduplicate; nominal identities remain distinct; old and new revisions read independently; stale/busy CAS behavior is distinct; export preserves exact source and refuses a destination created after preview; interrupted publication exposes no partial revision; verify/reindex and backup/restore preserve authoritative addresses.
-
-No distributed sync, automatic merge, pruning, arbitrary SQL, general query CLI, MCP, LSP, semantic editing, REPL, ordinary dependency delivery, Wasm build products, native code generation, or optimization promise enters M1. A content address identifies an object only within an authorized opened codebase and grants no access by itself.
+`proc`, plans, `await`, grants, host operations, and the entry contract.

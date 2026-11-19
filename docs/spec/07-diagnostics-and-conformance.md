@@ -1,1109 +1,1056 @@
 # Vibra diagnostics and conformance
 
 Status: normative target
-Implementation status: reader, static, interpreter, and tooling observations
-have conformance coverage for the complete pure language through M3 and the
-pre-M4 binding revision; the current counts are recorded in the milestone
-exit evidence. The host-event expectation is implemented in both backends, and
-the differential execution runs over every executable case since M4 Step 11,
-which lowers every form of a checked program. Milestone 4
-Step 13 closes the Stage 4B contracts of this chapter, the effect and host
-diagnostics, the host-world corpus input, the audit-event snapshots, and the
-registry invariants, and implements none of them; Steps 14 to 20 do.
+Implementation status: this chapter defines the diagnostics and the evidence
+a release needs. None of that evidence exists yet.
 
 ## Diagnostics are a language surface
 
-Every rejected or normalized construct has a structured diagnostic. A
-diagnostic code is a stable lowercase atom of the form `@<domain>.<thing>`.
-Both components are kebab-case and the thing describes the condition rather
-than its issuance order or severity.
+Every rejected construct has a structured diagnostic. A diagnostic code is a
+stable atom `@<domain>.<condition>`, in camelCase like every other atom. A
+code names a condition. It does not encode a severity or a number.
 
-The following table is the canonical registry of codes and their fixed levels.
-Where a later paragraph restates a level it agrees with this table, and the
-table governs.
+The registry below is the single authority. Every other mention of a code or
+its level MUST agree with it.
 
 | Code | Level |
 | --- | --- |
-| `@syntax.unmatched-delimiter` | `@error` |
-| `@syntax.missing-separator` | `@error` |
-| `@syntax.invalid-character-literal` | `@error` |
-| `@syntax.invalid-string-literal` | `@error` |
-| `@syntax.invalid-numeric-literal` | `@error` |
-| `@syntax.invalid-name` | `@error` |
-| `@syntax.retired-form` | `@error` |
-| `@syntax.invalid-form` | `@error` |
-| `@syntax.misplaced-binding` | `@error` |
-| `@syntax.duplicate-attribute` | `@error` |
-| `@syntax.unknown-attribute` | `@error` |
-| `@syntax.invalid-attribute` | `@error` |
-| `@name.unknown-symbol` | `@error` |
-| `@name.wrong-entity-kind` | `@error` |
-| `@name.private-access` | `@error` |
+| `@syntax.unmatchedDelimiter` | `@error` |
+| `@syntax.missingSeparator` | `@error` |
+| `@syntax.invalidCharacterLiteral` | `@error` |
+| `@syntax.invalidStringLiteral` | `@error` |
+| `@syntax.invalidNumericLiteral` | `@error` |
+| `@syntax.invalidName` | `@error` |
+| `@syntax.invalidForm` | `@error` |
+| `@syntax.misplacedBinding` | `@error` |
+| `@syntax.duplicateSection` | `@error` |
+| `@syntax.invalidEncoding` | `@error` |
+| `@syntax.invalidSection` | `@error` |
+| `@name.unknownSymbol` | `@error` |
+| `@name.wrongEntityKind` | `@error` |
+| `@name.privateAccess` | `@error` |
+| `@name.inaccessibleRepresentation` | `@error` |
 | `@name.redeclaration` | `@error` |
-| `@name.member-collision` | `@error` |
-| `@name.generic-redeclaration` | `@error` |
-| `@name.reserved-label` | `@error` |
-| `@name.reserved-declaration` | `@error` |
-| `@name.reserved-value-spelling` | `@error` |
-| `@module.file-directory-collision` | `@error` |
-| `@module.source-id-collision` | `@error` |
-| `@module.unknown-path` | `@error` |
-| `@module.missing-required-import` | `@error` |
-| `@module.import-cycle` | `@error` |
-| `@module.invalid-segment` | `@error` |
-| `@module.path-escape` | `@error` |
-| `@module.io-error` | `@error` |
-| `@type.argument-mismatch` | `@error` |
-| `@type.type-argument-mismatch` | `@error` |
-| `@type.redundant-implementation` | `@error` |
-| `@type.default-override` | `@error` |
-| `@type.missing-abstract-member` | `@error` |
-| `@type.function-not-equatable` | `@error` |
-| `@type.not-applicable` | `@error` |
-| `@type.invalid-tuple-index` | `@error` |
-| `@type.unknown-record-field` | `@error` |
-| `@type.numeric-out-of-range` | `@error` |
-| `@type.not-constant` | `@error` |
-| `@type.initializer-cycle` | `@error` |
-| `@type.undispatchable-contract-member` | `@error` |
-| `@type.union-too-few-members` | `@error` |
-| `@type.union-member-overlap` | `@error` |
-| `@type.union-member-not-concrete` | `@error` |
-| `@type.overlapping-implementation` | `@error` |
-| `@type.ambiguous-implementation` | `@error` |
-| `@type.unsatisfied-bound` | `@error` |
-| `@type.ambiguous-destination` | `@error` |
-| `@type.invalid-ascription` | `@error` |
-| `@type.narrowing-non-union` | `@error` |
-| `@type.not-a-union-member` | `@error` |
-| `@type.redundant-conversion` | `@error` |
+| `@name.memberCollision` | `@error` |
+| `@name.genericRedeclaration` | `@error` |
+| `@name.reservedLabel` | `@error` |
+| `@name.reservedDeclaration` | `@error` |
+| `@name.reservedValueSpelling` | `@error` |
+| `@module.fileDirectoryCollision` | `@error` |
+| `@module.sourceIdCollision` | `@error` |
+| `@module.caseCollision` | `@error` |
+| `@module.testOutsideTests` | `@error` |
+| `@module.assertionOutsideTests` | `@error` |
+| `@module.unknownPath` | `@error` |
+| `@module.missingRequiredImport` | `@error` |
+| `@module.importCycle` | `@error` |
+| `@module.invalidSegment` | `@error` |
+| `@module.pathEscape` | `@error` |
+| `@module.ioError` | `@error` |
+| `@type.argumentMismatch` | `@error` |
+| `@type.typeArgumentMismatch` | `@error` |
+| `@type.redundantImplementation` | `@error` |
+| `@type.defaultOverride` | `@error` |
+| `@type.missingAbstractMember` | `@error` |
+| `@type.functionNotEquatable` | `@error` |
+| `@type.notApplicable` | `@error` |
+| `@type.unknownRecordField` | `@error` |
+| `@type.numericOutOfRange` | `@error` |
+| `@type.notConstant` | `@error` |
+| `@type.initializerCycle` | `@error` |
+| `@type.undispatchableContractMember` | `@error` |
+| `@type.unsupportedSelfPosition` | `@error` |
+| `@type.overlappingImplementation` | `@error` |
+| `@type.ambiguousImplementation` | `@error` |
+| `@type.unsatisfiedBound` | `@error` |
+| `@type.ambiguousDestination` | `@error` |
+| `@type.redundantConversion` | `@error` |
 | `@type.mismatch` | `@error` |
-| `@type.ambiguous-inference` | `@error` |
-| `@type.infinite-size` | `@error` |
-| `@type.invalid-dict-key` | `@error` |
-| `@type.invalid-try` | `@error` |
-| `@type.unhandled-fallible` | `@error` |
-| `@type.invalid-return` | `@error` |
-| `@type.redundant-return` | `@error` |
-| `@type.unreachable-code` | `@error` |
-| `@pattern.refutable-binding` | `@error` |
-| `@pattern.irrefutable-let-else` | `@error` |
-| `@pattern.non-exhaustive` | `@error` |
-| `@pattern.unreachable-arm` | `@error` |
-| `@effect.outside-ceiling` | `@error` |
-| `@effect.invalid-reference` | `@error` |
-| `@effect.duplicate-root` | `@error` |
-| `@external.unknown-symbol` | `@error` |
-| `@external.owner-mismatch` | `@error` |
-| `@data.invalid-extension` | `@error` |
-| `@data.invalid-shape` | `@error` |
-| `@data.invalid-value` | `@error` |
-| `@data.duplicate-field` | `@error` |
-| `@data.duplicate-key` | `@error` |
-| `@project.stale-lock` | `@error` |
-| `@project.entry-outside-target` | `@error` |
-| `@project.entry-on-library` | `@error` |
-| `@project.invalid-entry-signature` | `@error` |
-| `@project.ambiguous-dependency-target` | `@error` |
-| `@project.reserved-unit-name` | `@error` |
-| `@project.overlapping-target-roots` | `@error` |
-| `@project.not-found` | `@error` |
-| `@project.invalid-target-root` | `@error` |
-| `@project.io-error` | `@error` |
-| `@runtime.invalid-host-value` | `@error` |
-| `@runtime.invalid-checked-program` | `@error` |
-| `@runtime.division-by-zero` | `@error` |
-| `@runtime.unobservable-function` | `@error` |
-| `@runtime.memory-exhausted` | `@error` |
-| `@style.argument-order` | `@warning` |
-| `@contract.unused-effect` | `@warning` |
+| `@type.ambiguousInference` | `@error` |
+| `@type.infiniteSize` | `@error` |
+| `@type.invalidDictKey` | `@error` |
+| `@type.invalidTry` | `@error` |
+| `@type.unhandledFallible` | `@error` |
+| `@type.invalidReturn` | `@error` |
+| `@type.missingReturn` | `@error` |
+| `@type.invalidInvariant` | `@error` |
+| `@type.suspiciousRow` | `@warning` |
+| `@type.unreachableCode` | `@error` |
+| `@pattern.refutableBinding` | `@error` |
+| `@pattern.irrefutableLetElse` | `@error` |
+| `@pattern.nonExhaustive` | `@error` |
+| `@pattern.unreachableArm` | `@error` |
+| `@pattern.unsupportedCoverage` | `@error` |
+| `@effect.outsideCeiling` | `@error` |
+| `@effect.invalidReference` | `@error` |
+| `@effect.duplicateRoot` | `@error` |
+| `@effect.invalidAwait` | `@error` |
+| `@external.unknownSymbol` | `@error` |
+| `@external.ownerMismatch` | `@error` |
+| `@external.signatureMismatch` | `@error` |
+| `@data.invalidExtension` | `@error` |
+| `@data.invalidShape` | `@error` |
+| `@data.invalidValue` | `@error` |
+| `@data.duplicateField` | `@error` |
+| `@data.duplicateKey` | `@error` |
+| `@project.staleLock` | `@error` |
+| `@project.dependencyCycle` | `@error` |
+| `@project.entryOutsideTarget` | `@error` |
+| `@project.entryOnLibrary` | `@error` |
+| `@project.invalidEntrySignature` | `@error` |
+| `@project.ambiguousDependencyTarget` | `@error` |
+| `@project.reservedUnitName` | `@error` |
+| `@project.overlappingTargetRoots` | `@error` |
+| `@project.notFound` | `@error` |
+| `@project.invalidTargetRoot` | `@error` |
+| `@project.ioError` | `@error` |
+| `@runtime.invalidHostValue` | `@error` |
+| `@runtime.invalidCheckedProgram` | `@error` |
+| `@runtime.memoryExhausted` | `@error` |
+| `@style.casing` | `@warning` |
+| `@contract.unusedEffect` | `@warning` |
+| `@contract.unproved` | `@error` |
+| `@contract.refuted` | `@error` |
+| `@contract.unsupportedPredicate` | `@error` |
+| `@contract.obligationLost` | `@error` |
+| `@contract.invalidPredicate` | `@error` |
+| `@contract.invalidConsequence` | `@error` |
+| `@grant.invalidBinding` | `@error` |
+| `@grant.bindingCycle` | `@error` |
+| `@grant.requiredUnavailable` | `@error` |
+| `@grant.acquisitionFailed` | `@error` |
+| `@grant.invalidPolicy` | `@error` |
+| `@grant.policyTooComplex` | `@error` |
 | `@tool.unavailable` | `@error` |
-| `@codebase.stale-head` | `@error` |
-| `@codebase.unknown-head` | `@error` |
-| `@codebase.unknown-revision` | `@error` |
-| `@codebase.unknown-entity` | `@error` |
-| `@codebase.unknown-object` | `@error` |
-| `@codebase.invalid-input` | `@error` |
-| `@codebase.stale-plan` | `@error` |
-| `@store.not-found` | `@error` |
-| `@store.busy` | `@error` |
-| `@store.corrupt` | `@error` |
-| `@store.unsupported-version` | `@error` |
-| `@store.unsafe-path` | `@error` |
-| `@store.io-error` | `@error` |
+| `@tool.stalePlan` | `@error` |
+| `@tool.actionDenied` | `@error` |
+| `@tool.limitExceeded` | `@error` |
+| `@tool.unsupportedValue` | `@error` |
+| `@tool.unsupportedTarget` | `@error` |
+| `@tool.missingLinkTool` | `@error` |
+| `@tool.linkFailed` | `@error` |
+| `@tool.incompatibleArtifact` | `@error` |
 
-Diagnostic codes are stable under the charter's compatibility policy. In
-Vibra data they are atoms. JSON output serializes the exact atom spelling as a
-string. A code need not be renamed if
-its registered level changes in a future language version.
+The compiler owns this closed registry. Each entry has a level, a domain
+(the code's first component), a summary, and a **fix capability**, which is
+`@safe` or `@none`. Only `@safe` permits an automatic fix; there is no
+"review needed" level between them. The summary's wording is compiler data,
+not fixed text. Every code in the registry has at least one trigger row in
+the tables of this chapter, naming its condition and its primary span, and
+every code any chapter cites is in the registry.
 
-The compiler owns a closed diagnostic registry that maps each code to one
-fixed level, `@error` or `@warning`, plus its domain, summary, and fix
-capability. The level is not encoded in the code and cannot be configured by a
-project. `vibra query @type.argument-mismatch --include diagnostic` exposes the
-registry entry, and every emitted diagnostic carries the same level. A command
-may fail on warnings by policy without changing their registered level.
+- A project cannot change a level. A command may fail on warnings by policy
+  without relabelling them.
+- No source declaration and no data file creates a code.
+- A retired code is never reused for another meaning. Changing a level is a
+  versioned change of the registry.
+- `@command.*` results, `@test.*` results, document format atoms, and the
+  cases of ordinary error types are not diagnostics and are not in the
+  registry.
 
-A code's domain is the first component of its spelling. Its fix capability is
-one of exactly two atoms: `@safe`, meaning the compiler can offer a fix that
-`vibra edit fix` may apply, and `@none`, meaning it never offers one. Vibra has
-no capability for a fix that requires human review, because it has no command
-that would apply one. A code's summary is compiler data and is not fixed by
-this chapter.
+### Diagnostic documents and spans
 
-Vibra has no language form or `.vibon` catalog for declaring diagnostics. The
-registry is compiler data: queryable and covered by schemas and conformance
-tests, but not loaded from or executed as Vibra source.
+**`DiagnosticDocument`, version 2**, is the closed JSON object
+`{schemaVersion, code, level, message, primarySpan, related, notes, fixes}`.
 
-A diagnostic contains schema version, code, level, message, primary source
-span, related spans, notes, and zero or more fixes. Spans are half-open UTF-8
-byte ranges with one-based line and Unicode-scalar column as derived display
-data. A multi-document observation carries the owning source identity on every
-primary and related span; a related span may identify a different document than
-the primary span. A single-document producer may leave identity null. Fixes
-declare whether they are safe and carry expected document revisions.
+| Field | Content |
+| --- | --- |
+| `schemaVersion` | `2` |
+| `code`, `level` | the exact atoms, as strings |
+| `message` | text for a person |
+| `primarySpan` | a `SpanDocument` |
+| `related` | array of `{span, message}` |
+| `notes` | array of strings |
+| `fixes` | array of `{description, safe, expectedRevision}`; empty when the code's fix capability is `@none` |
 
-Messages help people; codes and fields help tools. Tests assert codes, levels,
-spans, related identities, and fix results, not incidental English punctuation.
+A diagnostic describes a fix and never applies it; the edit is a separate
+[plan](05-tooling.md#transactional-edit-plans) that still checks revisions.
 
-`@tool.unavailable` is emitted when a syntactically valid command or language
-surface is outside the selected implementation profile. It is distinct from a
-malformed-input diagnostic and from the conformance runner's `unavailable`
-status: a real handler reports the diagnostic through its result contract,
-while a missing handler remains an unavailable corpus observation.
+**`SpanDocument`** is `{sourceId, start, end, startPosition, endPosition}`.
+`start` and `end` are half-open UTF-8 byte offsets on character boundaries,
+with `start` ≤ `end`. A position is `{line, column}`, with a one-based line
+and a column counted in Unicode scalars. Positions are for display; edits
+use offsets.
 
-### M2 unavailable-form spans
+- Every span names its source. A related span may be in another document. A
+  producer given one unnamed source may use a `null` `sourceId`.
+- A failure with no location has `sourceId` `null`, offsets 0 and 0, and
+  position 1:1. A tool MUST NOT invent a location or blame an unrelated
+  declaration.
+- Diagnostics sort by source, then primary start and end, then registry
+  order. Within one source, lexer diagnostics precede parser diagnostics at
+  equal spans.
+- One fault is reported once. A later phase does not report the same
+  introduction again.
+- Tests assert codes, levels, spans, related identities, defined notes, and
+  fixes. They do not assert message punctuation.
 
-For an unavailable source-language construct, the primary span MUST be the
-complete half-open UTF-8 span of the owning source form represented by the AST
-node that the checker rejects. A rejected declaration uses its complete
-declaration form. If unsupported semantics occur in a nested type or another
-child not represented by a separately spanned node used by the checker, the
-diagnostic uses the complete source form of its owning parameter or
-declaration. A rejected expression uses its complete expression form; and a
-reference that is unavailable because of its resolved entity uses the complete
-reference. List forms include their opening and closing delimiters. The
-diagnostic retains the owning source ID, and a source-form diagnostic never
-uses an invented or empty `0..0` span. A command-level availability diagnostic
-follows the process contract in `05-tooling.md`.
+### Availability, discovery and resolution
 
-The workspace boundary uses the following additional codes. Discovery emits
-`@project.not-found` when no exact `project.vibon` is found within the allowed
-ancestor search, and emits the nearest document's normal data or syntax
-diagnostics when that exact file exists but is malformed; it MUST NOT continue
-to an older ancestor after a malformed nearest project. A legacy `project.vib`
-or any other candidate is rejected by the extension-selected loader with
-`@data.invalid-extension` and is never content-sniffed.
-`@project.invalid-target-root` is attached to a target `root` value for an
-empty, absolute, parent-traversing, missing, non-directory, or otherwise
-non-confined root; an invalid reserved `tests/` root uses the empty span of
-project-relative path `tests`. `@project.io-error` is
-attached to an available project/root span when a non-security filesystem
-operation fails and carries the operation and path as a note. When no project
-document exists, the primary span is the empty span `0..0` with no source ID.
-`@project.reserved-unit-name` is attached to a target name or dependency alias
-that collides with the runner-reserved `@tests` unit. In addition to target
-roots nesting or coinciding with each other,
-`@project.overlapping-target-roots` is attached to a target's `root` value
-when that root equals or is nested beneath the reserved `tests/` root; this
-case has no related span for the synthetic test root.
+**Unavailable is not invalid.** A valid command or construct that the tool's
+profile does not support is `@tool.unavailable`. Malformed input keeps its
+ordinary code. A missing conformance handler is an unavailable observation,
+not a passing one. A smaller profile never gives source a different meaning.
 
-`@module.missing-required-import` is emitted once in a module that declares
-tests but has no import targeting exactly `@std.assert`. Its primary span is
-the string name of the module's first test declaration. It is an ordinary
-source diagnostic, so the selected suite is invalid and no selected test
-executes.
+The span of an unavailable construct is the whole form, opener to closer. A
+nested expression with its own span owns its own diagnostic. A nested type
+with no node of its own uses its parameter or declaration. An existing form
+is never reported at the empty location. An unavailable command uses the
+command-line context.
 
-The runtime chapter's **Traps** section closes the trap codes.
-`@runtime.invalid-checked-program` identifies an execution-boundary trap
-when a checked program has no executable entry, its body violates checked-IR
-invariants, or the toolchain fails, including an engine trap that generated code
-did not record. Its diagnostic has no source ID and an empty primary span `0..0`;
-the corresponding CLI `trapCode` and VIBON `trap-code` are the exact string
-`"@runtime.invalid-checked-program"`, with no source origin (`null` in JSON
-and omitted from the closed VIBON trap record). `@runtime.invalid-host-value`
-is the trap of a host operation that receives a value ID or index it does not
-admit, and does not describe checked-program failures; no checked program
-reaches it unless the toolchain has a defect, and the CLI `run` and `test`
-schemas and the `@test-run.v1` observation admit it as a `trapCode`, with no
-origin. `@runtime.division-by-zero` is the trap of an unchecked integer `div` or
-`rem` with a zero divisor; it has no origin. `@runtime.unobservable-function` is the trap of a
-value holding a function that reaches a test assertion or the entry's result;
-in a test its diagnostic and trap origin are the assertion call.
-`@runtime.memory-exhausted` is the host event that ends execution when the
-memory or the value-ID space of an instance runs out: an unlocated error
-diagnostic that is never a trap, so it has no `trapCode`, and `run` and `test`
-report it as `@command.operational-failure`.
+| Condition | Code |
+| --- | --- |
+| no `project.vibon` at or above the workspace | `@project.notFound` |
+| the nearest `project.vibon` is malformed (no search continues above it) | its data or syntax code |
+| a file with the wrong extension | `@data.invalidExtension` |
+| a target or test root that is missing, not a directory, absolute, or escapes | `@project.invalidTargetRoot` |
+| target roots that overlap each other or `tests` | `@project.overlappingTargetRoots` |
+| a target or dependency named `tests` | `@project.reservedUnitName` |
+| other project input or output failure | `@project.ioError` |
+| module enumeration or read failure, unreadable or dangling entry | `@module.ioError` |
+| an invalid source path segment | `@module.invalidSegment`, at offset 0 of that source |
+| two source paths that differ only by case | `@module.caseCollision` |
+| a link that leaves the source root | `@module.pathEscape` |
+| one source identity for two modules, including dependency inputs | `@module.sourceIdCollision` |
+| an import cycle | `@module.importCycle`: primary span on the later edge, related spans along the cycle |
+| a dependency cycle | `@project.dependencyCycle`, the later dependency entry in the project file, related along the cycle |
+| a `.vib` file beside a directory of the same name | `@module.fileDirectoryCollision`, at offset 0 of that source |
+| a path whose unit is not visible to the importing module, or that reaches no module | `@module.unknownPath`, the reference |
+| a lock whose `project` digest or dependency set differs from the project; a missing vendor directory or vendored content whose content hash differs from the lock | `@project.staleLock`, the lock's `format` field or the lock entry |
+| a target `entry` whose first part is not the target's name | `@project.entryOutsideTarget`, the `entry` field |
+| an `entry` on a library target | `@project.entryOnLibrary`, the `entry` field |
+| an `entry` that is not a module-level `proc` with an entry signature, or that has a bare `requires` | `@project.invalidEntrySignature`, the `entry` field, related to the declaration |
+| a dependency without `target` on a package with several library targets | `@project.ambiguousDependencyTarget`, the dependency entry |
+| access to a private declaration | `@name.privateAccess`, the reference, related to the declaration |
+| use of a hidden constructor, pattern, or field read | `@name.inaccessibleRepresentation`, the use, related to the type |
+| a name that resolves to nothing: a path part, a `given` key, an `impl` member or choice that is no member of the interface, an entity reference slot | `@name.unknownSymbol`, the name |
+| an entity of the wrong kind: an import of a member, an `impl` target of the wrong kind, a bound that is not an interface, a typed data slot | `@name.wrongEntityKind`, the reference |
+| a repeated module, import, local, test, or `given` key name; an associated type chosen twice in one `impl` | `@name.redeclaration`, the later name, related to the earlier |
+| two members of one owner with one name, an associated type and another member of its interface included; a callable member supplied twice in one `impl` | `@name.memberCollision`, the later name, related to the first |
+| a repeated type parameter; an associated type with the name of a visible type parameter | `@name.genericRedeclaration`, the later parameter, the associated type, or the `impl` head |
+| a reserved word in a label position | `@name.reservedLabel`, the word |
+| a test module without an import that resolves to `@std.assert` | `@module.missingRequiredImport`, at its first test's name |
+| a test outside `@tests`; outside `@tests`, a use of a declaration bound to an [assertion row](06-runtime.md#assertion-operations) | `@module.testOutsideTests`; `@module.assertionOutsideTests`, the use |
 
-During source enumeration, `@module.invalid-segment` is attached to the empty
-span `0..0` of the affected project-relative path when a directory or file
-segment is not a single kebab-name component. `@module.path-escape` is used
-for a symlink or junction whose canonical target leaves the project, target,
-or test root; its primary span is the affected project/root field when one exists,
-otherwise the empty span of the project-relative path. `@module.io-error` is
-used for a dangling or otherwise unreadable link/entry and for a source read
-failure, with the same path-span rule. These diagnostics are emitted before
-module parsing; their messages are explanatory and are not a machine
-contract. All filesystem diagnostics are errors with no fixes.
+Resolution reads only the captured source graph.
 
-Resolution diagnostics retain the referring source ID and half-open span. A
-private imported declaration is `@name.private-access`; a repeated top-level,
-import-alias, lexical binding, or decoded module-local test name is
-`@name.redeclaration`; a repeated member in one owner's flat namespace is
-`@name.member-collision`; and an import back edge is `@module.import-cycle`.
-The later span is primary and the earlier declaration or edge is a related
-span when available. Each repeated introduction has exactly one owning
-diagnostic: resolution owns lexical redeclaration, and later checking stages
-MUST NOT report the same introduction again. Diagnostics are deterministic by
-source ID, primary span, and registry order. Resolution consumes only an explicit immutable source
-graph and performs no filesystem, dependency, lock, cache, or network access.
+### Syntax and data diagnostics
 
-A resolver graph uses source IDs as document identities, so one source ID MUST
-refer to only one module in that graph, including when a verified package
-overlay is present. A repeated source ID emits `@module.source-id-collision`
-at the empty span `0..0` of that source ID. The affected graph is not type
-checked or executed because diagnostics and source text would otherwise be
-ambiguous across packages.
+| Condition | Code and primary span |
+| --- | --- |
+| a byte-order mark, invalid UTF-8, or NUL | `@syntax.invalidEncoding`, the offending bytes |
+| two adjacent tokens, each of the classes identifier, reserved word, number, atom, string, character, or doc string, with nothing between them; a bracket or `:` beside a token never triggers it | `@syntax.missingSeparator`, a zero-width span at the second token |
+| an empty, multi-scalar, or surrogate character literal | `@syntax.invalidCharacterLiteral`, the token |
+| a terminated string with a malformed or unsupported escape | `@syntax.invalidStringLiteral`, the token |
+| an unknown numeric suffix, an integer suffix on a float body, or trailing token text | `@syntax.invalidNumericLiteral`, the token |
+| a malformed identifier | `@syntax.invalidName`, the token |
+| a form the grammar does not admit; a doc string outside `doc`; a tag outside a section's closed set; a VIBON form outside the data grammar | `@syntax.invalidForm`, the smallest enclosing construct |
+| a `(` where a top-level form or a statement is expected | `@syntax.invalidForm`, once, the balanced parenthesized form |
+| `as` outside a `use` | `@syntax.invalidForm`, the `as` |
+| a `use` after another top-level form | `@syntax.invalidForm`, the `use` |
+| a `fn` or `proc` without `do` that is neither an abstract interface member nor an external definition | `@syntax.invalidForm`, its closer |
+| an identifier other than `true` and `false`, a doc string, or an application in a VIBON document | `@syntax.invalidForm`, the token |
+| a reserved word in a declaration or binder position; a prelude name declared as a type, interface, type parameter, or binder; a reserved type head declared | `@name.reservedDeclaration`, the name |
+| a repeated record field in VIBON | `@data.duplicateField`, the later field |
+| a repeated dict key in VIBON, after decoding | `@data.duplicateKey`, the later key |
+| a VIBON `format` the reader does not implement; a literal of the right form whose value a schema slot does not admit; fields that relate wrongly | `@data.invalidValue`, the value |
+| a missing required field, an unknown field, or a value of the wrong form in VIBON | `@data.invalidShape`, the field or the value |
 
-### Binding, `return`, and `never` diagnostics
+### Type and interface diagnostics
 
-The binding-sequence, `return`, and `never` rules add the codes
-`@syntax.misplaced-binding`, `@type.invalid-return`, `@type.redundant-return`,
-`@type.unreachable-code`, and `@pattern.irrefutable-let-else`. All have fixed
-level `@error` and fix capability `@none`. The rules otherwise reuse existing
-codes, and each primary span below is a complete half-open UTF-8 range with the
-owning source identity:
+| Condition | Code and primary span |
+| --- | --- |
+| an argument that does not fit its slot, a wrong arity, an unknown, duplicate, or missing label; a constructor pattern of the wrong shape; an argument for a `Self` parameter outside the receiver slot that does not have the receiver's type, or that is supplied through an interface value | `@type.argumentMismatch`, the argument, the application, or the pattern |
+| a wrong type-argument count, an unknown or repeated label, a label in an `impl` target, or an interface value type with an open associated type | `@type.typeArgumentMismatch`, the label or the type application |
+| application of a value that is not applicable | `@type.notApplicable`, the callee |
+| a field read of a value without that field | `@type.unknownRecordField`, the field name |
+| a literal that does not fit its type | `@type.numericOutOfRange`, the literal |
+| a module value whose initializer reaches itself | `@type.initializerCycle`, the `let`, related along the cycle |
+| a declared type whose expansion repeats | `@type.infiniteSize`, the declaration whose expansion first repeats |
+| an inadmissible dict key type | `@type.invalidDictKey`, the key type |
+| a callable as a dict key, or an `assert.equal` operand whose type contains a callable, plan, or grant | `@type.functionNotEquatable`, the type or the operand |
+| `try` on a wrong carrier, in a callable with another carrier, or directly in a test | `@type.invalidTry`, the `try` |
+| a fallible value left unused as a statement | `@type.unhandledFallible`, the statement |
+| an `impl` inside an interface that targets a type of the same module | `@type.redundantImplementation`, the `impl` head |
+| a default member supplied again by an implementation | `@type.defaultOverride`, the member's name, related to the default |
+| an abstract member or an associated type an implementation does not supply | `@type.missingAbstractMember`, the `impl` head, related to the contract member |
+| two implementations of one receiver whose targets unify | `@type.overlappingImplementation`, the later `impl` head, related to the earlier |
+| two implementations still candidates at a call | `@type.ambiguousImplementation`, the application |
+| a contract member with no receiver slot whose written result type does not contain `Self` | `@type.undispatchableContractMember`, the member's name |
+| a contract member whose written result type places `Self` outside the [`Self` map](02-type-system.md#interfaces), found when the interface declaration is checked, whether or not the interface is used as a value | `@type.unsupportedSelfPosition`, the result type |
+| a destination-dispatched call with no written expected type | `@type.ambiguousDestination`, the application |
+| `From` and `TryFrom` sources of one receiver that unify | `@type.redundantConversion`, the later `impl` head, related to the earlier |
+| a receiver or destination with no implementation for the selected key; a call on a type parameter of a member its bound does not give; a label-bound parameter that fails its own bound | `@type.unsatisfiedBound`, the operand or the expected type, related to the interface or bound |
+| an implementation member whose signature differs from the contract; a widening whose label differs from the implementation's choice; a label-bound parameter fixed to two types; a deferred associated equality or a complete result that disagrees after selection; a destination-dispatched call whose expected type has no position for `Self` or gives `Self` two types, at the application | `@type.mismatch`, the differing type or expression |
 
-| Condition | Code | Primary span | Related span and notes |
-| --- | --- | --- | --- |
-| `let` or `let-else` that is not a direct element of a body sequence | `@syntax.misplaced-binding` | the complete form | none; a note names the admitted positions |
-| `let` with an odd number of operands after its head, or none; `let-else` without exactly three operands; `return` without exactly one | `@syntax.invalid-form` | the complete form | none |
-| `let-else` pattern that is irrefutable | `@pattern.irrefutable-let-else` | the pattern | none; a note names `let` |
-| `let-else` fallback whose type is not `never` | `@type.mismatch` | the fallback | none; there is no written type to relate |
-| `return` in a `def` initializer, or in a `test` body outside a `lambda` | `@type.invalid-return` | the complete `return` form | none |
-| `return` in tail position of its function | `@type.redundant-return` | the complete `return` form | none |
-| expression of type `never` in a position that does not admit one | `@type.unreachable-code` | the expression | none |
-| element following an element of type `never` in one body sequence | `@type.unreachable-code` | the first following element | the diverging element |
-| binder repeating a name a `let` or `let-else` left visible | `@name.redeclaration` | the later binder | the earlier binder |
-| lexical binder of any form (parameter, `let`, `let-else`, `match` arm, or `lambda` parameter) spelled as a keyword, `any`, or a name of the prelude (a primitive type name, `option`, `result`, `iter`, `equatable`, `ordered`, `array`, `dict`, `true`, or `false`) | `@name.reserved-declaration` | the binder name | none; `true` and `false` reach this only as a plain name, because they are constant patterns at a pattern site |
-| module value or function spelled as a prelude name (`true`, `false`, `option`, `result`, `iter`, `equatable`, `ordered`, or a builtin type name), or an import alias spelled as a builtin type name, `true`, or `false`, outside the embedded standard library | `@name.reserved-value-spelling` | the declaration or the name | none |
-| pattern name that resolves to a module value that is not a compile-time constant | `@name.redeclaration` | the name | the module value, with a note that it is not a compile-time constant |
-| labelled default that is not a constant expression: a call, a function, or a module value whose initializer is not constant | `@type.not-constant` | the default expression | the module value, when the expression is a name of one |
-| declaration named `never` | `@name.reserved-declaration` | the name | none |
-| generic argument that only diverging operands could fix | `@type.ambiguous-inference` | the application | one note per missing constraint |
-| `never` as a type argument for a bound other than `any` | `@type.unsatisfied-bound` | the type argument, as that code reports an argument that does not satisfy a bound elsewhere | the bound |
-| `impl` block whose target is `never` | `@name.wrong-entity-kind` | the `impl` block, as for an anonymous target | none |
-| arm requiring an uninhabited payload | `@pattern.unreachable-arm` | the arm's pattern | none |
+### Binding, return and pattern diagnostics
 
-One form never receives both `@type.unreachable-code` and
-`@type.redundant-return`; the position error wins. A form emits at most one
-`@type.unreachable-code`.
+Every row is an error with no automatic fix.
 
-### Effect and host diagnostics
+| Condition | Code and primary span |
+| --- | --- |
+| a `let` where a statement is not allowed | `@syntax.misplacedBinding`, the `let` |
+| a missing `be`, expression, or `endlet`; crossed or missing closers | `@syntax.invalidForm` or `@syntax.unmatchedDelimiter`, the form or token |
+| a repeated section; a section the declaration does not admit | `@syntax.duplicateSection`; `@syntax.invalidSection` |
+| a `let` or parameter pattern that can fail, with no `else` | `@pattern.refutableBinding`, the pattern |
+| a `let … else` whose pattern cannot fail | `@pattern.irrefutableLetElse`, the pattern |
+| an `else` of a `let` that can complete normally | `@type.mismatch`, the `else` body |
+| a callable body that can run off its end | `@type.missingReturn`, the body |
+| a `return` operand of the wrong type | `@type.mismatch`, the operand |
+| a `return` outside a callable, in a module value, or directly in a test | `@type.invalidReturn`, the `return` |
+| a statement after one that cannot complete | `@type.unreachableCode`, the first such statement, related to the earlier one |
+| a name bound twice, or shadowing | `@name.redeclaration`, the later name, related to the earlier |
+| a keyword or prelude name used as a binder | `@name.reservedDeclaration`, the name |
+| a prelude spelling used for a module value, function, or import | `@name.reservedValueSpelling`, the introduction |
+| a pattern name that resolves to a module value or function that is not constant | `@name.redeclaration`, the name, related to that declaration |
+| a labelled default that is not constant | `@type.notConstant`, the expression |
+| a `match` that does not cover its type | `@pattern.nonExhaustive`, the `match`, with one uncovered shape |
+| coverage the checker cannot decide for this type | `@pattern.unsupportedCoverage`, the `match` |
+| an arm that is repeated, already covered, or uninhabited | `@pattern.unreachableArm`, the arm's pattern |
+| a type argument the call does not determine, including one still undetermined when no bound is resolvable | `@type.ambiguousInference`, the application |
+| a type argument that does not meet its bound | `@type.unsatisfiedBound`, the actual type, related to the bound |
+| an `impl` for `Never` or for an anonymous type | `@name.wrongEntityKind`, the `impl` |
 
-The effect and host rules add the codes `@effect.duplicate-root` and
-`@external.owner-mismatch`, both with fixed level `@error` and fix capability
-`@none`, and otherwise reuse existing codes. Each primary span is a complete
-half-open UTF-8 range with the owning source identity:
+- An explicit `return` in tail position is the normal spelling and is never
+  reported as redundant.
+- One form yields at most one `@type.unreachableCode`.
+- An invalid binding position is reported in place of the type errors it
+  would cause downstream.
 
-| Condition | Code | Primary span | Related span and notes |
-| --- | --- | --- | --- |
-| root in a target `effects` array that resolves to no module or declaration | `@module.unknown-path` or `@name.unknown-symbol`, as for any entity reference | the atom, in `project.vibon` | none |
-| root in a target `effects` array that resolves to an entity that is not an effect root | `@name.wrong-entity-kind` | the atom | none; names the entity found |
-| root listed twice in one target `effects` array | `@effect.duplicate-root` | the second atom | the first atom |
-| root listed twice in one written row of a `defn`, `lambda`, function type, test, or operation | `@effect.duplicate-root` | the second entry | the first entry |
-| binary target with no `effects` field | `@data.invalid-shape` | the target record | none |
-| root of a target `effects` array that the entry's performed row does not contain | `@contract.unused-effect` (`@warning`) | the atom | none |
-| root of the entry's performed row that the target `effects` array omits | `@effect.outside-ceiling` | the `entry:` value in `project.vibon`, one diagnostic for each omitted root | every hop of the witness, the first included, each noted `performs <root> via <callee>` |
-| performed root missing from a function, `lambda`, operation, or test ceiling | `@effect.outside-ceiling` | the first call site, one diagnostic for each offending function and missing root | the remaining hops of the witness, each noted `performs <root> via <callee>` |
-| entry in a row that is an atom, or a symbol that resolves to no effect root | `@effect.invalid-reference` | the entry | none |
-| `external: @host` on anything but a member of a `deffect` | `@syntax.invalid-attribute` | the `external:` attribute | none |
-| `effects:` row on a `@host` member | `@syntax.invalid-attribute` | the `effects:` attribute | none; a note says that a `@host` member has no additive row |
-| `effects:` on a `deffect` | `@syntax.invalid-attribute` | the `effects:` attribute | none |
-| `@host` member whose registry entry is owned by a root other than its enclosing `deffect` | `@external.owner-mismatch` | the `symbol:` string | the `deffect` name |
-| `@host` symbol that is not a registry symbol | `@external.unknown-symbol` | the `symbol:` string | none |
-| `@host` member whose signature differs from its registry entry | `@type.type-argument-mismatch` | the declaration | none; a note gives the registry signature |
+### Contract, effect and authority diagnostics
 
-`@contract.unused-effect` applies to a declared root that is never performed,
-whether it is written in a ceiling or in a target array; a target-array root is
-unused when the entry's performed row, computed over its whole call graph, does
-not contain it. A target-array diagnostic does not stop the target from being
-admitted, since the array already contains the entry's row.
+| Condition | Code and primary span |
+| --- | --- |
+| a bare guard is disproved | `@contract.refuted`, the predicate, related to the argument or return that refutes it |
+| a bare guard is not established by the rules | `@contract.unproved`, the predicate or the failing application, with the declaration |
+| a predicate outside the certified fragment | `@contract.unsupportedPredicate`, the predicate |
+| a predicate of the wrong type or shape | `@contract.invalidPredicate`, the predicate |
+| a consequence of the wrong type, not constant where required, or not pure | `@contract.invalidConsequence`, the consequence |
+| a conversion to a plain callable type that would hide a bare `requires` | `@contract.obligationLost`, the conversion, related to the guard |
+| a type invariant that is not a predicate over the representation | `@type.invalidInvariant`, the `where` |
+| a row names one interface twice, under any spelling | `@effect.duplicateRoot`, the second entry, related to the first |
+| a row entry that is not an operation interface | `@effect.invalidReference`, the entry |
+| a body performs an interface outside its ceiling | `@effect.outsideCeiling`, the first `await` that contributes it |
+| `await` outside a `proc` or test, or of a value that is not a plan | `@effect.invalidAwait`, the `await` |
+| a ceiling names an interface the body cannot perform | `@contract.unusedEffect` (warning), the entry |
+| a result type that is a tuple of operation interfaces | `@type.suspiciousRow` (warning), the type |
+| an `external` section outside the embedded library | `@syntax.invalidSection`, the section |
+| an external symbol not in the registry | `@external.unknownSymbol`, the symbol |
+| an external member on the wrong interface | `@external.ownerMismatch`, the symbol, related to the owner |
+| an external member whose signature or row differs from the registry | `@external.signatureMismatch`, the declaration, with the expected signature |
+| an entry row or startup step row outside the target's `effects` | `@effect.outsideCeiling`, the target's `effects` field in the project file, related to the entry's `performs` entry or to the recipe |
+| an `effects` entry that neither the entry nor a startup step performs | `@contract.unusedEffect` (warning), that entry of the list |
+| a missing, extra, ill-typed, or unapproved grant binding; an unknown, repeated, or missing `after` name; a `source` leaf of the wrong kind | `@grant.invalidBinding`, the binding, its field, or the `grants` record |
+| a cycle in `after` | `@grant.bindingCycle`, the later edge, related along the cycle |
+| a required grant refused at startup, in a case its issuer lists as a refusal | `@grant.requiredUnavailable`, the leaf's binding recipe in the project file; a startup result, not a check result |
+| an acquisition that fails at startup, in a case its issuer lists as a failure, for a required or an optional grant | `@grant.acquisitionFailed`, the leaf's binding recipe in the project file; a startup result, not a check result |
+| an invalid policy, or a policy naming another root | `@grant.invalidPolicy`, the policy value |
+| a policy over the size or depth limit | `@grant.policyTooComplex`, the policy |
+
+An `@effect.outsideCeiling` is reported once per body and interface. Its
+related spans are the shortest remaining chain of calls, ties in source
+order, each with the note `performs <root> via <callee>`; a hop through a
+callback or interface member is marked indirect. The query expansion
+`effectWitnesses` returns the same chain.
+
+A grant that denies a request at run time returns the operation's typed
+error. That is never a diagnostic and never a trap. A check-time failure of
+a guard is never turned into a run-time error value by a tool.
+
+### Integer facts
+
+The sixth discharge rule of [Guards](02-type-system.md#guards) uses exactly
+the facts below and no other arithmetic reasoning. `x`, `y`, and `z` are
+values of one sized integer type. The relations are the results of that
+type's `Ordered.compare` and `Equatable.equal`, written here in mathematical
+notation, which is not source syntax. For the sized integer types, and for
+them only, the checker reads each of these default members of `Ordered` as
+its defining relation, so the facts apply to a predicate written with one:
+`less(x y)` is x < y, `lessOrEqual(x y)` is x ≤ y, `greater(x y)` is x > y,
+`greaterOrEqual(x y)` is x ≥ y, and `inRange(x low high)` is low ≤ x and
+x ≤ high. `min` and `max` are not relations and are not covered.
+
+| ID | From | The checker may conclude |
+| --- | --- | --- |
+| INT-1 | x < y | not (x = y); x ≤ y; y > x |
+| INT-2 | x > y | not (x = y); x ≥ y; y < x |
+| INT-3 | x = y | y = x; x ≤ y; x ≥ y |
+| INT-4 | x ≤ y and y ≤ x | x = y |
+| INT-5 | x ≤ y and not (x = y) | x < y |
+| INT-6 | x < y and y ≤ z, or x ≤ y and y < z | x < z |
+| INT-7 | x ≤ y and y ≤ z | x ≤ z |
+| INT-8 | two integer constants | their comparison, by evaluation |
+
+No fact relates the result of an arithmetic operation to its operands:
+`add` saturates, so `add(x 1) > x` is not a fact. No fact covers `F32`,
+`F64`, or a user implementation of `Ordered`. Adding a fact is a versioned
+change to this table, with a positive case and a nearest negative case.
+
+### Runtime and tool failures
+
+| Condition | Code and primary span |
+| --- | --- |
+| impossible typed IR, descriptor, or continuation; an unknown engine trap; a defect of the embedded standard library found at load | `@runtime.invalidCheckedProgram`, the source origin when known, otherwise none |
+| an invalid, stale, foreign, or wrong-kind boundary value; an unsealed access; a malformed trusted result | `@runtime.invalidHostValue`, the source origin when known, otherwise none |
+| memory exhaustion | `@runtime.memoryExhausted`, no location; a host event, not a trap |
+| a name that departs from the casing convention | `@style.casing` (warning), the name |
+| a valid command or construct outside the tool's profile; a driver the platform does not support, at admission | `@tool.unavailable`, the whole form, or the command-line context |
+| a plan whose workspace or document revision no longer matches | `@tool.stalePlan`, no location |
+| an MCP or tool action the server's permissions deny | `@tool.actionDenied`, no location |
+| a tool limit reached, with an unknown, incomplete status | `@tool.limitExceeded`; the predicate when the limit stopped an obligation, whose status is then `unknown` and which gets no `@contract.unproved`; otherwise no location |
+| a value that cannot be shown: a function, a plan, or a grant, including one an interface value holds | `@tool.unsupportedValue`, the observed expression when one exists |
+| a build for a platform the toolchain does not emit | `@tool.unsupportedTarget`, no location |
+| a missing platform linker | `@tool.missingLinkTool`, no location |
+| a failed link step | `@tool.linkFailed`, no location |
+| an artifact whose ABI, registry, or identities the runtime cannot admit | `@tool.incompatibleArtifact`, no location |
+
+- Both traps mean the toolchain or runtime is wrong, not the program's
+  input. A trap has a source origin only when the runtime can identify the
+  failing operation; it never blames arbitrary source.
+- A tool limit is never also reported as a false predicate.
+- A value that cannot be shown gives an encoder error or a structured test
+  failure, with `@tool.unsupportedValue` where a diagnostic is shown.
+- Native build failures name the exact target and toolchain. They are tool
+  outcomes, not exit codes of the program.
+
+Checked division and remainder return typed errors. There is no trap for a
+failed guard, for division by zero, or for an unobservable value. This is
+the contract for supported source; it does not promise that an operating
+system failure, a defective driver, or a program that does not terminate can
+never end a process.
 
 ## Recovery
 
-The parser retains a lossless concrete syntax tree and recovers after malformed
-forms so context queries and diagnostics remain useful in incomplete files. It
-MUST NOT manufacture a typed node for an ambiguous recovery.
+The parser keeps a lossless syntax tree and recovers after a malformed form,
+so that diagnostics and queries stay useful in an unfinished file.
 
-Presentation that has one unambiguous semantic binding may parse with a style
-diagnostic and a safe formatter fix. Missing operands, duplicate labels,
-unknown labels on resolved forms, missing required trivia between sibling
-forms, unmatched delimiters, invalid tokens, odd dict key/value tails, and
-ambiguous applications remain errors.
-
-Later phases operate on explicitly marked valid subtrees and suppress cascades
-that add no new information. A tool response identifies which facts are exact,
-recovered, or unavailable.
+- A recovery step consumes input or returns. It MUST NOT build an
+  unambiguous node from ambiguous tokens.
+- Later phases use the valid subtrees and suppress errors that only repeat
+  an earlier one. They never fill an unknown proof or effect with a
+  successful value.
+- A closer that does not match the innermost open construct is resolved by
+  kind. If a construct of the closer's kind is open, every construct inside
+  it closes as missing and the closer closes that construct, with one
+  `@syntax.unmatchedDelimiter` at the closer, related to the innermost
+  opener. So an `endfn` met while a `match` is open inside a `fn` closes
+  the `match` as missing and then the `fn`. If no construct of the closer's
+  kind is open, nothing closes: the closer is kept as its ordinary token
+  leaf inside an `@error` node of the
+  [tree](#persistent-observations), and the same code is reported at it.
+- Missing operands, crossed or missing closers, repeated or unknown labels,
+  items with no whitespace between them, invalid tokens, and ambiguous
+  applications are errors. A `:` in the wrong place is not reinterpreted.
+- A malformed literal and a well-formed literal that is out of range are
+  different errors. An unterminated quote is `@syntax.unmatchedDelimiter`
+  only. An unknown numeric suffix is `@syntax.invalidNumericLiteral`. A
+  malformed identifier is `@syntax.invalidName`. `_` is the only discard.
+- Each fact is `exact`, `recovered`, or `unavailable` on its own. A valid
+  node beside a recovery stays exact. A partial performed row is not an
+  exact ceiling.
+- The formatter keeps ambiguous bytes. A name-case convention gives
+  `@style.casing`; formatting never renames and never reorders evaluation.
 
 ## Conformance corpus
 
-The implementation will maintain a backend-independent corpus organized by
-specification rule, not compiler module. Each case records:
+The implementation MUST maintain a corpus of Vibra cases that is independent
+of any backend and organized by the rule each case tests. A case has a
+stable rule identity, an operation, its inputs, a profile, and the expected
+verdict, diagnostics, and observations. Expected results are written from
+this specification. They are never regenerated from an engine's output.
 
-- normative rule ID;
-- a closed operation selector (`reader`, `project-decode`, `source-graph`,
-  `resolve`, `interpret`, `query`, `format`, `workspace-check`,
-  `workspace-run`, or `workspace-test`);
-  `project-decode` requires exactly one project input, and a
-  `source-graph` case requires one confined `tree` directory and a `project`
-  input whose path is exactly `<tree>/project.vibon`; the corpus loader MUST
-  acquire that tree before graph building and the handler MUST load only that
-  exact marker, never an ancestor or sibling;
-  `resolve` has the same confined `tree`/`project` binding and consumes the
-  already acquired graph through the filesystem-free `vibra-resolve` input;
-  `format` requires the tooling profile, one confined tree, its exact
-  `<tree>/project.vibon` input, and one `.vib` source beneath that tree; it
-  compares the snapshot-backed formatter result with a required formatted
-  source snapshot;
-  `workspace-check` requires the static profile, one confined tree, and its
-  exact `<tree>/project.vibon` input, with no source input; it checks the whole
-  workspace snapshot through the workspace semantic API. A source that is only
-  to be checked is a one-module workspace: a library target whose single module
-  is the case's source, so that the verdict, the diagnostics, and the spans
-  are those of the workspace check of that module. A `workspace-check` case MAY
-  declare a `types` snapshot, which an accepted workspace compares with the
-  canonical `@types.v1` observation of its checked module values and functions;
-  no other operation has one;
-  `workspace-run` requires the interpreter profile, the same project/tree
-  binding and no source input; it requires exactly one binary target and
-  compares its checked execution with the required result and VIBON audit
-  trace snapshots, running it in the host world of the case;
-  `workspace-test` requires the interpreter profile, the same project/tree
-  binding and no source input; it runs all tests, each in a fresh copy of the
-  host world of the case, and compares one canonical
-  `@test-run.v1` observation. The observation contains a separate
-  `@audit-trace.v1` record for each test;
-  `interpret` takes one `.vib` source input and checks it as the only module of
-  a one-module workspace with the embedded standard library, under the source
-  ID the input names, so the verdict and diagnostics of a case are those the
-  workspace check reports for that module; it then runs the first function the
-  source declares, which need not be an entry signature, and compares the
-  canonical encoding of the value it returns. It is the one operation that
-  observes the value of a function whose result is not `void` or `result void
-  e`, and so the one that covers the canonical value encoding of every type.
-  `interpret` is pure and has no host world, so it takes no `host-world` input;
-  non-reader case with multiple input kinds must state its operation;
-- source/project/data inputs and an optional confined tree directory;
-- for `workspace-run` and `workspace-test`, an optional `host-world` input, the
-  path of a `@host-world.v1` document of the runtime chapter, which supplies the
-  case's standard input, files, environment, arguments, clock, and random seed.
-  Without it the case runs in the default world. The document is copied fresh
-  for each test and for each backend, so a case never observes another's writes.
-  The path is a relative `.vibon` file of the case directory and lies outside the
-  confined tree, which is the workspace; a document that fails to decode fails its
-  case, and only its case, with the data diagnostics at the document, each
-  reported once;
-- an optional `.vibon` `graph` snapshot path for source-graph cases; when present it
-  records the canonical `@source-graph.v1` observation, so acceptance alone
-  cannot hide a wrong snapshot. Its VIBON shape is one top-level `record`
-  with `format: @source-graph.v1`, a `units` array, and a `dependencies`
-  array. Each unit record has `name`, `kind`, and a `modules` array; each
-  module record has canonical module atom `path` (for example
-  `@hello.nested.a`), project-relative `source`, and `bytes-hex`.
-  `bytes-hex` is the lowercase, two-digit-per-byte encoding of
-  the exact immutable source bytes. Every project graph includes one reserved
-  `@tests` unit, even when it has no modules; its `name` is `@tests` and its
-  `kind` is `@lib`. Each dependency record has its `alias`,
-  `kind`, declared `source`, optional `target`, delivery `status`, owning
-  `source-id`, and half-open `span`. Arrays are sorted by their canonical
-  identity and source identity. The graph record contains no parsed or
-  resolved declarations;
-- an optional `resolved` snapshot path for `resolve` cases; when present it is
-  canonical VIBON with format `@resolved.v1` and records package provenance,
-  sorted source modules (whose module paths are canonical atoms), declaration
-  IDs with source IDs/spans/visibility, import edges (whose resolved module
-  targets are canonical atoms), and body-reference edges. Exact source bytes remain in the
-  `@source-graph.v1` observation, so resolution never rereads or normalizes
-  source input. Its top-level record has `format`, `package`, `modules`,
-  `declarations`, `imports`, and `references`; declaration records carry
-  canonical package-qualified IDs, entity kind, visibility, source ID, and
-  span; import and reference records carry their written edge and source/span
-  provenance. Both snapshot formats are compared as canonical text by the
-  runner; expected text is never reparsed by the implementation under test;
-- expected acceptance or diagnostics;
-- expected canonical formatting;
-- expected resolved identities, types, and effects where relevant; the `types`
-  snapshot of a `workspace-check` case is the canonical `@types.v1` record of
-  its accepted workspace: its module values and then its functions, each by
-  declaration path, with its checked types and body, in checked order;
-- interpreter result and ordered audit trace where the operation exposes a
-  separate trace; the expected
-  audit trace is a `.vibon` snapshot whose canonical root is
-  `(record format: @audit-trace.v1 events: (array ...))`, with the event
-  records of the runtime chapter in execution order;
-- for `workspace-test`, an interpreter result snapshot whose canonical root is
-  `(record format: @test-run.v1 result: @command.ok tests: (array ...))`; this
-  snapshot embeds one `@audit-trace.v1` per test and replaces the separate
-  `interpreter.audit_trace` snapshot;
-- for an `interpret`, `workspace-run`, or `workspace-test` case that ends in a
-  host event, an `expect.host_event` field naming the event atom,
-  `@runtime.memory-exhausted`, in place of the result and audit-trace
-  snapshots, so that a case never records a value for a run that has none (a
-  `workspace-test` case that ends in a host event is `@command.operational-failure`
-  with zero selected, passed, and failed tests, as the tooling chapter states,
-  and records no `@test-run.v1` snapshot).
+### Case operations and inputs
 
-An executable case has no Wasm snapshot of its own: **Differential execution**
-below runs it in a second backend against the same expectation.
+| Operation | Inputs | Observation |
+| --- | --- | --- |
+| `reader` | one `.vib` or `.vibon` document | the lossless tree, recovery, diagnostics; optionally a structural query or format |
+| `projectDecode` | exactly one `project.vibon` | the typed decode and diagnostics, with no discovery |
+| `sourceGraph` | one confined tree with its `project.vibon` | the source graph snapshot |
+| `resolve` | the same | resolved identities, imports, and references |
+| `workspaceCheck` | the same; no single-source input | the static result; optionally checked types and obligations |
+| `format` | the same, plus one document | the formatted text and diagnostics |
+| `query` | a captured workspace, a subject, an offset, options | the versioned query result |
+| `interpret` | one pure module, checked as a one-module workspace; its first function with no parameters is called | the canonical result or an observation failure; no host world |
+| `workspaceRun` | the same tree, one binary target | startup, the entry's result, and the ordered audit trace in the supplied world |
+| `workspaceTest` | the same tree | one suite result with each test's trace, each test in a fresh world |
 
-Every `workspace-test` case, accepted or rejected, that does not end in a host
-event MUST supply exactly one
-`interpreter.result` snapshot and MUST omit `interpreter.audit_trace`. The
-result is a closed VIBON record with fields `format`, `result`, and `tests`;
-`format` is exactly `@test-run.v1`, `result` is one of
-`@command.ok`, `@command.diagnostics`, `@command.test-failed`,
-`@command.trap`, or `@command.unavailable`, and `tests` is an array with one
-record per selected test in canonical test order. Each test record has required
-fields `name` (the canonical selector string), `result` (one of the five
-`@test.*` atoms), and `audit-trace` (a complete `@audit-trace.v1` record).
-Top-level field order is `format`, `result`, `tests`; test-record field order
-is `name`, `result`, optional `failure` or `trap`, then `audit-trace`.
-`failure` is present only for `@test.assertion-failed` and is a record with
-`assertion` (canonical assertion atom), `expected` and `actual` (canonical
-literal strings), and `primary-span` (a record with `source-id` (a
-project-relative slash path), `start`, and `end` as unsigned, half-open UTF-8
-byte offsets). Failure-record field
-order is `assertion`, `expected`, `actual`, `primary-span`; span-record field
-order is `source-id`, `start`, `end`. `trap` is present only for `@test.trap`
-and is a closed record with `trap-code` (a string equal to the CLI `trapCode`)
-and optional `origin`, whose value has the same source-id/start/end span shape.
-Trap-record field order is `trap-code`, then `origin` when present; no other
-fields are permitted. Neither conditional field is represented as null. No
-test record contains diagnostics; the case's ordinary diagnostic expectations
-carry those independently. No other fields are permitted. The
-`audit-trace` record has exactly `format: @audit-trace.v1` and `events: (array
-event...)`, where each event is the record of the runtime chapter's audit-trace
-section. The events are the host calls the test completed, so they are empty for
-a test that completes none, and always for an invalid or unavailable test, and a
-test that trapped keeps the events completed before the trap. For
-checked-program execution-boundary traps, `trap-code` is
-the exact string `"@runtime.invalid-checked-program"` and `origin` is omitted;
-for `"@runtime.unobservable-function"`, `origin` is the assertion call; and
-`"@runtime.invalid-host-value"` and `"@runtime.division-by-zero"` have no
-origin.
-The test records contain all per-test traces, so a second
-suite-level audit snapshot is forbidden. An empty suite is `tests: (array)`
-with result `@command.ok`.
+- A case with several kinds of input states its operation.
+- Paths are relative to the case, confined, and checked by extension. The
+  loader captures the tree first; a handler reads only that capture.
+- `interpret`'s entry is a fixture for observing values. It is not an
+  exception to the entry contract of a binary.
+- `workspaceRun` and `workspaceTest` may name one `@hostWorld.v2`
+  document, inside the case directory and outside the source tree. Without
+  it the default deterministic world applies. Every test and every executor
+  gets a fresh copy. A malformed world fails only its case, once, and never
+  becomes an empty permissive world. World data describes inputs; the fake
+  broker issues the grants.
+- An expectation is `accepted`, `refuted`, `unknown`, or `unsupported`. Only
+  the first is a pass. A case for a static rule includes a passing example
+  and the nearest failing one.
+- A handler that does not exist is unavailable and fails any gate that needs
+  it.
 
-The source graph has one representation: the structured `@source-graph.v1`
-VIBON record described above. Every graph consumer and corpus fixture MUST
-produce or compare that record directly. Plain-text graph snapshots are not a
-supported input, output, or compatibility format. The graph representation
-MUST preserve the exact source IDs, bytes, spans, and dependency edges above.
+### Persistent observations
 
-Executable audit traces have one representation as well: the structured
-`@audit-trace.v1` VIBON record described above. An empty pure trace is the
-canonical `(record format: @audit-trace.v1 events: (array))` value. Events
-remain ordered records and are never flattened into a line-oriented text
-snapshot or an opaque string; plain-text audit snapshots are not a supported
-format. A decoder of the format preserves an event of an unknown `kind` and
-compares it as data.
+Snapshots are canonical typed VIBON, never text dumps. Source bytes are
+data inside them; source is never parsed as VIBON. A change of shape is a
+new major format. Every schema below follows the
+[schema rules](04-programs-and-packages.md#schemas): absent optional fields
+are omitted, lists are in the order stated, and a **span record** is
+`{sourceId: Str start: U64 end: U64}`.
 
-A `workspace-run` case whose entry returns `err` records the entry's
-`(result void e)` in the canonical result observation, as for any result. Its
-command result, `@command.program-failed`, follows from that observation, so the
-case adds no field for it and expects no trap and no diagnostic. Both backends
-classify the entry's result by its variant and the harness holds them to the
-same outcome. A `workspace-run` case whose run traps is an accepted case that
-expects the trap's runtime error diagnostic, unlocated with span `0..0`, in
-place of the result and audit-trace snapshots, as for a host event: it declares
-neither, and the Wasm backend must end with the same trap code.
-
-Cases use the following stable section IDs, followed by a descriptive
-kebab-case suffix such as `V1-SRC-CALLS-labelled-after-variadic`:
-
-| Prefix | Normative section |
+| Format | Defined in |
 | --- | --- |
-| `V1-CHARTER` | mission, boundary, commitments, and exclusions |
-| `V1-SRC-READER` | reader, tokens, names, and trivia |
-| `V1-SRC-CALLS` | general application, labels, variadics, and binding |
-| `V1-SRC-DECL` | declarations, nested methods and impls, and visibility |
-| `V1-SRC-EXPR` | expressions, patterns, collections, and control flow |
-| `V1-SRC-FMT` | canonical formatting |
-| `V1-TYPE-NOMINAL` | primitive and nominal type constructors |
-| `V1-TYPE-NAMES` | namespaces, imports, and forbidden shadowing |
-| `V1-TYPE-INFER` | inference and public checking |
-| `V1-TYPE-GENERIC` | flat generic bounds |
-| `V1-TYPE-INTERFACE` | interfaces, default methods, nested implementations, and `iter` |
-| `V1-TYPE-CONVERT` | ascription, widening, narrowing, and conversion |
-| `V1-TYPE-CONTROL` | control flow, failure, recursion, tail calls, and checked operations |
-| `V1-EFFECT` | declarations, rows, target ceilings, and reports |
-| `V1-PROJECT` | data forms, targets, modules, dependencies, and tests |
-| `V1-TOOL` | CLI, workspace queries, edit plans, schemas, and MCP |
-| `V1-RUNTIME` | evaluation, host ABI, failures, and determinism |
-| `V1-DIAG` | diagnostics, recovery, profiles, and release evidence |
+| `@tree.v2`, `@sourceGraph.v1`, `@resolved.v2`, `@types.v2`, `@testRun.v2` | below |
+| `@index.v2` | the [index](05-tooling.md#index-records) |
+| `@type.v2`, `@value.v2` | the [canonical value encoding](06-runtime.md#canonical-value-encoding) |
+| `@auditTrace.v2` | the [audit trace](06-runtime.md#audit-trace) |
 
-IDs are never reassigned to a different rule. A removed rule leaves a retired
-ID so test reports and external tooling remain interpretable.
+**`@tree.v2`** holds the lossless syntax tree that a `reader` case compares.
 
-Every accepted source example in `docs/spec/` becomes a corpus case or is
-marked illustrative. Every error rule has at least one focused negative case.
-The corpus includes Unicode spans, parser recovery, stale edit plans, forbidden
-shadowing, incomplete interface methods, static target-effect mismatch,
-transitively closed performed rows through effect-operation additive rows,
-host-error propagation, interpreter/Wasm parity, all three equivalent discard
-spellings, all character spellings, exact numeric suffix typing and range
-boundaries, rejection of the retired `unit` literal, and rejection of malformed
-names such as `_.x`, `a?.b`, `-.x`, and `@-.x`. Invalid character tokens use
-`@syntax.invalid-character-literal`; malformed escapes or Unicode scalar
-values in a terminated string use `@syntax.invalid-string-literal`; malformed
-or unknown numeric suffixes use `@syntax.invalid-numeric-literal`; a
-nonliteral leaf that fails the shared symbol, label, atom, or discard grammar
-uses `@syntax.invalid-name`; and a syntactically valid literal outside its
-suffixed type's range uses `@type.numeric-out-of-range`. All five have the
-fixed level `@error`. An
-unterminated quoted leaf remains the recovery case for
-`@syntax.unmatched-delimiter` and is not also an invalid-string case.
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `format` | `@tree.v2` | required |
+| `root` | node | the one document node |
 
-Reader recovery cases also cover a missing required separator between sibling
-forms with `@syntax.missing-separator`, whose fixed level is `@error`.
-Within one reader document, lexer and parser diagnostics MUST be combined in
-ascending primary byte-span order (start, then end). Equal spans MUST retain
-their emission order, with lexer diagnostics preceding parser diagnostics.
+A node is one of two closed records. An interior node is
+`{kind: K children: C}`, with `C` a list of nodes in source order that may
+be empty. A leaf is `{kind: K text: Str}`, holding the exact text of one
+token. The texts of the leaves, concatenated in order, equal the input, so
+whitespace and comments are leaves.
 
-Registry coverage proves that the queryable registry and the canonical table
-above agree. Every code in the table has exactly one registry entry, every
-registry entry appears in the table, each entry's level equals the table's,
-each entry's domain equals the first component of its code, and each entry's
-fix capability is `@safe` or `@none`. These cases belong to `V1-DIAG`.
+One rule decides which productions of the
+[source grammar](01-source-language.md#grammar) and the
+[data grammar](04-programs-and-packages.md#vibon-data-documents) are nodes:
 
-Source/data separation coverage accepts `.vib` only as source and `.vibon`
-only as VIBON, rejects `project.vib`, `project-lock.vib`, and
-`<target>.build.vib` with no compatibility fallback, and canonically round
-trips `project.vibon`, `project-lock.vibon`, and `<target>.build.vibon`.
-Reference-role coverage proves that equal atom spellings remain values in
-ordinary expressions, resolve only in explicit import or VIBON schema slots,
-and never appear in source effect rows. Effect rows resolve lexical symbols
-through imports to the same canonical identities used by target metadata.
-`@effect.invalid-reference` and `@data.invalid-extension` have fixed level
-`@error`.
+- The root is the one **document node**, of kind `@source` for a `.vib`
+  document and `@data` for a `.vibon` document. It stands for the whole
+  document, and no node stands for `module`.
+- A **choice production**, one whose body is only alternatives, is never a
+  node: `top`, `statement`, `expr`, `unary`, `primary`, `literal`,
+  `argument`, `pattern`, `type-expr`, and `data` among them. What a choice
+  production matches takes its place: a node, when the chosen alternative
+  is a node production, and otherwise the tokens of an alternative written
+  inline, which become children of the nearest enclosing node.
+- Every other production is an interior node whose `kind` is the
+  production's name in camelCase: `@fnDecl`, `@postfix`, `@list`, `@entry`.
+- A lexical production is a leaf. A leaf `kind` is `@identifier`,
+  `@reservedWord`, `@integer`, `@float`, `@atom`, `@string`, `@docString`,
+  `@character`, `@punctuation`, `@whitespace`, `@comment`, or `@missing`.
+  The discard `_` is a `@punctuation` leaf, and so is each character that
+  starts no token.
+- Recovery is recorded with two kinds, never with flags. An `@error` node is
+  interior and holds, as their ordinary token leaves, the tokens a recovery
+  step consumed without building a form; an unmatched closer is its
+  `@punctuation` or `@reservedWord` leaf inside an `@error` node. A
+  `@missing` leaf has empty text and stands where a required element was
+  not written.
+- A document that is not valid UTF-8 has no tree; its observation is its
+  diagnostic.
 
-Effect-propagation coverage includes an effect operation with a non-empty
-additive row implemented in Vibra, and proves that the additive root appears
-in the performed row of a transitive caller, that a caller naming only the
-owner root is rejected with `@effect.outside-ceiling`, and that the root
-appears in the binary target array even though no source row of the entry
-module writes it. `@effect.outside-ceiling` MUST report one diagnostic for each
-offending function and root missing from its ceiling, with the witness of the
-effects chapter: the first call site in source order as the primary span, the
-shortest remaining chain by hops, ties by source order, as the related spans, each
-noted `performs <root> via <callee>`, and a hop through a function value or a
-contract member marked as such. The same chain is returned by `--expand
-effect-witnesses`.
+The valid document `[1u8]`, five bytes with no newline, has this tree. The
+element is matched by the choice production `data`, so the integer leaf is
+a child of the list node:
 
-Effect coverage also includes the rows themselves: a call through a function
-value contributing its type's row, a call of a contract member contributing the
-contract ceiling whatever the implementation performs, creating a function value
-performing nothing, and the rejection of a function value where a function type
-of another row is expected, in both directions, because Vibra has no row
-subtyping; an effect root that is a target `effects` atom resolved through the
-ordinary resolution diagnostics, a duplicate root, and a root in the array that
-the entry does not perform, as the table of **Effect and host diagnostics**
-states; a `@host` declaration outside a `deffect`, with an additive row, and an
-`effects:` on a `deffect`, each `@syntax.invalid-attribute`; a registry entry
-owned by another root, `@external.owner-mismatch`; and a function type, a
-position-query `effects` fact, and an index record each carrying its row as the
-record of the effects chapter and never as a bare set.
+```vibon
+{
+  format: @tree.v2
+  root: {
+    kind: @data
+    children: [
+      {
+        kind: @list
+        children: [
+          {kind: @punctuation text: "["}
+          {kind: @integer text: "1u8"}
+          {kind: @punctuation text: "]"}
+        ]
+      }
+    ]
+  }
+}
+```
 
-Host-operation coverage runs in the host world and proves, for each of the 17
-registry rows, a success and every error variant the row can return, as the
-`result` value and as the audit event, in both backends: whole-value standard
-input read from the current position and returning empty the second time;
-standard output and error reaching the audit trace and never the process in a
-test; every filesystem error variant, `fs.read.entries` sorted by Unicode scalar
-order, a write that creates and a write that replaces, and `invalid-path` for a
-NUL; a present and an absent variable and the program arguments; the default
-clock and the stepped monotonic clock; and the random bytes of a seed as the
-SplitMix64 vectors define them. Event coverage proves one event for each
-completed call in call order, none for a trap or a host event, the event shape
-for a `void` result, and the preservation of an event of an unknown `kind`.
-Entry-outcome coverage proves an entry returning `err`, a host error propagated
-with `try` to the entry, a host error handled by the program, and a trap, each
-with its result and exit code in both backends.
+The malformed document `[1u8}` recovers as follows. No brace form is open,
+so the `}` closes nothing and is kept in an `@error` node; the list then
+ends without its closer, which a `@missing` leaf marks. Both faults are
+`@syntax.unmatchedDelimiter`, at the `}` and at the `[`:
 
-Application coverage includes arbitrary callee expressions, every closed
-applicable category, constructor applications, rejection of atom and numeric
-callees, tuple literal-index bounds, record selector resolution, optional
-collection lookup, and proof that pure projections and lookups add neither an
-effect nor a function-call edge. Collection construction covers heterogeneous
-`tupleof` and `recordof`, `enumof` against a written anonymous enum and its
-rejection without one, homogeneous and expected-empty `array.of`, `array.of`
-passed as a function value, even and duplicate-key `dict.of`, declared tuple,
-record, enum, union, and wrapper constructors, and rejection of the type forms
-`(tuple ...)`, `(record ...)`, `(enum ...)`, and `(union ...)` in value
-position.
+```vibon
+{
+  format: @tree.v2
+  root: {
+    kind: @data
+    children: [
+      {
+        kind: @list
+        children: [
+          {kind: @punctuation text: "["}
+          {kind: @integer text: "1u8"}
+          {kind: @error children: [{kind: @punctuation text: "}"}]}
+          {kind: @missing text: ""}
+        ]
+      }
+    ]
+  }
+}
+```
 
-For the admitted monomorphic function subset, fixed and labelled arity,
-duplicate-label, unknown-label, required-label, and operand-type failures use
-`@type.argument-mismatch`. A statically non-function callee uses
-`@type.not-applicable`. The `@style.argument-order` warning is emitted only
-after the written function signature proves a complete, unambiguous binding;
-an invalid application never produces formatter binding facts.
+**`@sourceGraph.v1`** holds exact source bytes and no parsed declaration.
+Every graph has the `@tests` unit, even when empty.
 
-Pattern coverage includes direct bare-name binders, nested destructuring in
-`let`, positional parameters, lambdas, and `match`, duplicate-name and
-no-shadowing rejection, all three repeating discards, and irrefutability
-checking against the expected type, with `let` written in the pair form inside
-a body sequence. The removed `(bind name)` spelling MUST be rejected with no
-compatibility bridge. Retired `while`, `for`, `break`, and `continue` forms MUST
-be rejected with `@syntax.retired-form`; `return` is no longer retired, and the
-old `(let pattern value body...)` shape has no compatibility spelling: whatever
-follows its first pair is read under the pair grammar, as further pairs, so the
-old shape is rejected, or means something else, by the rules below alone. `@type.not-applicable`,
-`@type.invalid-tuple-index`, `@type.unknown-record-field`, and
-`@pattern.refutable-binding` all have fixed level `@error`.
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `format` | `@sourceGraph.v1` | required |
+| `units` | list of unit records sorted by `name` | every unit of the snapshot |
+| `dependencies` | list of dependency records sorted by `alias` | every declared dependency |
 
-Match coverage includes a non-exhaustive enum, union, `bool`, tuple, and
-`atom` scrutinee, each rejected with `@pattern.non-exhaustive` naming its first
-uncovered shape; a repeated arm and an arm after a covering binder rejected
-with `@pattern.unreachable-arm`; and literal arm sets over `str` and an integer
-type that need a covering binder. Failure coverage includes `try` over `option`
-and over `result` in matching enclosing results, a `try` whose enclosing error
-type differs, a `try` in a test body, and a `try` over a non-container, each
-invalid case rejected with `@type.invalid-try`; and an ignored `result` in a
-non-final body position rejected with `@type.unhandled-fallible`, accepted when
-written with each discard spelling, and an ignored `option` accepted.
-Inference coverage rejects an unsuffixed literal with no expected numeric type,
-an empty `array.of` with no expected type, and an uninferable generic argument
-with `@type.ambiguous-inference`, and a `def` annotation, `if` condition, and
-differing branch types with `@type.mismatch`. Dict coverage accepts every closed
-key type, including a nested tuple key, and rejects `f64`, `void`, array, and
-record keys with `@type.invalid-dict-key`; an interpreter case proves that a dict
-built in two different insertion orders iterates, renders, and compares
-identically in canonical key order. Nominal coverage rejects a record that
-contains itself directly with `@type.infinite-size` and accepts one that
-contains itself through an array. `@type.mismatch`,
-`@type.ambiguous-inference`, `@type.infinite-size`, `@type.invalid-dict-key`,
-`@type.invalid-try`, `@type.unhandled-fallible`, `@pattern.non-exhaustive`,
-and `@pattern.unreachable-arm` all have fixed level `@error`.
+A unit record has `name` (atom), `kind` (`@bin`, `@lib`, `@tests`, or
+`@dependency`), and `modules` (list of `{path: Atom sourceId: Str
+bytesHex: Str}` sorted by `path`, where `bytesHex` is the module's exact
+bytes in lower-case hexadecimal). A dependency record has `alias` (`Str`),
+`kind` (`@path` or `@git`), `source` (`Str`, the path or URL), `target`
+(optional atom), `status` (`@captured`, `@verified`, `@unavailable`, or
+`@refuted`), and `span` (the span record of its project entry).
 
-Binding coverage, in `V1-SRC-EXPR` and `V1-TYPE-NAMES`, proves a one-pair and a
-multi-pair `let`; a later pair seeing an earlier one; bindings visible to every
-later element of the sequence and to nothing before, inside, or after it, so a
-binding in a `do` ends with that `do`; a `let` as the final element, whose
-sequence is `void`; destructuring and discard pairs; and the redeclaration of a
-name by a consecutive `let`, rejected with `@name.redeclaration`, beside the
-same name reused in two sibling `do` forms, which is accepted. Each admitted
-position and each rejected one is covered: a `let` or `let-else` as an
-application operand, an `if` condition and branch, a `match` subject and arm
-result, a `def` initializer, a `let` and `let-else` value, and a `return`, `try`,
-`as`, and anonymous-value operand, each rejected with
-`@syntax.misplaced-binding` and each accepted once wrapped in `do`. Malformed
-forms are rejected with `@syntax.invalid-form`: `(let)`, `(let a)`,
-`(let a 1 b)`, `(let-else p e)`, `(let-else p e f g)`, `(return)`, and
-`(return a b)`. Every such case is followed by a valid form that still checks,
-which proves recovery, and the old `(let pattern value body...)` shape is
-rejected with no bridge.
+```vibon
+{
+  format: @sourceGraph.v1
+  units: [
+    {
+      name: @hello
+      kind: @bin
+      modules: [{path: @hello.main sourceId: "src/hello/main.vib" bytesHex: "70726f63"}]
+    }
+    {name: @tests kind: @tests modules: []}
+  ]
+  dependencies: []
+}
+```
 
-`let-else` and `return` coverage, in `V1-TYPE-CONTROL`, accepts a refutable
-pattern whose bindings are visible after the form and not in its value or
-fallback, and a `let-else` that is the final element; it rejects an irrefutable
-pattern with `@pattern.irrefutable-let-else` and a fallback that is not `never`
-with `@type.mismatch`. A fallback is covered as a `return`, as a call of a
-function whose result is `never`, and as an `if` whose branches are all `never`.
-`return` is covered in a `defn`, a nested method, an `impl` member, and a
-`lambda`, where it exits only the lambda; at a written result type with a
-widening; as `(return void)`; rejected in a `def` initializer and in a test body
-with `@type.invalid-return`, and accepted inside a `lambda` in a test; and
-rejected as redundant with `@type.redundant-return` as a final expression, a
-branch of a final `if`, an arm of a final `match`, and the last element of a
-final `do`, while the same `return` in a `let-else` fallback is accepted. The
-interpreter cases prove the exit value, that a later element does not run, and,
-with the tail-call corpus, that the operand of a `return` is a tail call.
+**`@resolved.v2`** holds every declaration, import, and reference.
 
-`never` coverage proves that a function declared `never` accepts a final
-expression of type `never` and rejects any other, empty bodies included with
-`@type.mismatch`; that `never` is admitted at several expected types; the branch
-join for `if` and `match` with one, some, and all branches `never`; every
-admitted position and every rejected one with `@type.unreachable-code`,
-including an element after a `never` element; inference, where an uninferable
-argument that only a diverging operand could fix is rejected with
-`@type.ambiguous-inference` and the same argument written as `types: (never)` or
-inside `(result t never)` is accepted; `never` as a type argument bounded by
-`any`, and its rejection against another bound with `@type.unsatisfied-bound`
-and as a dict key with `@type.invalid-dict-key`; a declaration named `never`,
-rejected with `@name.reserved-declaration`, and a module value named `never`,
-rejected with `@name.reserved-value-spelling`; inhabitedness for `never`, a
-tuple, a record, a wrapper, an enum with and without a payloadless variant, a
-union, an array of `never`, and a recursive nominal type; exhaustiveness, where a
-`match` on `(result t never)` is exhaustive with only the `ok` arm, an `err` arm
-is rejected with `@pattern.unreachable-arm`, and `(let (result.ok value) x)` is
-irrefutable; and fallibility, where an ignored `(result t never)` is accepted and
-an ignored `(result t e)` is still rejected with `@type.unhandled-fallible`.
-`@syntax.misplaced-binding`, `@type.invalid-return`, `@type.redundant-return`,
-`@type.unreachable-code`, and `@pattern.irrefutable-let-else` all have fixed
-level `@error`. Layout coverage, in `V1-SRC-FMT`, formats the single-pair
-`let`, multi-pair `let`, and `let-else` of the source-language chapter in every
-layout it states, idempotently, and workspace-position coverage, in `V1-TOOL`,
-reports the contexts `let-value`, `let-else-fallback`, and `return-operand`, no
-`let-body`, and the `visibleLocals` of a position after a `let`.
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `format` | `@resolved.v2` | required |
+| `package` | record `name: Str`, `version: Str` | the local package |
+| `modules` | list of `{path: Atom unit: Atom sourceId: Str}` sorted by `path` | every module |
+| `declarations` | list of declaration records sorted by `identity` | every declaration, members included |
+| `imports` | list of import records sorted by `sourceId`, `start`, `end` of `span` | every `use` |
+| `references` | list of `{span: span record to: Str}` sorted by `span` | every resolved reference, `to` an identity |
 
-An `interpret` result snapshot is the canonical result observation
-`(record type: T value: v)` of the runtime chapter's canonical value encoding.
+A declaration record has `identity` (`Str`); `anchor` (record `package: Str`,
+`version: Str`, `module: Atom`, `owner: Str` optional, `kind: Atom`,
+`name: Str`, the fields the [type chapter](02-type-system.md#declared-types)
+hashes); `access` (`@public` or `@private`); and `span`. An import record
+has `span`, `path` (atom), `name` (`Str`, the local name), and `to`
+(optional `Str`, the identity of the module or declaration, absent when
+resolution failed).
 
-Interface coverage includes abstract and default contract members, rejection of
-`@type.default-override` and `@type.missing-abstract-member`, the canonical
-`iter` contract and default-method semantics, closed registry `iter`
-conformance for `(array t)`, `(dict k v)`, `str`, and `(option t)`, explicit
-`impl (iter item)` on `mapped-iter`, `filtered-iter`, `skipped-iter`, and
-`taken-iter`, pure `iter` default methods with `effects: ()` callbacks only,
-and effectful walks written as tail-recursive module-level functions over
-`iter.next`.
-Tail-call cases belong to `V1-RUNTIME`. Each runs its loop for a hundred thousand
-iterations and checks the result, and together they cover a callee in another
-module, a function-value parameter, a closure, a contract member called through
-an interface value, and an unrelated module-level function. Activation-depth
-coverage proves that non-tail recursion a hundred thousand activations deep, with a
-base case, completes with its result in both backends, and that a non-tail
-recursion with no base case ends with `expect.host_event =
-"@runtime.memory-exhausted"` under the runner's memory limit, in the entry of a
-`workspace-run` case and in the body of a test of a `workspace-test` case alike. Arena coverage
-proves, in the Wasm backend, that a tail-recursive loop allocating a fresh
-compound value on each iteration leaves a live arena size that does not grow
-with the iteration count, measured at two iteration counts a factor of ten
-apart through `vibra_v1_live_size`, and that releasing a value nested five
-thousand levels deep completes. `@name.reserved-value-spelling` and
-`@type.function-not-equatable` have fixed level `@error`.
+```vibon
+{
+  format: @resolved.v2
+  package: {name: "hello" version: "0.1.0"}
+  modules: [{path: @hello.main unit: @hello sourceId: "src/hello/main.vib"}]
+  declarations: [
+    {
+      identity: "sha256:213e3a01ef10d7c10032616f8ab0da9a97fb729b9f98d723f4beb3158a25e2ad"
+      anchor: {package: "hello" version: "0.1.0" module: @hello.main kind: @proc name: "main"}
+      access: @private
+      span: {sourceId: "src/hello/main.vib" start: 0u64 end: 68u64}
+    }
+  ]
+  imports: []
+  references: []
+}
+```
 
-Union coverage includes a two-member declaration, rejection of a one-member
-body, rejection of a union, interface, and bare generic member, and rejection of
-`(union (array t) (array i32))` as overlapping under instantiation. It proves
-that no member method or implementation is lifted to the union, and that a union
-used as a `(dict k v)` key without an explicit `ordered` implementation is
-rejected.
+**`@types.v2`** holds checked types and obligations.
 
-Structural-type coverage accepts anonymous `tuple`, `record`, `enum`, and
-`union` types in a parameter, a result, a record field, an enum payload, a
-union member, a `def` annotation, an `as` type, and a `types:` argument. It
-proves that a wrapper `(deftype celsius f64)` is distinct from `f64`; that two
-anonymous records or enums written with the same fields or variants in
-different orders are one type and that the formatter rewrites both to
-canonical order; that anonymous unions
-with the same member set in different orders are one type; that a declared
-`(deftype pair (tuple i32 str))` is distinct from `(tuple i32 str)`; that an
-anonymous type used as an `impl` target is rejected; and that each reserved
-head outside its admitted position is never reported as an unknown type
-application, while an ordinary applied type such as `(option t)` is accepted.
-Builtin-type coverage accepts `intrinsic-type` declarations only in the
-toolchain-embedded package, rejects one elsewhere, and rejects an unknown
-intrinsic atom with `@external.unknown-symbol`.
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `format` | `@types.v2` | required |
+| `moduleValues` | list of `{declaration: Str typeInfo: T}` sorted by `declaration` | the type of every module value |
+| `callables` | list of `{declaration: Str signature: G}` sorted by `declaration` | for every `fn`, `proc`, and member, `G` is its [signature record](06-runtime.md#open-signatures): its binders with their bounds, its receiver slot, and its complete callable type with its row, open where the declaration is |
+| `implementations` | list of [implementation records](06-runtime.md#open-signatures) sorted by the canonical bytes of `contract`, then of `receiver` | every implementation, with its positional key and its choices |
+| `obligations` | list of obligation records sorted by `declaration`, then `span` | every bare guard obligation |
 
-The reserved-head reservation is covered on both sides. A `deftype`, a `defint`,
-and a `where:` generic name spelled with a reserved type head or with a
-builtin type name are each rejected with `@name.reserved-declaration`, as is a
-generic name spelled `any` or `self`. A nested method named `dict` on an owner
-other than the associative `dict` type is accepted, proving the reservation
-does not reach members; the
-`@name.reserved-value-spelling` cases cover module-level values and aliases
-spelled `i32`, `array`, and `dict`.
+An obligation record has `declaration` (`Str`); `kind` (`@requires`,
+`@ensures`, or `@where`); `span` (the predicate's span record); `status`
+(`@passed`, `@refuted`, `@unknown`, or `@unsupported`); `rules` (list of
+`Str`, the identifiers of the discharge rules used, in order: `GUARD-1` to
+`GUARD-7` of [Bare guards](02-type-system.md#bare-guards), and after a
+`GUARD-6` the `INT` identifiers of the [integer facts](#integer-facts) it
+used); `dependencies` (list
+of `Str` declaration identities, sorted); and `counterexample` (optional
+`Str`, the canonical VIBON text of the refuting values). A module value is
+never generic, so its `typeInfo` is a closed type encoding.
 
-Prelude and constant-pattern coverage proves, in `V1-TYPE`, `V1-RUNTIME`, and
-`V1-PROJECT`, that `true` and `false` are named in every module without an
-import and read as ordinary module values; that a constant pattern of an
-integer, a declared enum value, a tuple, a constant defined by another
-constant, and `true` and `false` (bare, nested in a tuple, and in a
-`let-else`) matches exactly that value and covers `bool` as `(bool.true)` and
-`(bool.false)` do; that a dotted name through a module alias and a bare name
-through a declaration alias to another module's public constant are constant
-patterns; that adding a `def` of a name turns an existing arm into a value
-match; and, as rejections, that a pattern name that resolves to a module value
-whose initializer is a call, to a function, or to a parameter stays
-`@name.redeclaration`, that a constant whose expanded pattern is a float
-literal is `@type.mismatch` as the literal is, that a binder spelled as any
-prelude name at a plain-name site (a labelled or variadic parameter, or a
-`let-else` binder spelled `option`) is `@name.reserved-declaration`, that a
-`let` pattern spelled `true` is `@pattern.refutable-binding`, and that a module
-value or function spelled `true` or `false` is
-`@name.reserved-value-spelling`. Constant-default coverage proves that a labelled default is a constant expression in any form and of any type, a literal, `true`, a user constant, a constant defined by another constant, an inline constructor, a record, an enum variant with a payload, and a tuple, that a contract and an implementation whose defaults denote the same value keep one default however each is spelled, and, as rejections, that a call, a function, a module value with a call initializer, and an inline call are each `@type.not-constant`, relating the module value when one is named.
+The example is shape only; the identity of `ExitCode` is a placeholder:
 
-Unification coverage fixes the bound-agnostic reading: a union whose members are
-`(array t)` and `(array i32)` where `t` is bound by an interface `i32` does not
-implement is still rejected with `@type.union-member-overlap`, proving that a
-declared bound does not make two members disjoint.
+```vibon
+{
+  format: @types.v2
+  moduleValues: []
+  callables: [
+    {
+      declaration: "sha256:213e3a01ef10d7c10032616f8ab0da9a97fb729b9f98d723f4beb3158a25e2ad"
+      signature: {
+        binders: []
+        typeInfo: {
+          kind: @proc
+          parameters: []
+          labels: [:]
+          result: {
+            kind: @declared
+            path: @std.process.ExitCode
+            seed: "sha256:213e3a01ef10d7c10032616f8ab0da9a97fb729b9f98d723f4beb3158a25e2ad"
+            arguments: []
+          }
+          effects: {roots: []}
+        }
+      }
+    }
+  ]
+  implementations: []
+  obligations: []
+}
+```
 
-Widening coverage proves that each written expected type in the type chapter's
-list admits all three relations — member-to-union, concrete-to-interface, and
-atom-singleton-to-`atom` — that no widening occurs where no expected type is
-written, that `if` branches typed `i32` and `f32` are rejected rather than
-unified into a union, and that `(array i32)` does not widen to `(array number)`
-under invariance. Atom widening is covered on both sides of its boundary rule:
-`(array.of @ok @err)` is rejected for having no single element type, and
-`(as (array atom) (array.of @ok @err))` is accepted.
+**`@testRun.v2`** holds one suite result.
 
-The no-chaining rule has its own focused rejections, so widening cannot silently
-become transitive: a member value written where an interface implemented by its
-union but not by the member is expected, and an atom singleton written where
-`any` is expected, are both rejected even though each step would be legal alone.
-Reaching the far type requires two written boundaries.
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `format` | `@testRun.v2` | required |
+| `result` | atom | the suite's `@command.*` result |
+| `tests` | list of test records in discovery order | every selected test |
 
-Ascription coverage includes the legal no-op, the empty-collection and
-generic-result constraints, and the two rejected forms written in the type
-chapter's example block: `(as i64 3i32)` for implicit numeric widening and
-`(as i32 some-number)` for narrowing, both `@type.invalid-ascription`. It proves
-that `as` reaches the typed IR as its operand alone and adds no runtime check.
+A test record has `name` (`Str`, the selector); `result` (a `@test.*` atom);
+`failure` (optional record `kind: @assertion` or `@observation`,
+`assertion: Str`, `expected: Str` optional, `actual: Str` optional,
+`primarySpan`: span record, `observationError` optional record
+`code: Atom`, `typeInfo: T` optional); `trap` (optional record
+`trapCode: Atom`, `origin: U64` optional); and `auditTrace` (the test's
+[`@auditTrace.v2`](06-runtime.md#audit-trace) document).
 
-Narrowing coverage includes an exhaustive union `match`, a binder-covered
-remainder, a rejected non-exhaustive arm set, an unreachable duplicate arm, and
-an `as` pattern in `let` and in a positional parameter rejected with
-`@pattern.refutable-binding`. It also includes one `as` pattern over a
-non-union scrutinee rejected with `@type.narrowing-non-union` and one naming a
-type outside the union's member set rejected with
-`@type.not-a-union-member`.
+```vibon
+{
+  format: @testRun.v2
+  result: @command.ok
+  tests: [
+    {
+      name: "@tests.notes::\"counts the lines of a note\""
+      result: @test.passed
+      auditTrace: {
+        format: @auditTrace.v2
+        revision: "sha256:5fdc01744c45544c5765d4ec386b7a45bb990bc4b4c0ca415493546c7f36c8ec"
+        drivers: [{provider: @hostWorld.v2 version: "0.0.2"}]
+        policies: [:]
+        redaction: @none
+        events: []
+      }
+    }
+  ]
+}
+```
 
-Conversion coverage includes a `from` implementation on a destination `deftype`,
-a `try-from` implementation returning `conversion-error`, destination selection
-through a written parameter and result type, destination selection through `as`,
-a bare call with no expected type rejected with `@type.ambiguous-destination`,
-one receiver implementing `(from i16)` and `(from i8)` together, and a
-`from`/`try-from` pair on one source rejected with
-`@type.redundant-conversion`. The two-target receiver is an identity case as
-well as a dispatch case: query and index output for it MUST contain two distinct
-block identities and two distinct `convert` member identities, differing only in
-applied target, and completeness MUST be checked once per block rather than once
-per nominal interface. That two-target receiver is also called with an
-unsuffixed integer literal, whose source type both implementations satisfy, and
-the call is rejected with `@type.ambiguous-implementation`. `(from t)` and
-`(from i32)` on one generic receiver are rejected at the declaration with
-`@type.overlapping-implementation`, and `(from t)` with `(try-from i32)` on one
-generic receiver is rejected with `@type.redundant-conversion` alongside the
-same-written-source pair. Two contract members are rejected with
-`@type.undispatchable-contract-member`: one never naming `self`, and one naming
-it only in a variadic tail that may arrive empty. A third member, naming `self`
-in both its result and a variadic tail, is accepted and shown to be
-destination-dispatched rather than rejected as a mixed shape.
+- Each test has its own complete trace; there is no suite-level trace. An
+  invalid or unavailable test has an empty one. Diagnostics are not copied
+  into test observations.
+- An empty suite has result `@command.ok` and no tests.
+- A host event is expected with `expect.host_event` and the event's atom. A
+  case MUST NOT depend on the exact allocation at which memory runs out. A
+  tool limit is expected as unknown, with the limit profile.
+- An execution that traps records the code and origin and no value. Its
+  completed events are kept. The absence of an event is never evidence that
+  nothing external happened.
 
-Destination dispatch is covered beyond conversion by a non-conversion contract
-member of the same shape, such as a `(defn empty () self)` factory, selected
-from a written expected type and rejected with `@type.ambiguous-destination`
-where none is written.
+### Rule identities and example coverage
 
-`@type.undispatchable-contract-member`,
-`@type.union-too-few-members`,
-`@type.union-member-overlap`, `@type.union-member-not-concrete`,
-`@type.overlapping-implementation`, `@type.ambiguous-implementation`,
-`@type.ambiguous-destination`, `@type.invalid-ascription`,
-`@type.narrowing-non-union`, `@type.not-a-union-member`, and
-`@type.redundant-conversion` all have fixed level `@error`. Union declaration
-cases belong to `V1-TYPE-NOMINAL`; ascription, widening, narrowing, and
-conversion cases belong to `V1-TYPE-CONVERT`.
+A rule identity is a section prefix and a descriptive suffix in lower case
+with hyphens. The prefixes are `CHARTER`, `SRC-READER`, `SRC-CALLS`,
+`SRC-DECL`, `SRC-EXPR`, `SRC-FMT`, `TYPE-NOMINAL`, `TYPE-NAMES`,
+`TYPE-INFER`, `TYPE-GENERIC`, `TYPE-INTERFACE`, `TYPE-CONVERT`,
+`TYPE-CONTROL`, `EFFECT`, `PROJECT`, `TOOL`, `RUNTIME`, `DIAG`, `CONTRACT`,
+and `GRANT`, each under `V1-` or `V2-`. A `V1` identity is kept only for a
+rule that did not change. A changed or new rule gets a `V2` identity. An
+identity is never reused; a removed rule stays in the index as retired.
+
+Every accepted source example in this specification is a corpus case, or is
+marked schematic when it is not complete grammar. Every error rule has a
+focused negative case. Marking a required behavior schematic does not
+implement it.
+
+## Required coverage
+
+These are minimum obligations. None of these tests exists yet.
+
+1. **Reader and format.** Every literal category and the Unicode boundaries;
+   whitespace separation; unmatched and crossed closers; malformed names and
+   retired forms; recovery followed by a valid declaration; source and data
+   kept apart by extension; comments and doc strings; every byte kept in the
+   tree; formatting is idempotent and renames and reorders nothing.
+2. **Registry.** Every code is produced by a focused case and has exactly
+   one entry; levels, domains, and fix capabilities match; result and format
+   atoms are not entries; fixes respect revisions.
+3. **Names and graphs.** Separate namespaces; field reads against paths;
+   import names and `as`; private access; no shadowing; prelude
+   reservations; source-identity and case collisions; link escapes; cycles
+   of imports, packages, startup recipes, and module values rejected;
+   recursive functions and finite recursive types accepted.
+4. **Bindings and patterns.** `let` with and without a written type; names
+   visible only after `endlet` and absent in `else`; sibling scopes reuse
+   names; exact-length list and tuple patterns; omitted record fields;
+   constants against binders; `_`; parameter patterns that cannot fail;
+   coverage and unreachable arms for variants, `Bool`, products, and open
+   literal types; no coverage inferred from a `where` predicate; a constant
+   construction the checker evaluates, with unknown and refuted
+   counter-cases.
+5. **Control and inference.** `return` on every path; nested returns leave
+   the nearest callable; tests reject `return` and `try`; `let … else` whose
+   `else` cannot complete; `Never`; `try` on `Option` and `Result` with the
+   exact error type; expected types flow inward only; an ignored fallible
+   value against an explicit discard; ambiguous numbers, empty collections,
+   and generics; no numeric promotion.
+6. **Applications and values.** Any expression as callee; operands in
+   written order; labels and defaults; captures; constructors and wrong
+   arity, unknown, and repeated fields; projection and lookup add no effect;
+   constructors and projections are not function values; same shape,
+   different declared type; record identity ignores field order while
+   evaluation keeps written order; dict keys, later duplicate wins, key
+   order, canonical encoding; empty list and dict with and without context.
+7. **Interfaces and generics.** Abstract and default members; missing
+   member and choice, unknown and repeated member and choice, overridden
+   default, overlap, and orphan errors; one bound per parameter; applied
+   and labelled bounds, a label bound to a parameter with its inferred
+   choice and its agreement failure; receiver and destination dispatch with
+   the complete substituted result, `TryFrom` with two sources and two
+   error choices included; distinct identities for applied interface,
+   receiver, and member; `From` and `TryFrom` overlap and the fixed
+   conversion error; no call-site type arguments; the two widenings, with
+   no chaining, no container covariance, a differing label rejected, and
+   never from an interface value; an interface value implements no
+   interface; `Self` results in the `Self` map allowed, `Self` elsewhere in
+   a result rejected at the declaration, and other `Self` inputs rejected
+   through an interface value; a label in an `impl` target rejected; a
+   choice naming an associated type of its own `impl` rejected. No
+   algebraic law is assumed of a user `Ordered` or `Equatable`.
+8. **Pure library.** Shared `Iter` algorithms; `next` returns a remainder of
+   the same type; lazy `map`, `filter`, `skip`, `take`; strict left `fold`;
+   short-circuit operations do not drain; explicit implementations for
+   `List`, `Dict`, `Str`, `Option`, `Bytes`; `Ordered` defaults with one
+   comparison and left-biased ties; the shared lexicographic helper; ASCII
+   `trim`; eager `Bool` operations against `if`. `Result` is not iterable.
+9. **Contracts.** Each discharge rule and each integer fact, with a passing
+   and a nearest failing case; bare `requires`, `ensures`, and `where`;
+   unproved and refuted; the certified fragment; every return, including
+   through `try`; a rejected `requires … else` skips the body and `ensures`;
+   an `ensures … else` consequence differs from the candidate, is evaluated
+   once, and is not checked again; a constant `where … else` error, with the
+   constructor's type unchanged when the check is folded; no circular proof,
+   no proof from samples; conversion to a callable type keeps `else` guards
+   and rejects a hidden bare `requires`.
+10. **Effects and authority.** Complete rows through callbacks, records,
+    closures, and plans; owner plus additive row on interface members; no
+    `await` in a `fn`; building against running a plan; guards with `else`
+    run on each `await`; each `await` is a new invocation, with no implicit
+    retry; wrong, omitted, and duplicate rows; shortest witnesses; required
+    and optional grants; brands; forged, stale, and foreign grants;
+    narrowing against interface views; limits never reset.
+11. **Policies and drivers.** Whole rules stay correlated; restriction keeps
+    the parent; normalization and size limits; a read-only directory chosen
+    at run time with a `.txt` rule; the real name of an entry; prefix by
+    names, not by string; reparse points, links, mounts, renames, and a
+    replaced root; no cached intermediate handle; hard-link and
+    opened-object limits shown at approval; shared counters under siblings.
+    The reserved HTTP rules: correlation, prefixes, queries, rebinding, and
+    redirects. Passing in the fake world does not qualify a real adapter.
+12. **Host registry and entry.** Every operation, with success and each
+    typed error, in fresh worlds; standard input read twice; output captured
+    under test; sorted directory entries; create and replace; invalid paths
+    and text; present and absent variables; exact arguments; fake clock
+    steps and random vectors. Events are recorded once, in order; a trap or
+    exhaustion invents no event; projections restore no authority. The
+    startup order on a permuted `grants` dict in which acquiring the first
+    ready leaf makes a lexically earlier leaf ready; startup failure;
+    optional absence, including an absent `source` leaf; release order; and
+    non-zero exit codes stay distinct from tool exits and traps.
+15. **Persistent data.** Every schema of this specification decodes its
+    example and round-trips it to identical canonical bytes; every hash
+    vector; both float widths round-trip through `@value.v2`, including
+    `-0.0`, the three non-finite values, and a NaN with a payload
+    canonicalized to `@nan`; decoded-key duplicate detection across
+    spellings; an unsuffixed number typed by its slot and rejected by a slot
+    without a number type; the validation order, one fault reported once;
+    the source-preserving formatter keeping comments and order where
+    canonical serialization does not.
+13. **Runtime and native.** Tail calls through direct, indirect, and
+    cross-module callees, closures, interface members, and `return await`
+    reuse their activation for at least 100,000 transfers. Non-tail
+    recursion 100,000 deep completes within context memory, with no native
+    stack frame per activation. Unbounded recursion ends in the memory host
+    event. Deep release is iterative; live and peak storage are accounted at
+    counts that differ by ten; module values initialize once per run. A
+    pending `ensures … else`, widening, or cleanup prevents a tail transfer.
+    A built executable on Windows exits with the four fixed statuses for its
+    own endings and passes application codes through; invocation ordinals
+    and origin ordinals agree across executors; an interface value round
+    trips through `@value.v2` with its held type, and one holding a callable
+    gives the observation error.
+14. **Tooling and approvals.** One engine and one revision across CLI and
+    MCP; exact, recovered, and unavailable facts; roles by slot; stable
+    implementation identities; bounded output; schema validation; stale and
+    replaced plans, changed policy, and a dirty tree rejected; tampering
+    with a protected test body, helper, fixture, or selection rejected,
+    while the code under repair stays editable; no identity change on a body
+    edit, and a visible one on rename or move; atomic edits across files;
+    interrupted application; vendored and escaping paths denied; MCP
+    permissions make no grant.
 
 ## Conformance profiles
 
-The implementation reports its supported surface through conformance profiles.
-Profile names are independent of toolchain release versions.
+A profile is a versioned statement of what a tool supports. It is not a
+dialect and not a release number. A valid feature outside a profile is
+reported unavailable; the same source never means something else under a
+smaller profile.
 
-| Profile | Required surfaces |
+| Profile | Covers |
 | --- | --- |
-| `reader-v1` | Reader, recovery CST, formatter, syntax diagnostics |
-| `static-v1` | Reader plus names, types, effects, project checking |
-| `interpreter-v1` | Static profile plus reference execution and external registries |
-| `tooling-v1` | Static profile plus schemas, queries, plans, CLI, MCP |
-| `wasm-v1` | Static profile plus deterministic Wasm and runtime |
-| `full-v1` | All profiles, stdlib, projects, and release gates |
+| `readerV2` | the source and VIBON readers, recovery, canonical format, syntax diagnostics |
+| `staticV2` | `readerV2` plus names, types, guards, effect rows, project and binding validation |
+| `interpreterV2` | `staticV2` plus reference execution, the operation registry, fake and system worlds |
+| `toolingV2` | `staticV2` plus the query, edit, schema, CLI, and MCP contracts in the reported inventory |
+| `nativeV1` | `staticV2` plus verified execution IR, the native runtime, code generation, linking, launch, and native observations |
+| `wasmTransitionV2` | the transitional WebAssembly path, until native execution is qualified |
+| `fullV2` | everything a release requires: language, library, projects, tooling, interpreter, and native targets |
 
-Profiles are capability statements, not source dialects. The same source is
-never reinterpreted differently by a smaller profile; unsupported execution is
-reported as unavailable.
-
-A valid source or command surface outside the selected profile emits
-`@tool.unavailable` through the normal diagnostic result. A corpus handler
-with no implementation remains an `unavailable` observation and fails the
-relevant gate. Selecting a smaller profile MUST NOT turn it into a passing
-case.
+`nativeV1` does not include `interpreterV2`; a differential gate needs
+both. The WebAssembly profile, its backend, and its dependencies are removed
+together when native execution is qualified. The interpreter stays, for
+`run`, `test`, `eval`, and compile-time evaluation.
 
 ### Differential execution
 
-An **executable case** is a case whose operation is `interpret`,
-`workspace-run`, or `workspace-test`, and whose expectation is accepted, because a rejected program reaches no backend. It requires the `interpreter-v1` profile
-and has exactly one expected result and, where the operation exposes one, one
-expected audit trace, or one `expect.host_event`. No case carries a second
-expectation for the WebAssembly backend, and no operation selector, snapshot
-key, or case field is added for it.
+An executable case is an accepted `interpret`, `workspaceRun`, or
+`workspaceTest` case. It has one expected result, written from the
+specification, and not one per backend.
 
-`wasm-v1` does not include `interpreter-v1`, and `full-v1` includes both. A
-runner that has both an interpreter handler and a Wasm execution handler runs
-every executable case in both backends against that one expectation. A case
-passes only when both backends match it, and a disagreement from either backend
-fails the case, with a failure reason that names the backend. An expectation is
-reviewed against the specification and is never regenerated from either
-backend's output.
+- Each required executor runs it in its own fresh, equivalent world. The
+  comparison covers canonical values, exit codes, typed errors, assertion
+  outcomes, trap codes and origins, startup results, and the ordered audit
+  events. A mismatch names the executor and the first difference.
+- Before the WebAssembly backend is removed, its supported cases also run
+  there. Afterwards the pair is interpreter and native, with the
+  execution-IR stepper used to isolate lowering defects.
+- Every stepper and native case runs with an unbounded scheduler quota and
+  with a quota of one. The observations MUST agree. Equal step counts
+  between engines are not required.
+- A memory or tool limit is recorded, and is never a portable threshold or
+  a proof of termination.
+- Native qualification is actual execution on Windows x64, Linux x86-64,
+  and macOS arm64. Emitting an object file for a platform is not evidence.
+- Every admitted source form lowers, verifies, and emits completely, or the
+  profile fails. A program is never partly executed.
+- The parity inventory lists every executable case once, with its owner. A
+  listed match that fails, fails the gate.
+- A new feature updates the IR instruction, its verification, the runtime,
+  lowering, the stepper, the generator, the observations, and the cases
+  together.
+- For each natively accelerated library function, shared sample vectors
+  compare the interpreter running its Vibra body, the interpreter and native
+  runtime running the accelerator, and a native executable. Agreement on
+  those vectors is sampled evidence, not proof.
 
-The runner gives each instance of either backend its own fresh copy of the host
-world of the case, so the two backends read and write the same values without
-sharing a filesystem, and compares the audit traces event by event: a mismatch
-names the backend and the first event that differs.
-
-The runner runs every instance of either backend under one finite memory limit,
-which is a runner setting and not case data, so that a case that exhausts memory
-ends. A case MUST NOT depend on where in a run exhaustion happens, only on
-whether it does.
-
-The runner reports, besides the counts by required profile, one count line per
-backend over the executable cases: the interpreter backend as passed, failed,
-and unavailable, and the Wasm backend as matched and failed. A checked program
-has no form the Wasm backend leaves out, so a Wasm emit failure on an
-executable case is a toolchain defect and fails that case, with the emitter's
-error as the failure reason, exactly as a disagreement does. A case has no
-third disposition and no table names cases the Wasm backend skips; a runner
-with no Wasm execution handler runs the interpreter alone and reports no Wasm
-count. The Stage 4A
-sub-gate and the `full-v1` claim require only that no case fails.
-
-The native-implementation harness joins the same differential. For every sample
-input of every native symbol, the interpreter calling the native code, the
-interpreter running the body, and the module calling the native import agree. For
-a primitive row with no body, both backends call the same native code and are
-checked against the shared sample vectors.
+The runner reports, per profile and executor, the counts of passed, failed,
+unknown, and unavailable cases. There is no "skipped" count that reads as
+success, and a missing executor is reported missing. Expected results are
+never regenerated from native or stepper output to make a failure pass.
 
 ## Required implementation suites
 
-The future implementation has two independent suites:
+Two independent suites are mandatory.
 
-1. host-language tests for parser data structures, algorithms, filesystem
-   safety, runtime adapters, and failure paths; and
-2. Vibra conformance tests for observable source, project, tooling,
-   interpreter, and Wasm behavior.
+- **Host-language tests** cover algorithms, parsers, adapters, and failure
+  paths.
+- **Vibra conformance tests** cover observable language, project, tooling,
+  and runtime behavior. Continuous integration runs the corpus through a
+  real profile handler in its own job; a failed, unknown, or unavailable
+  required case fails the job.
 
-The reader-v1 slice runs its checked-in corpus through the real syntax and
-formatter handler using the internal `vibra-conformance` entrypoint. CI invokes
-that entrypoint as a separate job from the host-language test suite; it exits
-nonzero for a failed or unavailable case. No user-facing `vibra` binary is
-introduced by milestone 1. Host-language integration tests use synthetic
-temporary corpora for the runner and handler; checked-in cases are loaded only
-by this dedicated entrypoint in CI (or when invoked directly).
+Both run offline once dependencies are acquired. Required jobs:
 
-The host-language suite also holds two invariants of the host registry as
-tests. A checked-in snapshot of the registry fails on any change to an existing
-row, so a change that needs `vibra_v2` cannot pass as a minor. And no crate that
-checks, lowers, or executes a program uses the ambient filesystem, environment,
-clock, or random source: the test scans those crates for the APIs, and names the
-few tooling crates that read a project, a command line, or a corpus, so that every
-ambient read of a running program passes through the host provider and a registry
-entry.
+- formatter idempotence;
+- every JSON producer against its schema;
+- decode and canonical round-trip of every persistent format;
+- every example of this specification;
+- interpreter and native parity;
+- reproducible builds from two clean checkouts at different paths, with
+  pinned toolchains;
+- a snapshot per registry major version that fails if an existing row
+  changes;
+- architecture tests that semantic, checking, lowering, and execution code
+  reaches host effects only through the registry and provider path.
 
-Both run from a clean checkout without network access after dependencies are
-synced. Formatter idempotence, JSON-schema validation, `.vibon` data-decoder
-validation, documentation examples, interpreter/Wasm differential tests, and
-deterministic rebuilds are mandatory CI jobs.
+Fuzzing covers the lexer and parser recovery, formatting, the project, lock,
+build, policy, approval, and world decoders, CLI and MCP inputs, the
+external registry, the execution-IR verifier, and artifact admission. A
+finding is closed by a reduced regression case, never by ignoring a seed or
+loosening a decoder.
 
-Fuzzing covers the reader, formatter round trips, project/lock/build data
-decoders, CLI/MCP input decoders, external-registry boundary, and typed IR
-deserialization. A fuzz finding is not closed until reduced into a regression
-case.
+When concurrency is added, its suites add recorded schedules, backpressure,
+exit, late replies, ownership stress, and evidence of real progress on two
+workers. A replay that passes does not show that every interleaving was
+explored.
 
 ## Full conformance gate
 
-The `full-v1` claim requires:
+A `fullV2` claim requires all of the following.
 
-- every milestone required by the release complete with linked evidence;
-- no unresolved contradiction or placeholder marker in normative documents;
-- all normative examples classified and tested;
-- all CLI and MCP JSON schemas versioned, with every document a producer
-  renders validated against its published JSON Schema by producer tests, and
-  the cross-field rules a schema cannot express asserted on the produced
-  value (the published schema is the consumer contract: Vibra ships no reader
-  for its own output documents);
-- all persistent `.vibon` data formats validated and canonically round-tripped;
-- both suites green on every supported platform;
-- reference interpreter and Wasm parity across the executable corpus;
-- byte-identical rebuilds across two clean environments;
-- formatter idempotence across stdlib, examples, and conformance source;
-- every diagnostic code is unique and its queryable registered level matches
-  emitted results;
-- every compiler-generated host operation owned by the declared nominal effect
-  in the closed registry; and
-- a release audit that states supported claims and exclusions without calling
-  archived behavior compatible or effectful programs host-safe.
+- The linked evidence of every milestone the release requires.
+- No contradiction between chapters and no placeholder decision.
+- Every example classified and exercised.
+- A complete registry with one entry per code.
+- Every machine schema versioned and validated by its producer.
+- Every persistent format validated and round-tripped.
+- Both suites passing on the published platforms.
+- Complete interpreter and native parity, unchanged by yielding.
+- Reproducible offline builds from different paths, before signing.
+- Canonical formatting of the repository's own source.
+- An audit of target, driver, policy, and authority admission.
+- A statement of what the release supports and excludes.
 
-Passing tests is necessary but not sufficient: review-only invariants such as
-the absence of ambient host operations from effect-free accepted source must
-have an explicit audit checklist.
+Passing tests is necessary and not sufficient. These properties need a
+written review, each with a named owner: no ambient effects in source, sound
+removal of discharged guards, no amplification of grants, private
+representations kept private, a closed set of host operations, confinement
+to the opened object, and no access to the native bridge from outside it.
 
-## M1 codebase diagnostics and corpus operations
+A model-writing pilot of the syntax is not conformance, driver feasibility,
+a security proof, or the clean-machine acceptance of the CLI.
 
-The codebase/store codes in the registry have fix capability `@none`.
-Operational diagnostics MUST have no source identity, an empty byte span at
-zero, no related spans, and no fixes. A rejected import instead preserves the
-existing reader, resolver, type, and effect diagnostics and their source spans.
+## Exclusions and retired surfaces
 
-`@store.not-found` means an explicitly opened store does not exist; read-only
-operations MUST NOT create it. `@store.corrupt` covers failed SQLite integrity,
-invalid canonical records, hash mismatch, missing authoritative dependencies,
-or inconsistent membership. `@store.unsupported-version` identifies an
-unsupported store or record format; readers MUST NOT reinterpret it as a
-current format or automatically migrate it. This includes a WAL/non-rollback
-physical journal format: M1 rejects it before opening SQLite and creates no
-sidecar. Truncated/non-SQLite headers are corrupt instead.
-`@store.unsafe-path` covers
-escaping or linked paths and destinations that cannot be published safely.
-`@store.io-error` reports another filesystem or SQLite operational failure.
-This includes a read-only open that SQLite cannot serve until a hot journal is
-recovered; its diagnostic directs the caller to explicit read-write reindex
-and retry. Read-only operations MUST NOT silently perform recovery writes.
-`@store.busy` means bounded lock acquisition failed and is retryable with the
-original expected state. It is distinct from `@codebase.stale-head`, which
-means the expected head failed its compare-and-publish check. Stale outcomes
-MUST NOT cause automatic rebase or publication against another expectation.
+Not part of this language, and not accepted under any compatibility mode:
 
-Unknown head, revision, entity, and object selectors produce their distinct
-`@codebase.unknown-*` codes; an object outside the selected revision is unknown
-even when some other revision in the store contains it. Malformed codebase
-addresses, head names, or record selections are `@codebase.invalid-input` at
-the service boundary. Invalid process grammar remains the existing
-`@command.invalid-input` with exit 2 and no diagnostics. A malformed export-plan
-address is `@codebase.invalid-input`; a well-formed export plan whose
-digest, source revision, parent identity, or expected destination absence no
-longer holds is `@codebase.stale-plan`. All operational codebase/store errors
-use `@command.operational-failure` and exit 3; source rejection uses the existing
-diagnostics result and exit 1. These operations execute no user source.
+- untagged unions and anonymous enums;
+- type ascription and `as` narrowing;
+- tuple indexing and variadic calls;
+- loops and assignment;
+- call-site type arguments;
+- a source form for declaring diagnostics;
+- traps for failed guards, for integer division, and for unobservable
+  values;
+- grants made from decoded data;
+- proof by sample, a general solver, and cost guarantees;
+- static identity of a resource instance.
 
-The independent corpus admits operation `codebase` only under `tooling-v1`.
-It requires a confined `inputs.tree`, its `inputs.project`, exactly one
-`inputs.data` scenario document, and an `expect.codebase` VIBON snapshot. It
-forbids `inputs.source` and a host world. Other operations MUST NOT accept an
-`expect.codebase` snapshot. The handler MUST copy the declared tree into a
-fresh private temporary workspace and invoke the real workspace codebase
-services. It MUST NOT modify the checked-in input tree or execute tests while
-importing them. This is tooling evidence, not an executable backend case.
+Their codes are retired and never reused: the union, `as`, narrowing, and
+tuple-index codes, the redundant-return code, `@style.argumentOrder`,
+`@runtime.divisionByZero`, `@runtime.unobservableFunction`, and
+`@syntax.retiredForm`, because the toolchain never detects a retired
+surface.
 
-The scenario document is a non-executable canonical VIBON record with exactly
-`format: @codebase-case.v1`, `scenario`, and `edits`, in that field order.
-`scenario` is one of `@import`, `@lifecycle`, `@roundtrip`, `@stale`, `@integrity`,
-`@backup`, or `@declarations`. `edits` is an array of records with exactly `path` and `text`;
-paths are unique confined source-file paths and text is the complete replacement
-UTF-8 source. Edits are applied only in the private workspace, after the first
-import and before a second import. Unknown fields, formats, scenarios, duplicate
-paths, unsafe paths, or malformed source are rejected by the corresponding
-real decoder or workspace operation, never interpreted as a shell command.
-
-Each observation has `format: @codebase-observation.v1`, the selected scenario,
-and `facts`, a canonical dict of named measurements. The expected snapshot is
-independently authored. A handler MUST derive every reported fact from the
-actual operation result, reopened authoritative data, or byte comparison;
-merely completing a scenario does not prove a fact. Scenario coverage includes:
-
-| Scenario | Required observations through actual services |
-| --- | --- |
-| `@import` | Publish, reopen, resolve definitions and edges, and compare retained exact source |
-| `@lifecycle` | Publish changed inputs; retrieve both revisions; prove dependent address changes and unrelated component deduplication |
-| `@roundtrip` | Export, reimport, compare source and checked identities; reject destination created after preview |
-| `@stale` | Compete for one expected head and record exactly one successful advancement and a stale refusal |
-| `@integrity` | Reject corrupt and unsupported inputs; rebuild derived indexes and compare workspace facts |
-| `@backup` | Back up, restore independently, and compare heads, objects, sources, and relations |
-| `@declarations` | Check generic signatures, nominal types, explicit implementations, effect ownership, and trusted registry references without executing bodies |
-
-The milestone also requires host tests for deterministic binder normalization,
-recursive components, nominal identity, transaction fault points, bounded busy,
-confinement, interrupted publication, and backup consistency. Passing the
-corpus does not replace those tests or the review of canonical hash vectors.
+Full conformance does not claim an operating-system sandbox for foreign
+native code, freedom from toolchain or host failure, exploration of every
+schedule, or recovery of every service from a crash.

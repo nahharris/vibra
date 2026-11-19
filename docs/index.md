@@ -16,9 +16,6 @@ Read the chapters in order:
 7. [Runtime and WebAssembly](spec/06-runtime.md)
 8. [Diagnostics and conformance](spec/07-diagnostics-and-conformance.md)
 
-The [checked codebase encoding](spec/codebase-encoding.md) chapter specifies
-the canonical records and addresses used by v0.0.2 M1.
-
 `MUST`, `MUST NOT`, `SHOULD`, `SHOULD NOT`, and `MAY` carry their RFC 2119
 meanings where written in uppercase. Examples are normative when introduced
 with “must accept”, “must reject”, or an explicit rule; otherwise they are
@@ -28,9 +25,11 @@ illustrative.
 
 - [Release roadmap and versioning](roadmap/README.md)
 - [v0.0.1 (shipped, M1–M4)](roadmap/v0.0.1/README.md)
-- [v0.0.2 (planned, content-addressed agent tooling)](roadmap/v0.0.2/README.md)
+- [v0.0.2 (planned, the redesigned language, grants, and a repair loop)](roadmap/v0.0.2/README.md)
 - [v0.0.3 (planned, Nexus and native builds)](roadmap/v0.0.3/README.md)
-- [v0.0.4 (planned, local actors and message authority)](roadmap/v0.0.4/README.md)
+- [v0.0.4 (planned, dependencies and local concurrency)](roadmap/v0.0.4/README.md)
+- [v0.0.5 (planned, services and recovery)](roadmap/v0.0.5/README.md)
+- [Nexus implementation plan (v0.0.2 M4 to v0.0.4)](roadmap/nexus/README.md)
 - [Milestone execution model](roadmap/execution.md)
 - [Milestone 1 step plan](roadmap/v0.0.1/m1/execution.md)
 - [Milestone 2 step plan](roadmap/v0.0.1/m2/execution.md)

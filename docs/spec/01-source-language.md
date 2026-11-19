@@ -1,904 +1,857 @@
 # Vibra source language
 
 Status: normative target
-Implementation status: M1 supplies the lossless source structure and position
-metadata; M2 and M3 resolve and check every source form of the pure language,
-including binding sequences, `let-else`, `return`, and `never`, and Milestone 4
-Step 2b removes the source boolean literal for the prelude values `true` and
-`false`. Milestone 4 Step 14
-implements `deffect` with Vibra-bodied operations and nonempty effect rows;
-Milestone 4 Steps 16 to 18 implement `@host` externals, `@std.io`, `@std.fs`, and the other host modules, as the surface
-inventory records.
+Implementation status: none of this chapter is implemented. The
+[release roadmap](../roadmap/README.md) schedules the surface defined here.
+Only a small subset of it (declaration keywords, typed
+closers, application, `if`, `match`, `let`, `return`) has been exercised in a
+model-writing pilot; nothing here is claimed to be measured beyond that.
 
-## Reader
+## Design of the surface
 
-A `.vib` file is UTF-8 and contains zero or more forms. Parentheses delimit
-lists; whitespace separates tokens; `;` starts a line comment. There are no
-reader macros, quote syntax, commas, brackets, braces, raw strings, heredocs,
-or interpolation.
+Every construct opens with a keyword and, when it contains other constructs,
+ends with a closer named after its opener: `fn … endfn`, `if … endif`. Inside
+a declaration, a **section** is a keyword followed by its operand: `takes`,
+`returns`, `do`. Four bracket pairs have one job each:
+
+| Token | Only use |
+| --- | --- |
+| `( )` | Application: `f(a b)`, `Cents(5i64)`, `List(T)` |
+| `{ }` | Product shapes: tuples, records, parameter vectors, effect rows |
+| `[ ]` | Collections: lists and dicts |
+| `:` | Joins the two halves of one pair: `name: Type`, `name: value` |
+
+There are no commas, no semicolons, no infix or prefix operators, no `=`, and
+no parentheses used for grouping. Whitespace separates tokens and is otherwise
+insignificant: line breaks and indentation never change meaning.
+
+## Lexical structure
+
+A `.vib` file is UTF-8. A byte-order mark, an invalid UTF-8 sequence, or a NUL
+is `@syntax.invalidEncoding`. Whitespace is space, tab, CR, and LF.
+`//` starts a comment that runs to the end of the line. There is no block
+comment.
 
 ```ebnf
-module         = trivia, { top-form, trivia }, EOF ;
-form           = atom | list ;
-list           = "(", trivia,
-                 [ form, { required-trivia, form } ], trivia, ")" ;
-atom           = string | character | integer | float | void
-               | atom-name
-               | label | symbol ;
-literal        = string | character | integer | float | void
-               | atom-name ;
-void           = "void" ;
-character      = backslash,
-                 ( character-name | unicode-character | character-scalar ) ;
-character-name = "newline" | "return" | "space" | "tab" ;
-unicode-character = "u", hex-digit, hex-digit, hex-digit, hex-digit ;
-integer        = [ "-" ], digits, [ integer-suffix ] ;
-float          = [ "-" ],
-                 ( digits, ".", digits, [ exponent ], [ float-suffix ]
-                 | digits, exponent, [ float-suffix ]
-                 | digits, float-suffix ) ;
+identifier  = letter, { letter | digit } ;
+letter      = "A"…"Z" | "a"…"z" ;
+digit       = "0"…"9" ;
+atom        = "@", atom-part, { ".", atom-part } ;
+atom-part   = letter, { letter | digit } ;
+discard     = "_" ;
+void        = "void" ;
+integer     = [ "-" ], digits, [ integer-suffix ] ;
+float       = [ "-" ],
+              ( digits, ".", digits, [ exponent ], [ float-suffix ]
+              | digits, exponent, [ float-suffix ]
+              | digits, float-suffix ) ;
 integer-suffix = "i8" | "i16" | "i32" | "i64"
                | "u8" | "u16" | "u32" | "u64" ;
 float-suffix   = "f32" | "f64" ;
-exponent       = ( "e" | "E" ), [ "+" | "-" ], digits ;
-digits         = digit, { digit } ;
-symbol         = "-" | ( kebab-name, { ".", kebab-name } ) ;
-atom-name      = "@", symbol ;
-label          = symbol, ":" ;
-kebab-name     = lowercase-letter,
-                 { lowercase-letter | digit | "-" } ;
-lowercase-letter = "a" | "b" | "c" | "d" | "e" | "f" | "g"
-                 | "h" | "i" | "j" | "k" | "l" | "m" | "n"
-                 | "o" | "p" | "q" | "r" | "s" | "t" | "u"
-                 | "v" | "w" | "x" | "y" | "z" ;
-digit          = "0" | "1" | "2" | "3" | "4"
-               | "5" | "6" | "7" | "8" | "9" ;
-hex-digit      = digit | "a" | "b" | "c" | "d" | "e" | "f"
-               | "A" | "B" | "C" | "D" | "E" | "F" ;
-backslash      = U+005C ;
-character-scalar = ? one Unicode scalar other than whitespace ? ;
-trivia         = { whitespace | line-comment } ;
-required-trivia = ( whitespace | line-comment ), trivia ;
+exponent    = ( "e" | "E" ), [ "+" | "-" ], digits ;
+digits      = digit, { digit } ;
+string      = '"', { string-char | escape }, '"' ;
+doc-string  = '"""', ? any text not containing '"""' ?, '"""' ;
+character   = "'", ( char-scalar | escape | "\'" ), "'" ;
+escape      = "\\" | '\"' | "\n" | "\r" | "\t"
+            | "\u{", hex, { hex }, "}" ;
 ```
 
-The step 4–10 reader implements the shared UTF-8 tokenization, delimiter
-structure, trivia retention, recovery boundary, literal classification, and
-lexical name classification described above. Declarations and semantic AST
-nodes are available as contextual M1 views; resolution and semantic checking remain later milestone work. A recovered or incomplete tree
-remains lossless and carries an explicit error marker rather than being
-assigned an ambiguous typed node. When a double-quoted leaf reaches end of
-file without a closing quote, the reader emits
-`@syntax.unmatched-delimiter`, marks the subtree recovered, and preserves the
-original bytes. Terminated strings, characters, `void`, and decimal
-numeric spellings are classified by step 5, and so are `true` and `false` in a
-`.vibon` document, where they are the boolean literals; nonliteral leaves,
-which in source include `true` and `false`, are classified as names by step 6. The formatter canonicalizes valid character spellings
-while preserving raw string, numeric, and name spellings.
-Opaque leaves and literal leaves retain interior CR and CRLF bytes. LF
-normalization applies to trivia, not to quoted leaf contents.
+### Identifiers
 
-Strings are double quoted and support `\"`, `\\`, `\n`, `\r`, `\t`, and
-`\u{HEX}`. A terminated quoted leaf containing an unsupported escape, a
-malformed braced Unicode escape, or a value that is not one Unicode scalar
-emits `@syntax.invalid-string-literal` over the complete quoted-leaf span.
-An unterminated quoted leaf, including one that ends in an unfinished escape,
-instead emits `@syntax.unmatched-delimiter`, is recovered, and retains its
-original bytes; it does not emit both diagnostics. `\u{HEX}` uses one to six
-hexadecimal digits, rejects surrogate values, and rejects values above
-U+10FFFF.
+An identifier starts with an ASCII letter and continues with ASCII letters and
+digits. Hyphens, underscores, `?`, and `!` are not identifier characters. An
+identifier that fails this production is `@syntax.invalidName` over the whole
+token.
 
-A character literal follows EDN spelling and denotes exactly one Unicode scalar
-value. A backslash may be followed by one non-whitespace scalar, one of
-`newline`, `return`, `space`, or `tab`, or `u` and exactly four hexadecimal
-digits. Thus `\c`, `\0`, `\newline`, and `\u0063` denote `c`, `0`, line feed,
-and `c`. A `u` escape whose value is a surrogate code point is invalid. The
-complete non-delimited token belongs to the character literal: `\newline-x`
-and `\ab` are invalid rather than a character followed by a symbol. A
-backslash followed by whitespace is invalid; whitespace characters use their
-named or Unicode spelling.
+Two adjacent tokens of the classes identifier, reserved word, number, atom,
+string, character, and doc string MUST be separated by whitespace, a bracket,
+or `:`. Two such tokens with nothing between them, as in `"a"b` or
+`1u8"x"`, are `@syntax.missingSeparator` at a zero-width span where the
+second token starts; both tokens are kept. `-` directly before a digit is
+part of the numeric token and never needs separation.
 
-Integers are signed decimal and floats contain a decimal point, an exponent, or
-an `f32`/`f64` suffix. An adjacent suffix is part of the numeric token. The
-integer suffixes are `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, and `u64`;
-the float suffixes are `f32` and `f64`. A suffix fixes the literal's exact type,
-so `1u8`, `25i32`, and `2.5f64` have types `u8`, `i32`, and `f64`. `2f64` is
-also a float. Unsuffixed literals receive a type from their expression context.
-An unknown suffix, an integer suffix on a float body, or trailing token text is
-an invalid numeric literal. Numeric range belongs to type checking, not lexing;
-for example, `-1u8` is lexically one `u8` literal and is rejected as out of
-range. Vibra has no numeric separators, non-decimal bases, `isize`, or `usize`.
-Character and maximal numeric recognition take precedence over symbol
-recognition; `-` followed immediately by a digit starts a numeric token, while
-the standalone `-` remains the discard symbol.
+Casing is a convention, never a parse rule. Types, interfaces, and type
+parameters are written in PascalCase; every other name, including a variant
+case, is written in camelCase. `vibra check` reports a name that departs from
+the convention as the style diagnostic `@style.casing`; the program's
+meaning does not change. No rule in any chapter depends on the case of a name.
 
-`void` is both the primitive type name in type position and its single value in
-expression or data position. It is the result of a function or form that
-completes successfully but has no meaningful value to return. Empty `do` and
-an empty function body evaluate to `void`, and so does a `let` or `let-else`
-form. There is no `unit` literal.
+### Reserved words
 
-Every named symbol consists of one or more dot-separated segments, and every
-segment independently satisfies `kebab-name`. Its first character MUST be a
-lowercase ASCII letter; every later character is a lowercase ASCII letter,
-digit, or hyphen. Consecutive and trailing hyphens are therefore valid, while a
-leading hyphen is not. `?`, `!`, `_`, `/`, an empty segment, and a segment that
-starts with a digit are invalid in a symbol. A dotted symbol is a qualified
-name, never field-access syntax. For example, `a`, `a1`, `a-`, `a--b`, and
-`a.b2-c` are symbols; `1a`, `-a`, `a..b`, and `a?` are not.
+The following words are reserved. None can be declared or bound, and each is
+recognized before the identifier production.
 
-A nonliteral leaf that fails the shared symbol, label, atom, or discard
-production emits `@syntax.invalid-name` over its complete token span. Literal
-classification takes precedence, so malformed numeric, character, and
-terminated string leaves keep their dedicated diagnostics. This is lexical
-validation only; contextual role rejection and resolution remain later
-milestone work.
-
-Labels and atom names derive mechanically from symbols: `some.name:` is a
-label and `@some.name` is an atom name. The `"-"` symbol alternative therefore
-also derives `@-` and `-:` without separate lexical rules. These three forms
-are the semantic `discard` subset. Discard classification takes precedence over
-the ordinary symbol, atom-name, or label role.
-
-The three discard spellings cannot be namespaced or extended: `-.name`,
-`@-.name`, and `-:.name` are invalid. All are semantically equivalent to Rust's
-`_`: in a binder or wildcard position they create no identity, may repeat, and
-do not participate in redeclaration or shadowing checks. Despite being derived
-through the ordinary name grammar, a discard never denotes a value, label,
-atom, or reference and is rejected in every non-discard position.
-
-There is no boolean literal in source. `true` and `false` are ordinary symbols
-to the reader: they name the two public values `@std.bool` declares, and
-those values belong to the prelude, the closed set of declarations that every
-module sees without an import, which the type chapter defines. A `.vibon`
-document keeps `true` and `false` as its boolean literals, because data has no
-imports or definitions, and the canonical value encoding writes them so.
-
-Keywords, `void`, primitive type names, `any`, `never`, the names of the
-prelude, and atom names cannot be rebound. `void` and reserved-form recognition
-takes precedence when their spelling also satisfies the symbol production.
-`any`, `never`, the primitive type names, and the names of the prelude are
-ordinary symbols to the reader and are reserved by resolution, not by lexing.
-The reserved expression heads include
-`do`, `let`, `let-else`, `if`, `match`, `return`, `as`, `try`, `lambda`,
-`tupleof`, `recordof`, and `enumof`. A lexical binder, whatever form
-introduces it, that is spelled as a keyword, `any`, or a name of the prelude (a
-primitive type name, `option`, `result`, `iter`, `equatable`, `ordered`,
-`array`, `dict`, `true`, or `false`) is `@name.reserved-declaration` at the
-binder name, and it still binds
-for the rest of its scope so that the error does not cascade. At a pattern site
-(a positional parameter, `let`, `let-else`, or `match` arm pattern) resolution
-decides first whether a name denotes a module value; if it does, the name is a
-constant pattern, which the type chapter defines, and not a binder. `true` and
-`false` there are such names, so they are value patterns and never binders.
-
-An atom is an ordinary value by default. Only a source grammar or `.vibon`
-schema position that explicitly expects an entity reference resolves an atom
-as one. The module locator in `import` is such a source position; writing
-`@std.io` in an ordinary expression produces an atom value rather than loading
-or invoking code. Effect rows do not use atoms: they contain lexical symbols
-resolved through the source module's imports.
-
-A position that does expect an entity reference declares the entity kind it
-requires; it never changes how the atom's path is read. The type-system chapter
-defines that one reading, under which each path denotes at most one code entity
-in every position, and names the two entity kinds that carry a type-keyed
-identity rather than a path.
-
-## Labels and applications
-
-A label consumes one following form. Required ordered input is positional;
-optional or named input is labelled. An application may contain fixed
-positional, labelled, and variadic operands.
-
-The reader permits any form, including another list, at the head of a list.
-After reserved-form recognition, every nonempty executable list is an
-application. The checker classifies it from the statically resolved callee;
-an application is not necessarily a function call. An empty list is valid
-only where a contextual grammar explicitly admits it, such as an empty
-parameter or effect list. It is never an executable application.
-
-```vibra
-((choose-function condition) argument)
-((make-tuple) 0)
-((tuple-of-functions 0) argument)
+```text
+as await be case do doc else endfn enddo endif endimpl endinterface endlet
+endmatch endproc endtest endtype enduse ensures external fn given if impl
+interface labelled let match native of performs proc representation
+requires return returns role symbol takes test then try type use visibility
+void where
 ```
 
-The first example calls the function selected by `choose-function`. The second
-projects component zero from the tuple returned by `make-tuple`. The third
-projects a function from a tuple and calls it. The callee expression is
-evaluated exactly once before any runtime operand; compile-time tuple and
-record selectors are not evaluated as values. The type chapter defines the
-closed set of applicable categories and their operand rules; Vibra has no
-user-defined call operator or callable interface.
+A reserved word where the grammar requires an identifier is recovered: the
+parser takes the word as the identifier and reports it. In a declaration or
+binder position (a declaration name, a type parameter, a pattern binder, an
+import name) the report is `@name.reservedDeclaration` at the word. In a
+label position (a labelled parameter, a record or case field, a labelled
+argument, a record literal or pattern field, a type-application label) it is
+`@name.reservedLabel` at the word. The recovered name still binds or labels
+for the rest of its scope so that the error does not cascade.
 
-The recovery parser accepts labelled operands interleaved with a variadic tail
-when every operand can be bound unambiguously to a resolved function or
-constructor signature. The canonical formatter emits fixed positional
-operands first, labelled operands in declaration order, and the variadic tail
-last. Ambiguous or duplicate binding is an error. Noncanonical but
-unambiguous order is a style diagnostic, not a compile error.
+The names of the prelude (the [type chapter](02-type-system.md#the-prelude)
+lists them, for example `Bool`, `Option`, `true`, `false`) are ordinary
+identifiers to the lexer and are reserved by resolution. A type, interface,
+type parameter, or pattern binder spelled as one is
+`@name.reservedDeclaration` at the name; a module value, `fn`, `proc`, or
+import spelled as one is `@name.reservedValueSpelling` at the name. Either
+still binds for the rest of its scope so that the error does not cascade.
 
-Function and constructor operands are evaluated in resolved fixed-parameter
-order, then labelled-parameter declaration order, then variadic source order.
-Evaluation therefore does not change when the formatter normalizes operand
-order.
+### Atoms
 
-```vibra
-(log.write "build finished" level: @info "target" "app")
+An atom is `@` followed by one or more dot-separated parts. A part starts with
+an ASCII letter and continues with ASCII letters and digits. Atoms are
+written in camelCase like every other value name, the registered tags of the
+toolchain included: `@runtime.invalidHostValue`, `@auditTrace.v1`.
+
+An atom is an ordinary value. What an atom means depends on the grammar
+position it is written in:
+
+- The locator of an `use` is an entity reference. Its path is matched
+  against actual entity names with exact case.
+- The operand of a `visibility`, `representation`, `role`, or `external`
+  section is a tag. It MUST be a member of that section's closed tag set,
+  and it names no declaration.
+- Anywhere else an atom is a value. `@std.io` in an expression loads and
+  calls nothing.
+
+Effect rows do not use atoms; they contain names resolved through the
+module's imports.
+
+### Literals
+
+Integers are signed decimal. A float contains a decimal point, an exponent, or
+a float suffix. An adjacent suffix is part of the token and fixes the
+literal's exact type: `1u8`, `25i32`, `2.5f64`, `2f64`. An unsuffixed literal
+takes its type from its expression context. An unknown suffix, an integer
+suffix on a float body, or trailing token text is
+`@syntax.invalidNumericLiteral`. Range is checked by the type checker, not
+the lexer: `-1u8` is one `U8` literal and is `@type.numericOutOfRange` at
+the literal, as is an unsuffixed literal that does not fit its expected
+type. There are no numeric separators and no non-decimal bases. `-`
+immediately followed by a digit starts a numeric token; `-` has no other
+use.
+
+A string is double quoted and supports `\"`, `\\`, `\n`, `\r`, `\t`, and
+`\u{HEX}` with one to six hexadecimal digits naming one Unicode scalar; a
+surrogate or a value above U+10FFFF is rejected. A terminated string with an
+unsupported or malformed escape is `@syntax.invalidStringLiteral` over the
+whole token. A string that reaches the end of the file unterminated is
+`@syntax.unmatchedDelimiter`, is recovered, and keeps its bytes; it does not
+also report the first diagnostic. A string may span lines; its interior bytes,
+including CR and CRLF, are kept as written. There is no interpolation and no
+raw string.
+
+A doc string is delimited by `"""`. It processes no escapes. If the text after
+the opening delimiter starts with a line break, that break is removed; the
+line break and indentation before the closing delimiter are removed; and the
+longest whitespace prefix common to all non-blank lines is removed from each
+line. A doc string is valid only as the operand of a `doc` section; elsewhere
+it is `@syntax.invalidForm`.
+
+A character literal is single quoted and denotes exactly one Unicode scalar:
+one scalar written directly, or one string escape, or `\'`. An empty literal,
+one holding more than one scalar, or a surrogate is
+`@syntax.invalidCharacterLiteral`.
+
+`void` is the single value of the type `Void`. `_` is the discard: in a binder
+or pattern position it matches anything and binds nothing, it may repeat, and
+it is rejected in every other position.
+
+There is no boolean literal. `true` and `false` are the two public values the
+standard `Bool` type's module declares, and they belong to the prelude.
+
+## Grammar
+
+```ebnf
+module      = { top }, EOF ;
+top         = use | type-decl | interface-decl | fn-decl | proc-decl
+            | module-let | test ;
+
+use         = "use", atom, [ "as", identifier ], "enduse" ;
+
+type-decl   = "type", identifier, [ type-params ],
+              ( "of", type-body | case, { case } ),
+              { type-item }, "endtype" ;
+type-body   = "Intrinsic", "(", atom, ")" | type-expr ;
+case        = "case", identifier, [ record-type ] ;
+type-item   = given | where | role | visibility | representation | doc
+            | fn-decl | proc-decl | impl ;
+
+interface-decl = "interface", identifier, [ type-params ],
+                 { given | role | visibility | doc | assoc-type | fn-decl
+                 | proc-decl | impl },
+                 "endinterface" ;
+assoc-type  = "type", identifier, "endtype" ;
+impl        = "impl", type-expr, { assoc-choice | fn-decl | proc-decl },
+              "endimpl" ;
+assoc-choice = "type", identifier, "of", type-expr, "endtype" ;
+
+fn-decl     = "fn", identifier, [ type-params ], signature,
+              { given | requires | ensures | visibility | external
+              | symbol | native | doc },
+              [ "do", body ], "endfn" ;
+proc-decl   = "proc", identifier, [ type-params ], signature,
+              { given | requires | ensures | performs | visibility
+              | external | symbol | doc },
+              [ "do", body ], "endproc" ;
+signature   = [ "takes", params ], [ "labelled", labelled ],
+              "returns", identifier, ":", type-expr ;
+params      = "{", { pattern, ":", type-expr }, "}" ;
+labelled    = "{", { identifier, ":", type-expr, "be", expr }, "}" ;
+type-params = "(", identifier, { identifier }, ")" ;
+
+module-let  = "let", identifier, ":", type-expr, { visibility | doc },
+              "be", expr, "endlet" ;
+test        = "test", string, [ "takes", params ], [ performs ],
+              "do", body, "endtest" ;
+
+given       = "given", "{", { identifier, ":", type-expr }, "}" ;
+requires    = "requires", expr, [ "else", expr ] ;
+ensures     = "ensures", expr, [ "else", expr ] ;
+where       = "where", expr, [ "else", expr ] ;
+performs    = "performs", row ;
+row         = "{", { path }, "}" ;
+visibility  = "visibility", atom ;
+representation = "representation", atom ;
+role        = "role", atom ;
+external    = "external", atom ;
+symbol      = "symbol", string ;
+native      = "native", string ;
+doc         = "doc", doc-string ;
+
+body        = { statement } ;
+statement   = let | expr ;
+let         = "let", pattern, [ ":", type-expr ], "be", expr,
+              [ "else", body ], "endlet" ;
+
+expr        = "return", expr | unary ;
+unary       = "try", unary | "await", unary | postfix ;
+postfix     = primary, { "(", { argument }, ")" | ".", identifier } ;
+argument    = expr | identifier, ":", expr ;
+primary     = literal | identifier | atom
+            | "{", { expr }, "}"
+            | "{", identifier, ":", expr, { identifier, ":", expr }, "}"
+            | "[", { expr }, "]"
+            | "[", expr, ":", expr, { expr, ":", expr }, "]"
+            | "[", ":", "]"
+            | if | match | do-block | anon-fn | anon-proc ;
+literal     = string | character | integer | float | void ;
+if          = "if", expr, "then", body, [ "else", body ], "endif" ;
+match       = "match", expr, arm, { arm }, "endmatch" ;
+arm         = "case", pattern, body ;
+do-block    = "do", body, "enddo" ;
+anon-fn     = "fn", [ type-params ], signature,
+              { given | requires | ensures }, "do", body, "endfn" ;
+anon-proc   = "proc", [ type-params ], signature,
+              { given | requires | ensures | performs },
+              "do", body, "endproc" ;
+
+pattern     = discard | pattern-literal | path
+            | path, "(", { pattern }, ")"
+            | path, "(", identifier, ":", pattern,
+                        { identifier, ":", pattern }, ")"
+            | "{", { pattern }, "}"
+            | "{", identifier, ":", pattern,
+                   { identifier, ":", pattern }, "}"
+            | "[", { pattern }, "]" ;
+pattern-literal = string | character | integer | atom ;
+
+type-expr   = path, [ "(", { type-expr }, { identifier, ":", type-expr }, ")" ]
+            | atom
+            | "{", { type-expr }, "}"
+            | record-type
+            | "Fn", "(", inputs, type-expr, ")"
+            | "Proc", "(", inputs, type-expr, [ row ], ")"
+            | "Intent", "(", type-expr, [ row ], ")" ;
+record-type = "{", identifier, ":", type-expr,
+                   { identifier, ":", type-expr }, "}" ;
+inputs      = "{", { type-expr }, { identifier, ":", type-expr }, "}" ;
+path        = identifier, { ".", identifier } ;
 ```
 
-A function value is `f`; its nullary application `(f)` is a function call.
-Atoms are ordinary values and are not applicable, so `(@some-atom value)` is a
-static error rather than an indirect lookup or call.
-The head spelling alone never turns an operand into a selector: `(value @name)`
-is a function call when `value` has a matching `fn` type and a record
-projection when `value` has a record type. `(value value)` is classified by the
-same static rule. A literal-headed form such as `(1 2)` is not applicable.
+Notes on the grammar:
 
-An array variadic parameter receives every remaining unlabelled form as one
-array. A dict variadic parameter receives alternating key and value forms. The
-call MUST contain an even number of remaining forms. Every key and value is
-evaluated, and a later duplicate key replaces the earlier value.
+- `(` never starts an expression, a pattern, or a type. It always applies
+  the form before it, with or without whitespace between them. Any
+  expression may be a callee: `choose(c)(x)` calls the result of
+  `choose(c)`. `f()` is a nullary call; `f` is the function value.
+- `Fn`, `Proc`, `Intent`, and `Intrinsic` are **reserved type heads**. A
+  `type-expr` or `type-body` that begins with one is parsed by that head's
+  own production and never as an applied path, so `Fn({I32} Bool)` is a
+  callable type even though its operands would also parse as type
+  arguments. The heads name no declaration; declaring one is
+  `@name.reservedDeclaration`.
+- A constructor pattern is positional or labelled, never both. A pattern
+  whose shape does not fit the constructor it names (labels for a wrapper or
+  declared tuple, positional components for a declared record or a case with
+  fields, a wrong arity, or an unknown or repeated field) is
+  `@type.argumentMismatch` at the pattern.
+- A statement never needs a terminator, because no statement can begin with
+  `(`, `.`, or `:` and no expression can end with an open form.
+- The `do` that follows a signature opens the declaration's body and is
+  closed by the declaration's own closer. A `do` in expression position
+  opens a block closed by `enddo`.
+- In `Proc({Str} Void {DirWrite})` the row is the last operand and is
+  optional. `Proc({Str} {DirWrite})` therefore declares a `proc` that
+  returns the one-component tuple type `{DirWrite}` with an empty row; the
+  checker reports `@type.suspiciousRow` when a result type is a tuple
+  whose every component resolves to an operation interface.
+- The grammar admits an empty brace or bracket form wherever a repetition
+  can be empty: `{}` is the empty tuple (type, value, and pattern) and `[]`
+  the empty list. An empty `takes {}`, `labelled {}`, `given {}`, or
+  `performs {}` means the same as omitting the section; the formatter
+  removes it.
+- A form the grammar does not admit is `@syntax.invalidForm` over the
+  smallest enclosing construct. An opener without its closer, or a closer
+  that does not match the innermost open construct, is
+  `@syntax.unmatchedDelimiter`.
 
-```vibra
-(collect-values v1 v2 v3)
-(collect-fields k1 v1 k2 v2 k3 v3)
-```
+The productions above write the sections of a declaration in their canonical
+order, to be readable. The parser accepts them in any order, under four
+constraints: the keyword, the name, and the type parameters come first; `do`
+and its body come last; the `case` alternatives of a variant type keep
+their written order among themselves, which is the order of the variants;
+and, in a file, every `use` precedes every other top-level form. So
+`fn f returns r: I32 takes {x: I32} do return x endfn` is accepted, and
+the formatter moves `takes` before `returns`. Nested members and `impl`
+blocks may be written between sections. A `use` written after another
+top-level form is `@syntax.invalidForm` at the `use`; the formatter moves no
+top-level form, so it does not repair one.
+
+Every section occurs at most once, `requires` and `ensures` included; a
+repeat is `@syntax.duplicateSection`. A required section that is missing,
+such as `returns`, is `@syntax.invalidForm`. Several conditions are joined
+with `Bool.and`. A section a declaration kind does not admit, such as
+`performs` on a `fn`, is `@syntax.invalidSection`. The formatter writes
+sections in the canonical order given under
+[Canonical format](#canonical-format).
 
 ## Declarations
 
-Vibra has exactly these user top-level forms:
+Vibra has exactly seven top-level forms: `use`, `type`, `interface`, `fn`,
+`proc`, `let`, and `test`. There is no module declaration, no top-level
+`impl`, and no local named declaration: a `type`, `interface`, named `fn`,
+named `proc`, or `test` inside a body is `@syntax.invalidForm`.
 
-```ebnf
-top-form = import | deftype | defint | deffect | def | defn | test ;
-import   = "(", "import", symbol, atom-name, ")" ;
-deftype  = "(", "deftype", symbol, deftype-body,
-           { type-attribute | nested-method
-           | interface-implementation }, ")" ;
-defint   = "(", "defint", symbol,
-           { type-attribute | declaration-attribute | interface-member
-           | interface-implementation }, ")" ;
-deffect  = "(", "deffect", symbol,
-           { declaration-attribute | effect-member }, ")" ;
-def      = "(", "def", symbol, type-expr, expr,
-           { declaration-attribute }, ")" ;
-defn     = "(", "defn", symbol, parameters, type-expr,
-           { function-attribute }, body, ")" ;
-test     = "(", "test", string, [ "effects:", effect-row ],
-           body-element, { body-element }, ")" ;
+All declarations of a module share one flat scope. A declaration may be
+referenced before it is written. No declaration or binder may shadow a visible
+name.
 
-nested-method = "(", "defn", local-name, parameters, type-expr,
-                { function-attribute }, body, ")" ;
-interface-member = "(", "defn", local-name, parameters, type-expr,
-                   { function-attribute },
-                   [ body-element, { body-element } ], ")" ;
-interface-implementation = "(", "impl", type-expr,
-                           implementation-member+, ")" ;
-implementation-member = "(", "defn", local-name, parameters, type-expr,
-                        { function-attribute }, body, ")" ;
-effect-member = "(", "defn", local-name, parameters, type-expr,
-                { function-attribute }, body, ")" ;
-
-discard              = "-" | "@-" | "-:" ;
-local-name           = kebab-name ;
-binding-name         = local-name | discard ;
-parameters           = "(", { pattern, type-expr }, ")" ;
-labelled-parameters  = "(", { local-name, type-expr, default }, ")" ;
-default              = literal | expression ;
-variadic-parameter   = "(", binding-name, variadic-type, ")" ;
-variadic-type        = "(", "array", type-expr, ")"
-                     | "(", "dict", type-expr, type-expr, ")" ;
-effect-row            = "(", { effect-reference }, ")" ;
-effect-reference      = symbol ;
-where-clause         = "(", { symbol, generic-bound }, ")" ;
-generic-bound        = symbol ;
-
-declaration-attribute = "visibility:", atom-name | "doc:", string ;
-type-attribute = "where:", where-clause
-               | "role:", atom-name
-               | declaration-attribute ;
-function-attribute = "where:", where-clause
-                   | "labelled:", labelled-parameters
-                   | "variadic:", variadic-parameter
-                   | "visibility:", atom-name
-                   | "effects:", effect-row
-                   | "external:", atom-name
-                   | "symbol:", string
-                   | "native:", string
-                   | "doc:", string ;
-lambda-attribute = "where:", where-clause
-                 | "labelled:", labelled-parameters
-                 | "variadic:", variadic-parameter
-                 | "effects:", effect-row ;
-```
-
-`deftype-body` is the type chapter's production for a declaration body. It is
-`type-expr`, which includes the structural `tuple`, `record`, `enum`, and
-`union` forms, plus the toolchain-only `intrinsic-type`, which is admissible
-nowhere else. A `deftype` over any other type expression declares a wrapper
-type: a distinct identity over one representation type.
-
-`role:` names the language role a standard-library `deftype` plays, and
-`native:` names the toolchain native implementation of a standard-library
-function that keeps its Vibra body; both are admissible only in the embedded
-standard library, as the type and runtime chapters state.
-
-`def` introduces an immutable module value. There is no separate `const` form
-in Vibra.
-
-Every required positional parameter is written directly as a pattern/type
-pair; there is no wrapper list around each parameter. The pattern MUST be
-irrefutable for the written type. `labelled:` is one flat list of
-name/type/default triples. Every labelled parameter MUST have a constant
-default and a real unqualified local name because its name is part of the call
-contract. A default is a constant expression, written as a literal, an atom,
-or any other expression, such as the name `true` or the construction
-`(bool.true)`; the type chapter defines what a constant expression is, as it
-does for constant patterns, and a default of any type is admitted. A default
-that is not a constant expression is `@type.not-constant`, and one whose
-shape cannot be an expression at all is a syntax error. `variadic:` contains
-exactly one name/type pair, and its type MUST be
-an `array` or `dict`. A function has at most one variadic parameter. A variadic
-parameter may use any discard spelling when its value is intentionally unused.
-
-`where:` is a flat list of generic-name/bound pairs. It is the only declaration
-of generic names: every generic name used by a declaration MUST occur exactly
-once in its `where:` clause, unless an enclosing declaration already binds it.
-A bound is an ordinary interface name; `any` is the predeclared empty interface
-and is the bound that requires nothing. A nested method inherits its owner's
-generic names and a `lambda` those of every enclosing declaration and lambda;
-neither may redeclare an inherited name. The type chapter defines that
-inheritance and the call-site `types:` list built from it.
-
-The canonical function-attribute order is `where:`, `labelled:`, `variadic:`,
-`visibility:`, `effects:`, `external:`, `symbol:`, `native:`, then `doc:`; a
-`lambda` uses the same relative order. The canonical type-attribute order is
-`where:`, `role:`, `visibility:`, then `doc:`. Attributes may be parsed in any unambiguous order,
-occur at most once, and are formatted canonically. Nested methods follow
-attributes, and `impl` blocks follow methods.
-
-Every labelled argument or attribute follows all fixed positional forms of its
-enclosing form and precedes its variadic body or member forms. The parser MAY
-recover another unambiguous order for function or constructor applications as
-described above, but the declaration grammar and formatter never use a label
-to interrupt a fixed header.
-
-All declarations are private unless they contain `visibility: @public`.
-Visibility is part of the declaration, not a wrapper form.
+Every declaration is private to its module unless it contains
+`visibility @public`. `@public` and `@private` are the only visibility values.
 
 ```vibra
-(import io @std.io)
+use @std.io enduse
 
-(deftype user-id u64
-  visibility: @public)
+type UserId of U64
+  visibility @public
+endtype
 
-(def default-retries u8 3u8)
+let defaultRetries: U8 be 3u8 endlet
 
-(defn greet (name str) str
-  visibility: @public
-  (str.concat "hello, " name))
-
-(deftype option
-  (enum some t none void)
-  where: (t any)
-  visibility: @public)
+fn greet
+  takes {name: Str}
+  returns greeting: Str
+  visibility @public
+  do
+    return Str.concat("hello, " name)
+endfn
 ```
 
-The following declaration has labelled defaults, an array variadic tail, and
-an imported effect reference:
+### `use`
+
+`use @path enduse` imports one module or one public declaration of a module
+under a local name. The name is the path's last part, or the identifier
+after `as`: `use @billing.cents as money enduse`. The closer is always
+written, as for every other declaration. The
+[programs chapter](04-programs-and-packages.md#modules-and-imports) defines
+resolution; because no module path part and no declaration name is a
+reserved word, the default name is always a valid identifier, and `as` only
+ever renames. Two imports that produce the same name, or an import whose
+name is a declaration of the module, are `@name.redeclaration`. An import
+whose name is a prelude name is `@name.reservedValueSpelling`. The
+formatter and the import organizer keep a written `as`.
+
+### `type`
+
+`type Name of TypeExpr … endtype` declares a nominal type over one
+representation: a wrapper over any other type, a declared tuple over a tuple
+type, or a declared record over a record type. `type Name case … endtype`
+declares a variant type; each `case` names one alternative and optionally
+gives it named fields.
 
 ```vibra
-(import io @std.io)
-(import log @std.log)
+type Celsius of F64 endtype
 
-(defn write-log (message str) void
-  labelled: (level atom @info)
-  variadic: (fields (array (tuple str str)))
-  visibility: @public
-  effects: (io.stdout)
-  (log.write message level fields))
+type User of {name: Str id: UserId}
+  visibility @public
+endtype
+
+type Lookup(T)
+  case found {value: T}
+  case missing
+  visibility @public
+endtype
 ```
 
-Omitted `effects:` always means `effects: ()`. This default is identical for
-every `defn`, `lambda`, function type, and test; omission never requests effect
-inference. The checker computes the effects performed by a body and requires
-them to fit within its written or default-empty ceiling. An ordinary effectful
-`defn`, `lambda`, or test MUST therefore write `effects:` explicitly. For a
-`deffect` member, the owner root remains implicit and `effects: ()` means that
-the operation performs no additional roots. `deffect` itself accepts no
-`effects:` attribute. An operation's owner root and additive row together form
-the row performed by each of its callers, so a caller writes both; the effects
-chapter defines that propagation.
+Type parameters are declared in the header. `given` gives a parameter its
+bound, an interface written as in any type position; a parameter without an
+entry has the bound `Any`. `where` states a type invariant and
+`representation` controls who may construct and take apart the type; the
+[type chapter](02-type-system.md#declared-types) defines all three. A `type`
+may nest `fn` and `proc` declarations, which are its static members, and
+`impl` blocks.
 
-`deftype`, `defint`, and `deffect` are native AST forms. They MUST NOT be
-parser desugarings into a generic definition node. A nested `impl` is likewise
-a native child of its `defint`, not a generic call or a method-list desugaring.
+`of Intrinsic(@name)` and the `role` section are admissible only in the
+embedded standard library.
 
-An effect reference is a symbol resolved only in the effect namespace. An
-unqualified symbol names an effect root in the current module; a dotted symbol
-starts with an explicit import alias and names a root in that module. Thus
-`io.stdout` resolves through `(import io @std.io)`. The resolved AST stores the
-root's canonical nominal identity, not the alias spelling. An atom such as
-`@std.io.stdout` in a source `effects:` row is an error and is never accepted
-as an alternate reference syntax; it emits `@effect.invalid-reference`.
+### `interface`
 
-## External definitions
-
-Vibra code calls external behavior through ordinary typed functions. A
-toolchain-owned declaration binds a signature to one of exactly two providers.
-`external:` and `symbol:` MUST occur together, and such a declaration MUST omit
-its body:
+An interface declares member signatures. A member without `do` is abstract; a
+member with `do` is a default, and its body is checked like any other
+callable body, so an empty one is `@type.missingReturn`. A nested
+`type Name endtype`, with no body, declares an associated type, which each
+implementation chooses; it is a member of the interface, and the
+[type chapter](02-type-system.md#associated-types) defines it. An interface
+whose members include a `proc` is an operation interface, which the
+[effects chapter](03-effects.md) defines. When an interface is checked, the
+written result type of each member may place `Self` only where the
+[type chapter](02-type-system.md#interfaces) allows; any other position is
+`@type.unsupportedSelfPosition`.
 
 ```vibra
-(defn add-checked (left i32 right i32) (result i32 core.arithmetic-error)
-  visibility: @public
-  external: @compiler
-  symbol: "i32.add-checked")
+interface Printable
+  visibility @public
+  fn render
+    takes {value: Self}
+    returns text: Str
+  endfn
+endinterface
 ```
 
-`@compiler` selects a pure compiler intrinsic. Such a declaration MUST have an
-empty effect ceiling. `@host` selects a typed host operation and is valid only
-on a member of the `deffect` that owns the operation's nominal effect root. A
-`@host` external member MUST have no additive effects. An interface contract
-cannot be external.
+### `impl`
 
-A `@compiler` binding and a `native:` symbol are attributes of a function, not
-of where it is declared: a module-level `defn`, a static method nested in a
-`deftype`, and a member of an `impl` block are all functions, and each may bind
-one. An implementation member binds exactly as any function does, and its
-signature, with `self` replaced by the receiver, MUST match the registry row
-exactly. This is how a builtin type implements a contract without a second
-function to forward to:
+`impl` is valid only as a direct child of the `type` that owns the type, where
+its operand names the interface, or of the `interface` that owns the
+interface, where its operand names the type. The parent supplies the other
+half of the pair.
 
 ```vibra
-(deftype i32 (intrinsic-type @i32)
-  visibility: @public
-  (impl equatable
-    (defn equal (left self right self) bool
-      external: @compiler
-      symbol: "i32.equal")))
+type User of {name: Str id: UserId}
+  fn nameLength
+    takes {user: Self}
+    returns length: U64
+    do
+      return Str.length(user.name)
+  endfn
+  impl Printable
+    fn render
+      takes {value: Self}
+      returns text: Str
+      do
+        return value.name
+    endfn
+  endimpl
+endtype
 ```
 
-The provider and string symbol are checked against closed, versioned toolchain
-registries. External declarations are accepted only in the embedded
-standard-library modules; ordinary packages cannot declare them. A `@host`
-declaration outside a `deffect`, one with an `effects:` row, and an `effects:`
-row on a `deffect` are each `@syntax.invalid-attribute`, and a `@host` symbol whose
-registry owner is not the enclosing `deffect` is `@external.owner-mismatch`. Every
-external function is applied through its declared Vibra name and ordinary
-function-application syntax—there is no `external`, `primitive`, or `host-op`
-expression. Vibra has no WebAssembly external provider and no source-level Wasm
-FFI.
+A callable member of an `impl` MUST have a body, or be an external
+declaration, and MUST match its contract under the
+[substitution](02-type-system.md#substitution) the type chapter defines. A
+`type Name of T endtype` inside an `impl` chooses the associated type `Name`
+and has no body. The operand of `impl` is positional: a label in it, as in
+`impl Iter(Item: U8)`, is `@type.typeArgumentMismatch` at the label. The
+type chapter defines completeness, overlap, and ownership.
 
-## Types, interfaces, and methods
+### `fn` and `proc`
 
-Every `defn` name is one unqualified `local-name`, whether the declaration is
-module-level or nested. The enclosing form names the owner, so a nested name
-never repeats it. An implementation is written as an `impl` block whose
-positional target supplies whichever half of the interface/type pair its parent
-does not.
+A `fn` is a pure function. A `proc` is a procedure that may perform
+operations; its `performs` section is its closed effect ceiling, and an
+omitted `performs` is the empty row. The ceiling is never inferred. The
+effects chapter defines rows, plans, and `await`.
+
+A `fn` or `proc` has a body unless it is an abstract member of an
+`interface` or an [external definition](#external-definitions). Any other
+`fn` or `proc` written without `do` is `@syntax.invalidForm` at its closer.
+
+`takes` lists the required positional parameters as `Pattern: Type` entries;
+a bare name is the simplest pattern. Every parameter pattern MUST be
+irrefutable for its written type. The entries are positional: the names a
+pattern binds are local to the callable and are not argument labels.
+
+`labelled` lists optional parameters as `name: Type be default`. Each has a
+real local name, which is part of the call contract, and a default that MUST
+be a constant expression; a default that is not is `@type.notConstant`. The
+type chapter defines constant expressions.
+
+`returns name: Type` declares the result type and a result name. The result
+name is visible only in the `ensures` section of the same declaration, in both
+the predicate and its `else` consequence. It is not visible in `requires` or
+in the body.
+
+`requires`, `ensures`, and `where` are **guards**. The
+[type chapter](02-type-system.md#guards) defines them: a guard without `else`
+is an obligation the checker MUST discharge statically, and a guard with
+`else` states the value produced when the guard is false. No guard traps.
 
 ```vibra
-(defint printable
-  visibility: @public
-  (defn render (value self) str))
-
-(deftype user
-  (record name str id user-id)
-  visibility: @public
-  (defn name-length (value self) u64
-    (str.length (value @name)))
-  (impl printable
-    (defn render (value self) str
-      (value @name))))
+fn splitCents
+  takes {total: Cents parts: I32}
+  labelled {roundUp: Bool be false}
+  returns shares: Result(List(Cents) SplitError)
+  requires Ordered.greaterOrEqual(parts 1i32)
+    else Result.err(error: SplitError.noParts())
+  do
+    return Result.ok(value: divide(total parts roundUp: roundUp))
+endfn
 ```
 
-The standard `iter` interface is generic over an item type and declares abstract
-`next` plus default methods `map`, `filter`, `skip`, `take`, and `collect`. The
-type chapter gives the canonical contract, semantics, and closed builtin
-conformance rules. Default bodies live in the standard library and MUST NOT be
-redeclared in user `impl` blocks.
-
-The package that owns an interface may implement it for a type declared in
-another module by placing an `impl` block in the owning `defint`:
+An anonymous `fn` or `proc` is an expression with the same signature and
+guard sections and no name, visibility, or doc. It cannot refer to itself.
 
 ```vibra
-(defint printable
-  (defn render (value self) str)
-  (impl i32
-    (defn render (value self) str
-      (from.convert value))))
+fn takes {value: I32} returns next: I32 do
+  return I32.add(value 1i32)
+endfn
 ```
 
-`impl` is valid only as a direct child of the `deftype` that owns the type or
-the `defint` that owns the interface; there is no top-level `impl` and no `for:`
-implementation attribute. An interface member without a body is abstract. A
-member whose optional body is present MUST contain at least one expression; that
-body is a default method. The type chapter defines which members an
-implementation must supply and forbids overriding a default. A method
-implementing an interface has a body and MUST match its contract after
-substituting the receiver type for `self`. The type chapter defines
-completeness, conflict, and ownership rules.
+There are no variadic parameters. A collection literal or a collection
+parameter takes their place.
 
-A declaration name and a reference are distinct. A name is always one segment
-in its owner's scope; a reference is a dotted path through owners, so
-`user.name-length` and `printable.render` are resolved paths at a use site and
-never the spelling of a declaration.
+### Module values
 
-Declared records and tuples are constructed by applying their type to their
-fields, and declared unions and wrapper types by applying it to one value. Enum
-tags expose qualified constructors. Anonymous values use the reserved forms
-`tupleof`, `recordof`, and `enumof` that the type chapter defines. A record value is
-applied to an atom selector to read one statically known field; there is no
-`field` form and no generated source accessor function.
+A top-level `let name: Type be expr endlet` declares an immutable module
+value. Its name is one identifier, not a pattern; its type is mandatory; it
+admits no `else`. Its initializer is pure. `visibility` and `doc` sit between
+the type and `be`. The [runtime chapter](06-runtime.md) defines when the
+initializer runs. There is no separate constant form.
+
+### `test`
+
+`test "name" takes {world: TestWorld} performs {…} do … endtest` declares a
+test. `takes` is optional and admits exactly one parameter, of the standard
+type `TestWorld`; any other parameter list is `@syntax.invalidForm`. Its
+body has type `Void`, MUST NOT contain a `return` or `try` outside an
+anonymous callable, and may `await`. The
+[programs chapter](04-programs-and-packages.md#tests) defines discovery and
+the test world.
+
+### External definitions
+
+A toolchain-owned declaration binds a signature to a provider. `external` and
+`symbol` MUST occur together, and such a declaration MUST omit its body. The
+excerpt below is the `addChecked` member of the `I32` declaration in the
+embedded `@std.builtin` module, whose
+[intrinsic registry](06-runtime.md#compiler-intrinsic-registry) row fixes
+the symbol, the owner, and the signature:
 
 ```vibra
-(user name: "Ada" id: (user-id 1))
-(option.some "value")
-(person @name)
+type I32 of Intrinsic(@i32)
+  visibility @public
+  fn addChecked
+    takes {left: Self right: Self}
+    returns sum: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "i32.addChecked"
+  endfn
+endtype
 ```
 
-A module-level `defn` name or nested method path in expression position
-denotes a `fn` value. Application is `(f …)` when `f` has a function type.
-Constructors, projections, and lookups are not `fn` values; reifying one as a
-higher-order value requires an explicit `lambda`.
+`@compiler` selects a compiler intrinsic and is valid only on a `fn`.
+`@host` selects a typed host operation and is valid only on a `proc` member
+of the operation interface that owns that operation; such a member MUST NOT
+write `performs`. `native` names a toolchain native implementation of a `fn`
+that keeps its Vibra body. Symbol strings are registry keys and keep their
+registered spelling.
 
-A module-level `def`, `defn`, or import alias MUST NOT be spelled as a builtin
-type name, because builtin types own static methods reached by the same path.
-A nested method named `dict` on some other owner is allowed; the associative
-`dict` type MUST NOT declare a method named `dict`.
+External declarations, `native`, `role`, and `Intrinsic` are accepted only in
+the embedded standard-library modules; elsewhere each is
+`@syntax.invalidSection`. The operand of `visibility`, `representation`,
+`role`, and `external` is one atom of that section's closed tag set; any
+other atom is `@syntax.invalidForm` over the section. A `@host` symbol whose
+registry owner is not the enclosing interface is `@external.ownerMismatch`.
+An external function is applied through its Vibra name with ordinary
+application; there is no foreign-call expression and no source-level foreign
+function interface.
 
-## Functions and expressions
+## Names and paths
 
-A named function declares a name, a flat parameter list, and a result type.
-A function body is a body sequence, defined below; its final element is the
-result. `lambda` declares an anonymous function with the same parameter,
-result, generic, labelled, variadic, and effect syntax, but no name or visibility.
-`fn` is reserved for function types and is never an anonymous declaration.
+A declaration name is always one identifier in its owner's scope. A reference
+is a path through owners: `User.nameLength`, `Printable.render`,
+`Option.some`, `io.Stdout`. A call names its owner; there is no method-call
+sugar, so `user.nameLength()` is not a call of `User.nameLength`.
+
+A dotted name is resolved from the left. If its first identifier is a local
+binding or a module value, each later `.name` reads a field of a record or
+declared record. Otherwise the longest prefix that names an entity is a path,
+and any remaining `.name` parts read fields of its value. Because nothing
+shadows, a name is never both. A field read of a value without that field is
+`@type.unknownRecordField`.
+
+A module-level `fn` name or a nested member path in expression position
+denotes a function value. Constructors, field reads, and lookups are not
+function values; an anonymous `fn` wraps one where a function value is
+needed.
+
+## Application
+
+`callee(arguments)` applies a callee to its arguments. The checker classifies
+the application from the statically resolved callee, and the
+[type chapter](02-type-system.md#application) defines the closed set of
+applicable kinds: a function or procedure, a constructor, and a collection
+lookup. There is no user-defined call operator.
+
+Positional arguments bind to required parameters in order. A labelled argument
+`name: expr` binds to the labelled parameter, record field, or case field of
+that name. A missing, duplicate, or unknown binding is an error. Labelled
+arguments may be written in any position among the positional ones.
+
+The callee is evaluated once, first. Then every written argument is evaluated
+in written order, labelled arguments included. Binding an argument to its slot
+never changes that order, and the formatter never reorders arguments.
+
+Construction uses labels exactly when the shape has field names:
 
 ```vibra
-(lambda (value i32) (result i32 core.arithmetic-error)
-  (i32.add-checked value 1i32))
+User(name: "Ada" id: UserId(1u64))   // declared record: labels
+Option.some(value: "x")              // case with fields: labels
+Option.none()                        // case without fields
+Celsius(21.5f64)                     // wrapper: positional
+Pair(1i32 "x")                       // declared tuple: positional
 ```
 
-```ebnf
-body          = { body-element } ;
-body-element  = expr | let-form | let-else-form ;
-let-form      = "(", "let", pattern, expr, { pattern, expr }, ")" ;
-let-else-form = "(", "let-else", pattern, expr, expr, ")" ;
-expr = atom | application | lambda
-     | "(", "do", body, ")"
-     | "(", "if", expr, expr, expr, ")"
-     | "(", "match", expr, pattern, expr, { pattern, expr }, ")"
-     | "(", "return", expr, ")"
-     | "(", "as", type-expr, expr, ")"
-     | "(", "try", expr, ")"
-     | "(", "tupleof", { expr }, ")"
-     | "(", "recordof", label, expr, { label, expr }, ")"
-     | "(", "enumof", label, expr, ")" ;
-application = "(", expr, { expr }, ")" ;
-lambda = "(", "lambda", parameters, type-expr,
-         { lambda-attribute }, body, ")" ;
-pattern = binding-name | literal
-        | "(", symbol, { pattern | label, pattern }, ")"
-        | "(", "tupleof", { pattern }, ")"
-        | "(", "recordof", label, pattern, { label, pattern }, ")"
-        | "(", "enumof", label, pattern, ")"
-        | "(", "array", { pattern }, ")"
-        | "(", "as", type-expr, pattern, ")" ;
+Lookup is application of a collection to a key and returns an `Option`:
+`items(0u64)`, `table(key)`, `text(0u64)`.
+
+## Anonymous products and collections
+
+```vibra
+{"Ada" 42u64}                 // tuple value
+{name: "Ada" id: 42u64}       // record value
+[1i32 2i32 3i32]              // list
+["name": "Ada" "role": "dev"] // dict
+[:]                           // empty dict
 ```
 
-Vibra has no `while`, `for`, `break`, `continue`, or assignment form; the four
-loop and jump forms are retired and emit `@syntax.retired-form`. Early exit is
-written with `return`, defined below, or with `try`, which the type chapter
-defines as the propagation form.
+Tuple and record values may hold values of different types. Every element of
+a list has one exact type; the keys of a dict share one exact type and so do
+its values. `[]` and `[:]` need an expected type. Entries are evaluated in
+written order, and a later duplicate dict key replaces the earlier value.
+There is no tuple index operation; a tuple is taken apart by a pattern.
 
-Reserved forms are recognized before the general application production. A
-list headed by `let`, `let-else`, or `return`, for example, cannot be
-reinterpreted as application of a value named `let`, `let-else`, or `return`,
-and none of these spellings can be bound as a name.
+## Bodies and statements
 
-### Body sequences
+A **body** is a sequence of statements: the body of a `fn`, `proc`, or
+`test`, each branch of an `if`, each arm of a `match`, the `else` of a `let`,
+and the inside of a `do` block. Statements are evaluated in order. A statement
+is a `let` or an expression.
 
-A **body sequence** is the `body` of a `defn` (module-level, nested method,
-`impl` member, interface default member, or effect operation), the `body` of a
-`lambda`, the `body` of a `do`, and the `body-element` list of a `test`. Its
-elements are evaluated in order and its value is that of its final element. An
-empty sequence and a sequence whose final element is a `let` or `let-else` have
-type and value `void`, because a `let` or `let-else` form has type `void`.
+Each of an `if` branch, a `match` arm, a `do` block, and a `let` fallback is
+its own scope: a binding made in it ends with it. A callable body is one
+scope together with its parameters.
 
-`let` and `let-else` are **binding forms**, and a binding form is valid only as
-a direct element of a body sequence. Anywhere else (an application operand, an
-`if` condition or branch, a `match` subject or arm result, a `def` initializer,
-a `let` or `let-else` value, a `return`, `try`, `as`, or anonymous-value
-operand, and so on) it emits `@syntax.misplaced-binding` over the complete
-form. An `if` branch or `match` arm that needs a binding wraps its elements in
-`do`, whose bindings end with that `do`. A misplaced binding form introduces
-no binding, its value operands are still read so that their own syntax errors
-are reported, and the declaration that holds it is checked no further, as for
-any other form-level syntax error.
+An expression statement whose value is fallible, as the type chapter defines
+(a `Result` that can hold an error), is `@type.unhandledFallible`.
+`let _ be risky() endlet` discards one explicitly.
 
 ### `let`
 
-`(let pattern expr { pattern expr })` has one or more pattern/value pairs,
-evaluated in order. The pairs are written flat, with no wrapper list. An odd
-number of operands after `let`, or none, is malformed and emits
-`@syntax.invalid-form` over the complete form.
-
-The names a pair's pattern introduces are visible to the values of every later
-pair of the same form and to every later element of the directly enclosing body
-sequence. They are never visible to the pair's own value, to an earlier pair or
-element, or after the sequence ends. There is no assignment or shared mutable
-state in Vibra. `let` and positional function or lambda parameters accept
-patterns, but each such binding pattern MUST be irrefutable for its expected
-type. `match` accepts refutable patterns.
-
-A bare unqualified local name in a pattern always introduces a binding; it
-never compares against an existing value. A dotted symbol in a pattern names a
-constructor or other resolved entity and never introduces a local. Every named
-binder MUST NOT shadow a visible name, and the same pattern MUST NOT bind one
-name more than once. Because a `let` binding stays visible to the end of its
-body sequence, a later binder in that sequence, or in a form nested in it, that
-repeats the name is a redeclaration even when the two `let` forms are written
-one after another. A discard never binds and may be used as
-`(let - expression)`, `(let @- expression)`, or `(let -: expression)` to state
-that a result is intentionally ignored. Repeating a discard is always valid
-because it creates no declaration to redeclare or shadow. There is no `bind`
-pattern form and no compatibility spelling for it.
-
-### `let-else`
-
-`(let-else pattern expr fallback)` has exactly three operands and follows the
-same position and scope rules as `let`; any other operand count emits
-`@syntax.invalid-form` over the complete form. The pattern MUST be refutable
-for the value's type. An irrefutable pattern is an error that directs the author
-to `let`, because a `let-else` whose fallback can never run would be a second
-spelling of `let`.
-
-The value is evaluated once and matched against the pattern. On a match, the
-pattern's bindings are visible to the later elements of the enclosing body
-sequence, exactly as a `let` binding is. Otherwise the fallback is evaluated,
-and the fallback MUST have type `never`, so control leaves the sequence and a
-later element runs only for a matched value. The fallback does not see the
-pattern's bindings. The type chapter defines `never`.
-
-### `return`
-
-`(return expr)` has exactly one operand; a function whose result type is `void`
-writes `(return void)`. It exits the innermost enclosing `defn`, nested method,
-or `lambda` with the operand's value, which is checked at that function's
-written result type. A `return` inside a `lambda` therefore leaves the lambda
-and never the function that contains it. Outside any such body, in a `def`
-initializer or in a `test` body that is not inside a `lambda`, it is an error.
-`return` has type `never`.
-
-A `return` that is in tail position of its function is redundant, because the
-final expression is already the result. It is an error, so that one result has
-one spelling. The runtime chapter defines tail position, and the rule includes
-a `return` that is a branch of a final `if` or `match`.
-
 ```vibra
-(defn describe-pair (pair (tuple str i32)) str
-  (let
-    (tupleof name id) pair
-    full (str.concat name (from.convert id)))
-  full)
-
-(defn first-or-zero (items (array i32)) i32
-  (let-else (option.some head) (items 0u64) (return 0i32))
-  head)
-
-(lambda ((tupleof left right) (tuple i32 i32)) (result i32 core.arithmetic-error)
-  (i32.add-checked left right))
+let total be I32.add(a b) endlet
+let count: U64 be 0u64 endlet
+let {name: n id: i} be user endlet
+let Option.some(value: head) be items(0u64) else
+  return 0i32
+endlet
 ```
 
-The second function is the shape `let-else` exists for: the `return` leaves
-early on a mismatch and the rest of the body is the matched path. Its `return`
-is not redundant because the fallback is not in tail position.
+`let pattern be expr endlet` evaluates `expr` once and binds the pattern's
+names. The names become visible after `endlet` and stay visible to the end of
+the directly enclosing body. They are not visible in `expr` or in the
+fallback. `endlet` ends the declaration statement; it is not a scope around
+the uses of the names.
 
-### Collections, `match`, and `try`
+A written `: Type` is the expected type of the initializer: it fixes
+inference and is one of the places where a widening may occur. Without it, the
+type is inferred from the initializer alone, never from later uses.
 
-Collections have immutable value semantics. Pure iteration uses the standard
-`iter` interface; the type chapter defines `iter.next` and its default methods.
-Effectful walks are recursive functions over `iter.next` with an explicit
-written effect ceiling. Arrays and dicts are built by the static methods
-`array.of` and `dict.of` of the builtin `array` and `dict` types, and anonymous
-tuples and records by the reserved forms `tupleof` and `recordof`. There is no
-other collection-literal form and no `entry` wrapper.
+One `let` holds one pattern. Without `else` the pattern MUST be irrefutable.
+With `else` the pattern MUST be refutable, and an irrefutable pattern with
+`else` is `@pattern.irrefutableLetElse`. When the value does not match, the
+fallback body runs; every path through it MUST leave, so it has type `Never`.
 
-```vibra
-(tupleof "Ada" 42u64)
-(recordof name: "Ada" id: 42u64)
-(array.of 1i32 2i32 3i32)
-(dict.of "name" "Ada" "role" "maintainer")
-```
+A `let` is a statement and has no value. It cannot appear where an expression
+is required; `do … enddo` supplies a place for one.
 
-`tupleof` and `recordof` may contain heterogeneous values. Every `array.of`
-element has one exact type. `dict.of` contains alternating key and value
-expressions and MUST have even arity; its keys share one exact type and its values share one exact
-type. An empty `array.of` or `dict.of` requires an expected collection type.
-All operands are evaluated, and a later duplicate dict key replaces the earlier
-value. `array.of` and `dict.of` are ordinary variadic methods and first-class
-function values; `tupleof` and `recordof` are reserved forms, not functions.
-Users cannot declare members on the builtin types.
+### `return`, `try`, `await`
 
-`match` contains alternating pattern/result forms directly; there is no `case`
-wrapper. Every arm has exactly one result expression, so `do` groups multiple
-expressions. Arms are checked for reachability and exhaustiveness.
+`return expr` leaves the innermost enclosing `fn` or `proc`, named or
+anonymous, with the value of `expr`, checked at that callable's result type.
+It has type `Never`. A callable whose result type is `Void` writes
+`return void`.
 
-```vibra
-(match value
-  (option.some text) (str.length text)
-  (option.none) 0)
-```
+Every path through a callable body that completes normally MUST end in
+`return`; a body that can run off its end is `@type.missingReturn`. A path
+of type `Never` needs no `return`. There is no implicit result expression at
+the end of a callable body. A `return` in a module-value initializer, or in a
+`test` body outside an anonymous callable, is `@type.invalidReturn`.
 
-A tuple pattern, `(tupleof p…)` or a declared tuple's `(z p…)`, has exact
-arity. A record pattern, `(recordof a: p…)` or a declared record's
-`(z a: p…)`, uses labelled fields; omitted fields are ignored. Array patterns have exact length. Irrefutability is
-a type-system property: tuple and record patterns may be irrefutable when all
-of their subpatterns are, while a fixed-length array pattern is refutable for
-the variable-length array type. Enum constructors are normally refutable, but
-the exhaustiveness checker may prove a constructor pattern irrefutable for a
-single-variant type.
+`try expr` propagates the absence of an `Option` or the error of a `Result`
+out of the enclosing callable, and otherwise yields the payload. The type
+chapter defines it.
 
-`try` propagates the error of `result` or the absence of `option` through a
-function returning the same container and error type. There are no exceptions
-or implicit error conversions. A fallible value MUST be matched, propagated,
-returned, bound for later use, or explicitly ignored with a discard binding.
+`await expr` runs a plan. It is valid only inside a `proc`, named or
+anonymous, or a `test`; elsewhere it is `@effect.invalidAwait`. The
+effects chapter defines it.
 
-## Type ascription and narrowing
-
-`as` writes a type at one position. It is a reserved form in both expression
-and pattern head position and is recognized before the general application and
-constructor-pattern productions, so a list headed by `as` is never the
-application of a value named `as`.
-
-In expression position, `(as type-expr expr)` states the type the operand is
-checked at. It is the general way to write a typed boundary where no
-declaration already supplies one, and its three uses are one rule: it admits a
-widening, it fixes an otherwise ambiguous inference, and it names the
-destination of a conversion.
+### `if`, `match`, `do`
 
 ```vibra
-(as number 1i32)
-(as (array u32) (array.of))
-(as u32 (from.convert 42u8))
-(as str "Hello world")
+if Ordered.less(a b) then
+  return a
+else
+  return b
+endif
+
+let label be if ready then "go" else "wait" endif endlet
+
+match value
+  case Option.some(value: text)
+    return Str.length(text)
+  case Option.none()
+    return 0u64
+endmatch
 ```
 
-Ascription is static. It never inserts a conversion, never narrows, and has no
-runtime representation. The type chapter defines what it admits.
+`if condition then body else body endif` evaluates the `Bool` condition and
+one branch. `match subject case pattern body … endmatch` evaluates the
+subject once and runs the first arm whose pattern matches; arms are checked
+for reachability and exhaustiveness. `do body enddo` runs its statements in a
+scope of its own.
 
-In pattern position, `(as type-expr pattern)` matches one member of a union
-value and binds its payload at that member type. It takes a full type
-expression because a member such as `(array i32)` is not spellable as a path
-segment.
+Each of the three is an expression. Its value is the value of the final
+expression statement of the body that ran. A body that is empty or ends in a
+`let` yields `void`. When the value is used, an `if` MUST have an `else`, and
+every branch that completes normally MUST yield the one expected type; a
+branch of type `Never` yields nothing and is skipped when branches are
+compared. No common supertype, numeric promotion, or union is computed. When
+the value is not used, the form is a statement, an `if` may omit `else`, and
+each branch MUST have type `Void` or `Never`.
 
-```vibra
-(deftype number (union i32 f32)
-  visibility: @public)
+The final expression of a `do`, `if`, or `match` is the value of that form,
+never the result of the enclosing callable.
 
-(defn render (value number) str
-  visibility: @public
-  (match value
-    (as i32 n) (from.convert n)
-    (as f32 x) (from.convert x)))
-```
+Vibra has no loop, jump, or assignment form. Repetition is recursion or the
+standard `Iter` interface. An effectful walk is a recursive `proc` over
+`Iter.next`.
 
-The two positions mirror each other: an expression `as` widens to a written
-type, and a pattern `as` narrows from one. Neither performs a conversion, and
-`as` in expression position MUST NOT be used to narrow.
+## Patterns
+
+Patterns appear in `let`, in `takes`, and in `match` arms, with one grammar
+and one set of rules.
+
+| Pattern | Matches |
+| --- | --- |
+| `_` | Anything; binds nothing |
+| `name` | See below |
+| literal, atom | That value. Float, `void`, and `Never` literals are not patterns |
+| `Owner.case(field: p)`, `User(name: p)` | A case or declared record, by field name; omitted fields are ignored |
+| `Celsius(p)`, `Pair(p q)` | A wrapper or declared tuple, positionally, with exact arity |
+| `{p q}` | A tuple, with exact arity |
+| `{name: p}` | A record, by field name; omitted fields are ignored |
+| `[p q]` | A list of exactly that length |
+
+A bare name that resolves to a visible module value whose initializer is a
+constant expression is a **constant pattern**: it matches that value and binds
+nothing. `true` and `false` are such names. Any other bare name introduces a
+binding. A dotted name names a constructor or a constant and never binds. A
+name that resolves to a function or to a non-constant module value is neither
+and is `@name.redeclaration`. Casing never decides.
+
+A pattern MUST NOT bind one name twice, and a binder MUST NOT shadow a visible
+name. Sibling scopes may reuse a name.
+
+There are no rest, alternative, or guarded patterns, and no pattern tests a
+run-time type. The type chapter defines irrefutability and coverage.
 
 ## Canonical format
 
 `vibra fmt` defines the only canonical representation:
 
-- UTF-8, LF endings, and one trailing newline;
-- two-space indentation and no trailing whitespace;
-- one blank line between top-level forms;
-- `\newline`, `\return`, `\space`, and `\tab` for their four characters,
-  uppercase four-digit `\uNNNN` spelling for every other control or whitespace
-  scalar in the Basic Multilingual Plane, and direct EDN character spelling for
-  every remaining scalar;
-- adjacent lowercase numeric suffixes, preserved exactly when written;
-- leaf lists on one line when they fit within 88 columns;
-- multiline lists keep their line comments on their own indented lines. A
-  comment written on the line of a form goes on the line after that form; any
-  other comment stays before the form that follows it;
-- delimiter placement in every multiline list, commented or not. The opening
-  delimiter shares the first form's line when that form is inline and fits
-  beside it; a hanging opening delimiter above an inline first form is never
-  canonical. It stands alone above a line comment, which keeps its own line,
-  and above a multiline first form, because a form that started beside the
-  delimiter would have to indent its body under its own opening column
-  instead of at the enclosing list's two-space step. The closing delimiter
-  shares the last form's line unless that form is a line comment, which would
-  swallow it, or is an atom that leaves no room for the delimiter within 88
-  columns. A last form that is a list is laid out multiline when, on one
-  line, it would leave no room for the closing delimiters that follow it; a
-  multiline last form ends on its own closing delimiter, and the ones that
-  follow stack onto that same line rather than being orphaned below it.
-  Closing delimiters carry no indentation of their own, so the asymmetry
-  between the two ends is deliberate. Each end is decided on its own;
-- declaration headers before labelled attributes and bodies, in the same
-  canonical order whether or not the declaration holds a comment. A `lambda`
-  orders its attributes the same way, and a comment moves with the form it
-  is attached to;
-- in a multiline declaration, the header forms on the opening line: the
-  declaration head, then each following header form for as long as it is
-  inline, no comment separates it from the form before, and the line stays
-  within 88 columns. The header forms are the name of every declaration, the
-  body of a `deftype`, the type and value of a `def`, the parameters and
-  result of a `defn`, and the target of an `import`. A header form past that
-  point takes its own line;
-- in a multiline declaration, each labelled attribute on one line with its
-  value when both are inline, no comment separates them, and the pair leaves
-  room within 88 columns for one closing delimiter, or for every closing
-  delimiter that follows it when it ends the declaration; otherwise the label
-  and the value each take a line. Every other form of the declaration takes
-  its own line;
-- fixed, labelled, then variadic function or constructor operands;
-- a multiline `do` with its head alone on the opening line and each element on
-  its own line, two spaces in from the head;
-- a `let` of one pair that holds no comment and fits within 88 columns on one
-  line is written on one line. A `let` of two or more pairs is always
-  multiline, and so is a one-pair `let` that holds a comment or does not fit.
-  A multiline `let` has its head alone on the opening line and each pair on its
-  own line, two spaces in from the head, with the pattern and value sharing that
-  line when both are inline, no comment separates them, and the pair leaves room
-  within 88 columns for the closing delimiter that follows it, or for the one
-  that ends the form when it is the last pair. Any other pair gives the pattern
-  one line and the value the next, at the same indentation, and a comment before
-  a pair or after its value keeps its own line at that indentation;
-- a `let-else` that holds no comment and fits within 88 columns on one line is
-  written on one line. Otherwise its head stands alone on the opening line,
-  its pattern and value share the next line when both are inline and fit
-  within 88 columns, and its fallback takes the line after. When the pattern
-  and value do not fit together, the pattern, the value, and the fallback each
-  take a line. All are two spaces in from the head;
-- one pattern/result arm per line in a multiline `match`; and
-- preserved comments, attached to the form whose line they were written on
-  and otherwise to the following form when possible.
+- UTF-8, LF line endings, one trailing newline, no trailing whitespace;
+- two-space indentation and a limit of 88 columns;
+- one blank line between top-level forms, which keep their written order;
+  the imports are already first, as the [grammar](#grammar) requires;
+- one space between tokens on a line; none inside `(`, `)`, `{`, `}`, `[`,
+  `]`, before `(`, or before `:`; one after `:`;
+- numeric suffixes, string contents, and name spellings exactly as written;
+- a construct on one line when it holds no comment, no nested `let`, and
+  fits within the limit; otherwise its opener line, its contents indented one
+  step, and its closer on its own line at the opener's indentation;
+- in a multi-line declaration, each section on its own line, one step in, in
+  this order: `of` or the `case` list, `takes`, `labelled`, `returns`,
+  `given`, `where`, `requires`, `ensures`, `performs`, `role`,
+  `visibility`, `representation`, `external`, `symbol`, `native`, `doc`,
+  then the associated type declarations of an interface or the choices of
+  an `impl`, then nested `fn` and `proc` members, then `impl` blocks, then
+  `do`; within each of these three groups the written order is kept;
+- the statements of a callable body two steps in from the declaration, one
+  step in from `do`; a guard's `else` on the next line one step in from its
+  guard when both do not fit on one line;
+- in a multi-line `if`, `then` on the condition's line and `else` alone on
+  its line at the `if`'s indentation; in a multi-line `match`, each `case`
+  one step in and its body one further step in;
+- a multi-line `let` with `be` on the pattern's line, the initializer on that
+  line when it fits and otherwise on the next line one step in, `else` at
+  the end of the initializer's last line, the fallback one step in, and
+  `endlet` on its own line at the `let`'s indentation; a single-line `let`
+  ends with `endlet` on the same line;
+- a brace or bracket form on one line when it fits, otherwise one entry per
+  line, one step in, with the closing token on its own line;
+- arguments in written order, always; and
+- comments preserved: a comment on a construct's line stays at the end of
+  that line, and any other comment stays on its own line before the form
+  that follows it.
 
-```vibra
-(defn resolve-entry (items (array entry) key str) (result entry lookup-error)
-  (let lower 1u64)
-  (let
-    upper 2u64
-    width (width-of upper))
-  (let
-    (tupleof found rest) (split-first items key)
-    (option.some entry) (find-entry found key (collect-matching-entries rest))
-    count (entry-count entry))
-  (let
-    summary
-    (describe-entry-with-all-of-its-attributes entry count (default-describe-options)))
-  (let-else (option.some second) (items 1u64) (return (result.ok entry)))
-  (let-else
-    (option.some picked) (pick-entry-by-key-and-priority entry key (priority-of entry))
-    (return (result.err (lookup-error.missing key))))
-  (let-else
-    (option.some chosen)
-    (choose-entry-by-key-and-priority entry key (priority-of-entry entry))
-    (return (result.err (lookup-error.missing key))))
-  (result.ok summary))
-```
+Formatting MUST be idempotent and MUST preserve meaning. It never reorders
+anything that is evaluated. If the parser recovered from a syntax error
+anywhere in a file, the formatter MUST return the file's bytes unchanged.
 
-The example shows, in order, a one-line single-pair `let`, a two-pair `let`
-(always multiline), a three-pair `let`, a single-pair `let` whose pair does not
-fit, a one-line `let-else`, a `let-else` whose
-pattern and value share a line, and one whose three operands each take a line.
-The names and calls are illustrative.
+## Exclusions
 
-Formatting MUST be idempotent and semantics-preserving. The formatter MAY
-normalize recoverable presentation but MUST NOT guess through a syntax,
-binding, or type ambiguity.
+The following are not part of the source language. Each is a deliberate
+exclusion; the reason and the condition for revisiting it are recorded in the
+roadmap.
 
-If recovery inserted an error marker, the formatter MUST preserve the original
-UTF-8 document bytes exactly. Canonical whitespace and line-ending rules apply
-only when the tree has no recovery error; rewriting an incomplete or opaque
-leaf would be a semantic guess.
+- commas, semicolons, infix and prefix operators, `=`, grouping parentheses;
+- loops, jumps other than `return`, and assignment;
+- variadic parameters and variadic calls;
+- call-site type arguments: a call whose type arguments its context cannot
+  determine is rejected;
+- an `as` ascription expression and an `as` narrowing pattern;
+- untagged union types and anonymous variant types;
+- tuple index projection;
+- selective, relative, string, and wildcard imports, and re-exports;
+- local named declarations and method-call sugar;
+- string interpolation, raw strings, numeric separators, and non-decimal
+  bases;
+- rest, alternative, and guarded patterns;
+- macros, reader extensions, and any user-defined syntax.
 
-## Exact source attachments
-
-A codebase source attachment is the exact UTF-8 text of one captured <code>.vib</code> module or project data document. It preserves comments, whitespace, line endings, and every source byte that is valid UTF-8. Source spans in an attachment are half-open UTF-8 byte ranges. The attachment's raw source hash and the address of its canonical VIBON wrapper are distinct identities, and neither is the hash of the normalized checked definition derived from that source. Trivia-only edits change the source attachment while leaving checked identity unchanged when checked meaning and entity identity are unchanged. Codebase export writes the captured attachment text exactly and MUST NOT invoke this chapter's formatter implicitly.
+An excluded spelling has no diagnostic of its own; it is whatever the
+grammar makes of it. In particular, a `(` where a top-level form or a
+statement is expected is `@syntax.invalidForm`, reported once over the
+balanced parenthesized form, and `as` anywhere outside a `use` is
+`@syntax.invalidForm` at the `as`.

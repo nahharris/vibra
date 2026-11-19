@@ -1,0 +1,13 @@
+id = "V1-RUNTIME-nexus-m1-fixture"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "workspace-run"
+description = "The Nexus Milestone 1 fixture: an entry in one module counts a binary counter down in another module, which ends by tail-calling a function value that the first module defined, and writes one line to standard output. The result is void and the trace holds the one completed write."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

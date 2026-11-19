@@ -7,6 +7,10 @@ use vibra_diagnostics::Diagnostic;
 
 use crate::corpus::{Case, Corpus};
 use crate::manifest::{CaseExpectations, ExpectedExecution};
+use crate::native::{
+    EntryJob, NativeCounts, NativeObservation, NativeStatus, OBSERVATION, StepperRun,
+};
+use crate::native_exe::{WindowsExecutor, WindowsRun};
 use crate::profile::ConformanceProfile;
 
 /// The one finite memory limit, in bytes, the runner applies to every instance
@@ -120,8 +124,6 @@ pub struct CaseObservation {
     pub effects: Option<String>,
     /// The `@index.v1` document, if the handler provides it.
     pub index: Option<String>,
-    /// A codebase scenario observation from the real workspace service.
-    pub codebase: Option<String>,
     /// Structural source-position query observations.
     pub queries: Vec<QueryObservation>,
     /// Reference-interpreter observation.
@@ -133,6 +135,11 @@ pub struct CaseObservation {
     /// executable case sets it for every program it runs. A rejected program
     /// is no executable case, so a handler leaves it unset.
     pub wasm: Option<BackendObservation<WasmObservation>>,
+    /// What the reference stepper did with the case, set wherever `wasm` is.
+    pub native: Option<NativeObservation>,
+    /// What the `windows` column needs to build and launch the case's entry,
+    /// set wherever `native` is for an entry.
+    pub entry: Option<Box<EntryJob>>,
 }
 
 impl CaseObservation {
@@ -413,6 +420,11 @@ pub struct BackendStatuses {
     /// handler took part in the case, or the case never reached a backend
     /// because its handler failed or was unavailable.
     pub wasm: Option<WasmStatus>,
+    /// The reference stepper's status, under the same conditions as `wasm`.
+    pub native: Option<NativeStatus>,
+    /// The linked executable's status (the `windows` column), or `None` when the
+    /// column was not run or the case never reached the stepper.
+    pub windows: Option<NativeStatus>,
 }
 
 /// One case's result in a run report.
@@ -434,11 +446,59 @@ pub struct CaseReport {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RunReport {
     reports: Vec<CaseReport>,
+    windows_ran: bool,
 }
 
 impl RunReport {
-    fn new(reports: Vec<CaseReport>) -> Self {
-        Self { reports }
+    fn new(reports: Vec<CaseReport>, windows_ran: bool) -> Self {
+        Self {
+            reports,
+            windows_ran,
+        }
+    }
+
+    /// Whether the `windows` column was run: the runner had an executor.
+    #[must_use]
+    pub const fn windows_ran(&self) -> bool {
+        self.windows_ran
+    }
+
+    /// The linked executable's status on every executable case, by case id; a
+    /// case that never reached the stepper counts as a failure. Empty when the
+    /// column was not run.
+    #[must_use]
+    pub fn windows_statuses(&self) -> Vec<(String, NativeStatus)> {
+        if !self.windows_ran {
+            return Vec::new();
+        }
+        self.reports
+            .iter()
+            .filter_map(|report| {
+                let backends = report.backends.as_ref()?;
+                let status =
+                    backends
+                        .windows
+                        .clone()
+                        .unwrap_or_else(|| NativeStatus::Failed {
+                            reason: "the case never reached the executable".to_owned(),
+                        });
+                Some((report.case_id.clone(), status))
+            })
+            .collect()
+    }
+
+    /// The linked executables' counts over the executable cases.
+    #[must_use]
+    pub fn windows_counts(&self) -> NativeCounts {
+        let mut counts = NativeCounts::default();
+        for (_, status) in self.windows_statuses() {
+            match status {
+                NativeStatus::Matched => counts.matched += 1,
+                NativeStatus::Pending(_) => counts.pending += 1,
+                NativeStatus::Failed { .. } => counts.failed += 1,
+            }
+        }
+        counts
     }
 
     /// Per-case results in corpus order.
@@ -498,6 +558,41 @@ impl RunReport {
         counts
     }
 
+    /// The reference stepper's status on every executable case, by case id. A
+    /// case that never reached the stepper, because its handler failed or was
+    /// unavailable, counts as a failure of it.
+    #[must_use]
+    pub fn native_statuses(&self) -> Vec<(String, NativeStatus)> {
+        self.reports
+            .iter()
+            .filter_map(|report| {
+                let backends = report.backends.as_ref()?;
+                let status =
+                    backends
+                        .native
+                        .clone()
+                        .unwrap_or_else(|| NativeStatus::Failed {
+                            reason: "the case never reached the stepper".to_owned(),
+                        });
+                Some((report.case_id.clone(), status))
+            })
+            .collect()
+    }
+
+    /// The reference stepper's counts over the executable cases.
+    #[must_use]
+    pub fn native_counts(&self) -> NativeCounts {
+        let mut counts = NativeCounts::default();
+        for (_, status) in self.native_statuses() {
+            match status {
+                NativeStatus::Matched => counts.matched += 1,
+                NativeStatus::Pending(_) => counts.pending += 1,
+                NativeStatus::Failed { .. } => counts.failed += 1,
+            }
+        }
+        counts
+    }
+
     /// The WebAssembly backend's counts over the executable cases.
     #[must_use]
     pub fn wasm_counts(&self) -> WasmCounts {
@@ -541,20 +636,33 @@ pub struct WasmCounts {
 #[derive(Debug)]
 pub struct ConformanceRunner {
     dispatcher: ProfileDispatcher,
+    windows: Option<WindowsExecutor>,
 }
 
 impl ConformanceRunner {
-    /// Creates a runner using the supplied profile dispatcher.
+    /// Creates a runner using the supplied profile dispatcher. It does not run
+    /// the `windows` column.
     #[must_use]
     pub fn new(dispatcher: ProfileDispatcher) -> Self {
-        Self { dispatcher }
+        Self {
+            dispatcher,
+            windows: None,
+        }
+    }
+
+    /// Runs the `windows` column with `executor`: every executable case the
+    /// stepper completes is built, linked, and launched as a process.
+    #[must_use]
+    pub fn with_windows(mut self, executor: WindowsExecutor) -> Self {
+        self.windows = Some(executor);
+        self
     }
 
     /// Runs all cases in deterministic corpus order.
     #[must_use]
     pub fn run(&self, corpus: &Corpus) -> RunReport {
         let cases = corpus.cases().iter().collect::<Vec<_>>();
-        RunReport::new(self.run_cases(&cases))
+        RunReport::new(self.run_cases(&cases), self.windows.is_some())
     }
 
     /// Runs `cases` on as many threads as the machine has, and reports them in
@@ -640,12 +748,27 @@ impl ConformanceRunner {
                     };
                 }
                 let wasm = wasm_status(case, &observation);
+                let native = native_status(case, &observation);
+                let windows = self.windows.as_ref().and_then(|executor| {
+                    windows_status(executor, case, &observation, native.as_ref())
+                });
+                let status = differential_status(
+                    &interpreter,
+                    wasm.as_ref(),
+                    native.as_ref(),
+                    windows.as_ref(),
+                );
                 CaseReport {
                     case_id,
                     required_profile: required,
                     provided_profile: Some(provided),
-                    status: differential_status(&interpreter, wasm.as_ref()),
-                    backends: Some(BackendStatuses { interpreter, wasm }),
+                    status,
+                    backends: Some(BackendStatuses {
+                        interpreter,
+                        wasm,
+                        native,
+                        windows,
+                    }),
                 }
             }
             DispatchResult::Unavailable { required, reason } => {
@@ -657,6 +780,8 @@ impl ConformanceRunner {
                     backends: executable.then(|| BackendStatuses {
                         interpreter: status.clone(),
                         wasm: None,
+                        native: None,
+                        windows: None,
                     }),
                     status,
                 }
@@ -676,6 +801,8 @@ impl ConformanceRunner {
                     backends: executable.then(|| BackendStatuses {
                         interpreter: status.clone(),
                         wasm: None,
+                        native: None,
+                        windows: None,
                     }),
                     status,
                 }
@@ -851,12 +978,6 @@ impl CaseExpectations {
             self.index.as_deref(),
             observation.index.as_deref(),
         )?;
-        compare_snapshot(
-            case,
-            "codebase",
-            self.codebase.as_deref(),
-            observation.codebase.as_deref(),
-        )?;
         if self.queries.len() != observation.queries.len() {
             return Err(format!(
                 "query observation count mismatch: expected {}, got {}",
@@ -910,13 +1031,190 @@ impl CaseExpectations {
 /// in the case, so that only the interpreter judges it.
 fn wasm_status(case: &Case, observation: &CaseObservation) -> Option<WasmStatus> {
     let wasm = observation.wasm.as_ref()?;
-    Some(wasm_outcome_status(case, observation, wasm))
+    Some(executor_status(
+        case,
+        observation,
+        wasm,
+        "wasm",
+        "the module",
+    ))
 }
 
-fn wasm_outcome_status(
+/// The stepper's status: each of its runs, held to the comparison the Wasm
+/// backend is held to.
+fn native_status(case: &Case, observation: &CaseObservation) -> Option<NativeStatus> {
+    Some(match observation.native.as_ref()? {
+        NativeObservation::Pending { package, .. } => {
+            NativeStatus::Pending(package.clone())
+        }
+        NativeObservation::Ran(runs) => {
+            for run in runs {
+                if let WasmStatus::Failed { reason } = executor_status(
+                    case,
+                    observation,
+                    &run.observation,
+                    "stepper",
+                    "the stepper",
+                ) {
+                    let quota = if run.quota == u64::MAX {
+                        "unbounded".to_owned()
+                    } else {
+                        format!("quota {}", run.quota)
+                    };
+                    return Some(NativeStatus::Failed {
+                        reason: format!("{reason} ({quota})"),
+                    });
+                }
+            }
+            NativeStatus::Matched
+        }
+    })
+}
+
+/// The linked executable's status: built and launched when the stepper matched,
+/// each launch held to the case's one expectation by the comparison the stepper
+/// is held to, and the trap origin held to the stepper's.
+///
+/// A case the stepper holds stays pending at the same package; one the stepper
+/// fails fails. The executable's result is read from the launcher's dump of it
+/// and held to the case's snapshot, and to the stepper's result of the same
+/// quota. A run whose result the dump cannot give (it was cut off by a bound of
+/// the launcher, or holds a value the reader has no row for) leaves the case
+/// pending at the package that owns the observation of values.
+fn windows_status(
+    executor: &WindowsExecutor,
+    case: &Case,
+    observation: &CaseObservation,
+    native: Option<&NativeStatus>,
+) -> Option<NativeStatus> {
+    let stepper_runs = match (native?, observation.native.as_ref()) {
+        (NativeStatus::Pending(package), _) => {
+            return Some(NativeStatus::Pending(package.clone()));
+        }
+        (NativeStatus::Failed { .. }, _) => {
+            return Some(NativeStatus::Failed {
+                reason: "the stepper fails the case".to_owned(),
+            });
+        }
+        (NativeStatus::Matched, Some(NativeObservation::Ran(runs))) => runs,
+        (NativeStatus::Matched, _) => return None,
+    };
+    let Some(job) = observation.entry.as_deref() else {
+        return Some(NativeStatus::Failed {
+            reason: "the case has no entry to build".to_owned(),
+        });
+    };
+    let runs = match executor.observe(&case.manifest().id, job) {
+        Ok(runs) => runs,
+        Err(reason) => return Some(NativeStatus::Failed { reason }),
+    };
+    Some(windows_runs_status(case, observation, &runs, stepper_runs))
+}
+
+fn windows_runs_status(
+    case: &Case,
+    observation: &CaseObservation,
+    runs: &[WindowsRun],
+    stepper_runs: &[StepperRun],
+) -> NativeStatus {
+    let mut result_unobserved = false;
+    for run in runs {
+        let quota = if run.quota == u64::MAX {
+            "unbounded".to_owned()
+        } else {
+            format!("quota {}", run.quota)
+        };
+        if let Some(stepper) = stepper_runs.iter().find(|s| s.quota == run.quota)
+            && stepper.trap_origin != run.trap_origin
+        {
+            return NativeStatus::Failed {
+                reason: format!(
+                    "trap origin mismatch: the stepper's {:?}, the executable's {:?} ({quota})",
+                    stepper.trap_origin, run.trap_origin
+                ),
+            };
+        }
+        let stepper_execution = stepper_runs
+            .iter()
+            .find(|s| s.quota == run.quota)
+            .and_then(|s| match &s.observation.outcome {
+                WasmObservation::Completed(execution) => {
+                    Some((execution, s.observation.program_failed))
+                }
+                _ => None,
+            });
+        if !run.result_observed {
+            // The result is not observable, so the case cannot be `matched`;
+            // everything else the executable reports is still held to the
+            // stepper's: the command outcome and the audit trace.
+            result_unobserved = true;
+            if let (Some((stepper, stepper_failed)), WasmObservation::Completed(actual)) =
+                (stepper_execution, &run.observation.outcome)
+                && (stepper.audit_trace != actual.audit_trace
+                    || stepper_failed != run.observation.program_failed)
+            {
+                return NativeStatus::Failed {
+                    reason: format!(
+                        "the executable's audit trace or command outcome differs from the stepper's ({quota})"
+                    ),
+                };
+            }
+            continue;
+        }
+        if let WasmStatus::Failed { reason } = executor_status(
+            case,
+            observation,
+            &run.observation,
+            "windows",
+            "the executable",
+        ) {
+            return NativeStatus::Failed {
+                reason: format!("{reason} ({quota})"),
+            };
+        }
+        // Direct comparison: when both completed, the two canonical results
+        // are the same text, whatever the case's snapshot says.
+        if let (Some((stepper, _)), WasmObservation::Completed(actual)) =
+            (stepper_execution, &run.observation.outcome)
+            && stepper.result != actual.result
+        {
+            return NativeStatus::Failed {
+                reason: format!(
+                    "result mismatch: the stepper's {:?}, the executable's {:?} ({quota})",
+                    stepper.result, actual.result
+                ),
+            };
+        }
+    }
+    let expects_result = case
+        .manifest()
+        .expectations
+        .interpreter
+        .as_ref()
+        .is_some_and(|expected| expected.result.is_some());
+    unobserved_verdict(result_unobserved, expects_result)
+}
+
+/// The status of an executable whose every field agreed: `matched`, unless a
+/// result the case expects could not be observed, which leaves the case pending
+/// at the package that owns the observation of values, never `matched`.
+fn unobserved_verdict(result_unobserved: bool, expects_result: bool) -> NativeStatus {
+    if result_unobserved && expects_result {
+        NativeStatus::Pending(OBSERVATION.to_owned())
+    } else {
+        NativeStatus::Matched
+    }
+}
+
+/// An executor that reports in the terms of [`WasmObservation`], held to the
+/// case's one expectation. `name` is how a comparison names it and `subject`
+/// how a reason refers to it.
+fn executor_status(
     case: &Case,
     observation: &CaseObservation,
     wasm: &BackendObservation<WasmObservation>,
+    name: &str,
+    subject: &str,
 ) -> WasmStatus {
     let expectations = &case.manifest().expectations;
     match &wasm.outcome {
@@ -924,7 +1222,7 @@ fn wasm_outcome_status(
             if let Some(event) = &expectations.host_event {
                 return WasmStatus::Failed {
                     reason: format!(
-                        "host event mismatch: expected {event}, but the module completed"
+                        "host event mismatch: expected {event}, but {subject} completed"
                     ),
                 };
             }
@@ -936,7 +1234,7 @@ fn wasm_outcome_status(
             }) {
                 return WasmStatus::Failed {
                     reason: format!(
-                        "trap mismatch: expected {}, but the module completed",
+                        "trap mismatch: expected {}, but {subject} completed",
                         trap.code.as_atom()
                     ),
                 };
@@ -951,7 +1249,7 @@ fn wasm_outcome_status(
             {
                 return WasmStatus::Failed {
                     reason: format!(
-                        "command outcome mismatch: the interpreter's entry {} err, the module's {}",
+                        "command outcome mismatch: the interpreter's entry {} err, {subject}'s {}",
                         if interpreter {
                             "returned"
                         } else {
@@ -963,7 +1261,7 @@ fn wasm_outcome_status(
             }
             compare_execution(
                 case,
-                "wasm",
+                name,
                 expectations.interpreter.as_ref(),
                 Some(actual),
             )
@@ -985,7 +1283,7 @@ fn wasm_outcome_status(
             } else {
                 WasmStatus::Failed {
                     reason: format!(
-                        "trap mismatch: the module trapped with {code}, which the case does not expect"
+                        "trap mismatch: {subject} trapped with {code}, which the case does not expect"
                     ),
                 }
             }
@@ -1010,6 +1308,8 @@ fn wasm_outcome_status(
 fn differential_status(
     interpreter: &CaseStatus,
     wasm: Option<&WasmStatus>,
+    native: Option<&NativeStatus>,
+    windows: Option<&NativeStatus>,
 ) -> CaseStatus {
     let mut reasons = Vec::new();
     match interpreter {
@@ -1025,6 +1325,12 @@ fn differential_status(
     }
     if let Some(WasmStatus::Failed { reason }) = wasm {
         reasons.push(format!("wasm backend: {reason}"));
+    }
+    if let Some(NativeStatus::Failed { reason }) = native {
+        reasons.push(format!("native backend: stepper: {reason}"));
+    }
+    if let Some(NativeStatus::Failed { reason }) = windows {
+        reasons.push(format!("native backend: windows: {reason}"));
     }
     if reasons.is_empty() {
         CaseStatus::Passed
@@ -1089,4 +1395,20 @@ fn compare_execution(
 
 fn canonical_audit_snapshot(events: &[vibra_host::AuditEvent]) -> String {
     format!("{}\n", vibra_host::trace_to_vibon(events))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_unobserved_result_the_case_expects_is_pending_never_matched() {
+        assert_eq!(
+            unobserved_verdict(true, true),
+            NativeStatus::Pending("X3-18".to_owned())
+        );
+        assert_eq!(unobserved_verdict(false, true), NativeStatus::Matched);
+        assert_eq!(unobserved_verdict(true, false), NativeStatus::Matched);
+        assert_eq!(unobserved_verdict(false, false), NativeStatus::Matched);
+    }
 }

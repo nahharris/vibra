@@ -18,10 +18,10 @@ use crate::support::{TempDir, json, run_workspace, spelled};
 
 /// Each example and the tests it holds.
 const EXAMPLES: [(&str, u64); 5] = [
-    ("codebase-demo", 2),
     ("m3-catalog", 8),
     ("m4-console", 1),
     ("m4-demo", 0),
+    ("nexus-m1", 0),
     ("stage-3a-config", 6),
 ];
 

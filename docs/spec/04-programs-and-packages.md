@@ -1,761 +1,901 @@
 # Vibra programs and packages
 
 Status: normative target
-Implementation status: M1 supplies generic VIBON data and structural query
-metadata; M2 decodes projects, resolves local modules, and supports init,
-check, run, and test; M3 embeds the standard library as the toolchain input.
-Ordinary dependency delivery and build products remain unimplemented.
-See the [release roadmap](../roadmap/README.md) for delivery status.
-`run` and `test` execute the reference interpreter. Milestone 4 Step 13 closes
-the Stage 4B contracts of this chapter, the `host` list and effect modules of the
-standard-library manifest, the test host world, and the target `effects`
-diagnostics, and implements none of them; Steps 14 to 18 do.
+Implementation status: none of this chapter is implemented. The
+[release roadmap](../roadmap/README.md) schedules it.
 
 ## VIBON data documents
 
-Vibra Object Notation (VIBON) is the non-executable `.vibon` document grammar
-for compiler-owned persistent data. `.vib` source and `.vibon` data share the
-lexical reader and literal spellings, but the file extension selects one
-document grammar before parsing; contents are never used to guess the mode. A
-VIBON document is exactly one value from this closed subset:
+Vibra Object Notation (VIBON) is the `.vibon` grammar for compiler-owned
+persistent data. It is the data subset of Vibra source: the literals, and
+the brace and bracket forms that hold them. A VIBON value is written exactly
+as the same value is written in a `.vib` file. It has no names, no calls,
+and no declarations, so it is parsed and validated and never executed.
+
+The file extension selects the grammar before parsing; contents are never
+used to guess. A document presented to the wrong loader is
+`@data.invalidExtension` before its contents are read.
+
+A VIBON document is exactly one value:
 
 ```ebnf
-data = string | character | boolean | integer | float | void | atom-name
-     | "(", "record", { label, data }, ")"
-     | "(", "array", { data }, ")"
-     | "(", "tuple", { data }, ")"
-     | "(", "dict", { data, data }, ")" ;
+data   = string | character | boolean | integer | float | void | atom
+       | tuple | record | list | dict ;
+tuple  = "{", { data }, "}" ;
+record = "{", field, { field }, "}" ;
+field  = identifier, ":", data ;
+list   = "[", { data }, "]" ;
+dict   = "[", entry, { entry }, "]" | "[", ":", "]" ;
+entry  = data, ":", data ;
 ```
 
-Records contain unique labelled fields. Dicts contain alternating key/value
-forms directly and require an even number of forms. Bare symbols, applications,
-imports, bindings, declarations, and host operations are not data and MUST be
-rejected in a VIBON document. The data is parsed and validated, never executed.
-Characters, `void`, and suffixed numerics use the source reader's literal
-spelling and carry the same values and exact primitive types.
+Every terminal is spelled as in the
+[source language](01-source-language.md#lexical-structure): literals keep
+their numeric suffixes, `true` and `false` are the booleans, and `//` starts
+a comment. `true` and `false` are the `boolean` production, and outside a
+field name they are the only identifiers the data grammar admits: any other
+identifier, a doc string, and an application such as
+`Option.some(value: 1i32)` are `@syntax.invalidForm` at the token. A typed
+decoder rejects a wrong shape afterwards, with `@data.invalidShape`. There
+are no commas. `{}` is the empty tuple, `[]` the empty
+list, and `[:]` the empty dict. A field name is an identifier, so no field
+of any schema is a reserved word or contains a hyphen. A record's fields are
+unique. A later duplicate dict key is an error in VIBON, `@data.duplicateKey`,
+where source would let it replace the earlier one.
 
-Each compiler-owned format defines a closed record schema and a version atom.
-Unknown, duplicate, or missing fields are errors. Generic records retain source
-field order until a typed schema supplies an explicit order. Generic dicts sort
-keys by the complete canonical encoded key bytes. Canonical output uses the
-source formatter's whitespace rules, schema or generic field order, canonical
-key order for dicts, LF endings, and one trailing newline.
+This is the only VIBON grammar. Every compiler-owned document is written in
+it: project and lock files, host worlds, audit traces, build manifests,
+conformance snapshots, and canonical value encodings. Their schemas, in this
+and the other chapters, are stated as records, lists, and dicts and mean
+these forms.
 
-An atom parsed by the generic VIBON grammar is an atom value. A typed schema
-may declare a particular slot to be an entity reference; only then is that atom
-resolved to a canonical code identity. For example, `format: @project.v1` is a
-version atom, a dependency dict key `@std` is an alias atom, and an entry in a
-target's `effects` array is an effect-entity reference. Every schema slot
-declares exactly one role, and an entity-reference slot additionally declares
-the one entity kind it requires. No decoder may infer the role from the atom's
-spelling.
+### Schemas
 
-Decoding and resolution are separate phases. Decoding validates document
-grammar, schema shape, and the syntactic form of every atom, and never consults
-the source graph. An entity-reference slot is resolved during project checking,
-once the lock, vendored dependencies, and source graph are available; the
-resolved entity MUST exist and MUST have the kind its slot requires. An
-atom-value slot is never resolved in either phase.
+Each compiler-owned format defines a closed record schema and a version
+atom, carried in its first field `format`. A schema states, for every field,
+its type and whether it is required or optional; for every dict slot, its
+key type; and for every number slot, its exact width. There is no null
+value: an absent optional field is omitted from the document, and the
+[JSON projection](05-tooling.md#machine-contracts) of a document writes
+`null` for it. A field map that may be empty is a dict, never a record,
+because `{}` is the empty tuple. For the same reason a record whose fields
+are all optional has no all-absent spelling: every such schema requires a
+present record to hold at least one field, and the enclosing field is
+omitted when there is nothing to say. A schema may give an optional field a
+default, which the reader supplies when the field is absent, so a document
+that omits the field and one that writes the default decode to the same
+value.
 
-The source graph MUST reject `.vibon` as a module extension, and a persistent
-data loader MUST reject `.vib`. Vibra has no extension fallback, content sniffing,
-or compatibility bridge between the two grammars. A document presented to the
-wrong loader emits `@data.invalid-extension` before its contents are parsed.
+A reader validates a document in this order, and reports one fault once:
 
-This literal subset is Vibra's object notation. Project files, lock files, and
-build metadata use it instead of persistent JSON. JSON remains the machine
-interchange format for CLI and MCP responses.
+1. lexical and grammatical faults, with the
+   [source language](01-source-language.md#lexical-structure)'s codes:
+   `@syntax.invalidEncoding`, the literal codes, `@syntax.unmatchedDelimiter`,
+   and `@syntax.invalidForm` for a form outside the data grammar;
+2. a repeated record field, `@data.duplicateField` at the later field. A
+   field name is compared as written, so this needs no schema;
+3. format selection: a `format` the reader does not implement is
+   `@data.invalidValue` at the `format` field; a reader never guesses or
+   upgrades. The selected schema types every slot, each dict's key slot
+   included;
+4. shape, field by field in schema order: a required field missing, an
+   unknown field, a value of the wrong form (a list where a record is
+   required, a tuple of the wrong arity), `@data.invalidShape` at the field
+   or the value;
+5. value: a literal of the right form whose value the slot does not admit,
+   `@data.invalidValue` at the value. This covers a number of the wrong
+   width or out of range, an unsuffixed number in a slot with no number
+   type, an atom outside a closed set, a string that fails a stated
+   constraint, and a document whose fields relate wrongly. Dict keys are
+   validated here like any other value;
+6. a repeated dict key, `@data.duplicateKey` at the later key. Keys are
+   compared as decoded values of the key slot's type, so the comparison
+   happens only after steps 3 to 5 have typed and accepted them.
 
-The step 4–10 reader supplies the extension-selected shared lexical/document
-mode boundary, the shared literal/name surface, and generic VIBON value
-validation with canonical data formatting. Project-specific record schemas and
-source-graph resolution remain later milestone work.
+An unsuffixed number is accepted by the grammar and typed by the schema slot
+it lands in. A slot with no number type rejects it. In canonical output every
+number carries its suffix.
+
+An atom in VIBON is an atom value. A typed schema may declare one slot to be
+an entity reference of one stated kind; only that slot is resolved, during
+project checking, and the resolved entity MUST exist (`@name.unknownSymbol`
+at the slot) and have that kind (`@name.wrongEntityKind` at the slot). No
+decoder infers a slot's role from an atom's spelling. Decoding validates
+shape and value and never consults the source graph.
+
+### Decoded values and canonical bytes
+
+A document is compared, sorted, and hashed by its **decoded value**, never
+by its spelling. A string or character decodes to its scalar sequence, so
+`"a"` and `"\u{61}"` are one key; a number decodes to its type and value, so
+`1` and `1u8` are one `U8` key once the schema types the slot and `0.0f64`
+and `-0.0f64` are two `F64` values; an atom decodes to its parts; a compound
+decodes recursively, a record to its set of named fields, with every absent
+defaulted field holding its default. Two dict keys are duplicates when their
+decoded values are equal under the key type's `Ordered` implementation. A
+grammar-only reader, which has no schema, has no steps 3 to 5: it compares
+decoded keys with the written suffix as part of a number's value.
+
+**Dict order.** A VIBON dict has one normative order: its entries ascend by
+the `Ordered` order of the key slot's type, which is the canonical key order
+of the [type chapter](02-type-system.md#dict-keys-equality-and-order). The
+keys are compared as typed values, never as text or encoded bytes, so `2u8`
+precedes `10u8`. Canonical serialization and every tool that renders or
+traverses a decoded dict use this order.
+
+**Opaque data** is data no schema describes: the record of an audit event
+of an unknown kind, and everything nested in it. A dict inside opaque data
+has no typed key slot, so it has its own rule: each key is serialized to its
+canonical bytes, with a number keeping its suffix exactly as written, and
+the entries ascend by the unsigned byte order of those key bytes, a shorter
+key before a longer one it prefixes. Two such keys are duplicates exactly
+when their canonical bytes are equal. A typed slot always keeps the key
+type's order; the byte order applies only where no schema types the key.
+
+**Canonical serialization** is defined for a document validated against a
+schema. Its output, the document's **canonical bytes**, is fully determined
+by the decoded value and the schema, has no comment, and has no layout:
+
+- UTF-8, on one line: the bytes contain no LF and no CR, and end with the
+  document's closing token, with no trailing newline;
+- exactly one space between two adjacent elements of a compound, and one
+  after each `:`; no other whitespace, so none inside brackets or before
+  `:`;
+- a string as the shortest literal: `\"`, `\\`, `\n`, `\r`, and `\t` for
+  those scalars, `\u{H}` with the fewest upper-case hexadecimal digits for
+  any other scalar below U+0020 and for U+007F, and every other scalar
+  written directly; a character likewise, with `\'` for the quote;
+- an integer as its minimal decimal digits and its exact suffix; a float as
+  the [canonical text](06-runtime.md#floating-point-operations) of the
+  runtime chapter and its exact suffix; `true` and `false`; an atom as its
+  parts;
+- a record's fields in schema order. An absent optional field is omitted,
+  and so is a field whose value equals its schema default, whatever the
+  input spelled;
+- a record in opaque data with its fields in the order of the UTF-8 bytes
+  of their names and nothing omitted, and a number in opaque data with its
+  minimal digits and the suffix it was written with, or none;
+- a dict's entries in dict order, or in the byte order of opaque data where
+  no schema types the key; a list's elements in their order;
+- an empty compound as `{}`, `[]`, or `[:]`.
+
+Every identity hash defined over a record covers its canonical bytes. The
+hashes of exact input bytes are deliberate exceptions: the
+[workspace revision](05-tooling.md#snapshot-claim-and-witness-identity),
+the lock's `project` digest, the [content hash](#content-hash) of a file
+tree, the source and output digests of a build record, and the artifact
+identity. They cover the bytes as captured and canonicalize nothing.
+
+A file the toolchain writes for a document with no human author (a lock
+file, a build record, a snapshot) is the document's canonical text laid out
+by the formatter's layout rules and ended with one LF. Laying out changes
+whitespace only, so reading the file and serializing it gives the canonical
+bytes again. No hash defined over a canonical record covers the laid-out
+file. A hash of exact input bytes does when the file is one of its inputs:
+the workspace revision covers the lock file's bytes exactly as they are on
+disk, layout included.
+
+The **source-preserving formatter** is a different operation. `vibra fmt`
+and the project edits of the [tooling chapter](05-tooling.md#formatting)
+keep comments, written spellings, and the written order of dict entries, and
+apply only the layout rules, the 88-column limit among them, which belong
+to the formatter alone; they never produce canonical bytes, and a hash is
+never taken over their output.
+
+Project files, lock files, build metadata, host worlds, and canonical value
+encodings use VIBON. JSON is the interchange format of CLI and MCP responses
+only.
 
 ## Project file
 
-A project is rooted by `project.vibon`. It contains one `@project.v1` record:
+A project is rooted by `project.vibon`, one `@project.v2` record:
 
 ```vibon
-(record
-  format: @project.v1
-  package: (record
-    name: "hello"
-    version: "0.1.0")
-  targets: (array
-    (record
+{
+  format: @project.v2
+  package: {name: "hello" version: "0.1.0"}
+  targets: [
+    {
       name: @hello
       kind: @bin
       root: "src/hello"
       entry: @hello.main.main
-      effects: (array @std.fs.read @std.io.stdout)))
-  dependencies: (dict
-    @std (record
-      kind: @git
-      git: "https://github.com/nahharris/vibra-stdlib.git"
-      rev: "0123456789abcdef0123456789abcdef01234567"
-      target: @core)))
+      effects: [@std.env.EnvReadArgs @std.fs.DirReadText @std.io.StdoutText]
+      grants: [
+        @args: {
+          provider: @host.env.args
+          resource: {kind: @processArguments}
+          after: []
+        }
+        @notes: {
+          provider: @host.fs.directory
+          resource: {kind: @argumentPath index: 0u64 source: @args}
+          policy: {
+            format: @scopePolicy.v1
+            family: @filesystem
+            expression: {
+              kind: @fileRule
+              root: @notes
+              prefix: []
+              depth: @tree
+              actions: [@read]
+              names: {kind: @suffix value: ".txt"}
+            }
+          }
+          after: [@args]
+        }
+        @out: {
+          provider: @host.io.stdout
+          resource: {kind: @processStream}
+          after: []
+        }
+      ]
+    }
+  ]
+  dependencies: [:]
+}
 ```
 
-### M2 `@project.v1` schema
+This target reads `.txt` files, and nothing else, anywhere under the
+directory named by the program's first argument, and writes to standard
+output.
 
-The M2 decoder closes the following typed schema. Records may be written in any
-field order, but canonical formatting uses the order shown. Unknown fields,
-missing required fields, and wrong value kinds are `@data.invalid-shape`;
-duplicate record labels are `@data.duplicate-field`, and duplicate dependency
-dict keys are `@data.duplicate-key`. The decoder retains each field and value
-span with its source identity and does not resolve an atom or read a path.
+| Record | Fields, in canonical order | Constraint |
+| --- | --- | --- |
+| project | `format`, `package`, `targets`, `dependencies` | all required; `targets` a list with at least one target; `dependencies` a dict from `Str` name to dependency, possibly empty |
+| package | `name`, `version` | strings; `name` satisfies the source identifier grammar, is not a reserved word, and is camelCase; `version` is one semantic version, never a range |
+| target | `name`, `kind`, `root`, `entry`, `effects`, `grants` | `name` is a one-part atom whose part is not a reserved word; `kind` is `@bin` or `@lib`; `root` a `Str`; a binary requires `entry` (an entity reference), `effects` (a list of entity references), and `grants` (a dict from leaf atom to grant binding); a library omits all three |
+| grant binding | `provider`, `resource`, `policy`, `limits`, `after` | `provider`, `resource`, `after` required; `policy` and `limits` optional; a present `limits` holds at least one bound; see [Targets](#targets) |
+| limits | `invocations`, `inputBytes`, `outputBytes` | each an optional `U64`; at least one present |
+| path dependency | `kind`, `path`, `target` | `kind` is `@path`; `path` a `Str` confined beneath the project root; `target` an optional atom |
+| Git dependency | `kind`, `git`, `rev`, `target` | `kind` is `@git`; `git` is an HTTPS URL without userinfo; `rev` is 40 lower-case hexadecimal digits; `target` an optional atom |
 
-| Record | Field order | Type | Requiredness and constraint |
-| --- | --- | --- | --- |
-| project | `format`, `package`, `targets`, `dependencies` | atom, record, array, dict | all required; `format` is exactly `@project.v1`; `targets` contains at least one target; `dependencies` may be empty |
-| package | `name`, `version` | string, string | both required; `name` is kebab-case and `version` is one semantic version, never a range |
-| target | `name`, `kind`, `root`, `entry`, `effects` | atom, atom, string, atom, array | `name`, `kind`, and `root` required; `name` is one kebab-name atom component; `kind` is `@bin` or `@lib`; a binary requires `entry` and `effects`; a library omits both |
-| path dependency | `kind`, `path`, `target` | atom, string, atom | `kind` is `@path`; `path` required; `target` optional |
-| Git dependency | `kind`, `git`, `rev`, `target` | atom, string, string, atom | `kind` is `@git`; `git` is HTTPS; `rev` is exactly 40 lowercase hexadecimal characters; `target` optional |
+A `format` other than `@project.v2` is rejected under the
+[schema rules](#schemas); there is no fallback and no automatic migration.
+`project.vib` is never searched.
 
-The dependency value is selected by its `kind` field. A dependency dict key is
-an alias atom value whose spelling is one kebab-name component. `format`, target `name` and `kind`, and dependency `kind`
-are atom values selected by their schema slots. Target `entry` is an entity
-reference requiring a declaration; each target `effects` item is an entity
-reference requiring an effect root; and dependency `target` is an entity
-reference requiring a library target. These references are retained as typed
-unresolved values by the decoder and are resolved only after the source graph
-and lock inputs exist. An atom's spelling never changes its role.
+Project tooling preserves comments where it can and rewrites changed data
+with the source-preserving formatter.
 
-The M2 decoder accepts only the records above and the generic VIBON literals
-they contain. It performs no filesystem discovery, dependency sync, network
-access, or source resolution. `root` and path-dependency `path` strings are
-opaque schema values in M2: every valid VIBON string is accepted, including
-relative, absolute-looking, and traversal-looking spellings. Path syntax,
-normalization, containment, target-root overlap,
-entry-kind, and dependency-target diagnostics belong to the later graph and
-resolver phases; the decoder must report the shape error before those phases
-when the record is malformed.
+### Discovery and the source snapshot
 
-M2 decodes this record through a closed typed schema before it acquires any
-source files. Schema-selected atom roles are retained as values until the
-source graph and resolver phases have explicit inputs. The standard library is
-embedded in the toolchain, as the standard-library input section below states;
-ordinary local/Git dependency sync and lock generation remain Milestone 5 work. A syntactically valid project feature
-outside the selected M2 profile reports `@tool.unavailable` rather than being
-silently ignored or executed through a fallback.
+Discovery starts at a given directory, or at a given file's parent, and
+examines that directory and each ancestor. The first directory that contains
+a regular file named exactly `project.vibon` is the project root. No such
+file is `@project.notFound`. If the nearest marker cannot be read or
+decoded, discovery reports that failure and does not fall back to an older
+ancestor. A marker that is a symbolic link or junction is a project
+filesystem failure.
 
-Project tooling preserves comments when possible and rewrites changed data in
-canonical form. There is no executable `(project ...)` declaration and no
-legacy project format fallback. `project.vib` is not searched or accepted as a
-project document.
+Every target `root` MUST be a non-empty relative path without `.` or `..`
+parts. Its canonical directory MUST exist inside the canonical project root,
+compared by path components; otherwise it is `@project.invalidTargetRoot`.
+Canonical target roots MUST be pairwise disjoint, neither equal nor nested,
+or the later one is `@project.overlappingTargetRoots`. These checks finish
+before any source directory is listed.
 
-### M2 project discovery and source snapshot
+Below a root, a symbolic link or junction MUST resolve inside both the
+project root and its own source root. An escaping link or a directory cycle
+is `@module.pathEscape`; a dangling or unreadable link is
+`@module.ioError`. A canonical directory is walked once, and a linked file
+is admitted once, at its first path in sorted order. A source root MUST NOT
+itself be a link. No source byte is read before these checks pass.
 
-The workspace discovery API accepts an existing directory or an existing file.
-For a directory it starts at that directory; for a file it starts at the
-file's parent directory. It canonicalizes the start before searching and then
-examines that directory followed by each parent up to the filesystem root.
-The first directory containing an exact regular file named `project.vibon` is
-the project root. A caller that supplies a missing path, a non-directory and
-non-file path, or a path whose ancestor chain contains no such file receives
-`@project.not-found` at empty span `0..0` with no source ID; discovery never
-searches a sibling, child, or unrelated working directory. If the nearest
-exact file exists but cannot be read or decoded, discovery reports that
-failure and MUST NOT fall back to an older ancestor. The marker itself MUST be
-a regular file in its containing directory; a marker symlink or junction is a
-project filesystem failure. `project.vib` is not a marker and is rejected only
-when a caller explicitly presents it to the data loader, which emits
-`@data.invalid-extension`.
+A regular file is a module only when its extension is exactly `.vib`. Every
+file and directory name on a module's path MUST satisfy the source identifier
+grammar and MUST NOT be a reserved word, or the path is
+`@module.invalidSegment`. Names are compared with
+exact case. Two paths under one root that differ only by case are
+`@module.caseCollision` on every host, and on a case-insensitive filesystem
+a reference whose case differs from the file's actual name is
+`@module.unknownPath`. A file `text.vib` beside a directory `text/` is
+`@module.fileDirectoryCollision`. Entries are sorted by project-relative
+path. Source identities are project-relative paths with `/` separators, and
+bytes are copied exactly into an immutable snapshot: repeated snapshots of an
+unchanged tree are identical. Later phases receive the snapshot and no
+filesystem access.
 
-Discovery returns the canonical project root, the canonical marker path, and
-the typed project value. The source identity of the marker is exactly
-`project.vibon`; all later source identities are project-relative paths using
-`/` separators. The discovery and snapshot APIs never read a dependency path,
-clone a Git URL, consult a cache, or inspect a lock file.
+The optional top-level `tests/` directory is the source root of the reserved
+test unit `@tests`, walked under the same rules and required to be disjoint
+from every target root. A target or dependency named `tests` or `std` is
+`@project.reservedUnitName`.
 
-Before source walking, every target `root` MUST be a non-empty relative path
-with no `.` or `..` component. Its canonical directory MUST exist, be a
-directory, and be contained by the canonical project root using path-component
-comparison. A failure is `@project.invalid-target-root` at the target's root
-string span; a non-security filesystem failure is `@project.io-error` at the
-same span. Canonical target roots MUST be pairwise disjoint. Equality and
-nested containment in either direction emit `@project.overlapping-target-roots`
-at the later target's root span with a related span for the earlier root. These
-checks MUST finish before any target directory is enumerated or any `.vib`
-bytes are read.
+## Packages, units, and targets
 
-Source walking uses `symlink_metadata` and canonical path components. A
-symlink or junction encountered at a target root or below it MUST resolve to a
-canonical path inside both the project root and the owning source root; an
-escaping link emits `@module.path-escape`, and a dangling or unreadable link
-emits `@module.io-error`. In-root links are allowed, but canonical directory
-identity is tracked: a cycle is reported as `@module.path-escape`, and an
-already visited canonical directory is skipped so aliases cannot duplicate a
-module. A linked file is admitted once, at the lexicographically first
-project-relative path. A source root itself MUST NOT be a link; a target root
-is canonicalized as part of target-root validation. No source byte is read
-until these confinement checks pass.
+A package has a name and a semantic version, which are provenance: they are
+part of every declaration's identity and never appear in a reference.
+Dependency selection is exact; there is no version solving.
 
-The project also reserves the optional top-level `tests/` directory as the
-source root of one test-only unit named `@tests`. If the directory is absent,
-the unit has no modules. If present, it MUST be a directory and is canonicalized
-and walked with the same confinement, link, ordering, extension, and segment
-rules as a target root. A non-directory or invalid root emits
-`@project.invalid-target-root` at the empty span of project-relative path
-`tests`; a test root that escapes the project emits `@module.path-escape`.
-An in-project `tests/` root that is itself a symlink emits
-`@project.invalid-target-root` at that same empty path span. The test root MUST
-be disjoint from
-every target root. A target root equal to or nested under `tests/` emits
-`@project.overlapping-target-roots` at that target's `root` field, with no
-related span for the synthetic test root. Validate the test root and its
-disjointness from all target roots before enumerating any source. The
-synthetic `@tests` unit is always reserved, including when the directory is
-absent. A target name or dependency alias `tests` emits
-`@project.reserved-unit-name` at the declared name or alias span.
+A **unit** is one local target, the reserved unit `@tests`, the embedded
+standard library `@std`, or one dependency name. The first part of every
+code-reference atom names a unit. Target and dependency names share one
+namespace with the two reserved units. Because roots are disjoint, every
+module belongs to exactly one unit and has exactly one canonical path.
 
-Within each target, entries are sorted by their `/`-separated project-relative
-path before descent. A regular file is a source module only when its extension
-is exactly `.vib`; `.vibon`, files with another extension, and hidden/editor
-files are ignored as data or unrelated files. There is no extension search and
-no implicit index module. Every path segment in a source file or directory
-name MUST be one kebab-name component; otherwise `@module.invalid-segment` is
-reported at the path's empty span. A file `text.vib` and directory `text/`
-claim the same module path and emit `@module.file-directory-collision` before
-any module is parsed. Source IDs are stable project-relative paths, bytes are
-copied exactly into an immutable snapshot, and repeated snapshots from an
-unchanged tree have identical unit/module order, IDs, and bytes.
+The units a module can name are closed: its own unit, `@std`, and the
+dependencies its project declares; a module of `@tests` can also name every
+local target. A path whose first part is any other unit, including `@tests`
+from a target and an undeclared dependency, is `@module.unknownPath` at the
+reference. Together with the acyclic dependency graph this keeps the unit
+graph acyclic.
 
-The source graph contains one explicit unit for each local target, the
-reserved `@tests` unit, and one explicit, unresolved dependency edge for each
-declared dependency. The `@tests` unit has kind `@lib` in the graph snapshot,
-but it is not a project target or a dependency and has no target entry. A
-dependency edge retains its alias, kind, target value, and source span. Graph
-construction MUST NOT resolve, fetch, inspect, or silently discard a dependency.
-Each unsupported edge reports `@tool.unavailable` at its dependency alias
-while remaining present in the graph. The graph accepts only the immutable
-snapshot produced by this workspace boundary. Later resolver phases receive
-no ambient filesystem handle.
+A library target has no entry. Its surface is every public declaration of
+every module under its root.
 
-## Packages and targets
+### Targets
 
-A package has a kebab-case name and semantic version used as source identity.
-Vibra does not solve version ranges; dependency selection is exact. The package
-name and version are provenance and never appear in a reference position, so
-they are strings rather than atoms.
+A binary target names an entry and states, as data, everything the program is
+allowed to do.
 
-A target has a unique one-component kebab atom name, kind `@bin` or `@lib`, and a source root. Every
-root MUST remain inside the project after canonical path resolution, and roots
-MUST be pairwise disjoint: no root may equal or contain another. Every module
-therefore belongs to exactly one target and has exactly one canonical path.
-Overlapping roots emit `@project.overlapping-target-roots`. Target and
-dependency names share one project namespace and cannot collide.
+`entry` is a declaration reference whose first part MUST be the target's own
+name (`@project.entryOutsideTarget` otherwise). It MUST resolve to a
+module-level `proc` with an **entry signature**:
 
-A *unit* is one local target, the reserved test unit `@tests`, or one dependency
-alias. The unit is the root of code reference: the first component of every
-code-reference atom names a unit, and the remaining components address an
-entity beneath it. Only the test runner and `@tests` modules may resolve the
-`@tests` unit; a local target's import graph does not contain it.
+- every parameter is a bare name, with no labelled parameters;
+- every parameter type is a **grant shape**: an operation interface value
+  type, `Option` of one, or a record whose fields are grant shapes; and
+- the result type is `ExitCode` from `@std.process`, a wrapper over `U8`.
 
-A binary target record MUST contain `entry` and `effects`; a library target
-record MUST omit both. A library has no execution entry and no index module: its
-surface is every public declaration of every module under its root, reached by
-import. An `entry` on a library target is `@project.entry-on-library`. The
-binary `effects` array is the entry's complete static effect ceiling and
-execution consent as defined by the effects chapter, which also closes the
-diagnostics of an unknown, mistyped, or repeated root in it.
+Anything else, and a bare `requires` on the entry, which no call site could
+discharge, is `@project.invalidEntrySignature`; a path that resolves to
+another kind of entity is `@name.wrongEntityKind`. The entry need not be
+public or named `main`. Naming it in `entry` creates no import edge and does
+not change its visibility. An `entry` on a library is
+`@project.entryOnLibrary`.
 
-`entry` is a declaration reference. Its first component MUST be the target's own
-name, so an entry always resolves inside its own target's root; any other unit
-is `@project.entry-outside-target`. Because roots are disjoint, no declaration
-is nameable by the entry of more than one target.
+```vibra
+use @std.env.EnvReadArgs enduse
+use @std.fs.DirReadText enduse
+use @std.io.StdoutText enduse
+use @std.process.ExitCode enduse
 
-Three failures are distinguished. A path that resolves to nothing emits the
-ordinary resolution diagnostic, `@module.unknown-path` or
-`@name.unknown-symbol`. A path that resolves to an entity that is not a
-module-level `defn` emits `@name.wrong-entity-kind` and names the entity it
-found. A path that resolves to such a `defn` whose signature is not an entry
-signature emits `@project.invalid-entry-signature`.
-
-An entry signature has no parameters and a result of either `void` or
-`result void e` for a nominal error type `e`; `never` is neither, so an entry
-result of `never` or an error type of `never` is not an entry signature. An entry
-that returns `err` ends `run` with `@command.program-failed` and exit code 6, as
-the tooling chapter states; traps remain distinct.
-The error type MUST NOT hold a function type, directly or through a declared
-type, because the result is observed and a function has no observable value;
-such a signature also emits `@project.invalid-entry-signature`.
-
-The entry declaration need not be public and need not be named `main`. The
-project document is a privileged referrer: naming a declaration in `entry`
-creates no import edge and does not widen its visibility.
-
-An omitted entry `effects:` is `()`. An effectful entry writes its ceiling, and
-project checking compares its computed performed row with both that ceiling and
-the target record.
-
-The minimum initialized layout is:
-
-```text
-hello/
-  project.vibon
-  src/
-    hello/
-      main.vib
-  tests/
+proc main
+  takes {args: EnvReadArgs notes: DirReadText out: Option(StdoutText)}
+  returns code: ExitCode
+  performs {EnvReadArgs DirReadText StdoutText}
+  do
+    return ExitCode(0u8)
+endproc
 ```
+
+A declared type over a grant, such as `type LogDir of DirWriteText` with a
+private representation, is not an entry parameter type. Only its own module
+can construct it, so no project file can bind one: the entry takes the
+operation interface, and the program calls that module to wrap it. A tuple
+of grants is not one either, because a binding names what it binds.
+
+`effects` is the target's **static admission ceiling**: a list of entity
+references to operation interfaces, without repeats. The entry's written
+`performs` row, and the row of every startup step, MUST be contained in it,
+or the project is `@effect.outsideCeiling` at the `effects` field, related
+to the entry's `performs` entry or to the recipe. An interface in the list
+that neither the entry nor a startup step performs is the warning
+`@contract.unusedEffect` at that entry of the list. The list grants
+nothing.
+
+`grants` is a dict of **binding recipes**, one for each grant the entry
+takes, keyed by the name of what it binds.
+
+Each recipe binds one **grant leaf**. A parameter of an operation interface
+type, or of `Option` of one, is a leaf, named by the parameter: `@notes`. A
+parameter of a record type has one leaf for each field, named by the
+parameter and the field, and so on through nested records: `@logs.reader`.
+The dict's keys MUST be exactly the entry's leaves. A missing or extra key
+is `@grant.invalidBinding` at the `grants` field, related to the parameter.
+
+A recipe has:
+
+- `provider`: an atom naming a registered issuer of the table below. The
+  leaf's type, or the payload of its `Option`, MUST be one of the issuer's
+  grant types.
+- `resource`: a record that says which resource the issuer binds, of a kind
+  the issuer accepts. A resource that is read from the process (an
+  `@argumentPath` or a `@variablePath`) names in `source` the leaf whose
+  grant performs that read: a leaf of type `EnvReadArgs` for an argument, a
+  leaf of type `EnvReadVar` whose `names` include the variable for a
+  variable. No recipe reads the environment by itself.
+- `policy`: for `@host.fs.directory` only, and required there: a
+  `@scopePolicy.v1` document of family `@filesystem`, defined in the
+  [effects chapter](03-effects.md#scope-policies). Its rules name this
+  leaf as their root. The grant permits exactly the operation the leaf's
+  interface names, within the policy. A policy describes; it
+  authorizes nothing by itself.
+- `limits`: optional record of `invocations`, `inputBytes`, and
+  `outputBytes`, each an optional `U64` upper bound for the life of the
+  process. A present record holds at least one bound; a grant with no limit
+  omits `limits`, exactly as its
+  [projection](06-runtime.md#audit-trace) does. A `limits` with no field
+  is the empty tuple and `@data.invalidShape`.
+- `after`: a list, without repeats, of leaves this recipe must be acquired
+  after. It MUST contain the recipe's `source` leaf when it has one. Every
+  name in it MUST be a key of `grants`. The `after` relation MUST be
+  acyclic, or the project is `@grant.bindingCycle`.
+
+| Provider | Grant types | Resource kinds |
+| --- | --- | --- |
+| `@host.fs.directory` | `DirReadBytes`, `DirReadText`, `DirList`, `DirWriteBytes`, `DirWriteText`, `DirStat` | `@fixedPath` with `path`; `@argumentPath` with `index` and `source`; `@variablePath` with `name` and `source` |
+| `@host.io.stdin` | `StdinText`, `StdinBytes` | `@processStream` |
+| `@host.io.stdout` | `StdoutText`, `StdoutBytes` | `@processStream` |
+| `@host.io.stderr` | `StderrText`, `StderrBytes` | `@processStream` |
+| `@host.env.vars` | `EnvReadVar` | `@variableSet` with `names`, a list of exact names |
+| `@host.env.args` | `EnvReadArgs` | `@processArguments` |
+| `@host.time.wall` | `WallClock` | `@systemClock` |
+| `@host.time.monotonic` | `MonotonicClock` | `@systemClock` |
+| `@host.random` | `RandomBytes` | `@systemRandom` |
+
+A `@fixedPath` is absolute, or relative to the process's working directory
+at startup. A path taken from an argument or variable is read once, at
+startup, through the `source` leaf's grant; the read is a startup step whose
+row is that grant's interface, and it is recorded in the
+[audit trace](06-runtime.md#audit-trace). In each case the issuer opens the
+directory once and the grant holds that directory object; a path string is
+never authority. The table is closed; a project cannot add a provider.
+
+Project checking validates every recipe: the issuer exists and issues the
+leaf's type, the resource kind is one the issuer accepts, the `source` leaf
+exists with the grant type the read needs, the policy is well-formed for the
+issuer and names this leaf as its root, and `after` is well-formed. Any
+other case is `@grant.invalidBinding` at the offending field; an invalid
+policy is `@grant.invalidPolicy`. A missing or invalid recipe fails the
+build, for a required and an optional leaf alike.
+
+### Startup order
+
+The runtime processes the leaves one at a time. Every leaf starts
+**unprocessed**. A leaf is **ready** when every leaf in its `after` list is
+processed. Repeatedly, among the unprocessed ready leaves, the runtime takes
+the one whose full canonical atom spelling (`@notes`, `@logs.reader`) is
+smallest in UTF-8 byte order, attempts to acquire it, and marks it
+**processed** whether it was acquired or bound absent. Readiness is
+recomputed after each leaf. A processed leaf is never selected again, and
+because `after` is acyclic the sequence reaches every leaf unless startup
+fails first. This is the only startup order; the project file's written
+order plays no part. The effects, tooling, and runtime chapters refer to
+it.
+
+Each attempt has exactly one of three outcomes, decided by the issuer's
+row. Anything the row does not list as acquired or refused is a failure:
+
+| Provider | Refused | Failed |
+| --- | --- | --- |
+| `@host.fs.directory` | the path names nothing; the path names something that is not a directory; the operating system denies the process permission to open the directory; the path is not Unicode; an `@argumentPath` index at or beyond the end of the argument list, which `index` counts from zero without the executable's path; a `@variablePath` variable that is not present | any other error opening the directory; a directory on which the driver cannot enforce the leaf's policy |
+| `@host.io.stdin`, `@host.io.stdout`, `@host.io.stderr` | the process has no such stream | any other error obtaining the stream |
+| `@host.env.vars`, `@host.env.args`, `@host.time.wall`, `@host.time.monotonic`, `@host.random` | never | the operating system cannot provide the resource |
+
+- **Acquired.** The leaf is bound to its grant.
+- **Refused.** A leaf whose `source` leaf was bound absent is refused as
+  well, because its read cannot happen. A refused optional leaf is bound to
+  `Option.none()` and the sequence continues. A refused required leaf stops
+  the sequence: startup fails with `@grant.requiredUnavailable`.
+- **Failed.** A failure stops the sequence for a required and an optional
+  leaf alike: startup fails with `@grant.acquisitionFailed`. A failure never
+  becomes an absence.
+
+Both diagnostics are startup results with the leaf's binding recipe in the
+project file as their primary span, and the entry does not run. The
+`@startup` events of the [audit trace](06-runtime.md#audit-trace) and the
+startup record of the [tooling chapter](05-tooling.md#command-payloads)
+report each leaf with these same three outcomes. A driver the platform does
+not support at all is a different case: it is rejected at admission, as
+`@tool.unavailable`, before any leaf is processed.
+
+On every ending of the process, including a failed startup, the acquired
+grants are released in reverse acquisition order. The
+[runtime chapter](06-runtime.md#entry-outcome) defines the outcomes, the
+release, and how the exit code is reported.
 
 ## Modules and imports
 
-Every `.vib` source file is one module. Its canonical module identity is its
-target-relative path without the extension. A source file does not redeclare
-that identity.
+Every `.vib` file is one module. Its identity is its unit followed by its
+root-relative path without the extension, with separators replaced by dots.
+A file does not declare its own identity.
 
-Every path segment under a target root MUST be a `kebab-name`, and `.vib` is the
-only module extension, so every module is addressable as a dotted atom path. A
-module file and a module directory of the same name MUST NOT both exist: a
-module is a leaf or an interior node, never both. `text.vib` and `text/`
-therefore cannot coexist under one root, and a root containing both emits
-`@module.file-directory-collision` before any module is parsed.
-
-Resolving `@unit.c1...cn` walks the components from that unit's root, descending
-while a component names a directory and stopping at the first component that
-names a `.vib` file. The layout rule above guarantees no step has a choice, so
-the walk needs no content inspection, extension search, or directory index
-fallback. Components remaining after that file are resolved against the module's
-declarations as the type-system chapter defines. A path whose walk reaches no
-module emits `@module.unknown-path`.
+Resolving `@unit.c1…cn` walks the parts from the unit's root, descending
+while a part names a directory and stopping at the first part that names a
+`.vib` file. The layout rules leave no step a choice. Parts that remain
+resolve against the module's declarations. A walk that reaches no module is
+`@module.unknownPath`.
 
 ```vibra
-(import text @std.str)
-(import model @hello.model)
+use @std.fs.DirReadText enduse
+use @hello.model enduse
+use @billing.cents as money enduse
 ```
 
-Every import has one explicit lexical alias and one atom entity reference whose
-resolved entity MUST be a module or one public top-level declaration of a
-module. The first atom component names a unit; the remaining components name a
-module beneath that unit's source root, optionally followed by exactly one
-declaration name. Thus
-`@hello.model` resolves to the local `hello` target's `model.vib`, while
-`@std.str` resolves through the `@std` dependency alias. The resolver never
-guesses from the importing file's directory.
+An import names a module or one public top-level declaration of a module.
+The local name is the path's last part unless `as` gives another. A module
+import makes the module's public declarations reachable as `name.Decl`. A
+declaration import binds the name to that declaration in every namespace it
+occupies, so its members are reached through it: `Ordering.less`. A path
+that resolves to anything else, such as a member of a declaration, a case,
+or a field, is `@name.wrongEntityKind` at the import.
 
-Resolution is total, but access is not. An atom path resolves to a private
-declaration exactly as it resolves to a public one, and each referring position
-then applies its own visibility rule: an import exposes only public
-declarations, while the `entry` slot may name a private one. A private
-declaration reached from an import emits `@name.private-access` at the
-referring path and relates the declaration span. Duplicate aliases and
-top-level declarations use `@name.redeclaration`; duplicate members under one
-owner retain `@name.member-collision`. An import back edge emits
-`@module.import-cycle` at the later edge and relates the earlier edge.
+Resolution is total and access is not. A path resolves to a private
+declaration as it does to a public one, and the referring position applies
+its own rule: an import of a private declaration is `@name.privateAccess`,
+relating the declaration, while a target's `entry` may name a private one.
 
-String paths, relative imports, absolute filesystem imports, glob imports,
-implicit extension search, directory index fallback, re-exports, and import
-cycles are errors. The atom is resolved only because the import grammar expects
-an entity reference; the same atom in expression position remains an ordinary
-value.
+**Imports MUST NOT form a cycle.** An import whose target module imports,
+directly or through any chain of imports, the importing module is
+`@module.importCycle` at the later edge, relating the earlier edges. The
+same holds between units: package dependencies form a directed acyclic graph,
+and a dependency cycle is `@project.dependencyCycle`. Declarations inside
+one module may refer to each other freely.
 
-A module import makes only the target module alias visible. Public declarations
-are referenced as `alias.name`; nested effect operations use
-`alias.root.operation`. A declaration import, such as
-`(import ordering @std.core.ordering)`, binds its alias to that one
-declaration in every namespace the declaration occupies, so `ordering` then
-names the type and `ordering.less` its variant; members of a declared type are
-reached through the alias exactly as through the type name. Because the layout
-rule makes a module a leaf, a path never denotes both a module and a
-declaration. Apart from the prelude, the closed set of declarations the type
-chapter lists (the core and role types and the values `true` and `false`),
-the standard library is imported explicitly like any other package. The
-prelude is fixed by the specification, cannot be extended by a package, and the
-module that declares it, `@std.bool`, is in every checked graph.
+String paths, relative imports, wildcard and selective imports, extension
+search, directory index modules, and re-exports do not exist.
+
+Apart from the prelude, the standard library is imported like any other
+package. The modules that declare the prelude are in every checked graph.
 
 ## Dependencies and lock
 
-Vibra supports the following forms.
+A dependency is local (`kind: @path`) or an exact Git revision
+(`kind: @git`). A dependency name binds one `@lib` target of the dependency's
+package, named by `target`; when omitted, the package's only library target
+is selected, and a package with several is
+`@project.ambiguousDependencyTarget`. A dependency never binds a binary
+target.
 
-- local dependencies whose record has `kind: @path` and `path:`; and
-- Git dependencies whose record has `kind: @git`, an HTTPS `git:` URL, and a
-  full 40-hex `rev:`.
+`vibra project sync` exports each Git revision into `dep/<name>/` without
+repository metadata and writes `project-lock.vibon`, one `@projectLock.v2`
+record. Check, test, run, and build work offline from the project tree and
+the lock. Local dependencies are not copied and are fingerprinted in every
+snapshot.
 
-For the M2 schema check, an HTTPS Git URL has the form `https://authority` with
-an authority containing either DNS labels (ASCII letters, digits, and internal
-hyphens) or a bracketed IPv6 literal, plus an optional decimal port from 1 to
-65535. A path, query, or fragment may follow. Userinfo, an empty or malformed
-host, control/whitespace characters, and non-HTTPS schemes are rejected. URL
-fetching and repository-specific validation remain outside the decoder.
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `format` | `@projectLock.v2` | required |
+| `project` | `Str` digest | `sha256:` and the SHA-256 of the exact bytes of `project.vibon` when the lock was written; a hash of input bytes, not of canonical bytes |
+| `dependencies` | dict from `Str` name to lock entry | one entry per declared dependency, no more and no fewer |
 
-A dependency alias binds one `@lib` target of the dependency package, named by
-the optional `target:` field, and never binds a package as a whole. An omitted
-`target:` selects the package's only `@lib` target; a package exposing more than
-one requires the field and otherwise emits
-`@project.ambiguous-dependency-target`. A dependency alias MUST NOT bind a
-`@bin` target, though a local `@bin` target remains a unit importable inside its
-own project. One package MAY therefore be bound under several aliases, one per
-library target.
+A lock entry has `kind` (`@path` or `@git`); for `@path`, `path` (`Str`);
+for `@git`, `git` (`Str`), `rev` (`Str`, 40 lower-case hexadecimal digits),
+`vendorPath` (`Str`, the project-relative vendor directory), and
+`contentHash` (`Str`, the [content hash](#content-hash) of the vendored
+tree); then `target` (optional atom) and `dependencies` (list of `Str`, the
+names the dependency's own project declares, sorted by UTF-8 bytes).
 
-`vibra project sync` exports exact Git revisions into `dep/<alias>/` without
-`.git` metadata. It writes `project-lock.vibon`, a canonical generated data
-record. The lock contains its format, project fingerprint, dependency edges,
-source identities, revisions, content hashes, and vendor paths:
+The example shows the shape. Its `project` digest is a placeholder, not the
+digest of any project file in this chapter; its `contentHash` is the test
+vector of [Content hash](#content-hash).
 
 ```vibon
-(record
-  format: @project-lock.v1
-  project: "sha256:..."
-  dependencies: (dict
-    @std (record
+{
+  format: @projectLock.v2
+  project: "sha256:244210e48437b6556980a70249a99369934a352429034cef9d7bd253b3bf2c01"
+  dependencies: [
+    "money": {
       kind: @git
-      source: "https://github.com/nahharris/vibra-stdlib.git"
+      git: "https://example.com/money.git"
       rev: "0123456789abcdef0123456789abcdef01234567"
-      target: @core
-      content: "sha256:..."
-      vendor: "dep/std"
-      dependencies: (array))))
+      vendorPath: "dep/money"
+      contentHash: "sha256:8ea702dc6eeac8cc73563dad98200ef105fcb23af61a46a23afce628c2ad5068"
+      dependencies: []
+    }
+  ]
+}
 ```
 
-Check, test, run, and build operate offline from the project tree and lock.
-They reject a missing vendor tree, stale lock, changed vendored content, path
-escape, or undeclared dependency. Local dependencies are not copied and are
-fingerprinted on every workspace snapshot.
+The four commands reject, at the project-data span named: a lock whose
+`project` digest differs from the project file, or a dependency set that
+differs from the project's, `@project.staleLock` at the lock's `format`
+field; a missing vendor directory or vendored content whose content hash
+differs from the lock, `@project.staleLock` at that lock entry; a path
+dependency outside the project root, `@module.pathEscape` at its `path`;
+and an import of an undeclared unit, `@module.unknownPath` at the import as
+[Packages, units, and targets](#packages-units-and-targets) states.
 
-### Toolchain standard-library input
+#### Content hash
 
-M3 replaces the M2 bootstrap input, with no transition period and no fallback
-between the two. The signed artifact, detached signature, toolchain public key,
-and their digests are retired. A signature verified against a key that is
-compiled into the same binary as the signed bytes adds no authority: whoever
-can change the embedded modules can change the embedded key. Authority instead
-comes only from embedding: the standard library is part of the toolchain build,
-and nothing a project supplies can add to it.
+The content hash of a file tree is `sha256:` and 64 lower-case hexadecimal
+digits of the SHA-256 of these bytes, in order:
 
-The input is the repository directory `stdlib/`. Its authority is
-`stdlib/manifest.vibon`, a closed `@stdlib-manifest.v1` record with fields, in
-order, `format`, `package-name`, `package-version`, `modules`, `compiler`,
-`host`, `native`, and `assertions`. `package-name` is `"vibra-stdlib"` and
-`package-version` is `"0.3.0"`. `modules` is a dict from each module atom to a
-record with `path` (a `stdlib/src/`-relative slash path), `sha256` (the
-`sha256:` digest of the module's exact bytes), and `role` (`@source` or
-`@test-registry`). `compiler` lists every `@compiler` symbol the modules may
-bind, `host` lists every `@host` registry symbol the modules may bind, `native`
-lists every native implementation symbol the modules may name with `native:`,
-together with the four that implement the `str` and `bytes` wrapper constructor
-and pattern, which no module names (`docs/spec/06-runtime.md`), and
-`assertions` lists the test-only assertion members.
+1. the ASCII text `vibraContentHashV2`;
+2. one zero byte;
+3. the number of regular files, as a big-endian 64-bit integer;
+4. per file, in the order of the UTF-8 bytes of their paths, two byte
+   strings each preceded by its length as a big-endian 64-bit integer: the
+   tree-relative path with `/` separators, then the file's exact bytes.
 
-The toolchain embeds the manifest and every listed module at build time. At
-load it decodes the manifest through its closed record, hashes each embedded
-module against its entry, and requires every `external: @compiler` declaration
-to name a listed symbol whose signature matches the registry exactly. It
-requires every `external: @host` declaration likewise to name a symbol of the
-`host` list and of the host registry, with the registry's signature and with the
-registry's owner root equal to the root of the enclosing `deffect`, and it
-requires the `host` list to hold exactly the symbols the modules bind. Every
-`native:` symbol MUST likewise be listed and implemented by the toolchain, and
-every language role MUST be claimed by exactly one `role:` declaration. A
-mismatch is an internal toolchain defect reported as an operational provenance
-diagnostic, never a fallback. `check`, `run`, and `test` never read the
-standard library from the project, the build checkout, the installation
-directory, a vendor tree, a cache, or the network.
+Directories contribute nothing, and a symbolic link or junction in the tree
+is `@module.pathEscape`. Test vector: one file `src/lib.vib` holding the
+bytes `fn f returns answer: Str do return "ok" endfn` hashes to
+`sha256:8ea702dc6eeac8cc73563dad98200ef105fcb23af61a46a23afce628c2ad5068`.
 
-The admitted modules enter the resolver as the `vibra-stdlib@0.3.0` package
-with unit `@std`, keep that provenance in every declaration identity, and are
-imported explicitly, except for the prelude of the type chapter, whose
-declarations every module sees. Every module that declares a prelude name, a
-value or a declaration that plays a role, is in every checked graph: `@std.bool`,
-`@std.core`, `@std.str`, `@std.bytes`, `@std.option`, `@std.result`,
-`@std.iter`, and `@std.builtin`. So `check`, `run`, and `test` always load the
-embedded library. A declaration outside this
-embedded package that writes `external:` acquires no provider authority and is
-rejected before execution. The module set of the package is `@std.core`,
-`@std.option`, `@std.result`, `@std.bool`, `@std.str`,
-`@std.bytes`, `@std.iter`, the builtin-member module `@std.builtin`, and the
-test-registry module `@std.assert`. Milestone 4 adds the five effect modules
-`@std.io`, `@std.fs`, `@std.env`, `@std.time`, and `@std.random`, which declare
-the roots, operations, and error types of the host registry in the runtime
-chapter. `@std.builtin` is never imported: it declares the members and the
-implementations of the builtin numeric, `char`, `array`, and `dict` types,
-whose members are reached through those type paths. Adding a module or symbol is a specification change to
-this list and to the runtime registry, and replaces the manifest and the package
-version in place.
-
-The combined project and standard-library graph MUST keep source IDs unique
-across all packages, because a source ID selects the document used for
-diagnostic spans. A project module that reuses an embedded module's source ID
-emits `@module.source-id-collision`; the affected selected graph is not type
-checked or executed.
-
-Builtin type names are reserved alias and module-level value spellings, as the
-type chapter states, because their members are reached by the same dotted path
-an alias would start.
-
-There is no registry, version range, lock auto-upgrade, lifecycle script, or
+There is no registry, version range, automatic upgrade, lifecycle script, or
 dependency-provided executable.
+
+### The standard library
+
+The standard library is embedded in the toolchain at build time. Its
+authority is that embedding: nothing a project supplies can add to it or
+replace it. `check`, `run`, `test`, and `build` never read it from the
+project, an installation directory, a cache, or the network.
+
+Its manifest is a closed `@stdlibManifest.v2` record. At load the
+toolchain checks every module against its digest; every `external`
+declaration against the registry's signature and owner; every `native`
+symbol against an implemented native; and that each language role is
+claimed exactly once, on a declaration of the shape the
+[type chapter](02-type-system.md#language-core-and-standard-library)
+requires. A mismatch is a toolchain defect, reported as
+`@runtime.invalidCheckedProgram` with the `@command.trap` result, never a
+fallback.
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `format` | `@stdlibManifest.v2` | required |
+| `package` | record `name: Str`, `version: Str` | the embedded package |
+| `modules` | list of module entries sorted by `path` | every embedded module |
+| `symbols` | record `compiler`, `host`, `native`: each a list of `Str` sorted by UTF-8 bytes, possibly empty | the wire symbols the modules may bind. An empty `native` list is valid: acceleration is an optimization the manifest declares, and without it the interpreter runs every Vibra body |
+
+A module entry has `path` (the module atom), `digest` (`Str`, `sha256:` and
+the SHA-256 of the module's exact bytes), and `languageRoles` (list of role
+atoms, possibly empty).
+
+```vibon
+{
+  format: @stdlibManifest.v2
+  package: {name: "std" version: "0.0.2"}
+  modules: [
+    {
+      path: @std.bool
+      digest: "sha256:65c20520d3bde9ee2d53288d20df389fec9bce119c15722e95628d3005cf220f"
+      languageRoles: [@bool]
+    }
+    {
+      path: @std.builtin
+      digest: "sha256:65c20520d3bde9ee2d53288d20df389fec9bce119c15722e95628d3005cf220f"
+      languageRoles: []
+    }
+  ]
+  symbols: {
+    compiler: ["i32.addChecked" "list.length" "list.next"]
+    host: ["io.stdoutText"]
+    native: []
+  }
+}
+```
+
+The package enters resolution as unit `@std`. Its modules are:
+
+| Module | Contents |
+| --- | --- |
+| `@std.core` | `Equatable`, `Ordered`, `Ordering`, `From`, `TryFrom`, `ConversionError`, `ArithmeticError` |
+| `@std.bool`, `@std.str`, `@std.bytes` | the three wrapper and variant types and their members |
+| `@std.option`, `@std.result` | `Option`, `Result` |
+| `@std.iter` | `Iter` and the four adapter types |
+| `@std.builtin` | the declarations of the builtin types, with their members and implementations; never imported, reached through the prelude |
+| `@std.assert` | assertions, usable only from `@tests` |
+| `@std.test` | `TestWorld` |
+| `@std.process` | `ExitCode` |
+| `@std.policy` | `ScopeError`, and the policy, selector, and limit types of the [scope policies](03-effects.md#scope-policies) |
+| `@std.io`, `@std.fs`, `@std.env`, `@std.time`, `@std.random` | the operation interfaces and error types of the host registry |
+
+Adding a module or symbol is a change to this specification and to the
+runtime registry. A project module whose source identity collides with an
+embedded one is `@module.sourceIdCollision`.
 
 ## Tests
 
-Every `.vib` file under the project `tests/` root is a module in the reserved
-`@tests` unit. Its canonical module identity is `@tests` followed by the
-slash-separated project-relative path beneath `tests/`, without `.vib`, with
-slashes replaced by dots. For example, `tests/math/add.vib` is `@tests.math.add`.
-There is no root/index module. Test modules are captured into the same immutable
-workspace snapshot as target modules, with their exact project-relative source
-IDs and bytes. They are not part of a target's module closure. A local target
-module cannot import `@tests`; that import path emits `@module.unknown-path`.
-Modules within `@tests` may import other `@tests` modules under the ordinary
-module-resolution, cycle, and public-visibility rules.
-
-Tests are declarations in those modules. A `test` declaration outside the
-reserved `@tests` unit emits `@tool.unavailable` in M2 and is never admitted
-into a target program:
+Every `.vib` file under `tests/` is a module of the unit `@tests`:
+`tests/math/add.vib` is `@tests.math.add`. Test modules are part of the
+snapshot but of no target. A target module cannot name `@tests`
+(`@module.unknownPath`). A `test` declaration outside `@tests` is
+`@module.testOutsideTests`.
 
 ```vibra
-(import assert @std.assert)
+use @std.assert enduse
+use @std.test.TestWorld enduse
+use @std.fs.DirReadText enduse
+use @std.fs.RelativePath enduse
+use @hello.notes enduse
 
-(test "greets by name"
-  (assert.equal (greet "Ada") "hello, Ada"))
+test "counts the lines of a note"
+  takes {world: TestWorld}
+  performs {TestWorld DirReadText}
+  do
+    let Result.ok(value: path) be RelativePath(["a.txt"]) endlet
+    let {readText: reader} be
+      await TestWorld.directory(world files: [path: "x\ny"])
+    endlet
+    assert.equal(Result.ok(value: 2u64) await notes.countLines(reader path))
+endtest
 ```
 
-A test's identity is its canonical module identity and decoded string name.
-Names compare by exact Unicode scalar sequence without normalization and MUST
-be unique within one module; repeating a name emits `@name.redeclaration` at
-the later test name and relates the earlier name. The same string name in a
-different test module is distinct. Test discovery order is ascending canonical
-module identity by UTF-8 bytes, then source declaration order within a module.
-The canonical string-literal spelling used for selectors and string values is
-double-quoted; `\"` escapes a quote, `\\` escapes a backslash, and `\n`, `\r`,
-and `\t` escape line feed, carriage return, and tab. Other C0 controls and DEL
-use `\u{hex}`, where `hex` has one
-to six lowercase hexadecimal digits and no leading zero. All other Unicode
-scalars appear literally. Booleans use `true` or `false`; `i32` and `u64`
-values use base-10 digits with their `i32` or `u64` suffix and no leading
-zeroes or plus sign; zero is `0i32` or `0u64`. Characters use the canonical
-EDN spelling: `\newline`, `\return`, `\space`, and `\tab`; other controls and
-BMP whitespace use `\u` plus four uppercase hexadecimal digits; other scalars
-use a backslash followed by the scalar. Assertion names in failures are canonical
-`@std.assert.<member>` atoms. The same literal spelling rules apply to the
-`expected` and `actual` strings in structured assertion failures.
-The runner checks every selected test module and the modules in its import
-closure for ordinary syntax, import, and type diagnostics before executing any
-selected test. With no selector, all discovered tests are selected. An
-explicit selector does not check unrelated test modules or target modules. For
-availability checking, each selected test has a declaration-dependency closure:
-start with the test declaration and its body, follow every resolved declaration
-reference in that body, then recursively follow references in each reached
-declaration's type, signature, and body until no new declaration is reached.
-An M2-unavailable form produces `@tool.unavailable` for each selected test
-whose declaration-dependency closure contains that form. Merely importing a
-module does not make every declaration in it a dependency; a valid unavailable
-form outside every selected test's declaration-dependency closure does not
-affect that `test` command. A shared helper's unavailable form can therefore
-make the tests that reference it unavailable while leaving other selected
-tests runnable. A module that declares a test MUST explicitly import
-`@std.assert`; helper modules without tests do not need that import. Test
-imports use ordinary unit aliases and ordinary public-visibility rules; no
-test-only prelude or private-access exception exists.
+The first `let` needs no `else`: the construction has constant operands, so
+the checker evaluates it and knows it succeeds. `files:` is the labelled
+parameter of `directory`, and the `assert.equal` call types its first
+operand from its second, as the
+[type chapter](02-type-system.md#inference-and-checking) describes.
 
-The test language permits declared effect ceilings. Since Milestone 4
-Step 14 a test is checked against its written ceiling like a function, an
-omitted `effects:` is empty, and a test whose ceiling holds only operations with
-Vibra bodies runs. Selecting and running a test is consent to the roots of its written row, with no
-target array involved, and a test cannot add effects to a test declaration. An
-effectful test runs in the default host world of the runtime chapter, which
-provides no host operation to call until the standard effect modules exist.
+A test's identity is its module and its decoded name. Names compare by exact
+scalar sequence and MUST be unique within a module (`@name.redeclaration`).
+Discovery order is ascending module identity by UTF-8 bytes, then declaration
+order.
 
-### M2 assertion contract
+A module that declares a test MUST contain an import that resolves to the
+module `@std.assert`, under any local name
+(`@module.missingRequiredImport`). There is no test-only prelude and no
+private-access exception.
 
-An M2 test module MUST import `@std.assert` explicitly. If a module declares
-one or more tests but has no import targeting exactly `@std.assert`, emit one
-`@module.missing-required-import` diagnostic at the string name of its first
-test declaration. This is an ordinary source error: all selected tests are
-invalid and none execute. The embedded `@std.assert` module exports exactly these
-test-only assertion members; they are resolved by their canonical module
-identity and are not user-definable external declarations:
+### Test worlds and grants
 
-| Member | Exact signature | Passing behavior |
+Every test runs in a fresh, deterministic, in-memory host world, in a
+procedure context the runner owns. The world's clock, random source,
+filesystem, environment, arguments, and standard streams are those of the
+default `@hostWorld.v2` document unless a conformance case supplies
+another. A project has no field for a world.
+
+A test has no ambient authority. A test without `takes` receives no grant and
+can perform no host operation. A test with `takes {world: TestWorld}`
+receives the sealed root grant of its own world from the runner. `TestWorld`
+is an operation interface: its procedures derive grants for that world's
+resources, each scoped by explicit fixture data, and it MUST appear in the
+test's `performs` row like any other operation interface. No binding recipe
+can name `TestWorld`, so no target can obtain one.
+
+`TestWorld` has these members. Each is a `proc` that takes the world as its
+one required parameter `{world: Self}`, takes its fixture data as labelled
+parameters with the constant defaults shown, performs only `TestWorld`, and
+cannot fail.
+
+| Member | Labelled parameters | Returns |
 | --- | --- | --- |
-| `assert.true` | `bool -> void` | succeeds when the operand is `true` |
-| `assert.false` | `bool -> void` | succeeds when the operand is `false` |
-| `assert.equal-bool` | `bool bool -> void` | succeeds when both operands are the same boolean |
-| `assert.equal-char` | `char char -> void` | succeeds when both operands have the same scalar |
-| `assert.equal-str` | `str str -> void` | succeeds when both operands have the same Unicode scalar sequence |
-| `assert.equal-i32` | `i32 i32 -> void` | succeeds when both operands have the same signed value |
-| `assert.equal-u64` | `u64 u64 -> void` | succeeds when both operands have the same unsigned value |
+| `directory` | `files: Dict(RelativePath Str) be [:]` | a record of grants over one new fake directory holding those UTF-8 files: `{readBytes: DirReadBytes readText: DirReadText list: DirList writeBytes: DirWriteBytes writeText: DirWriteText stat: DirStat}` |
+| `streams` | `stdin: Str be ""` | `{stdinText: StdinText stdinBytes: StdinBytes stdoutText: StdoutText stdoutBytes: StdoutBytes stderrText: StderrText stderrBytes: StderrBytes}` |
+| `environment` | `variables: Dict(Str Str) be [:]`, `arguments: List(Str) be []` | `{variables: EnvReadVar arguments: EnvReadArgs}` |
+| `clocks` | none | `{wall: WallClock monotonic: MonotonicClock}` |
+| `random` | none | `RandomBytes` |
+| `output` | none | `{stdout: Bytes stderr: Bytes}`: what the test has written so far |
 
-These callable members are admitted only from declarations in the reserved
-`@tests` unit. A reference to one from a local target declaration emits
-`@tool.unavailable` at the reference span and prevents target execution;
-importing `@std.assert` without referencing a member does not by itself make a
-target unavailable.
+A test takes the grants it needs out of a returned record by pattern and
+narrows them with the ordinary restriction functions. Grants from one
+test's world are unusable in another. The members behave as follows:
 
-The table is closed: another assertion name, generic assertion, implicit
-conversion, collection assertion, or deferred operand type is
-`@tool.unavailable` in M2. Assertion operands are checked and evaluated
-left-to-right. A test body is a body sequence with result type `void`, and its
-static effects row MUST be empty; assertion calls do not add an effect. A
-`return` directly in a test body has no function to exit and emits
-`@type.invalid-return`, while one inside a `lambda` in the test exits that
-`lambda`.
+- Each member is a row of the closed test-world registry of the
+  [runtime chapter](06-runtime.md#host-registry), bound with
+  `external @host` in `@std.test`. A call reaches no external resource and
+  appends no `@host` event to the test's trace; the operations a test then
+  performs with the derived grants do. In those events a grant derived from
+  a `TestWorld` projects its origin as `{kind: @testWorld}`, never as a
+  startup leaf, as the [audit trace](06-runtime.md#audit-trace) defines.
+- Each grant `directory` returns permits its own action everywhere in the
+  new directory, with no limits: a `files` rule with `prefix: []`,
+  `depth: @tree`, and `anyName` for the read and write grants, a
+  `directories` rule of `depth: @tree` for `list` and `stat`. A test
+  narrows them with `restrict`, `sub`, and `limit`. A multi-name path in
+  `files` implies its parent directories.
+- `directory` and `streams` make a new resource on every call. `streams`
+  makes new standard streams whose input is its `stdin` argument.
+- `environment`, `clocks`, and `random` return grants over the world's one
+  environment, one clock pair, and one random state, so two calls share
+  state; `environment` sets the world's variables and arguments on each
+  call.
+- `output` returns everything written through every stream grant the
+  test's world issued, per stream, in write order.
 
-A passing assertion returns `void`. A false assertion records one structured
-test failure with the assertion's canonical name, the canonical literal forms
-of its expected and actual values, and the assertion call's primary source
-span, then stops that test's body. For `assert.true` and `assert.false`,
-`expected` is the required boolean value, rendered `true` or `false`, and
-`actual` is the operand. For an
-`assert.equal-*` member, `expected` is the first operand and `actual` is the
-second operand; both are rendered with the canonical literal formatter. It
-does not throw, create a `result` value,
-emit a host event, or become a runtime trap. The runner continues with the
-next selected test using a fresh value state and empty audit trace. A test item
-therefore has exactly one of `@test.passed`, `@test.assertion-failed`,
-`@test.invalid`, `@test.unavailable`, or `@test.trap`. `@test.invalid` means
-duplicate test identities or error-level syntax, import, or type diagnostics
-prevented the selected suite from executing; every selected item is invalid
-in that case, and none executes. Warning-level diagnostics remain attached to
-the suite and to each selected test whose module or import closure contains
-their primary source, but do not prevent execution or change a test outcome.
-Suite-wide static diagnostics are attributed to each selected test whose module
-or import closure contains the diagnostic's primary source; the same diagnostic
-may occur in multiple test items. Item-owned diagnostics are attributed by the
-test declaration that produced them, even when selected tests share a module:
-an unavailable-form diagnostic belongs to each test whose declaration-
-dependency closure contains the form, and a runtime trap diagnostic belongs
-only to the test that trapped. `@test.unavailable` means the selected test's
-declaration-dependency closure contains a valid but M2-unavailable form; that
-item does not execute, but other selected tests may run after preflight when no
-ordinary diagnostics block the suite. Invalid and unavailable items have empty
-audit traces. A suite containing any non-passing item is not `@command.ok`.
+A test is checked against its written row. Selecting a test is consent to run
+it in its fake world only; no test reaches a real host resource.
 
-Static type or import errors are reported before any selected test executes.
-An unavailable assertion or test form retains its source span and reports
-`@tool.unavailable`; it is never silently skipped. A runtime trap remains the
-separate `@test.trap` outcome with its structured trap diagnostic and stops only
-that test. The runner then starts the next selected test with fresh value state
-and an empty audit trace. Empty test selection is a successful empty suite only
-when the selector is omitted; an unknown explicit selector is invalid input.
+### Assertions
 
-The runner isolates each test's values and audit trace. Every test, effectful
-or not, runs in a fresh copy of the deterministic in-memory host world of the
-runtime chapter, for every root and with standard output and error going to the
-test's audit trace, and a test supplies no provider, response, or mode of its
-own. The world's clock, random generator, filesystem, environment, arguments,
-and standard input are fields of one `@host-world.v1` document, and the default
-world, empty and fixed, is what a test sees when nothing supplies another. A
-conformance case may supply a world. User-supplied worlds and recorded-run
-replay are outside the test contract, and the project has no field for a world.
-Tests cannot name a nondeterministic provider, so there is no failure for a
-dependency on one.
+`@std.assert` declares exactly these members. Each is an
+`external @compiler` declaration bound to one of the
+[assertion rows](06-runtime.md#assertion-operations) of the compiler
+intrinsic registry. Outside `@tests`, a use of a declaration bound to an
+assertion row, as a callee or as a value, is
+`@module.assertionOutsideTests` at the use.
 
-### M3 assertion contract
-
-Stage 3A replaces the five monomorphic `assert.equal-*` members with one
-generic member and keeps `assert.true` and `assert.false` unchanged. The
-removed members are not retained as aliases.
-
-| Member | Exact signature | Passing behavior |
+| Member | Signature | Passes when |
 | --- | --- | --- |
-| `assert.equal` | `(expected t) (actual t) -> void`, `where: (t any)` | succeeds when both operands have the same canonical value encoding |
+| `assert.true` | `Fn({Bool} Void)` | the operand is `true` |
+| `assert.false` | `Fn({Bool} Void)` | the operand is `false` |
+| `assert.equal(T)` | `Fn({T T} Void)`, expected then actual | both operands have the same canonical value encoding |
 
-The comparison is the canonical value encoding of the runtime chapter, so it is
-defined for every value except a function. An operand whose type is or
-contains a `fn` type emits `@type.function-not-equatable` at that operand. The
-encoding also supplies the `expected` and `actual` failure strings. Because it
-compares encodings rather than calling `equatable`, `assert.equal` is a
-test-only surface and grants no equality to ordinary code. Every other part of
-the M2 assertion contract is unchanged.
+An operand of `assert.equal` whose type contains a callable, plan, or grant
+type is `@type.functionNotEquatable`. The comparison uses the canonical
+value encoding and gives ordinary code no equality.
+
+A false assertion records one structured failure, with the assertion's name,
+the canonical encodings of the expected and actual values, and the call's
+span, and stops that test's body. It is not a trap, a `Result`, or a host
+event. Each test ends as exactly one of `@test.passed`,
+`@test.assertionFailed`, `@test.invalid`, `@test.unavailable`, or
+`@test.trap`.
+
+Before any selected test runs, the runner checks every selected test module
+and its import closure. An error there makes every selected test
+`@test.invalid` and none runs. A selected test whose declaration-dependency
+closure contains a form the toolchain does not yet implement is
+`@test.unavailable` with `@tool.unavailable` at the form; other tests still
+run. A trap ends only its own test. Each test starts with fresh values, a
+fresh world, and an empty audit trace. With no selector all tests are
+selected; an unknown explicit selector is invalid input.
 
 ## Build products
 
-`vibra build <target>` emits:
+`vibra build <target>` emits a native executable for the selected platform
+and `<target>.build.vibon`, a canonical `@build.v2` record. The metadata
+describes; it is not executable policy. Identical toolchain, snapshot,
+target, platform, and options MUST produce byte-identical outputs.
 
-- `<target>.wasm`, the deterministic program or library module;
-- `<target>.build.vibon`, canonical `@build.v1` data containing toolchain,
-  project, dependency, source, required-effect, required registry symbols and
-  the derived registry minor of the runtime chapter, and module hashes; and
-- optional human-readable diagnostics on stderr.
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `format` | `@build.v2` | required |
+| `toolchain` | a [`@toolchain.v2`](05-tooling.md#snapshot-claim-and-witness-identity) record | the exact toolchain |
+| `revision` | `Str` | the workspace revision the build was taken from |
+| `target` | atom | the target's name |
+| `triple` | `Str` | the platform triple |
+| `sources` | list of `{sourceId: Str digest: Str}` sorted by `sourceId` | every source the target and its dependencies contributed; `digest` is `sha256:` and the SHA-256 of the exact bytes |
+| `dependencies` | list of `{name: Str contentHash: Str}` sorted by `name` | every dependency, with its content hash |
+| `effects` | list of [entity reference records](06-runtime.md#types) | the target's admission ceiling, sorted by `path` |
+| `grants` | dict from leaf atom to grant binding | the target's `grants` dict, as validated |
+| `registry` | record `major: U32`, `minor: U32`, `symbols: List(Str)` sorted | the host registry version the executable requires and the wire symbols it binds |
+| `outputs` | list of `{path: Str digest: Str}` sorted by `path` | every emitted file |
+| `semanticIdentity` | `Str` | `sha256:` and the SHA-256 of `vibraSemanticIdentityV2`, a zero byte, and the canonical bytes of the build's `@buildIdentity.v2` record |
+| `artifactIdentity` | `Str` | `sha256:` and the SHA-256 of the executable's exact bytes; a hash of input bytes |
 
-The metadata is descriptive and not executable policy. A conforming runner
-checks source targets before execution, while another Wasm host is responsible
-for its own embedding policy. Identical toolchain, project snapshot, target,
-and build options MUST produce byte-identical outputs.
+The semantic identity has its own preimage schema, so that the bytes it
+hashes validate against a schema of their own. A `@buildIdentity.v2` record
+has `format: @buildIdentity.v2` and then exactly the fields `toolchain`,
+`revision`, `target`, `triple`, `sources`, `dependencies`, `effects`,
+`grants`, and `registry`, each with the type, order, and sorting it has in
+`@build.v2`. It has no `outputs` and no identity field, so it depends on no
+emitted byte. The toolchain forms it from the same validated inputs as the
+build record and never stores it.
 
-[Distribution research](../roadmap/scratchpad/foundations/README.md#other-distribution-work)
-covers signing, publishing build products, and multi-artifact application
-containers.
+The example shows the shape. Its identities and digests are placeholders,
+except `revision`, which is the workspace revision test vector of the
+[tooling chapter](05-tooling.md#snapshot-claim-and-witness-identity).
 
-## M1 addressed codebase data
+```vibon
+{
+  format: @build.v2
+  toolchain: {
+    format: @toolchain.v2
+    version: "0.0.2"
+    grammar: "sourceV2"
+    checker: "staticV2"
+    stdlib: "sha256:65c20520d3bde9ee2d53288d20df389fec9bce119c15722e95628d3005cf220f"
+    drivers: "systemV2"
+    policy: "scopePolicyV1"
+    registry: {major: 2u32 minor: 0u32}
+  }
+  revision: "sha256:5fdc01744c45544c5765d4ec386b7a45bb990bc4b4c0ca415493546c7f36c8ec"
+  target: @hello
+  triple: "x86_64-pc-windows-msvc"
+  sources: [
+    {
+      sourceId: "src/hello/main.vib"
+      digest: "sha256:65c20520d3bde9ee2d53288d20df389fec9bce119c15722e95628d3005cf220f"
+    }
+  ]
+  dependencies: []
+  effects: [
+    {path: @std.io.StdoutText seed: "sha256:213e3a01ef10d7c10032616f8ab0da9a97fb729b9f98d723f4beb3158a25e2ad"}
+  ]
+  grants: [
+    @out: {provider: @host.io.stdout resource: {kind: @processStream} after: []}
+  ]
+  registry: {major: 2u32 minor: 0u32 symbols: ["io.stdoutText"]}
+  outputs: [
+    {path: "hello.exe" digest: "sha256:65c20520d3bde9ee2d53288d20df389fec9bce119c15722e95628d3005cf220f"}
+  ]
+  semanticIdentity: "sha256:65c20520d3bde9ee2d53288d20df389fec9bce119c15722e95628d3005cf220f"
+  artifactIdentity: "sha256:65c20520d3bde9ee2d53288d20df389fec9bce119c15722e95628d3005cf220f"
+}
+```
 
-A **codebase** is an explicitly opened local store of checked project revisions. It is separate from a file workspace: file commands continue to capture their own workspace snapshot, and codebase commands never discover or reread a project from disk unless the command is explicitly <code>import</code>. A revision names an immutable checked graph and its exact input attachments; a named head is a mutable pointer to one revision.
+The runtime chapter defines native execution and what the WebAssembly
+transition backend supports.
 
-### Codebase container and portable records
+## Exclusions
 
-M1 supports SQLite's rollback-journal physical format with `DELETE` journal
-mode. Before opening SQLite, the store MUST inspect the held confined file's
-header and reject a WAL or other non-rollback journal format as
-`@store.unsupported-version`. It MUST NOT change the input's journal mode or
-create WAL/shared-memory sidecars, including when rejecting an unsupported
-store. A truncated or non-SQLite header is `@store.corrupt`.
-
-The M1 store uses SQLite as a private local physical container. The database file is not itself a <code>.vibon</code> document, a portable record interchange format, or an address input. Every authoritative object, source attachment, revision manifest, and operation journal payload MUST be exact canonical UTF-8 VIBON bytes under the versioned schemas in this section. SQL tables and indexes are derived storage structures. SQL text, row identifiers, insertion order, pages, journal bytes, and database-file bytes MUST NOT enter any content address. The public portable record contract is the canonical VIBON payload; M1 exposes no arbitrary SQL or general record-dump operation.
-
-The store MUST reside on a supported local filesystem. It MUST NOT follow a symlink or junction while opening a path selected for creation, backup, restore, or export. Every read-write SQLite connection MUST use <code>synchronous=FULL</code>. New store, backup, restore, and exported-tree publication MUST use an exclusive same-filesystem no-replace operation; a check followed by an overwriting rename is forbidden. The operation MUST fail closed if the filesystem cannot provide that primitive. File and containing-directory metadata MUST be synchronized where the platform supports it. The contract guarantees that process interruption exposes an absent or complete newly published destination; it does not promise directory-metadata power-loss durability on Windows. Its schema version is explicit. A reader MUST reject a schema version newer than it supports and MUST NOT guess or opportunistically migrate it.
-
-M1 supports a trusted local workspace: the caller MUST ensure that no untrusted principal can concurrently rename or rebind the canonical workspace root or any ancestor of an operation's paths. Under this precondition, path traversal MUST reject symlinks, junctions, and other reparse points. The store is not an isolation boundary against another local principal with write access to those directories. Shared writable workspaces and privileged execution over untrusted directories do not satisfy this precondition. In particular, SQLite's final-component no-follow flag does not protect Unix parent components against hostile concurrent replacement; M1 does not claim that protection.
-
-The caller MUST use a local filesystem that honors SQLite locking, file synchronization, and exclusive no-replace publication. Network mounts and stores concurrently rewritten or replicated by a file-synchronization service are excluded from M1. Copying a live database file is not a supported backup operation; callers use the explicit consistent backup command.
-
-### Checked objects and entity keys
-
-A checked **object** is the addressable unit of checked meaning. M1 creates one object for each top-level declaration form (<code>def</code>, <code>defn</code>, <code>deftype</code>, <code>defint</code>, or <code>deffect</code>), one object for each test, and one object for each explicit <code>impl</code> block. Named members nested in a declaration form—type fields and variants, methods, interface contract members, and effect operations—are owned parts of that declaration object. Members nested in an <code>impl</code> block are owned parts of its implementation object. They are not separately addressed objects. A revision maps every resolver entity identity, including owned members, to its object address and canonical part path. A lookup of a member therefore identifies both its owner object and its part within it. Changing any owned part changes the owner object's address.
-
-A declaration entity key contains the resolver's canonical declaration identity plus its entity kind as a separate field. The identity spelling is <code>@&lt;package-name&gt;@&lt;package-version&gt;/&lt;unit&gt;[.&lt;module-segment&gt;...][.&lt;owner-segment&gt;...]</code>; source atom paths such as <code>@app.main.run</code> are not canonical identities. The identity includes package name and version, unit, module path, owner path, and final name; the entity key additionally records the kind. A rename, module move, unit move, package-name change, or package-version change changes entity identity. Equal definitions with different entity identities, including different nominal <code>deftype</code>, <code>defint</code>, or <code>deffect</code> identities, remain distinct objects.
-
-An implementation object key is the pair of the canonical normalized receiver type and canonical normalized applied interface target. The applied target is required even if the receiver and member spelling match another implementation. Each owned implementation member maps from the existing triple of contract-member identity, applied target, and receiver type to its block object plus part path. Generic type binders in these key types are normalized by lexical binder position.
-
-Every object member has a closed kind, a canonical semantic definition, and zero or more typed resolved edges. The workspace engine MUST supply an immutable checked projection from its existing source snapshot, resolver, and checker. That projection contains object keys, checked definitions, source-origin and part mappings, and all resolved edges. The encoder MUST be a pure projection over this immutable input: it MUST NOT read files, databases, the clock, randomness, or the network, and MUST NOT resolve names or check programs again. A recovered, unchecked, unavailable, or diagnostically rejected declaration MUST NOT enter a published checked graph.
-
-Each object edge identifies its owning member and canonical part path, its edge kind, and its resolved target entity or trusted external. The complete closed edge-kind set, ordering, deduplication rule, and canonical representation are defined in [Checked codebase encoding](codebase-encoding.md). The edge set MUST include every resolved input that affects checked meaning, including types, interfaces, constructors, values, calls, implementation contracts, effect roots, and trusted embedded declarations. A source spelling or import alias is never a resolved target.
-
-### Canonical checked graph and addresses
-
-The exact checked-definition node schema, binder traversal, normalized type encoding, entity and object keys, edge schema, SCC ordering, canonical component frame, and domain-separated component/object address bytes are defined in [Checked codebase encoding](codebase-encoding.md). That chapter is the single canonical source for graph bytes and required graph vectors. This chapter defines the project attachments, revision manifest, and storage lifecycle that include those graph records.
-
-### Source attachments and revision manifests
-
-Source text is attached separately from checked objects. Each project source document, test source document, and <code>project.vibon</code> is captured as exact valid UTF-8 bytes. The authoritative attachment record is a canonical VIBON value with exactly the fields <code>format</code>, <code>text</code> in that order:
-
-~~~vibon
-(record format: @source.v1 text: "(defn run () i32 1)")
-~~~
-
-Text decodes to the exact captured UTF-8 bytes. The raw source hash is lowercase SHA-256 of those bytes without a prefix domain. The source-attachment address is SHA-256 over ASCII <code>vibra-codebase-source-v1</code>, one <code>0x00</code> byte, and the exact canonical VIBON wrapper bytes, rendered with the <code>sha256:</code> spelling. The source ID is the workspace source identity; the origin is the project-relative path at which export materializes it. They are separate revision metadata, so a source attachment can keep its address while origin and entity identity change. Source spans are half-open UTF-8 byte ranges into the attachment identified by source ID. A trivia-only edit changes the source hash and attachment address while preserving checked-object addresses. Export writes stored attachment text exactly and MUST NOT format it implicitly. Project and source files that cannot be checked remain ordinary workspace drafts and MUST NOT be stored as published objects or attachments.
-
-The revision's source attachments contain the local project, ordinary source, and test documents. Trusted embedded standard-library documents remain identified by the exact module hashes in <code>trusted</code>, and MUST NOT be materialized into a local project by export. An origin for a local object or owned part MUST name an attached source; an origin for a trusted standard-library object or part MUST name the corresponding verified embedded module whose exact bytes match the revision's trusted module hash. In both cases, spans MUST be valid UTF-8 boundaries within those exact bytes. Trusted origins MUST NOT be silently dropped or redirected to a current local file.
-
-A revision record has exactly these fields in this order: <code>format</code>, <code>package</code>, <code>trusted</code>, <code>objects</code>, <code>sources</code>:
-
-~~~vibon
-(record
-  format: @codebase-revision.v1
-  package: (record name: "demo" version: "0.1.0")
-  trusted: (array (record kind: @registry fingerprint: "sha256:..." registry: (record format: @codebase-registry.v1 provider: @compiler version: "compiler-v1" rows: (array (record symbol: "array.length" type-parameters: (array "t") signature: "..." native: false)))) (record kind: @registry fingerprint: "sha256:..." registry: (record format: @codebase-registry.v1 provider: @host version: "vibra_v1" minor: 0u32 snapshot: "registry vibra_v1 1.0\n..."))) (record kind: @stdlib package-name: "vibra-stdlib" package-version: "0.3.0" manifest: "sha256:..." modules: (array (record module: "@vibra-stdlib@0.3.0/std.io" source-hash: "sha256:..."))))
-  objects: (array (record key: (record kind: @declaration identity: "@demo@0.1.0/app.main.run" entity-kind: @function) object: "sha256:..." part: (array)))
-  sources: (array (record source-id: "src/main.vib" attachment: "sha256:..." source-hash: "sha256:..." origin: "src/main.vib")))
-~~~
-
-Every field is required and no unlisted field is allowed. <code>trusted</code> contains records with exactly the fields shown. The standard-library record has <code>kind</code>, <code>package-name</code>, <code>package-version</code>, <code>manifest</code>, and <code>modules</code>; each module record has <code>module</code> and <code>source-hash</code>. <code>manifest</code> is raw SHA-256 of the exact embedded <code>stdlib/manifest.vibon</code> bytes, and each module <code>source-hash</code> is raw SHA-256 of that module's exact bytes. Module records sort by canonical module identity. A registry record has exactly <code>kind</code>, <code>fingerprint</code>, and <code>registry</code>. <code>registry</code> is the complete canonical <code>@codebase-registry.v1</code> VIBON record defined in [Checked codebase encoding](codebase-encoding.md); <code>fingerprint</code> is its domain-separated address. The trusted array sorts by the tuple (kind atom spelling, provider/package identity), both compared as UTF-8 bytes. It therefore places the two <code>@registry</code> records in provider order (<code>@compiler</code>, then <code>@host</code>) before the <code>@stdlib</code> record. <code>objects</code> contains records with exactly <code>key</code>, <code>object</code>, and <code>part</code> in that order. It maps every local or admitted trusted declaration identity, test identity, implementation block, and implementation member to its object address and owned-part path. It sorts by the complete canonical VIBON bytes of <code>key</code>. Sources is sorted by UTF-8 source ID and contains the raw content hash, wrapper address, source ID, and project-relative origin. The exact <code>project.vibon</code> document is one source attachment with source ID <code>project.vibon</code>. Source origins and target/project data are revision-bound. The revision does not include its parent or a publication timestamp; identical complete snapshots have the same revision address irrespective of import order or head history.
-
-Let R be canonical bytes of the complete <code>@codebase-revision.v1</code> record. The revision address is <code>sha256:</code> followed by lowercase hexadecimal SHA-256 of the ASCII bytes <code>vibra-codebase-revision-v1</code>, one <code>0x00</code> byte, then R. Revisions are immutable. A named head is a separately stored label and revision address; a head update never changes the revision address. Head names are lowercase kebab-case, with <code>main</code> as the default. A revision contains only checked objects whose reference closure is complete within that revision or explicitly admitted trusted input. A digest alone grants no access: all reads require an explicitly authorized opened store and either a resolved head or a revision in that store.
-
-### Store publication and recovery
-
-After process interruption, SQLite may require rollback-journal recovery before
-it can serve a read. A read-only operation MUST NOT write to perform recovery.
-If SQLite cannot read without recovery, it reports `@store.io-error` with
-guidance to run the explicit read-write `codebase reindex` command and retry.
-A read-write open lets SQLite recover the last committed state before records
-are admitted; reindex then verifies authority and rebuilds derived indexes.
-This recovery is distinct from migration or reconstructing committed records.
-
-The workspace engine captures and checks all source inputs and computes canonical objects, attachments, indexes, and the candidate revision before opening the writer transaction. Publication compares the requested expected head inside a write transaction before writing candidate records. It then stores all missing authoritative objects and attachments, revision membership, derived indexes, and the new head in the same transaction. Process interruption or a rejected publication exposes either the previous complete state or the new complete state, never a partial revision or head. Successful commits use SQLite <code>synchronous=FULL</code>. The store synchronizes files and containing directories where supported; it does not claim Windows directory-metadata durability after power loss. A failed import or stale compare MUST NOT logically publish any candidate record. Re-importing current content at the same head is a successful no-op. If a caller loses the response after commit, it MUST read the named head to determine whether publication committed; it MUST NOT infer rollback from a lost response. A hash collision with different canonical bytes is <code>@store.corrupt</code> and MUST NOT overwrite existing data. Revisions and objects are not pruned in M1.
-
-An expected head is either explicit absence or one exact revision address. If current state does not match that expectation, publication returns a stale-head outcome without rebasing. SQLite lock contention is bounded; exhausting the bound returns a distinct retryable busy outcome, not stale. A caller MUST retry busy only by resubmitting its original expected state. M1 uses a fixed 500 millisecond SQLite busy timeout. A reader resolves a named head once at operation start and reads from the immutable revision selected by that address. Reads never fall back to a newer head, a different revision, or current files.
-
-M1 supports a single local SQLite file and SQLite's consistent backup mechanism. Database integrity, supported schema version, authoritative record hashes, reference closure, revision membership, source wrapper hashes, and trusted fingerprints are checked at open, publish, read, verify, backup, and restore boundaries as the operation requires. An unknown newer format is rejected. Index rows are derived and can be rebuilt only from verified authoritative objects, attachments, and revision mappings. Verify never repairs authoritative records. Backup creates a consistent standalone copy at a destination that did not exist. Restore accepts only a verified backup and creates a standalone store at a destination that did not exist; neither operation overwrites an existing destination. Rejected, corrupt, or unsupported input does not publish a revision or silently change authoritative data.
+- import cycles and package dependency cycles;
+- a package registry, version ranges, and a dependency solver;
+- user-supplied host worlds, recorded-run replay, and real host resources in
+  tests;
+- user-defined issuers, providers, or registry symbols;
+- executable project files, build scripts, and lifecycle hooks.

@@ -1,55 +1,53 @@
-# Milestone 2 — Queries, edits, formatting, and lint
+# v0.0.2 M2: operations and authority
 
-An agent can understand a definition, propose a structured change,
-and publish it with evidence that the proposed revision checks.
+**Planned.** Procedures, effect ceilings, grants, and the entry contract, on
+the interpreter, with fake and real drivers.
 
-## Delivery order
+## Scope, in slices
 
-1. Expose the existing query and position facts through CLI and read-only
-   MCP. Accept a source position, canonical entity, or addressed definition in
-   a pinned revision. Return source, definition location, type, expected type,
-   performed and allowed effects with witnesses, token roles, diagnostics,
-   references, calls, and structured S-expression nodes with source origins.
-   Distinguish exact, recovered, and unavailable facts.
-   Bound and deterministically order relation expansions.
-2. Start with replacing one declaration from Vibra forms. Then add typed
-   plans to insert or remove a declaration, replace a selected expression,
-   rename across modules, and organize imports. Identify a node by its role
-   and address within the selected definition and base revision. Check the
-   replacement against the grammar and semantic context. Preview source and
-   definition-address diffs, affected declarations, and check diagnostics.
-   Publish uses the codebase transaction. File-backed writes use the
-   workspace's revision-checked file plan. Both paths revalidate their
-   postconditions and reject stale, ambiguous, or escaping changes.
-3. Extend the canonical formatter into format plans. Start lint with unused
-   imports and one semantic rule with a safe repair, such as a redundant
-   ascription proven removable by rechecking. A lint finding includes its rule,
-   severity, evidence spans, explanation, and action when available. Distinguish
-   validated edits from suggestions requiring judgment. Use the same plan
-   engine for code actions and fixes.
+1. **Procedures and plans.** `proc`, `performs`, `Proc` and `Intent` types,
+   plan construction, `await`, exact rows, guards on procedures.
+2. **Operation interfaces.** The seventeen host operations of v0.0.1 as one
+   nominal interface each, with their error types, under the new registry
+   major version.
+3. **Grants.** Sealed grant values, required and optional parameters,
+   narrowing by selecting a component and by pure restriction, shared
+   accounting, typed denial.
+4. **Policy and binding.** Policy documents, the `@project.v2` target with
+   its admission ceiling and grant bindings, build-time validation, startup
+   acquisition in dependency order, reverse release.
+5. **Entry.** The entry signature, `ExitCode`, and the outcome mapping of
+   `vibra run`.
+6. **Test worlds.** `TestWorld`, fixture-scoped fake grants, the
+   `@hostWorld.v2` document, the completed-call audit trace with grant
+   projections.
+7. **Real drivers.** Console, filesystem, environment, clock, and random on
+   Windows, with the file-scope adapter of M0.
 
-## Specification and gates
+## Exit evidence
 
-Close the subject grammar, typed operations, diagnostic registry, schema
-versions, and postcondition policy before implementing them. Define whether a
-plan may improve an invalid draft and what it must prove before publish.
-Resolve the effect identity spelling discrepancy recorded in the
-[M4 evidence](../../v0.0.1/m4/exit-evidence.md#open-items-for-later) before
-exposing the query schema through CLI and MCP.
-Reuse the one workspace engine and versioned JSON shapes. Read-only MCP can
-inspect and preview without persistent writes or execution. Apply is explicit
-and separately enabled. MCP tools accept typed data and run no shell.
+- The release program of [v0.0.2](../README.md#release-gate) runs under
+  `vibra run`.
+- Rejected at compile time: a callback whose row exceeds its parameter's
+  row; an operation outside a ceiling; an entry row outside the target's
+  admission ceiling; a missing or cyclic binding.
+- Denied or absent at run time, as values: a request outside a grant's
+  policy; a refused optional grant; an exhausted shared limit.
+- Attack cases of the effects chapter for file scopes, run on Windows
+  through the real adapter and in the fake world.
+- No grant is obtainable from data, from a row alone, or outside a test
+  world by test code.
 
-- **Demo.** Resolve an application to its definition by hash, inspect its type
-  and effect witnesses, preview a cross-module change and explained fix, then
-  apply a fresh plan after rejecting a stale one.
-- **Exit.** CLI and MCP facts and action results agree for the same revision.
-  Plans preserve unrelated forms and comments. Invalid or conflicting plans
-  produce no partial publish. Formatting is idempotent, and every validated
-  fix satisfies its advertised postconditions. Test authorization, traversal
-  and symlink/junction escapes, and schema validation on positive and negative
-  cases.
+## The model-writing pilot
 
-The [editor milestone](../m4/README.md) consumes these facts and plans
-through LSP. General AST patch languages and automatic edits on read are
-outside this milestone.
+After the gate above, freeze and run the registered model-writing pilot: two
+surface arms that differ only in whether an ordinary `let` ends with
+`endlet`, ten tasks, two model families, graded by this milestone's checker
+and test world. Reference solutions and negative controls pass before any
+model call. The result is a dated observation about that one choice on those
+tasks and models. If it favors the other arm under its registered rule, the
+change returns to the specification.
+
+## Not in this milestone
+
+Network operations, concurrency, and native execution.

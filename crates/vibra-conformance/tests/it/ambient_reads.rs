@@ -33,6 +33,18 @@ const TOOLING_EXCEPTIONS: &[(&str, &str)] = &[
         "vibra-conformance",
         "reads the conformance corpus and its fixtures",
     ),
+    (
+        "vibra-build",
+        "reads the environment, the registry through `reg.exe`, and the filesystem to find the linker, and starts it, all in its module `system` (`the_build_driver_reads_the_machine_in_one_module`)",
+    ),
+    (
+        "vibra-fs-scope",
+        "is the filesystem adapter itself: it opens entries relative to a held directory handle and does nothing else",
+    ),
+    (
+        "vibra-nexus-bridge",
+        "its launcher `main` reads the process arguments and standard streams of the executable, and its harness profile reads standard input, then hands them to the host provider",
+    ),
 ];
 
 /// The ambient APIs: the filesystem, the environment, the clocks, the operating
@@ -176,6 +188,26 @@ fn the_tooling_exceptions_and_the_provider_crate_exist_and_the_provider_does_rea
     }
 }
 
+/// The build driver is exempt from the scan above as a crate, and held to a
+/// narrower rule here: every ambient read, process, and filesystem call of the
+/// crate is in its module `system`.
+#[test]
+fn the_build_driver_reads_the_machine_in_one_module() {
+    let found = scan(&workspace_root(), "vibra-build");
+    assert!(
+        found.iter().any(|line| line.contains("system.rs:")),
+        "the audit is not vacuous: the module `system` reads the machine"
+    );
+    let outside = found
+        .iter()
+        .filter(|line| !line.contains("system.rs:"))
+        .collect::<Vec<_>>();
+    assert!(
+        outside.is_empty(),
+        "ambient reads outside the module `system`:\n{outside:?}"
+    );
+}
+
 #[test]
 fn the_emitter_the_checker_and_the_interpreter_are_scanned() {
     let scanned_crates = scanned_crates(&workspace_root());
@@ -225,4 +257,32 @@ fn an_ambient_read_is_reported_and_comments_and_test_modules_are_not() {
     assert!(
         ambient_references("let x = 1; // std::fs in a trailing comment").is_empty()
     );
+}
+
+/// The runner starts the executables of the `windows` column in one module,
+/// `native_exe`; the only other process it starts is the baseline's.
+#[test]
+fn the_runner_launches_executables_in_one_module() {
+    let mut users = Vec::new();
+    let mut sources = Vec::new();
+    rust_sources(
+        &workspace_root()
+            .join("crates")
+            .join("vibra-conformance")
+            .join("src"),
+        &mut sources,
+    );
+    for path in sources {
+        let source = std::fs::read_to_string(&path).expect("readable source");
+        if source.contains("Command::new") {
+            users.push(
+                path.file_name()
+                    .expect("a file name")
+                    .to_string_lossy()
+                    .into_owned(),
+            );
+        }
+    }
+    users.sort();
+    assert_eq!(users, ["baseline.rs", "native_exe.rs"]);
 }
