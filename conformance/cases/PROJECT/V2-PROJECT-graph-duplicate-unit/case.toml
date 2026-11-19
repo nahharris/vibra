@@ -1,0 +1,19 @@
+id = "V2-PROJECT-graph-duplicate-unit"
+rule = "V2-PROJECT-graph-duplicate-unit"
+profile = "staticV2"
+operation = "sourceGraph"
+description = "04-programs-and-packages.md#packages-units-and-targets: a target @money and a dependency \"money\" are @project.duplicateName at the dependency key, related to the target name"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@project.duplicateName"
+level = "@error"
+source = "project.vibon"
+span = { start = 133, end = 140 }
+related = [{ source = "project.vibon", span = { start = 80, end = 86 } }]

@@ -1,0 +1,16 @@
+id = "V2-SRC-READER-name-invalid-value"
+rule = "V2-SRC-READER-name-invalid-value"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#identifiers: a malformed identifier in a value position is one @syntax.invalidName over the token and nothing else"
+
+[inputs]
+data = ["input.vibon"]
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@syntax.invalidName"
+level = "@error"
+span = { start = 4, end = 12 }

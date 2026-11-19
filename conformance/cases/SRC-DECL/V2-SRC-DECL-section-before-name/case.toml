@@ -1,0 +1,16 @@
+id = "V2-SRC-DECL-section-before-name"
+rule = "V2-SRC-DECL-section-before-name"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#grammar: a section written before the name is @syntax.invalidForm at that section"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@syntax.invalidForm"
+level = "@error"
+span = { start = 3, end = 19 }

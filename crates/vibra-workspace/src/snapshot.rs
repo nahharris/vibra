@@ -335,6 +335,44 @@ fn canonical_root(
     Ok(Some(canonical))
 }
 
+/// `@project.duplicateName` for two targets with one name, or a target and
+/// a dependency with one name: at the later name in the project file, a
+/// target's `name` value or a dependency's key, related to the earlier one.
+fn duplicate_names(project: &DiscoveredProject) -> Vec<Diagnostic> {
+    let manifest = project.project();
+    let mut names: Vec<(&str, ByteSpan)> = manifest
+        .targets()
+        .iter()
+        .map(|target| {
+            let part = target.name().strip_prefix('@').unwrap_or(target.name());
+            (part, target.name_span())
+        })
+        .chain(
+            manifest
+                .dependencies()
+                .iter()
+                .map(|dependency| (dependency.name(), dependency.name_span())),
+        )
+        .collect();
+    names.sort_by_key(|(_, span)| (span.start(), span.end()));
+    let mut diagnostics = Vec::new();
+    for (index, (name, span)) in names.iter().enumerate() {
+        if let Some((_, earlier)) =
+            names.iter().take(index).find(|(other, _)| other == name)
+        {
+            diagnostics.push(
+                project_fault(
+                    DiagnosticCode::ProjectDuplicateName,
+                    *span,
+                    format!("two units are named `{name}`"),
+                )
+                .with_related(*earlier, "the unit of the same name"),
+            );
+        }
+    }
+    diagnostics
+}
+
 fn validate_roots(project: &DiscoveredProject) -> Result<Vec<Root>, Vec<Diagnostic>> {
     let project_root = project.root();
     let mut diagnostics = Vec::new();
@@ -386,6 +424,7 @@ fn validate_roots(project: &DiscoveredProject) -> Result<Vec<Root>, Vec<Diagnost
             ));
         }
     }
+    diagnostics.extend(duplicate_names(project));
     let tests = match canonical_root(project_root, TESTS_ROOT) {
         Ok(canonical) => canonical.map(|canonical| Root {
             name: "@tests".to_owned(),

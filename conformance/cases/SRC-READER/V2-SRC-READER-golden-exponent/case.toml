@@ -1,0 +1,12 @@
+id = "V2-SRC-READER-golden-exponent"
+rule = "V2-SRC-READER-golden-exponent"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#literals: a float with an exponent is one float leaf"
+
+[inputs]
+data = ["input.vibon"]
+
+[expect]
+verdict = "accepted"
+tree = "tree.vibon"

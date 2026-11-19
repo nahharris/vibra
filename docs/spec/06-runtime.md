@@ -1402,7 +1402,12 @@ The example is shape only; its identities are placeholders:
       grant: {
         issuedBy: {kind: @binding leaf: @out}
         policy: ""
-        rights: [{path: @std.io.StdoutText seed: "sha256:213e3a01ef10d7c10032616f8ab0da9a97fb729b9f98d723f4beb3158a25e2ad"}]
+        rights: [
+          {
+            path: @std.io.StdoutText
+            seed: "sha256:213e3a01ef10d7c10032616f8ab0da9a97fb729b9f98d723f4beb3158a25e2ad"
+          }
+        ]
         root: 1u64
       }
     }
@@ -1417,7 +1422,12 @@ The example is shape only; its identities are placeholders:
       grant: {
         issuedBy: {kind: @binding leaf: @out}
         policy: ""
-        rights: [{path: @std.io.StdoutText seed: "sha256:213e3a01ef10d7c10032616f8ab0da9a97fb729b9f98d723f4beb3158a25e2ad"}]
+        rights: [
+          {
+            path: @std.io.StdoutText
+            seed: "sha256:213e3a01ef10d7c10032616f8ab0da9a97fb729b9f98d723f4beb3158a25e2ad"
+          }
+        ]
         root: 1u64
       }
       args: ["hello\n"]

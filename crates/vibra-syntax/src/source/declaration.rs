@@ -291,17 +291,14 @@ pub(crate) fn check_sections(
 ) {
     if let Some(construct) = Construct::new(node, text)
         && construct.keyword() != "use"
-        && construct
-            .contents()
-            .iter()
-            .find(|child| !is_trivia(child))
-            .is_some_and(|first| first.kind() == SyntaxKind::Section)
     {
-        diagnostics.push(Diagnostic::new(
-            DiagnosticCode::SyntaxInvalidForm,
-            node.span(),
-            "a declaration's name comes before its sections",
-        ));
+        for span in sections_before_name(construct, text) {
+            diagnostics.push(Diagnostic::new(
+                DiagnosticCode::SyntaxInvalidForm,
+                span,
+                "a declaration's name comes before its sections",
+            ));
+        }
     }
     // Each entry: a node, and the keyword of the construct it is directly in.
     let mut stack: Vec<(&CstNode, &str)> = vec![(node, "")];
@@ -343,6 +340,44 @@ pub(crate) fn check_sections(
     }
 }
 
+/// The spans of the sections of a top-level form written before its name:
+/// the sections its contents start with, up to the first item that is not
+/// a section. A name written after a section is read into that section's
+/// operand, so when the contents hold only sections the name stands before
+/// `do`, which comes last, and the sections before `do` are reported. A
+/// form whose first section is `do` has no name, a form the grammar does
+/// not admit, reported over the construct.
+fn sections_before_name(construct: Construct<'_>, text: &str) -> Vec<ByteSpan> {
+    let mut leading = Vec::new();
+    let mut only_sections = true;
+    for child in construct
+        .contents()
+        .iter()
+        .filter(|child| !is_trivia(child))
+    {
+        match Section::new(child, text) {
+            Some(section) => leading.push(section),
+            None => {
+                only_sections = false;
+                break;
+            }
+        }
+    }
+    if !only_sections {
+        return leading.iter().map(Section::span).collect();
+    }
+    let before_do: Vec<ByteSpan> = leading
+        .iter()
+        .take_while(|section| section.keyword() != "do")
+        .map(Section::span)
+        .collect();
+    if before_do.is_empty() && !leading.is_empty() {
+        vec![construct.span()]
+    } else {
+        before_do
+    }
+}
+
 fn report_as(leaf: &CstNode, text: &str, diagnostics: &mut Vec<Diagnostic>) {
     if leaf.kind() == SyntaxKind::ReservedWord && leaf.text(text) == "as" {
         diagnostics.push(Diagnostic::new(
@@ -360,7 +395,6 @@ pub(crate) fn check_construct(
 ) {
     let mut seen: Vec<&str> = Vec::new();
     let mut after_do = false;
-    let mut misplaced = false;
     let has_body = BODY_CONSTRUCTS.contains(&construct.keyword());
     for section in construct.sections() {
         let keyword = section.keyword();
@@ -374,15 +408,12 @@ pub(crate) fn check_construct(
         }
         seen.push(keyword);
         if has_body && after_do {
-            misplaced = true;
+            diagnostics.push(Diagnostic::new(
+                DiagnosticCode::SyntaxInvalidForm,
+                section.span(),
+                "`do` and its body come last",
+            ));
         }
         after_do |= keyword == "do";
-    }
-    if misplaced {
-        diagnostics.push(Diagnostic::new(
-            DiagnosticCode::SyntaxInvalidForm,
-            construct.span(),
-            "`do` and its body come last",
-        ));
     }
 }

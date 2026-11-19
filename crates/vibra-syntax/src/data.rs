@@ -31,7 +31,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 
 use crate::cst::{CstNode, GroupKind, Shaper, SyntaxKind, error_around};
-use crate::lexer::{Token, TokenKind, is_atom};
+use crate::lexer::{Token, TokenKind, is_atom, is_identifier};
 use crate::literal::{
     FloatSuffix, IntegerSuffix, decimal_value, decode_character, decode_string,
     integer_value, scan_number, split_number,
@@ -557,6 +557,10 @@ impl<'a> DataShaper<'a> {
             (Some(TokenKind::Colon), _) => Class::Colon,
             // An unterminated doc string is already an unmatched delimiter.
             (Some(TokenKind::DocString), _) if !is_terminated_doc_string(text) => {
+                Class::Invalid(None)
+            }
+            // A malformed identifier is already `@syntax.invalidName`.
+            (Some(TokenKind::Identifier), _) if !is_identifier(text) => {
                 Class::Invalid(None)
             }
             (Some(TokenKind::Undecodable), _) => Class::Invalid(None),

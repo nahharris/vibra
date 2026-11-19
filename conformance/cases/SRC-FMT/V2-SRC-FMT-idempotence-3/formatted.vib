@@ -1,0 +1,16 @@
+type User of {name: Str id: UserId}
+  fn nameLength
+    takes {user: Self}
+    returns length: U64
+    do
+      return Str.length(user.name)
+  endfn
+  impl Printable
+    fn render
+      takes {value: Self}
+      returns text: Str
+      do
+        return value.name
+    endfn
+  endimpl
+endtype

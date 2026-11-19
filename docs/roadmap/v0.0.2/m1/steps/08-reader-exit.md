@@ -59,11 +59,10 @@ and the test `crates/vibra-conformance/tests/it/spec_examples.rs`.
    non-idempotent format.
 5. Deep nesting: a host test parses, formats, and drops a 100,000-deep
    `[[[…]]]` and `do do … enddo enddo` without consuming the host stack.
-6. Follow-ups: clear every entry of
-   [reader-follow-ups.md](../reader-follow-ups.md), each with the code
-   change and the cases it names, `@project.duplicateName` among them, then
-   delete the file and this task's link. Invariant: the specification and
-   the code agree on every entry before the file is deleted.
+6. Follow-ups: clear every entry of `reader-follow-ups.md`, each with the
+   code change and the cases it names, `@project.duplicateName` among them,
+   then delete the file. Invariant: the specification and the code agree on
+   every entry before the file is deleted.
 7. Record the counts in this step's PR and in the README's status row.
 
 ## Test matrix

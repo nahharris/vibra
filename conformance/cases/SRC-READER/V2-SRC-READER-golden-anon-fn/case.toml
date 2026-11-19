@@ -1,0 +1,12 @@
+id = "V2-SRC-READER-golden-anon-fn"
+rule = "V2-SRC-READER-golden-anon-fn"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#fn-and-proc: an anonymous fn is an @anonFn node in operand position"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "accepted"
+tree = "tree.vibon"

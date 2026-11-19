@@ -1,0 +1,14 @@
+use @std.io enduse
+
+type Cents of I64 endtype
+
+fn splitCents
+  takes {total: Cents parts: I32}
+  labelled {roundUp: Bool be false}
+  returns shares: Result(List(Cents) SplitError)
+  requires Ordered.greaterOrEqual(parts 1i32)
+    else Result.err(error: SplitError.noParts())
+  do
+    let n: I32 be if roundUp then 1i32 else 0i32 endif endlet
+    return Result.ok(value: divide(total parts roundUp: roundUp))
+endfn

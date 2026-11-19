@@ -34,6 +34,8 @@ V2-SRC-DECL-module-let-pattern	active	01-source-language.md#module-values
 V2-SRC-DECL-module-let-visibility	active	01-source-language.md#module-values
 V2-SRC-DECL-proc-basic	active	01-source-language.md#fn-and-proc
 V2-SRC-DECL-proc-native	active	01-source-language.md#external-definitions
+V2-SRC-DECL-section-after-do	active	01-source-language.md#grammar
+V2-SRC-DECL-section-before-name	active	01-source-language.md#grammar
 V2-SRC-DECL-test-basic	active	01-source-language.md#test
 V2-SRC-DECL-test-two-params	active	01-source-language.md#test
 V2-SRC-DECL-test-world	active	01-source-language.md#test
@@ -96,6 +98,7 @@ V2-SRC-FMT-declaration-member-breaks	active	01-source-language.md#canonical-form
 V2-SRC-FMT-declaration-of-one-line	active	01-source-language.md#canonical-format
 V2-SRC-FMT-declaration-of-wraps	active	01-source-language.md#canonical-format
 V2-SRC-FMT-declaration-section-breaks	active	01-source-language.md#canonical-format
+V2-SRC-FMT-idempotence	active	01-source-language.md#canonical-format
 V2-SRC-FMT-wrap-arguments	active	01-source-language.md#canonical-format
 V2-SRC-READER-character	active	01-source-language.md#lexical-structure
 V2-SRC-READER-closer-by-kind	active	07-diagnostics-and-conformance.md#recovery
@@ -116,7 +119,17 @@ V2-SRC-READER-encoding-nul	active	01-source-language.md#lexical-structure
 V2-SRC-READER-encoding-utf8	active	01-source-language.md#lexical-structure
 V2-SRC-READER-expr-recovery	active	07-diagnostics-and-conformance.md#recovery
 V2-SRC-READER-fn-recovery	active	07-diagnostics-and-conformance.md#recovery
+V2-SRC-READER-golden-anon-fn	active	01-source-language.md#fn-and-proc
+V2-SRC-READER-golden-anon-proc	active	01-source-language.md#fn-and-proc
+V2-SRC-READER-golden-ensures	active	01-source-language.md#fn-and-proc
+V2-SRC-READER-golden-escape	active	01-source-language.md#literals
+V2-SRC-READER-golden-exponent	active	01-source-language.md#literals
+V2-SRC-READER-golden-if	active	01-source-language.md#if-match-do
+V2-SRC-READER-golden-labelled	active	01-source-language.md#fn-and-proc
+V2-SRC-READER-golden-proc-decl	active	01-source-language.md#fn-and-proc
+V2-SRC-READER-golden-requires	active	01-source-language.md#fn-and-proc
 V2-SRC-READER-name-invalid	active	01-source-language.md#lexical-structure
+V2-SRC-READER-name-invalid-value	active	01-source-language.md#identifiers
 V2-SRC-READER-numeric-suffix	active	01-source-language.md#lexical-structure
 V2-SRC-READER-recovery-then-valid	active	07-diagnostics-and-conformance.md#recovery
 V2-SRC-READER-separator	active	01-source-language.md#lexical-structure
@@ -156,5 +169,7 @@ V1-PROJECT-graph-static-overlap	active	04-programs-and-packages.md#discovery-and
 V2-PROJECT-graph-reserved-tests	active	04-programs-and-packages.md#discovery-and-the-source-snapshot
 V2-PROJECT-graph-reserved-std	active	04-programs-and-packages.md#discovery-and-the-source-snapshot
 V2-PROJECT-graph-root-missing	active	04-programs-and-packages.md#discovery-and-the-source-snapshot
+V2-PROJECT-graph-duplicate-target	active	04-programs-and-packages.md#packages-units-and-targets
+V2-PROJECT-graph-duplicate-unit	active	04-programs-and-packages.md#packages-units-and-targets
 V1-PROJECT-graph-static-dot-root	active	04-programs-and-packages.md#discovery-and-the-source-snapshot
 V2-PROJECT-graph-empty-tests	active	07-diagnostics-and-conformance.md#persistent-observations

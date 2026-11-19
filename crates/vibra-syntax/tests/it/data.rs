@@ -122,10 +122,15 @@ fn identifiers_doc_strings_and_applications_are_not_data() {
         codes(data("{a: \"\"\"x\"\"\"}").diagnostics()),
         [(SyntaxInvalidForm, 4, 11)]
     );
-    // A malformed name is reported once as a name, also as a field name.
+    // A malformed name is reported once as a name, as a field name and as a
+    // value.
     assert_eq!(
         codes(data("{my_field: 1u8}").diagnostics()),
         [(SyntaxInvalidName, 1, 9)]
+    );
+    assert_eq!(
+        codes(data("{a: my_field}").diagnostics()),
+        [(SyntaxInvalidName, 4, 12)]
     );
     // The application's tokens are kept inside one error node.
     let document = data("{a: Option.some(value: 1i32)}");

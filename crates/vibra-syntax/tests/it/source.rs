@@ -282,13 +282,27 @@ fn duplicate_section() {
 
 #[test]
 fn do_comes_last_and_the_name_comes_first() {
+    // Each misplaced section is reported at that section.
     assert_eq!(
         diagnostics("fn f returns r: I32 do return x visibility @public endfn"),
-        [(SyntaxInvalidForm, 0, 56)]
+        [(SyntaxInvalidForm, 32, 50)]
     );
     assert_eq!(
+        diagnostics("fn f do return 1i32 takes {x: I32} returns r: I32 endfn"),
+        [(SyntaxInvalidForm, 20, 34), (SyntaxInvalidForm, 35, 49)]
+    );
+    assert_eq!(
+        diagnostics("fn returns r: I32 f do return 1i32 endfn"),
+        [(SyntaxInvalidForm, 3, 19)]
+    );
+    assert_eq!(
+        diagnostics("fn takes {x: I32} returns r: I32 f do return x endfn"),
+        [(SyntaxInvalidForm, 3, 17), (SyntaxInvalidForm, 18, 34)]
+    );
+    // With no name, the sections before `do` are where the name belongs.
+    assert_eq!(
         diagnostics("fn returns r: I32 do return 1i32 endfn"),
-        [(SyntaxInvalidForm, 0, 38)]
+        [(SyntaxInvalidForm, 3, 17)]
     );
     // Inside a body, `do` opens a block closed by `enddo`.
     assert!(diagnostics("fn f returns r: I32 do do return x enddo endfn").is_empty());

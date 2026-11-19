@@ -118,10 +118,7 @@ A callback's row is therefore visible in the signature that accepts it:
 
 ```vibra
 proc emit
-  takes {
-    line: Str
-    sink: Proc({Str} Result(Void FsError) {DirWriteText})
-  }
+  takes {line: Str sink: Proc({Str} Result(Void FsError) {DirWriteText})}
   returns outcome: Result(Void FsError)
   performs {DirWriteText}
   do
@@ -248,8 +245,7 @@ narrower grant of the same type. They perform nothing and open nothing.
 | `limit` | `{grant: Self limits: GrantLimits}` | `Self` | every standard operation interface |
 
 ```vibra
-let onlyReports: DirReadText be
-  try DirReadText.sub(notes try RelativePath(["reports"]))
+let onlyReports: DirReadText be try DirReadText.sub(notes try RelativePath(["reports"]))
 endlet
 ```
 
