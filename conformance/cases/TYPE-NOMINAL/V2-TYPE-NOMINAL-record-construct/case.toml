@@ -1,0 +1,12 @@
+id = "V2-TYPE-NOMINAL-record-construct"
+rule = "V2-TYPE-NOMINAL-record-construct"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#declared-types: a declared record is built with a label per field, in any order; its value lists the fields in declaration order"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

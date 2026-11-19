@@ -1,0 +1,18 @@
+id = "V2-TYPE-NOMINAL-record-duplicate-field"
+rule = "V2-TYPE-NOMINAL-record-duplicate-field"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#application: a label bound twice is an argument mismatch at the second argument"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.argumentMismatch"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 92, end = 103 }

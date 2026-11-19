@@ -1,0 +1,1 @@
+type Token of U64 visibility @public representation @public endtype

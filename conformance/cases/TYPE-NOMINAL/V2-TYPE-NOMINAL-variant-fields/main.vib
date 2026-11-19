@@ -1,0 +1,2 @@
+type Shape case circle {radius: F64} case empty endtype
+fn main returns r: List(Shape) do return [Shape.circle(radius: 1.0f64) Shape.empty()] endfn

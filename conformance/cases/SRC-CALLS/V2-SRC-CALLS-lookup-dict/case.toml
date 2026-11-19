@@ -1,0 +1,12 @@
+id = "V2-SRC-CALLS-lookup-dict"
+rule = "V2-SRC-CALLS-lookup-dict"
+profile = "interpreterV2"
+operation = "interpret"
+description = "01-source-language.md#application: a dict applied to a key looks it up and yields an Option"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

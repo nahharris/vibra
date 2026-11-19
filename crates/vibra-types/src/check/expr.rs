@@ -1490,7 +1490,10 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         if state.labels.is_some() {
             return;
         }
-        let positional = state.args.iter().filter(|arg| arg.label.is_none()).count();
+        // A labelled argument to a callee without field names is reported
+        // where it is written, and still counts here, so that it is not
+        // reported again as a wrong arity.
+        let positional = state.args.len();
         if let Some(params) = &state.params
             && params.len() != positional
         {
@@ -1925,7 +1928,9 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                     let slot = match state.product {
                         Product::Tuple | Product::Record(_) => None,
                         Product::List => Some(&mut state.element),
-                        Product::Dict if at.is_multiple_of(2) => Some(&mut state.element),
+                        Product::Dict if at.is_multiple_of(2) => {
+                            Some(&mut state.element)
+                        }
                         Product::Dict => Some(&mut state.value),
                     };
                     match slot {

@@ -1,0 +1,3 @@
+type Box(T) of {item: T} endtype
+fn f takes {b: Box(Any)} returns r: I32 do return 1i32 endfn
+fn main returns r: I32 do let b: Box(I32) be Box(item: 1i32) endlet return f(b) endfn

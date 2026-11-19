@@ -1,0 +1,2 @@
+type Box(T) of {item: T} endtype
+fn main returns r: Box(I32) do return Box(item: 1i32) endfn

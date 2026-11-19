@@ -1,0 +1,19 @@
+id = "V2-TYPE-GENERIC-expanding-mutual"
+rule = "V2-TYPE-GENERIC-expanding-mutual"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#generics: an expanding cycle through two functions is reported at its first expanding call"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.expandingInstantiation"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 56, end = 66 }
+related = [{ span = { start = 129, end = 137 } }]

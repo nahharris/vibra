@@ -1,0 +1,2 @@
+fn f takes {r: {a: I32 b: Str}} returns s: Str do return r.b endfn
+fn main returns r: Str do return f({b: "x" a: 1i32}) endfn

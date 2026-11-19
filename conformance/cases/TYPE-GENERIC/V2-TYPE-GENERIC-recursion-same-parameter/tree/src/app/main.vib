@@ -1,0 +1,1 @@
+fn f(T) takes {items: List(T)} returns r: U64 do return f(items) endfn

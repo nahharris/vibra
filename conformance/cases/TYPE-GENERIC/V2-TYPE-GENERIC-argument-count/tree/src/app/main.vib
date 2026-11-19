@@ -1,0 +1,2 @@
+type Box(T) of {item: T} endtype
+fn f takes {b: Box(I32 Str)} returns r: I32 do return 1i32 endfn

@@ -1,0 +1,1 @@
+{format: @value.v2 typeInfo: {kind: @declared path: @app.main.Box seed: "sha256:771c68b62498d1fb769da803196acb6842f45be34a65d1f3b5bef7e8752eb9c5" arguments: [@i32]} value: {kind: @record typeInfo: {kind: @declared path: @app.main.Box seed: "sha256:771c68b62498d1fb769da803196acb6842f45be34a65d1f3b5bef7e8752eb9c5" arguments: [@i32]} fields: {item: 1i32}}}

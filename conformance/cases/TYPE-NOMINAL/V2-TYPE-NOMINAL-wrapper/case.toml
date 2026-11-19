@@ -1,0 +1,12 @@
+id = "V2-TYPE-NOMINAL-wrapper"
+rule = "V2-TYPE-NOMINAL-wrapper"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#declared-types: a wrapper is built from one positional argument and encodes its value"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

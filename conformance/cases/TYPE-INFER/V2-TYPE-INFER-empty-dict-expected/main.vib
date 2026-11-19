@@ -1,0 +1,1 @@
+fn main returns r: Dict(Str I32) do let d: Dict(Str I32) be [:] endlet return d endfn

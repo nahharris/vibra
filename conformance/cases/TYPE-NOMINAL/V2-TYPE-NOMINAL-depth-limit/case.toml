@@ -1,0 +1,12 @@
+id = "V2-TYPE-NOMINAL-depth-limit"
+rule = "V2-TYPE-NOMINAL-depth-limit"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#recursive-types: a written type that nests exactly 64 levels is accepted"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

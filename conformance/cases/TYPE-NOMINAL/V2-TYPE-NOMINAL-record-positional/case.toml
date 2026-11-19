@@ -1,0 +1,18 @@
+id = "V2-TYPE-NOMINAL-record-positional"
+rule = "V2-TYPE-NOMINAL-record-positional"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#application: a shape with field names takes labelled arguments only; positional ones are an argument mismatch at the application"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.argumentMismatch"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 75, end = 91 }

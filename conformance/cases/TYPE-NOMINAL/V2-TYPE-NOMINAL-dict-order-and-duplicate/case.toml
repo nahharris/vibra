@@ -1,0 +1,12 @@
+id = "V2-TYPE-NOMINAL-dict-order-and-duplicate"
+rule = "V2-TYPE-NOMINAL-dict-order-and-duplicate"
+profile = "interpreterV2"
+operation = "interpret"
+description = "06-runtime.md#evaluation: a dict literal keeps the last value of a repeated key and orders its entries by key"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

@@ -1,0 +1,18 @@
+id = "V2-TYPE-GENERIC-invariant"
+rule = "V2-TYPE-GENERIC-invariant"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#generics: type arguments are invariant: a Box(I32) is not a Box(Any), so the argument does not fit its slot"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.argumentMismatch"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 171, end = 172 }

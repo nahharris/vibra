@@ -1,0 +1,2 @@
+type User of {name: Str id: U64} endtype
+fn main returns r: Str do let user be User(name: "Ada" id: 1u64) endlet return user.name endfn

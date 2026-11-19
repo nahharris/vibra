@@ -1,0 +1,1 @@
+fn main returns r: I32 do let d be [1.0f64: "x"] endlet return 1i32 endfn

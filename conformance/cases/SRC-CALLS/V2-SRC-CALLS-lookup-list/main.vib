@@ -1,0 +1,1 @@
+fn main returns r: {Option(I32) Option(I32)} do return {[7i32](0u64) [7i32](1u64)} endfn

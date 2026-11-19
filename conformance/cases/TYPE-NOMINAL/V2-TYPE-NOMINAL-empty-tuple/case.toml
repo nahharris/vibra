@@ -1,0 +1,12 @@
+id = "V2-TYPE-NOMINAL-empty-tuple"
+rule = "V2-TYPE-NOMINAL-empty-tuple"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#structural-types: {} is the empty tuple"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

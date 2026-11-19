@@ -1,0 +1,2 @@
+type Tree case leaf case node {kids: List(Tree)} endtype
+fn main returns r: Tree do return Tree.node(kids: [Tree.leaf() Tree.leaf()]) endfn
