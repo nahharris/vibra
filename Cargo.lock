@@ -1627,6 +1627,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "vibra-native"
+version = "0.0.1"
+dependencies = [
+ "vibra-ir",
+]
+
+[[package]]
 name = "vibra-native-v1"
 version = "0.0.1"
 dependencies = [
