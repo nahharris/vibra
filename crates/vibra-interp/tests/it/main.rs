@@ -478,6 +478,7 @@ pub fn closure(
             value_type,
             slot_count,
             captures: types,
+            defaults: Vec::new(),
             body,
         }),
         captures: nodes,

@@ -973,21 +973,23 @@ impl<'a> Machine<'a> {
         }
     }
 
-    /// The value of the default of `label` that the resolved callee
-    /// declares.
+    /// The value of the default of `label` that the resolved callee, a
+    /// function or a closure value, carries.
     fn default_of(
         &mut self,
         target: &Target<'a>,
         label: &str,
     ) -> Result<Val<'a>, Halt> {
-        let Target::Function(index) = target else {
-            return invalid(format!(
-                "a default for `{label}` of a callee without defaults"
-            ));
+        let defaults = match target {
+            Target::Function(index) => self.function(*index)?.defaults.as_slice(),
+            Target::Closure(closure) => closure.body.defaults.as_slice(),
+            _ => {
+                return invalid(format!(
+                    "a default for `{label}` of a callee without defaults"
+                ));
+            }
         };
-        let function = self.function(*index)?;
-        let constant = function
-            .defaults
+        let constant = defaults
             .iter()
             .find_map(|(name, constant)| (name == label).then_some(constant))
             .ok_or_else(|| {

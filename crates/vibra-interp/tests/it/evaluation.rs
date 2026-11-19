@@ -10,8 +10,8 @@ use vibra_ir::{
 };
 
 use crate::{
-    BASE, bool_type, boolean, call, closure, construct, direct, eval, function, global,
-    id, if_else, int, integer, node, none, option, origin_at, program, row, set_with,
+    BASE, bool_type, boolean, call, construct, direct, eval, function, global, id,
+    if_else, int, integer, node, none, option, origin_at, program, row, set_with,
     signature, some, some_value, text, text_value, u64_equal, u64_lit, u64_sub, var,
     variant_value,
 };
@@ -58,7 +58,22 @@ fn labelled_call(
     labelled_trap: bool,
 ) -> Node {
     let body = i32_sub(var(1, Type::I32), var(2, Type::I32));
-    let callee = closure(labelled_type(), 3, Vec::new(), body);
+    let zero = |label: &str| {
+        (
+            label.to_owned(),
+            Constant::new(Type::I32, Value::I32(0)).unwrap(),
+        )
+    };
+    let callee = node(Expr::Closure {
+        closure: std::sync::Arc::new(vibra_ir::ClosureBody {
+            value_type: labelled_type(),
+            slot_count: 3,
+            captures: Vec::new(),
+            defaults: vec![zero("a"), zero("b")],
+            body,
+        }),
+        captures: Vec::new(),
+    });
     let operand = |trap: bool, start: usize, value: i32| {
         if trap {
             sequence(vec![trap_at(start), int(value)])
@@ -521,4 +536,46 @@ fn an_unwritten_label_takes_the_callees_default() {
         },
     });
     assert_eq!(eval(&set, &call), Evaluation::Value(Value::I32(6)));
+}
+
+/// V9: a closure value carries its checked defaults, so a call through the
+/// value binds them for an unwritten label, inside a function the module
+/// set validated.
+#[test]
+fn v9_a_call_through_a_closure_value_binds_its_defaults() {
+    let ty = Type::function(FnType {
+        parameters: vec![Type::I32],
+        labels: NamedTypes::new([("step".to_owned(), Type::I32)]).unwrap(),
+        result: Type::I32,
+    });
+    let stepper = node(Expr::Closure {
+        closure: std::sync::Arc::new(vibra_ir::ClosureBody {
+            value_type: ty,
+            slot_count: 2,
+            captures: Vec::new(),
+            defaults: vec![(
+                "step".to_owned(),
+                Constant::new(Type::I32, Value::I32(5)).unwrap(),
+            )],
+            body: integer(
+                IntegerType::I32,
+                IntegerOp::Add,
+                vec![var(0, Type::I32), var(1, Type::I32)],
+            ),
+        }),
+        captures: Vec::new(),
+    });
+    let call = node(Expr::Call {
+        target: CallTarget::Value(Box::new(stepper)),
+        arguments: Arguments {
+            positional: vec![int(1)],
+            labelled: vec![("step".to_owned(), node(Expr::Default(Type::I32)))],
+        },
+    });
+    let main = function("main", crate::signature(Vec::new(), Type::I32), call, 0);
+    let set = set_with(vec![main], Vec::new(), Vec::new());
+    assert_eq!(
+        eval(&set, &crate::call(BASE, Vec::new())),
+        Evaluation::Value(Value::I32(6))
+    );
 }

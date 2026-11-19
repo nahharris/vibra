@@ -262,6 +262,9 @@ pub struct ClosureBody {
     pub slot_count: usize,
     /// The type of each captured slot.
     pub captures: Vec<Type>,
+    /// The constant default of each labelled parameter, which the closure
+    /// value carries to every call through it.
+    pub defaults: Vec<(String, Constant)>,
     /// The body.
     pub body: Node,
 }
@@ -535,6 +538,40 @@ impl<'a> Checker<'a> {
 
     fn bool_type(&self) -> Result<Type, IrError> {
         self.tables.library_type(Library::Bool, Vec::new())
+    }
+
+    /// Checks the defaults of a callable with the labels `labels`: one
+    /// constant of the label's type for each label, as the source chapter's
+    /// `labelled` gives every optional parameter, and no other.
+    pub(crate) fn check_defaults(
+        &self,
+        labels: &NamedTypes,
+        defaults: &[(String, Constant)],
+    ) -> Result<(), IrError> {
+        let mut seen = BTreeSet::new();
+        for (label, default) in defaults {
+            let expected = labels.get(label).ok_or_else(|| {
+                IrError::InvalidExpression(format!("a default for no label `{label}`"))
+            })?;
+            if !seen.insert(label.as_str()) {
+                return Err(IrError::Duplicate {
+                    what: "default",
+                    name: label.clone(),
+                });
+            }
+            self.check_constant(default)?;
+            expect(expected, default.value_type())?;
+        }
+        if let Some((label, _)) = labels
+            .entries()
+            .iter()
+            .find(|(label, _)| !seen.contains(label.as_str()))
+        {
+            return Err(IrError::InvalidExpression(format!(
+                "the labelled parameter `{label}` has no default"
+            )));
+        }
+        Ok(())
     }
 
     /// Checks that `key` implements `Ordered`, as every dict key must.
@@ -983,6 +1020,7 @@ impl<'a> Checker<'a> {
                 declared: closure.slot_count,
             });
         }
+        self.check_defaults(labels, &closure.defaults)?;
         let mut inner = Checker {
             tables: self.tables,
             scope: self.scope,
@@ -1287,7 +1325,7 @@ impl<'a> Checker<'a> {
         target: &CallTarget,
         arguments: &Arguments,
     ) -> Result<Type, IrError> {
-        let (callee, direct) = self.callee_type(target)?;
+        let (callee, _) = self.callee_type(target)?;
         let (parameters, labels, result) = call_shape(&callee).ok_or_else(|| {
             IrError::InvalidExpression(format!(
                 "a call of {callee}, which is not callable"
@@ -1322,21 +1360,12 @@ impl<'a> Checker<'a> {
             let expected = labels.get(label).ok_or_else(|| {
                 IrError::InvalidExpression(format!("no label `{label}`"))
             })?;
+            // Every callable a call can reach, a function or a closure, holds
+            // a checked default for each of its labels, so a placeholder
+            // always finds the callee's default.
             if let Expr::Default(value_type) = &argument.expr {
                 self.check_type(value_type)?;
                 expect(expected, value_type)?;
-                if let Some(function) = direct
-                    && !self
-                        .tables
-                        .function(function)?
-                        .defaults
-                        .iter()
-                        .any(|(name, _)| name == label)
-                {
-                    return Err(IrError::InvalidExpression(format!(
-                        "the callee has no default for `{label}`"
-                    )));
-                }
             } else {
                 expect(expected, &self.check(argument)?)?;
             }

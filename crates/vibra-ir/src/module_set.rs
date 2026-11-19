@@ -1006,21 +1006,8 @@ impl CheckedModuleSet {
                 declared: function.slot_count,
             });
         }
-        let mut seen = BTreeSet::new();
-        for (label, default) in &function.defaults {
-            let expected = labels.get(label).ok_or_else(|| {
-                IrError::InvalidExpression(format!("no label `{label}`"))
-            })?;
-            if !seen.insert(label) {
-                return Err(IrError::Duplicate {
-                    what: "default",
-                    name: label.clone(),
-                });
-            }
-            self.check_constant(default)?;
-            expect(expected, default.value_type())?;
-        }
         let mut checker = Checker::new(*tables, scope, function.slot_count);
+        checker.check_defaults(labels, &function.defaults)?;
         checker.evidence = Evidence {
             binders: signature.binders(),
             self_interface,

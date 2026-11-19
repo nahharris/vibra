@@ -725,3 +725,75 @@ fn v6_recursion_through_an_indirection_is_accepted() {
     );
     assert!(with_types(vec![holder, boxed]).is_ok());
 }
+
+// -- V9: defaults travel with the callable value ------------------------------
+
+/// `Fn({I32 step: I32} I32)`.
+fn stepping() -> Type {
+    Type::function(FnType {
+        parameters: vec![Type::I32],
+        labels: named(vec![("step", Type::I32)]),
+        result: Type::I32,
+    })
+}
+
+fn step_default() -> Vec<(String, Constant)> {
+    vec![(
+        "step".to_owned(),
+        Constant::new(Type::I32, Value::I32(5)).unwrap(),
+    )]
+}
+
+/// A closure of `stepping()` with `defaults`, called through its value with
+/// the label unwritten.
+fn closure_call(
+    defaults: Vec<(String, Constant)>,
+) -> Result<Arc<CheckedModuleSet>, IrError> {
+    let stepper = node(Expr::Closure {
+        closure: Arc::new(vibra_ir::ClosureBody {
+            value_type: stepping(),
+            slot_count: 2,
+            captures: Vec::new(),
+            defaults,
+            body: variable(1, Type::I32),
+        }),
+        captures: Vec::new(),
+    });
+    let call = node(Expr::Call {
+        target: CallTarget::Value(Box::new(stepper)),
+        arguments: Arguments {
+            positional: vec![int(1)],
+            labelled: vec![("step".to_owned(), node(Expr::Default(Type::I32)))],
+        },
+    });
+    let mut parts = library_parts();
+    parts.globals = vec![global("stepped", Type::I32, call)];
+    CheckedModuleSet::try_new(parts)
+}
+
+#[test]
+fn v9_a_closure_carries_a_default_for_each_label() {
+    assert!(closure_call(step_default()).is_ok());
+    assert!(matches!(
+        closure_call(Vec::new()),
+        Err(IrError::InvalidExpression(_))
+    ));
+}
+
+#[test]
+fn v9_a_function_carries_a_default_for_each_label() {
+    let set = |defaults: Vec<(String, Constant)>| {
+        let record = SignatureRecord::new(Vec::new(), stepping()).unwrap();
+        let mut parts = library_parts();
+        parts.functions = vec![CheckedFunction {
+            defaults,
+            ..function("step", record, variable(1, Type::I32), 2)
+        }];
+        CheckedModuleSet::try_new(parts)
+    };
+    assert!(set(step_default()).is_ok());
+    assert!(matches!(
+        set(Vec::new()),
+        Err(IrError::InvalidExpression(_))
+    ));
+}
