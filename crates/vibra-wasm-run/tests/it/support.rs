@@ -1,9 +1,9 @@
 //! Hand-built modules for the runner's tests.
 //!
 //! The emitter lives in another crate that this one does not depend on, so the
-//! tests write their own v1 modules with the encoder. A module here exports
-//! the six accessors the skeleton's modules export, and the entry's body is
-//! the test's choice.
+//! tests write their own modules with the encoder. A module here exports
+//! `vibra_v1_eval` and some of the accessors, and the entry's body is the
+//! test's choice.
 
 use vibra_wasm_run::{MemoryLimit, Runner};
 use wasm_encoder::{
@@ -22,7 +22,7 @@ pub(crate) const GLOBAL_ACTUAL: u32 = 6;
 
 /// The knobs of a test module.
 pub(crate) struct Spec<'a> {
-    /// The body of `vibra_v1_entry`.
+    /// The body of `vibra_v1_eval`.
     pub(crate) entry: Vec<Instruction<'a>>,
     /// The initial memory in pages.
     pub(crate) pages: u64,
@@ -144,7 +144,7 @@ pub(crate) fn module(spec: &Spec<'_>) -> Vec<u8> {
 
     let mut exports = ExportSection::new();
     exports.export("vibra_v1_memory", ExportKind::Memory, 0);
-    exports.export("vibra_v1_entry", ExportKind::Func, base);
+    exports.export("vibra_v1_eval", ExportKind::Func, base);
     exports.export("vibra_v1_status", ExportKind::Func, base + 1);
     exports.export("vibra_v1_trap_code", ExportKind::Func, base + 2);
     exports.export("vibra_v1_origin", ExportKind::Func, base + 3);

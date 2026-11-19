@@ -1637,7 +1637,10 @@ impl<'l, 'a> Builder<'l, 'a> {
             Some(Library::Option) => ("some", "none"),
             Some(Library::Result) => ("ok", "err"),
             _ => {
-                return Err(EmitError::malformed(format!("a try on {carrier}"), origin));
+                return Err(EmitError::malformed(
+                    format!("a try on {carrier}"),
+                    origin,
+                ));
             }
         };
         let shape = self.shape(&carrier, origin)?;

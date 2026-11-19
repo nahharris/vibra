@@ -1749,9 +1749,11 @@ dependencies = [
 name = "vibra-wasm-run"
 version = "0.0.1"
 dependencies = [
- "vibra-host-v1",
- "vibra-ir-v1",
- "vibra-native-v1",
+ "vibra-diagnostics",
+ "vibra-interp",
+ "vibra-ir",
+ "vibra-native",
+ "vibra-wasm",
  "wasm-encoder 0.261.0",
  "wasmparser 0.261.0",
  "wasmtime",

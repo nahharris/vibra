@@ -1,31 +1,31 @@
-//! The Wasmtime embedding that validates and runs v1 Vibra modules.
+//! The Wasmtime embedding that validates and runs transition modules.
 //!
 //! This is the only crate of the workspace that depends on the engine. The
 //! emitter (`vibra-wasm`) writes modules and never runs one, and it does not
-//! depend on this crate. The toolchain-owned native code of
-//! `vibra_native_v1`, when it exists, is supplied here, behind the module
-//! boundary of the `natives` module.
+//! depend on this crate. The toolchain-owned native code of `vibra-native` is
+//! supplied here, behind the module boundary of the `natives` module, and it
+//! is the only thing a module imports.
 //!
 //! # What a run is
 //!
-//! [`Runner::run_entry`] validates a module under exactly the v1 feature
-//! baseline, instantiates it under the runner's memory limit, calls
-//! `vibra_v1_entry`, and interprets what the module recorded by the protocol of
-//! `docs/spec/06-runtime.md`, "WebAssembly boundary": a call that returns has
-//! completed; a call that stops did so because generated code recorded a
-//! status first, and a stop with no record is a defect of the toolchain.
+//! [`Runner::run_eval`] validates a module under exactly the feature baseline
+//! of `docs/spec/06-runtime.md`, "Wasm transition", instantiates it under the
+//! runner's memory limit, calls `vibra_v1_eval`, and reads what the module
+//! recorded: a call that returns has completed, and a call that stops did so
+//! because generated code recorded a status first. A stop with no recorded
+//! status is a defect of the toolchain, reported as the trap
+//! `@runtime.invalidCheckedProgram`. [`Runner::run_test`] does the same for
+//! one test of a test module through `vibra_v1_test`.
 //!
 //! # The engine
 //!
 //! Cranelift is the only compiler. NaN canonicalization is on as a defence in
-//! depth (it is unobservable, because the specification canonicalizes NaN where
-//! it is observed). Every optional WebAssembly proposal is off, fuel and epoch
-//! interruption are unused (a runner built by [`Runner::with_fuel`] meters fuel
-//! for the performance baseline and for nothing else), and a resource limiter applies the runner's memory
-//! limit to every memory. The engine's own call stack is not part of the
-//! language: activations of a later step live in the module's arena.
+//! depth (it is unobservable, because the specification canonicalizes NaN
+//! where it is observed). Every optional WebAssembly proposal is off, fuel and
+//! epoch interruption are unused, and a resource limiter applies the runner's
+//! memory limit to every memory. The engine's own call stack is not part of
+//! the language: activations live in the module's arena.
 
-mod host;
 mod instance;
 mod natives;
 mod observe;
@@ -34,20 +34,19 @@ mod validate;
 
 use std::fmt;
 
-use vibra_host_v1::{AuditEvent, HostProvider, HostWorld, WorldProvider};
-use vibra_ir_v1::TestAssertion;
-use vibra_ir_v1::boundary::{
-    FAILURE_ACTUAL_EXPORT, FAILURE_EXPECTED_EXPORT, FAILURE_EXPORT, LIVE_SIZE_EXPORT,
-    ORIGIN_EXPORT, RESULT_EXPORT, STATUS_EXPORT, Status, TRAP_CODE_EXPORT, TrapCode,
+use vibra_ir::Trap;
+use vibra_ir::boundary::{
+    FAILURE_ACTUAL_EXPORT, FAILURE_EXPECTED_EXPORT, FAILURE_EXPORT, Failure,
+    LIVE_SIZE_EXPORT, ORIGIN_EXPORT, RESULT_EXPORT, STATUS_EXPORT, Status,
+    TRAP_CODE_EXPORT, TrapCode,
 };
 use wasmtime::{
     Config, Engine, Instance as EngineInstance, Linker, Module, ResourceLimiter, Store,
     Strategy,
 };
 
-pub use host::{Builders, Forged, Stop};
 pub use instance::{Instance, Started, ValueId};
-pub use observe::{Inspect, LiveSizes, Observed};
+pub use observe::{LiveSizes, Observed};
 pub use test_run::TestRun;
 pub use validate::{ModuleSummary, ValidationError, baseline_features, validate};
 
@@ -55,8 +54,8 @@ pub use validate::{ModuleSummary, ValidationError, baseline_features, validate};
 ///
 /// `docs/spec/07-diagnostics-and-conformance.md`, "Differential execution": a
 /// runner applies one finite limit to every instance. Growth past it fails,
-/// and a run that fails to grow ends with [`Outcome::MemoryExhausted`], the host
-/// event `@runtime.memory-exhausted`.
+/// and a run that fails to grow ends with [`Outcome::MemoryExhausted`], the
+/// host event `@runtime.memoryExhausted`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct MemoryLimit {
     bytes: usize,
@@ -76,15 +75,9 @@ impl MemoryLimit {
     }
 }
 
-/// The state the store carries for the host functions and the limiter.
+/// The state the store carries: the limiter.
 pub(crate) struct Host {
     pub(crate) limiter: Limiter,
-    /// The provider of every host operation the instance applies.
-    pub(crate) provider: Box<dyn HostProvider>,
-    /// The events of the host calls that completed, in call order.
-    pub(crate) audit: Vec<AuditEvent>,
-    /// Whether the provider could not allocate an answer: the host event.
-    pub(crate) memory_event: bool,
 }
 
 /// Applies the memory limit and remembers that it refused a request.
@@ -137,12 +130,12 @@ pub enum Outcome {
         origin: Option<u32>,
     },
     /// The instance exhausted its memory: the host event
-    /// `@runtime.memory-exhausted`, which is not a trap.
+    /// `@runtime.memoryExhausted`, which is not a trap.
     MemoryExhausted,
     /// The module recorded a failed assertion before it stopped.
     AssertionFailed {
         /// The assertion that failed.
-        failure: TestAssertion,
+        failure: Failure,
         /// The origin ordinal of the assertion call.
         origin: Option<u32>,
         /// The expected and actual operands of a failed `assert.equal`, as
@@ -151,7 +144,7 @@ pub enum Outcome {
     },
     /// The call stopped, or returned, in a way the protocol does not allow:
     /// the toolchain is at fault. It is reported as the trap
-    /// `@runtime.invalid-checked-program` with no origin, and no conformance
+    /// `@runtime.invalidCheckedProgram` with no origin, and no conformance
     /// case expects it.
     Defect {
         /// What the runner saw.
@@ -159,12 +152,21 @@ pub enum Outcome {
     },
 }
 
+impl Outcome {
+    /// The trap a defect is reported as.
+    #[must_use]
+    pub const fn defect_trap() -> TrapCode {
+        TrapCode::of(Trap::InvalidCheckedProgram)
+    }
+}
+
 /// The 64-bit slot `vibra_v1_result` reports after a completed entry.
 ///
-/// It is `0` for a `void` result, the bits of a scalar result, or the value ID
-/// of an arena result, and only the entry's result type says which. The slot
-/// does not show its number: an ID never leaves the runner in a public result,
-/// and [`Instance::observe`] turns a slot into the value it stands for.
+/// It is `0` for a `Void` result, the bits of a scalar result, or the value
+/// ID of an arena result, and only the entry's result type says which. The
+/// slot does not show its number: an ID never leaves the runner in a public
+/// result, and [`Instance::observe`] turns a slot into the value it stands
+/// for.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct ResultSlot(u64);
 
@@ -182,20 +184,12 @@ impl fmt::Debug for ResultSlot {
     }
 }
 
-impl Outcome {
-    /// The trap a defect is reported as.
-    #[must_use]
-    pub const fn defect_trap() -> TrapCode {
-        TrapCode::InvalidCheckedProgram
-    }
-}
-
 /// Why a module could not be run at all.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RunnerError {
     /// The engine could not be configured.
     Engine(String),
-    /// The module is not a v1 module.
+    /// The module is not a transition module.
     Invalid(ValidationError),
     /// The engine rejected a module that validated, which is a defect.
     Compile(String),
@@ -250,12 +244,10 @@ impl From<ValidationError> for RunnerError {
     }
 }
 
-/// Validates and runs v1 modules under one memory limit.
+/// Validates and runs transition modules under one memory limit.
 pub struct Runner {
     engine: Engine,
-    pub(crate) limit: MemoryLimit,
-    /// Whether the engine meters fuel, which only the performance baseline asks for.
-    fuel: bool,
+    limit: MemoryLimit,
 }
 
 impl fmt::Debug for Runner {
@@ -274,25 +266,12 @@ impl Runner {
     ///
     /// [`RunnerError::Engine`] when the engine rejects the configuration.
     pub fn new(limit: MemoryLimit) -> Result<Self, RunnerError> {
-        Self::build(limit, None, false)
-    }
-
-    /// Creates a runner like [`Runner::new`] whose engine also meters fuel, for the
-    /// performance baseline: every instance starts with the most fuel there is,
-    /// and [`Instance::fuel_consumed`] reports what its run burned. Fuel is
-    /// unused by every other runner, the conformance runner included, and it
-    /// changes nothing a module observes.
-    ///
-    /// # Errors
-    ///
-    /// [`RunnerError::Engine`] when the engine rejects the configuration.
-    pub fn with_fuel(limit: MemoryLimit) -> Result<Self, RunnerError> {
-        Self::build(limit, None, true)
+        Self::build(limit, None)
     }
 
     /// Creates a runner like [`Runner::new`] whose engine allows a module no
     /// more than `stack_bytes` of its own call stack. A test uses a small one
-    /// to show that a routine does not recurse in proportion to its input: the
+    /// to show that a run does not recurse in proportion to its input: the
     /// language's activations live in the arena, so no language depth ever
     /// reaches this stack.
     ///
@@ -303,21 +282,16 @@ impl Runner {
         limit: MemoryLimit,
         stack_bytes: usize,
     ) -> Result<Self, RunnerError> {
-        Self::build(limit, Some(stack_bytes), false)
+        Self::build(limit, Some(stack_bytes))
     }
 
     fn build(
         limit: MemoryLimit,
         stack_bytes: Option<usize>,
-        fuel: bool,
     ) -> Result<Self, RunnerError> {
-        let engine = Engine::new(&engine_config(stack_bytes, fuel))
+        let engine = Engine::new(&engine_config(stack_bytes))
             .map_err(|error| RunnerError::Engine(format!("{error:#}")))?;
-        Ok(Self {
-            engine,
-            limit,
-            fuel,
-        })
+        Ok(Self { engine, limit })
     }
 
     /// The limit applied to every instance.
@@ -326,88 +300,39 @@ impl Runner {
         self.limit
     }
 
-    /// Validates `bytes`, instantiates the module, calls `vibra_v1_entry`, and
+    /// Validates `bytes`, instantiates the module, calls `vibra_v1_eval`, and
     /// reads what the module recorded.
     ///
     /// # Errors
     ///
-    /// A [`RunnerError`] when the module is not a v1 module, imports a native
-    /// the runner does not supply, or lacks an export the protocol needs. A
-    /// run that exhausts memory is the [`Outcome::MemoryExhausted`] host event,
-    /// including when the module's own initial memory exceeds the limit.
-    pub fn run_entry(&self, bytes: &[u8]) -> Result<Outcome, RunnerError> {
+    /// A [`RunnerError`] when the module is not a transition module, imports
+    /// a native the runner does not supply, or lacks an export the protocol
+    /// needs. A run that exhausts memory is the [`Outcome::MemoryExhausted`]
+    /// host event, including when the module's own initial memory exceeds
+    /// the limit.
+    pub fn run_eval(&self, bytes: &[u8]) -> Result<Outcome, RunnerError> {
         match self.start(bytes)? {
             Started::MemoryExhausted => Ok(Outcome::MemoryExhausted),
-            Started::Ready(mut instance) => instance.call_entry(),
+            Started::Ready(mut instance) => instance.call_eval(),
         }
     }
 
-    /// Validates `bytes` and instantiates the module under the runner's limit,
-    /// without running it. The instance stays usable after any stop: the host
-    /// reads values and the live size through its accessors.
+    /// Validates `bytes` and instantiates the module under the runner's
+    /// limit, without running it. The instance stays usable after any stop:
+    /// the host reads values and the live size through its accessors.
     ///
     /// # Errors
     ///
-    /// The same [`RunnerError`]s as [`Runner::run_entry`], before the entry
+    /// The same [`RunnerError`]s as [`Runner::run_eval`], before the entry
     /// runs. A module whose own memory exceeds the limit is
     /// [`Started::MemoryExhausted`].
     pub fn start(&self, bytes: &[u8]) -> Result<Started, RunnerError> {
-        self.start_with_host(bytes, Box::new(WorldProvider::new(&HostWorld::default())))
-    }
-
-    /// [`Runner::start`] for a module whose host operations are operations of
-    /// `provider`, a fresh one for each instance.
-    ///
-    /// # Errors
-    ///
-    /// The same [`RunnerError`]s as [`Runner::start`].
-    pub fn start_with_host(
-        &self,
-        bytes: &[u8],
-        provider: Box<dyn HostProvider>,
-    ) -> Result<Started, RunnerError> {
-        self.instantiate(bytes, provider, None)
-    }
-
-    /// [`Runner::start`] for a host test of the boundary, with `forged` answering
-    /// the operation `symbol` in place of the runner's own host, so that the test
-    /// can misuse the builders the way a faulty host would.
-    ///
-    /// # Errors
-    ///
-    /// The same [`RunnerError`]s as [`Runner::start`].
-    #[doc(hidden)]
-    pub fn start_forged(
-        &self,
-        bytes: &[u8],
-        symbol: &'static str,
-        forged: Forged,
-    ) -> Result<Started, RunnerError> {
-        self.instantiate(
-            bytes,
-            Box::new(WorldProvider::new(&HostWorld::default())),
-            Some((symbol, forged)),
-        )
-    }
-
-    fn instantiate(
-        &self,
-        bytes: &[u8],
-        provider: Box<dyn HostProvider>,
-        forged: Option<(&'static str, Forged)>,
-    ) -> Result<Started, RunnerError> {
         validate(bytes)?;
         let module = Module::new(&self.engine, bytes)
             .map_err(|error| RunnerError::Compile(format!("{error:#}")))?;
         let mut linker = Linker::new(&self.engine);
         natives::define(&mut linker)
             .map_err(|error| RunnerError::Engine(format!("{error:#}")))?;
-        host::define(&mut linker)
-            .map_err(|error| RunnerError::Engine(format!("{error:#}")))?;
-        if let Some((symbol, forged)) = forged {
-            host::define_forged(&mut linker, symbol, forged)
-                .map_err(|error| RunnerError::Engine(format!("{error:#}")))?;
-        }
         let mut store = Store::new(
             &self.engine,
             Host {
@@ -415,17 +340,9 @@ impl Runner {
                     limit: self.limit,
                     refused: false,
                 },
-                provider,
-                audit: Vec::new(),
-                memory_event: false,
             },
         );
         store.limiter(|host| &mut host.limiter);
-        if self.fuel {
-            store
-                .set_fuel(u64::MAX)
-                .map_err(|error| RunnerError::Engine(format!("{error:#}")))?;
-        }
         for import in module.imports() {
             if linker.get_by_import(&mut store, &import).is_none() {
                 return Err(RunnerError::UnsuppliedImport {
@@ -442,18 +359,18 @@ impl Runner {
             }
             Err(error) => return Err(RunnerError::Instantiate(format!("{error:#}"))),
         };
-        Ok(Started::Ready(Instance::new(store, instance, self.fuel)))
+        Ok(Started::Ready(Instance::new(store, instance)))
     }
 }
 
-/// The engine configuration of a v1 runner.
+/// The engine configuration of a runner.
 ///
 /// Wasmtime is built with Cranelift and no optional engine feature, so the
-/// threads, garbage-collection, exception, function-reference, and reference-type
-/// proposals do not exist in this engine. The rest are turned off here, and
-/// [`validate`] refuses a module that uses any of them before it reaches the
-/// engine.
-fn engine_config(stack_bytes: Option<usize>, fuel: bool) -> Config {
+/// threads, garbage-collection, exception, function-reference, and
+/// reference-type proposals do not exist in this engine. The rest are turned
+/// off here, and [`validate`] refuses a module that uses any of them before
+/// it reaches the engine.
+fn engine_config(stack_bytes: Option<usize>) -> Config {
     let mut config = Config::new();
     if let Some(stack_bytes) = stack_bytes {
         config.max_wasm_stack(stack_bytes);
@@ -461,7 +378,7 @@ fn engine_config(stack_bytes: Option<usize>, fuel: bool) -> Config {
     config
         .strategy(Strategy::Cranelift)
         .cranelift_nan_canonicalization(true)
-        .consume_fuel(fuel)
+        .consume_fuel(false)
         .epoch_interruption(false)
         .wasm_multi_value(true)
         .wasm_bulk_memory(true)
@@ -519,6 +436,12 @@ fn origin(
     Ok(u32::try_from(ordinal).ok().filter(|ordinal| *ordinal != 0))
 }
 
+/// Reinterprets the bits of an `i64` an accessor returns as the unsigned
+/// value it carries.
+const fn unsigned(value: i64) -> u64 {
+    value.cast_unsigned()
+}
+
 /// Interprets what a call recorded. `stop` is the engine's report when the
 /// call did not return.
 pub(crate) fn interpret(
@@ -527,7 +450,7 @@ pub(crate) fn interpret(
     stop: Option<String>,
 ) -> Result<Outcome, RunnerError> {
     // A refused growth is the host event, whatever the module did next.
-    if store.data().limiter.refused || store.data().memory_event {
+    if store.data().limiter.refused {
         return Ok(Outcome::MemoryExhausted);
     }
     let recorded = call_i32(store, instance, STATUS_EXPORT)?;
@@ -540,10 +463,9 @@ pub(crate) fn interpret(
         (None, Status::Nothing) => {
             let result = call_i64(store, instance, RESULT_EXPORT)?;
             let live_size = call_i64(store, instance, LIVE_SIZE_EXPORT)?;
-            // An ID and a size are unsigned 64-bit values carried in an `i64`.
             Ok(Outcome::Completed {
-                result: ResultSlot(u64::from_ne_bytes(result.to_ne_bytes())),
-                live_size: u64::from_ne_bytes(live_size.to_ne_bytes()),
+                result: ResultSlot(unsigned(result)),
+                live_size: unsigned(live_size),
             })
         }
         (None, recorded) => Ok(Outcome::Defect {
@@ -567,18 +489,15 @@ pub(crate) fn interpret(
         }
         (Some(_), Status::FailedAssertion) => {
             let code = call_i32(store, instance, FAILURE_EXPORT)?;
-            let Some(failure) = TestAssertion::from_code(code) else {
+            let Some(failure) = Failure::from_code(code) else {
                 return Ok(Outcome::Defect {
                     cause: format!("`{FAILURE_EXPORT}` returned the code {code}"),
                 });
             };
-            let operands = if failure == TestAssertion::Equal {
+            let operands = if failure == Failure::AssertEqual {
                 let expected = call_i64(store, instance, FAILURE_EXPECTED_EXPORT)?;
                 let actual = call_i64(store, instance, FAILURE_ACTUAL_EXPORT)?;
-                Some((
-                    u64::from_ne_bytes(expected.to_ne_bytes()),
-                    u64::from_ne_bytes(actual.to_ne_bytes()),
-                ))
+                Some((unsigned(expected), unsigned(actual)))
             } else {
                 None
             };

@@ -162,12 +162,20 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
         &["vibra-diagnostics-v1", "vibra-ir-v1", "vibra-syntax-v1"],
     ),
     // The runner is the only crate that depends on the engine. It reads the
-    // boundary names and codes recorded in `vibra-ir-v1`, and it supplies the
-    // imports of the native-code crate over the instance memory. It
-    // does not depend on the emitter: the harness joins them.
+    // boundary names and codes recorded in `vibra-ir`, and it supplies the
+    // imports of the native-code crate over the instance memory; a module
+    // imports nothing else. It does not depend on the emitter: the harness
+    // joins them. Its tests emit programs and run them beside the reference
+    // interpreter.
     (
         "vibra-wasm-run",
-        &["vibra-host-v1", "vibra-ir-v1", "vibra-native-v1"],
+        &[
+            "vibra-diagnostics",
+            "vibra-interp",
+            "vibra-ir",
+            "vibra-native",
+            "vibra-wasm",
+        ],
     ),
     // The actor kernel is generic over an executor and knows no language, no
     // value layout, and no backend: it needs no other crate (N19).
@@ -649,9 +657,8 @@ fn the_emitter_has_no_engine_and_no_native_code_crate() {
     assert!(checked, "the emitter crate exists");
 }
 
-/// The toolchain-owned native code crate. It is written once and called by both
-/// backends: the interpreter directly, and the runner for the imports of a
-/// module. The emitter never depends on it.
+/// The v1 toolchain-owned native code crate, which the v1 reference
+/// interpreter and Nexus call. The emitter never depends on it.
 const NATIVE_CRATE: &str = "vibra-native-v1";
 
 #[test]
@@ -666,8 +673,8 @@ fn only_the_two_backends_run_the_native_code_and_it_reaches_neither_the_engine_n
     assert_eq!(
         dependents,
         // Nexus hands the native code a view of its value store (N7).
-        BTreeSet::from(["vibra-interp-v1", "vibra-nexus", "vibra-wasm-run"]),
-        "the reference interpreter, the runner, and Nexus call the native code, and nothing else does"
+        BTreeSet::from(["vibra-interp-v1", "vibra-nexus"]),
+        "the v1 reference interpreter and Nexus call the v1 native code, and nothing else does"
     );
     let own = graph.get(NATIVE_CRATE).expect("the native crate exists");
     assert_eq!(
@@ -690,9 +697,9 @@ fn only_the_two_backends_run_the_native_code_and_it_reaches_neither_the_engine_n
     }
 }
 
-/// The host provider crate. The reference interpreter and the runner may call it,
-/// and the harness depends on it to decode a case's host world and hand each
-/// backend a fresh provider. The emitter and the language phases never do: a
+/// The v1 host provider crate. The v1 reference interpreter and the native
+/// track may call it, and the v1 harness depends on it to decode a case's host
+/// world and hand each backend a fresh provider. The emitter and the language phases never do: a
 /// module names a host operation only by the registry symbol and signature that
 /// `vibra-ir-v1` records.
 const HOST_CRATE: &str = "vibra-host-v1";
@@ -716,7 +723,6 @@ fn only_the_backends_and_the_harness_depend_on_the_host_provider() {
         // its `harness` profile a world provider.
         "vibra-nexus-bridge",
         "vibra-nexus-eval",
-        "vibra-wasm-run",
         "vibra-workspace-v1",
     ]);
     assert!(

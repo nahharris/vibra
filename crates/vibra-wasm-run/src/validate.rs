@@ -1,26 +1,25 @@
-//! Validation of a module under exactly the v1 feature baseline.
+//! Validation of a module under exactly the transition feature baseline.
 //!
-//! `docs/spec/06-runtime.md`, "WebAssembly boundary", fixes what a v1 module
-//! may be: the core instruction set and function tables, multiple results,
+//! `docs/spec/06-runtime.md`, "Wasm transition", fixes what a transition
+//! module may be: the core instruction set and function tables, multiple results,
 //! bulk memory, sign-extension operators, and non-trapping float-to-integer
 //! conversions, and none of the optional proposals; imports from the native
 //! import module only; one defined 32-bit memory exported as
-//! `vibra_v1_memory` and no other export outside the versioned table; and no
-//! custom section. The check is wasmparser's validator under a feature set
+//! `vibra_v1_memory` and no other export outside the versioned table, with
+//! `vibra_v1_eval` or `vibra_v1_test` and never both; and no custom section. The check is wasmparser's validator under a feature set
 //! that names exactly the baseline, then those structural rules.
 
 use std::fmt;
 
-use vibra_ir_v1::boundary::{
-    BUILDER_EXPORTS, FUNCTION_EXPORTS, HOST_IMPORT_MODULE, MEMORY_EXPORT,
-    NATIVE_IMPORT_MODULE,
+use vibra_ir::boundary::{
+    ACCESSOR_EXPORTS, EVAL_EXPORT, MEMORY_EXPORT, NATIVE_IMPORT_MODULE, TEST_EXPORT,
 };
 use wasmparser::{
     ExternalKind, FuncValidatorAllocations, Parser, Payload, TypeRef, ValidPayload,
     Validator, WasmFeatures,
 };
 
-/// The feature set a v1 module validates under, and no more.
+/// The feature set a transition module validates under, and no more.
 ///
 /// WebAssembly 1.0 with mutable globals, plus the four named extensions. The
 /// tail-call, garbage-collection, exception, SIMD, relaxed SIMD, threads,
@@ -35,7 +34,7 @@ pub fn baseline_features() -> WasmFeatures {
         | WasmFeatures::SATURATING_FLOAT_TO_INT
 }
 
-/// Why a module is not a v1 module.
+/// Why a module is not a transition module.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ValidationError {
     /// The binary is malformed or invalid under the baseline feature set,
@@ -52,8 +51,9 @@ pub enum ValidationError {
         /// The import's name.
         name: String,
     },
-    /// An export outside the versioned table: a name that is not in it, or a
-    /// name exported as the wrong kind, such as a memory under another name.
+    /// An export outside the versioned table: a name that is not in it, a
+    /// name exported as the wrong kind, such as a memory under another name,
+    /// or the second of the two entry exports.
     ForeignExport {
         /// The export's name.
         name: String,
@@ -67,17 +67,17 @@ impl fmt::Display for ValidationError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Invalid(message) => {
-                write!(formatter, "not a v1 module: {message}")
+                write!(formatter, "not a transition module: {message}")
             }
             Self::CustomSection(name) => {
                 write!(
                     formatter,
-                    "a v1 module has no custom section, found `{name}`"
+                    "a transition module has no custom section, found `{name}`"
                 )
             }
             Self::ForeignImport { module, name } => write!(
                 formatter,
-                "import `{module}`.`{name}` is outside the `{NATIVE_IMPORT_MODULE}` and `{HOST_IMPORT_MODULE}` functions"
+                "import `{module}`.`{name}` is outside the `{NATIVE_IMPORT_MODULE}` functions"
             ),
             Self::ForeignExport { name } => {
                 write!(formatter, "export `{name}` is outside the versioned table")
@@ -89,7 +89,7 @@ impl fmt::Display for ValidationError {
 
 impl std::error::Error for ValidationError {}
 
-/// What a v1 module declares at its boundary.
+/// What a transition module declares at its boundary.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ModuleSummary {
     /// Each native import as its `(module, name)` pair, in module order. Every
@@ -105,7 +105,7 @@ pub struct ModuleSummary {
     pub data_segments: usize,
 }
 
-/// Validates `bytes` as a v1 module and reports what it declares.
+/// Validates `bytes` as a transition module and reports what it declares.
 ///
 /// # Errors
 ///
@@ -136,8 +136,7 @@ pub fn validate(bytes: &[u8]) -> Result<ModuleSummary, ValidationError> {
             Payload::ImportSection(reader) => {
                 for import in reader.into_imports() {
                     let import = import.map_err(invalid)?;
-                    if (import.module != NATIVE_IMPORT_MODULE
-                        && import.module != HOST_IMPORT_MODULE)
+                    if import.module != NATIVE_IMPORT_MODULE
                         || !matches!(
                             import.ty,
                             TypeRef::Func(_) | TypeRef::FuncExact(_)
@@ -174,8 +173,9 @@ pub fn validate(bytes: &[u8]) -> Result<ModuleSummary, ValidationError> {
                     let allowed = match export.kind {
                         ExternalKind::Memory => export.name == MEMORY_EXPORT,
                         ExternalKind::Func => {
-                            FUNCTION_EXPORTS.contains(&export.name)
-                                || BUILDER_EXPORTS.contains(&export.name)
+                            export.name == EVAL_EXPORT
+                                || export.name == TEST_EXPORT
+                                || ACCESSOR_EXPORTS.contains(&export.name)
                         }
                         _ => false,
                     };
@@ -193,21 +193,17 @@ pub fn validate(bytes: &[u8]) -> Result<ModuleSummary, ValidationError> {
             _ => {}
         }
     }
-    // A module exports the builders exactly when it imports a host operation.
-    let imports_host = summary
-        .imports
-        .iter()
-        .any(|(module, _)| module == HOST_IMPORT_MODULE);
-    if let Some(name) = summary
-        .exports
-        .iter()
-        .find(|name| BUILDER_EXPORTS.contains(&name.as_str()) && !imports_host)
+    // A module is an evaluation module or a test module, never both.
+    if summary.exports.iter().any(|name| name == EVAL_EXPORT)
+        && summary.exports.iter().any(|name| name == TEST_EXPORT)
     {
-        return Err(ValidationError::ForeignExport { name: name.clone() });
+        return Err(ValidationError::ForeignExport {
+            name: TEST_EXPORT.to_owned(),
+        });
     }
     if defined_memories != 1 {
         return Err(ValidationError::Memory(format!(
-            "a v1 module defines exactly one memory, found {defined_memories}"
+            "a transition module defines exactly one memory, found {defined_memories}"
         )));
     }
     if memory_exports != 1 {
