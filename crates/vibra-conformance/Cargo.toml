@@ -13,6 +13,7 @@ serde.workspace = true
 toml.workspace = true
 vibra-diagnostics.workspace = true
 vibra-fmt.workspace = true
+vibra-resolve.workspace = true
 vibra-syntax.workspace = true
 vibra-workspace.workspace = true
 

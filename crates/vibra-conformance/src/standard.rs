@@ -9,6 +9,7 @@ use crate::profile::{
 };
 use crate::project::{ProjectDecodeHandler, SourceGraphHandler};
 use crate::reader::ReaderV2Handler;
+use crate::resolve::ResolveHandler;
 
 /// Selects the closest registered handler that can run each case.
 #[derive(Default)]
@@ -176,8 +177,9 @@ pub enum DispatchResult {
 
 /// Every handler the workspace has, registered under its profile.
 ///
-/// The reader runs under `readerV2`; the project decoder and the source graph
-/// run under `staticV2`. Every other operation has no handler yet.
+/// The reader runs under `readerV2`; the project decoder, the source graph,
+/// and resolution run under `staticV2`. Every other operation has no handler
+/// yet.
 /// The binary and the host tests build this one dispatcher, so the two cannot
 /// disagree about which handlers exist.
 #[must_use]
@@ -186,4 +188,5 @@ pub fn standard_dispatcher() -> ProfileDispatcher {
         .with_handler(ConformanceProfile::ReaderV2, ReaderV2Handler)
         .with_handler(ConformanceProfile::StaticV2, ProjectDecodeHandler)
         .with_handler(ConformanceProfile::StaticV2, SourceGraphHandler)
+        .with_handler(ConformanceProfile::StaticV2, ResolveHandler)
 }

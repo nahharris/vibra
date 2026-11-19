@@ -34,6 +34,7 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
         &[
             "vibra-diagnostics",
             "vibra-fmt",
+            "vibra-resolve",
             "vibra-syntax",
             "vibra-workspace",
         ],
@@ -47,7 +48,10 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
     ("vibra-ir", &["vibra-diagnostics"]),
     // The workspace reads a project's files and hands later phases a
     // snapshot; no language crate depends on it.
-    ("vibra-workspace", &["vibra-diagnostics", "vibra-syntax"]),
+    (
+        "vibra-workspace",
+        &["vibra-diagnostics", "vibra-resolve", "vibra-syntax"],
+    ),
     // Resolution reads the reader's views of the modules a caller hands it.
     ("vibra-resolve", &["vibra-diagnostics", "vibra-syntax"]),
     // The reference interpreter runs checked IR and knows no front end.
