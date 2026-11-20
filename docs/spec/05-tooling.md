@@ -207,6 +207,9 @@ written order of entries. It previews by default; `--write` applies.
   name-case convention is a diagnostic, never a reason to rename.
 - Source the parser recovered from ambiguously is kept byte for byte. The
   formatter does not repair by guessing.
+- A file that is not valid UTF-8 is `@syntax.invalidEncoding` and plans no
+  edit: `changed` is `false` and `text` is `null`. It is never decoded
+  lossily.
 - A captured module is formatted with a semantic check of the candidate text
   in place of the captured bytes. A file that is not a module is formatted
   by syntax alone. When checking is unavailable, formatting proceeds from

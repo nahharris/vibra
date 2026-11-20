@@ -95,7 +95,7 @@
       }
     },
     {
-      "description": "fmt that admitted its path carries the fmt payload. Diagnostics prevent writing, and the planned text is null only when the file was never read; a preview always carries its text.",
+      "description": "fmt that admitted its path carries the fmt payload. Diagnostics prevent writing, and the planned text is null only when the file was never read or is not UTF-8; a preview always carries its text.",
       "if": { "$ref": "#/$defs/fmtResponse" },
       "then": {
         "properties": { "payload": { "$ref": "#/$defs/fmtPayload" } },

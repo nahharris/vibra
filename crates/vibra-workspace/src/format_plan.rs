@@ -14,7 +14,9 @@
 //!    place of the captured bytes. When the check of the module is
 //!    unavailable (`@tool.unavailable`), formatting proceeds from syntax
 //!    alone and the incomplete check reports nothing.
-//! 4. A document the reader recovered from is kept byte for byte.
+//! 4. A document the reader recovered from is kept byte for byte. A
+//!    document that is not UTF-8 plans no edit and has no text: it is never
+//!    decoded lossily.
 //!
 //! The plan is a preview. [`FormatPlan::write`] replaces the file atomically
 //! when the text changed and no error diagnostic is present.
@@ -176,7 +178,7 @@ impl FormatPlan {
 
     /// The formatted text, or the planned text when diagnostics prevent
     /// writing; the file's bytes unchanged when the reader recovered.
-    /// `None` when the file was never read. Every span of
+    /// `None` when the file was never read or is not UTF-8. Every span of
     /// [`Self::diagnostics`] that names the path is an offset into it.
     #[must_use]
     pub fn text(&self) -> Option<&str> {
@@ -423,18 +425,19 @@ pub fn plan_format(
     let document = parse(mode, Some(&relative), &bytes);
     let mut diagnostics = document.diagnostics().to_vec();
     let text = format_document(&document)
-        .unwrap_or_else(|| String::from_utf8_lossy(&bytes).into_owned());
+        .or_else(|| std::str::from_utf8(&bytes).ok().map(str::to_owned));
     if mode == DocumentMode::Source
         && diagnostics.is_empty()
         && let Some((snapshot, source_id, _)) = &module
+        && let Some(text) = &text
     {
-        diagnostics.extend(check_candidate(snapshot, source_id, &relative, &text));
+        diagnostics.extend(check_candidate(snapshot, source_id, &relative, text));
     }
     Ok(FormatPlan {
-        changed: bytes != text.as_bytes(),
+        changed: text.as_ref().is_some_and(|text| bytes != text.as_bytes()),
         path: relative,
         file: Some(file),
-        text: Some(text),
+        text,
         diagnostics,
         revision,
     })

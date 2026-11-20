@@ -135,7 +135,8 @@ pub struct FmtPayload {
     pub changed: bool,
     /// Whether the file was replaced.
     pub written: bool,
-    /// The formatted or planned text; `null` after a write.
+    /// The formatted or planned text; `null` after a write, or when the file
+    /// was never read or is not UTF-8.
     pub text: Option<String>,
 }
 
