@@ -44,7 +44,7 @@ fn a_prelude_name_resolves_to_its_declaration() {
         [(
             start,
             end,
-            std_identity("@std.builtin", DeclarationKind::Type, "Str")
+            std_identity("@std.str", DeclarationKind::Type, "Str")
         )]
     );
 }

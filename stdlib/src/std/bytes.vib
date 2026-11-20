@@ -1,0 +1,61 @@
+// The byte-string type, which plays the `@bytes` role: a wrapper over its
+// bytes, in order. Its length, concatenation, and slicing are bound to
+// `@compiler` intrinsics, and its order is the lexicographic walk of
+// `compareLexicographic`.
+
+use @std.iter.compareLexicographic enduse
+
+type Bytes of List(U8)
+  role @bytes
+  visibility @public
+  fn length
+    takes {value: Self}
+    returns count: U64
+    visibility @public
+    external @compiler
+    symbol "bytes.length"
+  endfn
+  fn concat
+    takes {left: Self right: Self}
+    returns joined: Self
+    visibility @public
+    external @compiler
+    symbol "bytes.concat"
+  endfn
+  fn slice
+    takes {value: Self start: U64 end: U64}
+    returns part: Option(Self)
+    visibility @public
+    external @compiler
+    symbol "bytes.slice"
+  endfn
+  impl Equatable
+    fn equal
+      takes {left: Self right: Self}
+      returns same: Bool
+      external @compiler
+      symbol "bytes.equal"
+    endfn
+  endimpl
+  impl Ordered
+    fn compare
+      takes {left: Self right: Self}
+      returns order: Ordering
+      do
+        return compareLexicographic(left right)
+    endfn
+  endimpl
+  impl Iter
+    type Item of U8 endtype
+    fn next
+      takes {value: Self}
+      returns step: Option({Item Self})
+      do
+        let Bytes(items) be value endlet
+        let Option.some(value: {first rest}) be Iter.next(items) else
+          return Option.none()
+        endlet
+        return Option.some(value: {first Bytes(rest)})
+    endfn
+  endimpl
+endtype

@@ -134,8 +134,8 @@ fn a_generic_anonymous_fn_bound_by_let_stays_generic() {
     let source = "fn main returns r: {I32 Str} do \
                   let id be fn(T) takes {x: T} returns r: T do return x endfn endlet \
                   return {id(1i32) id(\"x\")} endfn\n";
-    let str_type = "{kind: @declared path: @std.builtin.Str seed: \
-                    \"sha256:7a82cdb199f4a619d2da02c737c85a64243099c0385ac0e4442f1cb2d6e0ad5e\" \
+    let str_type = "{kind: @declared path: @std.str.Str seed: \
+                    \"sha256:29dc059689d38a6e1e8b843c7c518b7bfe2d16d9f596ef242d758b9b970b1d8a\" \
                     arguments: []}";
     let expected = format!(
         "{{format: @value.v2 typeInfo: {{kind: @tuple arguments: [@i32 {str_type}]}} \

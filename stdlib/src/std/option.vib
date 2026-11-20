@@ -6,4 +6,18 @@ type Option(T)
   case some {value: T}
   role @option
   visibility @public
+  impl Iter
+    type Item of T endtype
+    fn next
+      takes {value: Self}
+      returns step: Option({Item Self})
+      do
+        match value
+          case Option.some(value: item)
+            return Option.some(value: {item Option.none()})
+          case Option.none()
+            return Option.none()
+        endmatch
+    endfn
+  endimpl
 endtype

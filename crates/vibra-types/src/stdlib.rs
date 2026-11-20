@@ -94,7 +94,7 @@ const EMBEDDED_MANIFEST: &[u8] = include_bytes!("../../../stdlib/manifest.vibon"
 
 /// Every module compiled into the toolchain, by module path atom, in
 /// manifest order.
-const EMBEDDED_MODULES: [(&str, &[u8]); 7] = [
+const EMBEDDED_MODULES: [(&str, &[u8]); 9] = [
     (
         "@std.assert",
         include_bytes!("../../../stdlib/src/std/assert.vib"),
@@ -106,6 +106,10 @@ const EMBEDDED_MODULES: [(&str, &[u8]); 7] = [
     (
         "@std.builtin",
         include_bytes!("../../../stdlib/src/std/builtin.vib"),
+    ),
+    (
+        "@std.bytes",
+        include_bytes!("../../../stdlib/src/std/bytes.vib"),
     ),
     (
         "@std.core",
@@ -122,6 +126,10 @@ const EMBEDDED_MODULES: [(&str, &[u8]); 7] = [
     (
         "@std.result",
         include_bytes!("../../../stdlib/src/std/result.vib"),
+    ),
+    (
+        "@std.str",
+        include_bytes!("../../../stdlib/src/std/str.vib"),
     ),
 ];
 

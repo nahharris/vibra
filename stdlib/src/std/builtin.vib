@@ -2,7 +2,7 @@
 // `Intrinsic(@tag)` with the type's wire tag, and their static members are
 // bound to `@compiler` intrinsics. The module is in every checked graph and is
 // never imported; its public declarations are reached through the prelude.
-// `Str`, `Bytes`, and `Dict` are declared here with their roles.
+// `Dict`, whose representation is private, is declared here with its role.
 
 use @std.core.ArithmeticError enduse
 
@@ -35,6 +35,30 @@ type Char of Intrinsic(@char)
     visibility @public
     external @compiler
     symbol "char.fromU32"
+  endfn
+  fn isAsciiDigit
+    takes {value: Self}
+    returns holds: Bool
+    visibility @public
+    do
+      return Ordered.inRange(value '0' '9')
+  endfn
+  fn isAsciiAlphabetic
+    takes {value: Self}
+    returns holds: Bool
+    visibility @public
+    do
+      return Bool.or(Ordered.inRange(value 'A' 'Z') Ordered.inRange(value 'a' 'z'))
+  endfn
+  fn isAsciiWhitespace
+    takes {value: Self}
+    returns holds: Bool
+    visibility @public
+    do
+      return Bool.or(
+        Bool.or(Equatable.equal(value ' ') Equatable.equal(value '\t'))
+        Bool.or(Equatable.equal(value '\n') Equatable.equal(value '\r'))
+      )
   endfn
   impl Equatable
     fn equal
@@ -233,6 +257,15 @@ type I8 of Intrinsic(@i8)
       symbol "u64.toI8"
     endfn
   endimpl
+  impl TryFrom(Str)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: Str}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "i8.parse"
+    endfn
+  endimpl
 endtype
 
 type I16 of Intrinsic(@i16)
@@ -412,6 +445,15 @@ type I16 of Intrinsic(@i16)
       symbol "u64.toI16"
     endfn
   endimpl
+  impl TryFrom(Str)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: Str}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "i16.parse"
+    endfn
+  endimpl
 endtype
 
 type I32 of Intrinsic(@i32)
@@ -589,6 +631,15 @@ type I32 of Intrinsic(@i32)
       symbol "u64.toI32"
     endfn
   endimpl
+  impl TryFrom(Str)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: Str}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "i32.parse"
+    endfn
+  endimpl
 endtype
 
 type I64 of Intrinsic(@i64)
@@ -764,6 +815,15 @@ type I64 of Intrinsic(@i64)
       symbol "u64.toI64"
     endfn
   endimpl
+  impl TryFrom(Str)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: Str}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "i64.parse"
+    endfn
+  endimpl
 endtype
 
 type U8 of Intrinsic(@u8)
@@ -929,6 +989,15 @@ type U8 of Intrinsic(@u8)
       returns converted: Result(Self ConversionError)
       external @compiler
       symbol "u64.toU8"
+    endfn
+  endimpl
+  impl TryFrom(Str)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: Str}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "u8.parse"
     endfn
   endimpl
 endtype
@@ -1097,6 +1166,15 @@ type U16 of Intrinsic(@u16)
       symbol "u64.toU16"
     endfn
   endimpl
+  impl TryFrom(Str)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: Str}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "u16.parse"
+    endfn
+  endimpl
 endtype
 
 type U32 of Intrinsic(@u32)
@@ -1260,6 +1338,15 @@ type U32 of Intrinsic(@u32)
       returns converted: Result(Self ConversionError)
       external @compiler
       symbol "u64.toU32"
+    endfn
+  endimpl
+  impl TryFrom(Str)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: Str}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "u32.parse"
     endfn
   endimpl
 endtype
@@ -1426,6 +1513,15 @@ type U64 of Intrinsic(@u64)
       symbol "u32.toU64"
     endfn
   endimpl
+  impl TryFrom(Str)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: Str}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "u64.parse"
+    endfn
+  endimpl
 endtype
 
 type F32 of Intrinsic(@f32)
@@ -1479,6 +1575,15 @@ type F32 of Intrinsic(@f32)
     external @compiler
     symbol "f32.compareTotal"
   endfn
+  impl TryFrom(Str)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: Str}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "f32.parse"
+    endfn
+  endimpl
 endtype
 
 type F64 of Intrinsic(@f64)
@@ -1532,6 +1637,15 @@ type F64 of Intrinsic(@f64)
     external @compiler
     symbol "f64.compareTotal"
   endfn
+  impl TryFrom(Str)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: Str}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "f64.parse"
+    endfn
+  endimpl
 endtype
 
 type List(T) of Intrinsic(@list)
@@ -1575,24 +1689,6 @@ type List(T) of Intrinsic(@list)
   endimpl
 endtype
 
-type Str of List(Char)
-  role @str
-  visibility @public
-  impl Ordered
-    fn compare
-      takes {left: Self right: Self}
-      returns order: Ordering
-      external @compiler
-      symbol "str.compare"
-    endfn
-  endimpl
-endtype
-
-type Bytes of List(U8)
-  role @bytes
-  visibility @public
-endtype
-
 type Dict(K V) of List({K V})
   role @dict
   visibility @public
@@ -1604,4 +1700,13 @@ type Dict(K V) of List({K V})
     external @compiler
     symbol "dict.entries"
   endfn
+  impl Iter
+    type Item of {K V} endtype
+    fn next
+      takes {value: Self}
+      returns step: Option({{K V} Self})
+      external @compiler
+      symbol "dict.next"
+    endfn
+  endimpl
 endtype
