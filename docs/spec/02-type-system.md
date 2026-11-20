@@ -1101,7 +1101,13 @@ A name in pattern position that resolves to a constant module value is a
 constant pattern: it means the pattern of that value and binds nothing.
 Adding a module value named `x` therefore turns an existing pattern `x` from
 a binder into a value match. Coverage treats a constant pattern as its
-expanded value.
+expanded value. The pattern of a string, character, integer, or atom is its
+literal; that of a tuple, record, or list is the tuple, record, or list
+pattern of its components' patterns; and that of a construction of a case
+or a declared type is the constructor pattern of its fields' patterns. A
+float, `void`, or a dict has no pattern form, so a constant whose value is
+or holds one is `@pattern.unsupportedCoverage` at the pattern: coverage has
+no shape to expand it to.
 
 Labelled defaults are constant expressions. Two defaults are the same when
 they denote the same value. The value of a constant dict is the value its
