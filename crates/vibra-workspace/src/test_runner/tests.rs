@@ -118,7 +118,7 @@ fn a_trap_ends_only_its_own_test() -> Result<(), String> {
         ]
     );
     assert_eq!(run.result(), SuiteResult::Trap);
-    let document = run.document().ok_or("an observation")?;
+    let document = run.document();
     assert!(
         document.contains(
             "result: @test.trap trap: {trapCode: @runtime.invalidCheckedProgram} auditTrace:"

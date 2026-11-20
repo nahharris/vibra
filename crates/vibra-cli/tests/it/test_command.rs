@@ -416,7 +416,7 @@ fn test_memory_exhausted() {
     assert_eq!(counts(&document), (2, 1, 1));
     let items = &document["payload"]["tests"];
     assert_eq!(items[0]["name"], "@tests.memory::\"a exhausts\"");
-    assert_eq!(items[0]["result"], Value::Null);
+    assert_eq!(items[0]["result"], "@test.exhausted");
     assert_eq!(items[0]["status"], "unknown");
     assert_eq!(items[0]["trap"], Value::Null);
     assert_eq!(items[0]["diagnostics"], json!(["@runtime.memoryExhausted"]));

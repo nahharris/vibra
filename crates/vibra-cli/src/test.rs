@@ -21,7 +21,7 @@
 //!    item the diagnostic of its own ending (its `@tool.unavailable`, its
 //!    trap, its exhaustion, or its observation error).
 //! 6. Memory exhaustion is the host event `@runtime.memoryExhausted` on its
-//!    item: the item has no `@test.*` result, the limit `memory` is reached,
+//!    item: the item is `@test.exhausted`, the limit `memory` is reached,
 //!    and the observation is incomplete. It is not a trap.
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode, LineIndex};
@@ -119,15 +119,15 @@ const fn command_outcome(result: SuiteResult) -> CommandOutcome {
     }
 }
 
-/// The `@test.*` result of an outcome; an exhausted test has none.
-const fn test_result(outcome: &TestOutcome) -> Option<TestResult> {
+/// The `@test.*` result of an outcome.
+const fn test_result(outcome: &TestOutcome) -> TestResult {
     match outcome {
-        TestOutcome::Passed => Some(TestResult::Passed),
-        TestOutcome::AssertionFailed(_) => Some(TestResult::AssertionFailed),
-        TestOutcome::Trap { .. } => Some(TestResult::Trap),
-        TestOutcome::Invalid => Some(TestResult::Invalid),
-        TestOutcome::Unavailable(_) => Some(TestResult::Unavailable),
-        TestOutcome::Exhausted => None,
+        TestOutcome::Passed => TestResult::Passed,
+        TestOutcome::AssertionFailed(_) => TestResult::AssertionFailed,
+        TestOutcome::Trap { .. } => TestResult::Trap,
+        TestOutcome::Invalid => TestResult::Invalid,
+        TestOutcome::Unavailable(_) => TestResult::Unavailable,
+        TestOutcome::Exhausted => TestResult::Exhausted,
     }
 }
 
@@ -255,7 +255,7 @@ fn finish(
     let selected = tests.len();
     let passed = tests
         .iter()
-        .filter(|item| item.result == Some(TestResult::Passed))
+        .filter(|item| item.result == TestResult::Passed)
         .count();
     response.result = command_outcome(result);
     response.status = status_for(response.result);

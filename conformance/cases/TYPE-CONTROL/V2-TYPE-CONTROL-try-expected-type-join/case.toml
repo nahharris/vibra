@@ -1,0 +1,12 @@
+id = "V2-TYPE-CONTROL-try-expected-type-join"
+rule = "V2-TYPE-CONTROL-try-expected-type-join"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#try: in an if whose value nothing written types, the first branch fixes the join at U16, so the try in the else branch is checked at Result(U16 Str), which fixes the type argument of parse"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

@@ -1,0 +1,2 @@
+fn parse(T) takes {text: Str} returns r: Result(T Str) do return Result.err(error: text) endfn
+fn f takes {text: Str quick: Bool} returns r: Result(U16 Str) do let port be if quick then 80u16 else try parse(text) endif endlet return Result.ok(value: port) endfn

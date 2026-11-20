@@ -105,7 +105,6 @@ const fn row(chapter: &'static str, ordinal: usize, reading: Reading) -> Row {
 const SOURCE: &str = "01-source-language.md";
 const TYPES: &str = "02-type-system.md";
 const EFFECTS: &str = "03-effects.md";
-const PROGRAMS: &str = "04-programs-and-packages.md";
 
 const FORM: DiagnosticCode = DiagnosticCode::SyntaxInvalidForm;
 
@@ -134,15 +133,13 @@ const READINGS: &[Row] = &[
     row(TYPES, 3, Reading::StandardLibrary),
     // `Iter`, which claims its role.
     row(TYPES, 7, Reading::StandardLibrary),
+    // The `try` examples: the `let` with a type is a module value; the `let`
+    // without a type, whose `if` fixes the expected type, is a body statement.
+    row(TYPES, 9, Reading::Rejected(&[FORM])),
     // Two body statements: `let` with a pattern and `let` without a type.
     row(EFFECTS, 6, Reading::Rejected(&[FORM, FORM])),
     // Two body statements: `let` without a type, twice.
     row(EFFECTS, 10, Reading::Rejected(&[FORM, FORM])),
-    // The `@stdlibManifest.v2` example. Its `symbols` record has a field
-    // named `native`, a reserved word, which the VIBON grammar rejects at
-    // the word: the schema and the data grammar disagree, an open question
-    // of the programs chapter.
-    row(PROGRAMS, 5, Reading::Rejected(&[FORM])),
 ];
 
 /// The `vibra` and `vibon` fences of one chapter, numbered from 1.

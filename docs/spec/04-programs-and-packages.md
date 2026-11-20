@@ -546,10 +546,16 @@ module every declaration is visible.
 
 **Imports MUST NOT form a cycle.** An import whose target module imports,
 directly or through any chain of imports, the importing module is
-`@module.importCycle` at the later edge, relating the earlier edges. The
+`@module.importCycle` at the later edge, relating the earlier edges. The edges
+are taken in the order of the importing module's source identity, then of the
+start of the `use` path, and each is added to the graph unless its target
+already reaches its importer through the edges added before it. Such an edge is
+the later edge: it is reported at its path and left out, and its related spans
+are the paths of the shortest chain of added edges from its target back to its
+importer, in chain order. A module that imports itself has no related span. The
 same holds between units: package dependencies form a directed acyclic graph,
-and a dependency cycle is `@project.dependencyCycle`. Declarations inside
-one module may refer to each other freely.
+and a dependency cycle is `@project.dependencyCycle`. Declarations inside one
+module may refer to each other freely.
 
 String paths, relative imports, wildcard and selective imports, extension
 search, directory index modules, and re-exports do not exist.
@@ -657,7 +663,7 @@ fallback.
 | `format` | `@stdlibManifest.v2` | required |
 | `package` | record `name: Str`, `version: Str` | the embedded package |
 | `modules` | list of module entries sorted by `path` | every embedded module |
-| `symbols` | record `compiler`, `host`, `native`: each a list of `Str` sorted by UTF-8 bytes, possibly empty | the wire symbols the modules may bind. An empty `native` list is valid: acceleration is an optimization the manifest declares, and without it the interpreter runs every Vibra body |
+| `symbols` | record `compiler`, `host`, `nativeSymbol`: each a list of `Str` sorted by UTF-8 bytes, possibly empty | the wire symbols the modules may bind; `nativeSymbol` lists the `native` symbols, since the reserved word `native` is no field name. An empty `nativeSymbol` list is valid: acceleration is an optimization the manifest declares, and without it the interpreter runs every Vibra body |
 
 A module entry has `path` (the module atom), `digest` (`Str`, `sha256:` and
 the SHA-256 of the module's exact bytes), and `languageRoles` (list of role
@@ -682,7 +688,7 @@ atoms, possibly empty).
   symbols: {
     compiler: ["i32.addChecked" "list.length" "list.next"]
     host: ["io.stdoutText"]
-    native: []
+    nativeSymbol: []
   }
 }
 ```
@@ -713,7 +719,7 @@ Every `.vib` file under `tests/` is a module of the unit `@tests`:
 `tests/math/add.vib` is `@tests.math.add`. Test modules are part of the
 snapshot but of no target. A target module cannot name `@tests`
 (`@module.unknownPath`). A `test` declaration outside `@tests` is
-`@module.testOutsideTests`.
+`@module.testOutsideTests` over the whole declaration.
 
 ```vibra
 use @std.assert enduse
@@ -827,16 +833,16 @@ assertion row, as a callee or as a value, is
 | `assert.false` | `Fn({Bool} Void)` | the operand is `false` |
 | `assert.equal(T)` | `Fn({T T} Void)`, expected then actual | both operands have the same canonical value encoding |
 
-An operand of `assert.equal` whose type contains a callable, plan, or grant
-type is `@type.functionNotEquatable`. The comparison uses the canonical
-value encoding and gives ordinary code no equality.
+An operand of `assert.equal` whose type contains a callable, plan, or grant type
+is `@type.functionNotEquatable`, once at each such operand. The comparison uses
+the canonical value encoding and gives ordinary code no equality.
 
 A false assertion records one structured failure, with the assertion's name,
 the canonical encodings of the expected and actual values, and the call's
 span, and stops that test's body. It is not a trap, a `Result`, or a host
 event. Each test ends as exactly one of `@test.passed`,
-`@test.assertionFailed`, `@test.invalid`, `@test.unavailable`, or
-`@test.trap`.
+`@test.assertionFailed`, `@test.invalid`, `@test.unavailable`,
+`@test.trap`, or `@test.exhausted`.
 
 Before any selected test runs, the runner checks every selected test module
 and its import closure. An error there makes every selected test
