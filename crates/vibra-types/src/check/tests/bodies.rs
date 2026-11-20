@@ -255,8 +255,8 @@ fn try_without_an_enclosing_result_is_invalid() {
     );
 }
 
-/// A bare `where` is read without being checked yet, and a value of the
-/// type is not constructed until the invariant rule lands.
+/// A bare `where` is read and its predicate checked; each construction of
+/// the type states an obligation, which no discharge rule establishes yet.
 #[test]
 fn bare_where_types_are_read() {
     let source = "type Small of I32 where fn takes {v: I32} returns r: Bool do return true endfn endtype\n\
@@ -271,7 +271,10 @@ fn bare_where_types_are_read() {
     );
     assert_eq!(
         faults(&source),
-        [(DiagnosticCode::ToolUnavailable, at(&source, "Small", 2))]
+        [(
+            DiagnosticCode::ContractUnproved,
+            at(&source, "Small(1i32)", 0)
+        )]
     );
 }
 

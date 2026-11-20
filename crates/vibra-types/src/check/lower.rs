@@ -12,18 +12,26 @@ use std::sync::Arc;
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 use vibra_ir::{
-    Binder, Bound, Case, CheckedFunction, CheckedGlobal, CheckedModuleSet, FnType,
-    FunctionBody, Implementation, ImplementationRecord, InterfaceDefinition,
-    InterfaceKey, InterfaceMember, LibraryTypes, ModuleSetParts, NamedTypes,
-    SignatureRecord, SourceOrigin, Type, TypeBody, TypeDefinition, Value, Visibility,
-    encode_open_type, encode_type,
+    Arguments, Binder, Bound, CallTarget, Case, CheckedFunction, CheckedGlobal,
+    CheckedModuleSet, Constant, ExitGuard, Expr, FnType, FunctionBody, Guard,
+    Implementation, ImplementationRecord, InterfaceDefinition, InterfaceKey,
+    InterfaceMember, Invariant, Library, LibraryTypes, ModuleSetParts, NamedTypes,
+    Node, SignatureRecord, SourceOrigin, Type, TypeBody, TypeDefinition, Value,
+    Visibility, encode_open_type, encode_type,
 };
 use vibra_syntax::Document;
 
 use super::callables::fold;
+use super::contract::{
+    self, CheckedGuard, CheckedInvariant, Fold, Inputs, Predicate, Site,
+    anonymous_entries,
+};
 use super::cycle::initializer_cycles;
 use super::declare::{BoundData, Entity, FnData, Program, TypeKind};
-use super::expr::{BodyChecker, CallableScope, Checked, Layout, Reference, Target};
+use super::expr::{
+    BodyChecker, CallableScope, Checked, GuardViews, Layout, Reference, Target,
+    fallible_construction,
+};
 use super::generics::{Instantiation, expanding_instantiations};
 use super::testing::{self, TestFaults};
 use super::{CheckResult, CheckedTest};
@@ -40,8 +48,16 @@ struct Pass {
     /// Every instantiation of a generic function inside a body.
     instantiations: Vec<Instantiation>,
     /// The diagnostics of the labelled defaults of abstract contract
-    /// members, which no function holds.
+    /// members, which no function holds, and of the invariants of local
+    /// types.
     contract: Vec<Diagnostic>,
+    /// The checked invariant of each type, by program index.
+    invariants: BTreeMap<usize, CheckedInvariant>,
+    /// The error type of each type's `where … else`, by program index.
+    errors: BTreeMap<usize, Type>,
+    /// Every site of a bare-guard obligation or of a pattern a constant
+    /// construction decides, with its module.
+    sites: Vec<(usize, Site)>,
 }
 
 fn layout(program: &Program<'_>) -> Layout {
@@ -81,7 +97,11 @@ fn check_bodies(
         references: BTreeMap::new(),
         instantiations: Vec::new(),
         contract: abstract_defaults(program, documents, layout),
+        invariants: BTreeMap::new(),
+        errors: BTreeMap::new(),
+        sites: Vec::new(),
     };
+    invariants(program, documents, layout, &mut pass);
     for (index, data) in program.functions.iter().enumerate() {
         if !program.supported_fn(index) || data.external.is_some() {
             continue;
@@ -109,7 +129,9 @@ fn check_bodies(
             .map(|(pattern, _)| pattern)
             .collect::<Vec<_>>();
         let labelled = data.view.labelled();
-        let checked = checker.callable(signature, &patterns, &labelled, scope, body);
+        let views = GuardViews::of(&data.view);
+        let checked =
+            checker.callable(signature, &patterns, &labelled, scope, &views, body);
         if let Some(interface) = data.implements {
             let differing = differing_defaults(
                 program,
@@ -122,6 +144,8 @@ fn check_bodies(
             checker.diagnostics.extend(differing);
         }
         pass.functions.insert(index, checked);
+        pass.sites
+            .extend(checker.sites.drain(..).map(|site| (data.module, site)));
         pass.instantiations
             .extend(checker.instantiations.drain(..).map(
                 |(callee, arguments, span)| Instantiation {
@@ -155,6 +179,8 @@ fn check_bodies(
         let written = data.view.written_type().map(|written| written.span());
         let checked = checker.initializer(ty, value, written);
         pass.values.insert(index, checked);
+        pass.sites
+            .extend(checker.sites.drain(..).map(|site| (data.module, site)));
         pass.faults.insert(
             Target::Value(index),
             std::mem::take(&mut checker.diagnostics),
@@ -177,6 +203,8 @@ fn check_bodies(
         let mut checker = BodyChecker::new(program, layout, data.module, text);
         let checked = checker.test_body(body);
         pass.tests.insert(index, checked);
+        pass.sites
+            .extend(checker.sites.drain(..).map(|site| (data.module, site)));
         pass.faults.insert(
             Target::Test(index),
             std::mem::take(&mut checker.diagnostics),
@@ -185,6 +213,53 @@ fn check_bodies(
             .insert(Target::Test(index), std::mem::take(&mut checker.references));
     }
     pass
+}
+
+/// The representation of a type with a body this checker reads: the type a
+/// `where` predicate takes.
+fn representation(kind: &TypeKind) -> Option<Type> {
+    match kind {
+        TypeKind::Wrapper(representation) => Some(representation.clone()),
+        TypeKind::Tuple(components) => Some(Type::Tuple(components.clone())),
+        TypeKind::Record(fields) => Type::record(fields.clone()).ok(),
+        _ => None,
+    }
+}
+
+/// Checks the `where` of every type without parameters that states one.
+fn invariants(
+    program: &Program<'_>,
+    documents: &[Document],
+    layout: &Layout,
+    pass: &mut Pass,
+) {
+    for (index, data) in program.types.iter().enumerate() {
+        if !data.invariant || !data.params.is_empty() {
+            continue;
+        }
+        let (Some(representation), Some(section), Some(text)) = (
+            representation(&data.kind),
+            data.view.invariant(),
+            documents.get(data.module).and_then(Document::text),
+        ) else {
+            continue;
+        };
+        let mut checker = BodyChecker::new(program, layout, data.module, text);
+        let found = checker.invariant(section, &representation);
+        if let Some(error) = found.error {
+            pass.errors.insert(index, error);
+        }
+        if let Some(checked) = found.checked {
+            pass.invariants.insert(index, checked);
+        }
+        if program
+            .modules
+            .get(data.module)
+            .is_some_and(|module| !module.embedded)
+        {
+            pass.contract.append(&mut checker.diagnostics);
+        }
+    }
 }
 
 /// The diagnostics of the labelled defaults of every abstract member of an
@@ -408,8 +483,10 @@ fn skip_faulty_stdlib(program: &mut Program<'_>, pass: &Pass) {
 /// under the layout `provisional`, is a constant expression, by its global
 /// index in `layout`. An initializer that names another module value is
 /// constant when that one is, so the values are folded in rounds until no
-/// more are found.
+/// more are found. A construction of a type whose `where` has an `else` is
+/// no constant expression.
 fn constants(
+    program: &Program<'_>,
     provisional: &Layout,
     first: &Pass,
     layout: &Layout,
@@ -428,6 +505,7 @@ fn constants(
             if let Some(value) = checked
                 .node
                 .as_ref()
+                .filter(|node| !fallible_construction(program, node))
                 .and_then(|node| fold(node, &known).ok())
             {
                 known.insert(global, value);
@@ -458,10 +536,23 @@ pub(crate) fn check_program(
     let first = check_bodies(&program, documents, &provisional);
     skip_faulty_stdlib(&mut program, &first);
     let mut layout = layout(&program);
-    layout.constants = constants(&provisional, &first, &layout);
+    layout.constants = constants(&program, &provisional, &first, &layout);
     layout.constants_known = true;
+    layout.errors = first.errors.clone();
     drop(first);
     let pass = check_bodies(&program, documents, &layout);
+    let inputs = Inputs {
+        program: &program,
+        layout: &layout,
+        functions: &pass.functions,
+        invariants: &pass.invariants,
+        sites: &pass.sites,
+    };
+    let reviewed = contract::review(&inputs, || {
+        assemble(&program, &layout, &pass, &[], &BTreeMap::new(), true)
+            .ok()
+            .map(|assembled| assembled.set)
+    });
     let test_faults = testing::declaration_faults(&program);
     let reported = std::mem::take(&mut program.diagnostics);
     let mut diagnostics = reported.clone();
@@ -472,6 +563,7 @@ pub(crate) fn check_program(
         }
     }
     diagnostics.extend(pass.contract.iter().cloned());
+    diagnostics.extend(reviewed.diagnostics);
     diagnostics.extend(initializer_cycles(&program, &pass.references));
     diagnostics.extend(expanding_instantiations(&program, &pass.instantiations));
     diagnostics.sort_by(|left, right| {
@@ -518,7 +610,7 @@ pub(crate) fn check_program(
         return result;
     }
     let lowered = pass.tests.keys().copied().collect::<Vec<_>>();
-    match assemble(&program, &layout, pass, &lowered) {
+    match assemble(&program, &layout, &pass, &lowered, &reviewed.folds, false) {
         Ok(assembled) => {
             result.types = types_document(&program);
             result.entry = entry(&program, &layout);
@@ -648,7 +740,14 @@ fn runnable_tests(
     });
     let failure = match refaulted {
         Some((_, faults)) => faults.first().cloned(),
-        None => match assemble(program, &layout, reduced, &runnable) {
+        None => match assemble(
+            program,
+            &layout,
+            &reduced,
+            &runnable,
+            &BTreeMap::new(),
+            false,
+        ) {
             Ok(assembled) => {
                 return (
                     Some(assembled.set),
@@ -688,13 +787,23 @@ struct Assembled {
 }
 
 /// Lowers the declarations `layout` places and the tests `tests`, whose
-/// functions follow every other function.
+/// functions follow every other function, and then the anonymous invariant
+/// predicates, in the order of their types. Each guard with `else` is lowered
+/// as `folds` decides it; a bare guard leaves no code.
+///
+/// With `stubs`, the module set is one compile-time evaluations run over: a
+/// function or a module value the bodies pass did not lower is given a body
+/// that calls or reads itself, which no certified evaluation reaches.
 fn assemble(
     program: &Program<'_>,
     layout: &Layout,
-    mut pass: Pass,
+    pass: &Pass,
     tests: &[usize],
+    folds: &BTreeMap<usize, Fold>,
+    stubs: bool,
 ) -> Result<Assembled, String> {
+    let count = layout.functions.iter().flatten().count();
+    let anonymous = anonymous_entries(&pass.invariants, count + tests.len());
     let in_scope = |module: usize| {
         program
             .modules
@@ -702,7 +811,7 @@ fn assemble(
             .is_some_and(|data| data.in_scope)
     };
     let mut types = Vec::new();
-    for data in &program.types {
+    for (index, data) in program.types.iter().enumerate() {
         if !in_scope(data.module) {
             continue;
         }
@@ -735,8 +844,23 @@ fn assemble(
         } else {
             Visibility::Private
         };
+        let invariant = match pass.invariants.get(&index) {
+            Some(checked) => {
+                let predicate = match &checked.predicate {
+                    Predicate::Anonymous(_) => anonymous.get(&index).copied(),
+                    Predicate::Named(function) => {
+                        layout.functions.get(*function).copied().flatten()
+                    }
+                };
+                predicate.map(|predicate| Invariant {
+                    predicate,
+                    consequence: checked.consequence.clone(),
+                })
+            }
+            None => None,
+        };
         let definition =
-            TypeDefinition::new(id, data.params.clone(), body, None, visibility)
+            TypeDefinition::new(id, data.params.clone(), body, invariant, visibility)
                 .map_err(|error| error.to_string())?;
         types.push(definition);
     }
@@ -788,25 +912,38 @@ fn assemble(
         if layout.globals.get(index).copied().flatten().is_none() {
             continue;
         }
-        let (Some(ty), Some(checked)) = (data.ty.clone(), pass.values.remove(&index))
-        else {
-            return Err(format!(
-                "the module value `{}` was not checked",
-                data.qualified
-            ));
+        let origin = origin(program, data.module, data.view.construct().span());
+        let Some(ty) = data.ty.clone() else {
+            return Err(format!("the module value `{}` has no type", data.qualified));
         };
-        let Some(initializer) = checked.node else {
-            return Err(format!(
-                "the module value `{}` was not lowered",
-                data.qualified
-            ));
+        let lowered = pass
+            .values
+            .get(&index)
+            .and_then(|checked| Some((checked.node.clone()?, checked.slot_count)));
+        let (initializer, slot_count) = match lowered {
+            Some(lowered) => lowered,
+            None if stubs => {
+                let at = layout
+                    .globals
+                    .get(index)
+                    .copied()
+                    .flatten()
+                    .unwrap_or_default();
+                (Node::new(Expr::Global(at), origin.clone()), 0)
+            }
+            None => {
+                return Err(format!(
+                    "the module value `{}` was not lowered",
+                    data.qualified
+                ));
+            }
         };
         globals.push(CheckedGlobal {
             name: data.qualified.clone(),
             value_type: ty,
             initializer,
-            slot_count: checked.slot_count,
-            origin: origin(program, data.module, data.view.construct().span()),
+            slot_count,
+            origin,
         });
     }
     let mut functions = Vec::new();
@@ -821,7 +958,7 @@ fn assemble(
                 data.qualified
             ));
         };
-        let record = function_record(program, data, signature)?;
+        let record = function_record(program, data, signature.clone())?;
         let origin = origin(program, data.module, data.view.construct().span());
         let function = match data.external {
             Some(intrinsic) => CheckedFunction::external(
@@ -831,30 +968,51 @@ fn assemble(
                 (0..data.binders.len()).map(Type::Binder).collect(),
                 origin,
             ),
-            None => {
-                let Some(checked) = pass.functions.remove(&index) else {
-                    return Err(format!(
-                        "the function `{}` was not checked",
-                        data.qualified
-                    ));
-                };
-                let Some(body) = checked.node else {
+            None => match pass
+                .functions
+                .get(&index)
+                .filter(|checked| checked.node.is_some())
+            {
+                Some(checked) => {
+                    let fold = folds.get(&index).copied().unwrap_or_default();
+                    let entry_guard = match &checked.guards.entry {
+                        Some(guard) => lower_guard(program, guard, fold.entry)?,
+                        None => None,
+                    };
+                    let exit_guard = match &checked.guards.exit {
+                        Some((candidate, guard)) => {
+                            lower_guard(program, guard, fold.exit)?.map(|guard| {
+                                ExitGuard {
+                                    candidate: *candidate,
+                                    guard,
+                                }
+                            })
+                        }
+                        None => None,
+                    };
+                    CheckedFunction {
+                        name: data.qualified.clone(),
+                        signature: record,
+                        defaults: checked.defaults.clone(),
+                        body: FunctionBody::Expr(Box::new(
+                            checked.node.clone().ok_or("a lowered body")?,
+                        )),
+                        entry_guard,
+                        exit_guard,
+                        slot_count: checked.slot_count,
+                        origin,
+                    }
+                }
+                None if stubs => {
+                    stub(at, &signature, data.binders.len(), record, origin, data)
+                }
+                None => {
                     return Err(format!(
                         "the function `{}` was not lowered",
                         data.qualified
                     ));
-                };
-                CheckedFunction {
-                    name: data.qualified.clone(),
-                    signature: record,
-                    defaults: checked.defaults,
-                    body: FunctionBody::Expr(Box::new(body)),
-                    entry_guard: None,
-                    exit_guard: None,
-                    slot_count: checked.slot_count,
-                    origin,
                 }
-            }
+            },
         };
         names.push((data.qualified.clone(), at));
         functions.push(function);
@@ -866,8 +1024,8 @@ fn assemble(
         };
         let Some(body) = pass
             .tests
-            .remove(index)
-            .and_then(|checked| checked.node.map(|node| (node, checked.slot_count)))
+            .get(index)
+            .and_then(|checked| Some((checked.node.clone()?, checked.slot_count)))
         else {
             return Err(format!("the test `{}` was not lowered", data.qualified));
         };
@@ -887,6 +1045,34 @@ fn assemble(
             exit_guard: None,
             slot_count,
             origin: origin(program, data.module, data.view.construct().span()),
+        });
+    }
+    for (ty, at) in &anonymous {
+        let (Some(data), Some(Predicate::Anonymous(closure))) = (
+            program.types.get(*ty),
+            pass.invariants.get(ty).map(|checked| &checked.predicate),
+        ) else {
+            continue;
+        };
+        if functions.len() != *at {
+            return Err(format!("the predicate of `{}` is out of place", data.name));
+        }
+        let Type::Fn(signature) = &closure.value_type else {
+            return Err(format!("the predicate of `{}` is no `Fn`", data.name));
+        };
+        let span = pass
+            .invariants
+            .get(ty)
+            .map_or(data.view.construct().span(), |checked| checked.span);
+        functions.push(CheckedFunction {
+            name: format!("{}.where", data.name),
+            signature: signature_record(program, &[], &[], (**signature).clone())?,
+            defaults: closure.defaults.clone(),
+            body: FunctionBody::Expr(Box::new(closure.body.clone())),
+            entry_guard: None,
+            exit_guard: None,
+            slot_count: closure.slot_count,
+            origin: origin(program, data.module, span),
         });
     }
     let mut implementations = Vec::new();
@@ -943,6 +1129,100 @@ fn assemble(
         functions: names,
         tests: lowered_tests,
     })
+}
+
+/// The checked IR guard of `guard`, folded as `fold` decides: removed when
+/// its predicate always holds, with the predicate `false` when it never
+/// does. A bare guard leaves no code.
+fn lower_guard(
+    program: &Program<'_>,
+    guard: &CheckedGuard,
+    fold: Option<bool>,
+) -> Result<Option<Guard>, String> {
+    let Some(consequence) = guard.consequence.clone() else {
+        return Ok(None);
+    };
+    let predicate = match fold {
+        Some(true) => return Ok(None),
+        Some(false) => {
+            let truth = program
+                .library_type(Library::Bool, Vec::new())
+                .ok_or("a folded guard without `Bool`")?;
+            let never = Value::Variant {
+                case: "false".to_owned(),
+                fields: Vec::new(),
+            };
+            let constant =
+                Constant::new(truth, never).map_err(|error| error.to_string())?;
+            Node::new(Expr::Literal(constant), guard.predicate.origin.clone())
+        }
+        None => guard.predicate.clone(),
+    };
+    Ok(Some(Guard {
+        predicate,
+        consequence,
+    }))
+}
+
+/// The function `data`, at index `at` with the type `signature` and the
+/// signature record `record`, whose body calls itself with its own
+/// arguments: the stand-in for a body that was not lowered, in a module set
+/// that compile-time evaluations run over and that never runs it.
+fn stub(
+    at: usize,
+    signature: &FnType,
+    binders: usize,
+    record: SignatureRecord,
+    origin: SourceOrigin,
+    data: &FnData<'_>,
+) -> CheckedFunction {
+    let read = |slot: usize, value_type: &Type| {
+        Node::new(
+            Expr::Variable {
+                slot,
+                value_type: value_type.clone(),
+            },
+            origin.clone(),
+        )
+    };
+    let positional = signature
+        .parameters
+        .iter()
+        .enumerate()
+        .map(|(slot, ty)| read(slot, ty))
+        .collect();
+    let labelled = signature
+        .labels
+        .entries()
+        .iter()
+        .enumerate()
+        .map(|(at, (name, ty))| {
+            (name.clone(), read(signature.parameters.len() + at, ty))
+        })
+        .collect();
+    let body = Node::new(
+        Expr::TailCall {
+            target: CallTarget::Direct {
+                function: at,
+                type_arguments: (0..binders).map(Type::Binder).collect(),
+            },
+            arguments: Arguments {
+                positional,
+                labelled,
+            },
+        },
+        origin.clone(),
+    );
+    CheckedFunction {
+        name: data.qualified.clone(),
+        signature: record,
+        defaults: Vec::new(),
+        body: FunctionBody::Expr(Box::new(body)),
+        entry_guard: None,
+        exit_guard: None,
+        slot_count: signature.slot_count(),
+        origin,
+    }
 }
 
 /// The checked IR bound of `bound`.

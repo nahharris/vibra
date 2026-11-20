@@ -8,12 +8,13 @@
 //! leaves an error type that reports nothing again.
 //!
 //! The checker supports `fn` declarations with parameter patterns, labelled
-//! parameters, bounded type parameters, and written types of every form but
-//! `Proc` and `Intent`; module values of those types; wrappers, declared
-//! tuples, declared records, and variant types, generic or not, with their
-//! members, a wrapper, declared tuple, or declared record with a bare `where`
-//! included; interfaces with their parameters, associated types, abstract and
-//! default members, and their implementations in a type or in the interface;
+//! parameters, bounded type parameters, `requires` and `ensures`, and written
+//! types of every form but `Proc` and `Intent`; module values of those types;
+//! wrappers, declared tuples, declared records, and variant types, generic or
+//! not, with their members, a wrapper, declared tuple, or declared record with
+//! a `where` included; interfaces with their parameters, associated types,
+//! abstract and default members, and their implementations in a type or in
+//! the interface;
 //! and, in the embedded standard library, the intrinsic scalar types and
 //! `List(T)` with their external members. A guarded member of an interface
 //! or an implementation is `@tool.unavailable`, as is any other declaration
@@ -33,6 +34,7 @@ use vibra_ir::{FnType, Library, NamedTypes, Type, TypeId};
 use vibra_syntax::source::{
     Callable, Declaration, ExprForm, Given, Impl, InterfaceDecl, Module, ModuleLet,
     Primary, SourceOptions, Suffix, Test, TypeBody, TypeDecl, TypeExpr, TypeForm,
+    Where,
 };
 use vibra_syntax::{CstNode, Document, parse_source, parse_source_with};
 
@@ -160,8 +162,11 @@ pub(crate) struct TypeData<'a> {
     /// type: the `representation` section, or else the type's own
     /// visibility.
     pub(crate) representation_public: bool,
-    /// Whether a bare `where` states an invariant of the type.
+    /// Whether a `where` states an invariant of the type.
     pub(crate) invariant: bool,
+    /// Whether that `where` has an `else`, so that the constructor returns
+    /// a `Result`.
+    pub(crate) fallible: bool,
     /// The members, by name.
     pub(crate) members: BTreeMap<String, usize>,
 }
@@ -580,6 +585,7 @@ impl<'a> Program<'a> {
                         params: params.clone(),
                         representation_public,
                         invariant: false,
+                        fallible: false,
                         members: BTreeMap::new(),
                     });
                     self.declare(module_index, &type_name, Entity::Type(index));
@@ -1113,6 +1119,7 @@ impl<'a> Program<'a> {
     /// Decides the shape of every type: first which bodies this checker can
     /// read, then each body, until no type turns out unsupported.
     fn type_kinds(&mut self, pending_impls: &[(Host, Impl<'a>)]) {
+        let mut invalid = Vec::new();
         for index in 0..self.types.len() {
             let Some(data) = self.types.get(index) else {
                 continue;
@@ -1121,17 +1128,31 @@ impl<'a> Program<'a> {
                 .modules
                 .get(data.module)
                 .is_some_and(|module| module.embedded);
-            // A bare `where` on a wrapper, declared tuple, or declared record
-            // is read; its predicate is not checked yet, and no value of the
-            // type is constructed.
+            // A `where` on a wrapper, declared tuple, or declared record
+            // states the type's invariant, whose predicate the bodies pass
+            // checks. A `where` on a variant is a fault at the `where`, and
+            // the variant is read without it.
             let invariant = data.view.invariant();
-            let bare_where = invariant
-                .is_some_and(|section| section.consequence().is_none())
-                && matches!(data.view.body(), Some(TypeBody::Of(_)));
-            let plain = (invariant.is_none() || bare_where)
-                && bounds_are_any(data.view.given());
+            let of_body = matches!(data.view.body(), Some(TypeBody::Of(_)));
+            if let Some(section) = invariant
+                && matches!(data.view.body(), Some(TypeBody::Cases(_)))
+            {
+                invalid.push((
+                    data.module,
+                    Diagnostic::new(
+                        DiagnosticCode::TypeInvalidInvariant,
+                        where_span(section),
+                        "a variant type has no representation for a `where` to \
+                         state a predicate over; check its cases in a function",
+                    ),
+                ));
+            }
+            let stated = invariant.filter(|_| of_body);
+            let plain = bounds_are_any(data.view.given());
             let kind = match data.view.body() {
-                Some(TypeBody::Intrinsic(tag)) if plain && embedded => {
+                Some(TypeBody::Intrinsic(tag))
+                    if plain && embedded && invariant.is_none() =>
+                {
                     if tag.text() == "@list" && data.params.len() == 1 {
                         TypeKind::List
                     } else if data.params.is_empty() {
@@ -1167,8 +1188,13 @@ impl<'a> Program<'a> {
             if let Some(data) = self.types.get_mut(index) {
                 data.kind = kind;
                 data.id = id;
-                data.invariant = bare_where;
+                data.invariant = stated.is_some();
+                data.fallible =
+                    stated.is_some_and(|section| section.consequence().is_some());
             }
+        }
+        for (module, diagnostic) in invalid {
+            self.fault(module, diagnostic);
         }
         self.ordered = self.ordered_receivers(pending_impls);
         let mut faults = Vec::new();
@@ -1437,7 +1463,8 @@ impl<'a> Program<'a> {
                 associated: &[],
             };
             let own = data.view.params().len();
-            let header = if !unguarded(&data.view)
+            // A guard is read with the body; a row is not supported yet.
+            let header = if data.view.performs().is_some()
                 || (external.is_none() && data.view.body().is_none())
             {
                 Err(NoType::Unsupported)
@@ -1649,6 +1676,23 @@ pub(crate) fn plain_callable(view: &Callable<'_>) -> bool {
 /// Whether a callable header has no guard and no row.
 pub(crate) fn unguarded(view: &Callable<'_>) -> bool {
     view.requires().is_none() && view.ensures().is_none() && view.performs().is_none()
+}
+
+/// The span of a `where` section: its keyword to the end of its last
+/// operand.
+pub(crate) fn where_span(section: Where<'_>) -> ByteSpan {
+    let node = section.node();
+    let start = node
+        .children()
+        .first()
+        .map_or(node.span().start(), |keyword| keyword.span().start());
+    let end = section
+        .consequence()
+        .or_else(|| section.predicate())
+        .map_or(node.span().end(), |operand| {
+            super::expr::expr_span(&operand).end()
+        });
+    ByteSpan::new(start, end)
 }
 
 /// Whether every entry of a `given` section, if any, is the bound `Any`.
