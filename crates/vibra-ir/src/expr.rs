@@ -901,8 +901,11 @@ impl<'a> Checker<'a> {
     }
 
     /// Checks the defaults of a callable with the labels `labels`: one
-    /// constant of the label's type for each label, as the source chapter's
-    /// `labelled` gives every optional parameter, and no other.
+    /// constant for each label, as the source chapter's `labelled` gives
+    /// every optional parameter, and no other. A constant is closed, so a
+    /// default's type is its label's type with every binder replaced by
+    /// `Never` ([`Type::at_never`]): the default's value is then a value of
+    /// the label's type at every instantiation of the callable.
     pub(crate) fn check_defaults(
         &self,
         labels: &NamedTypes,
@@ -920,7 +923,7 @@ impl<'a> Checker<'a> {
                 });
             }
             self.check_constant(default)?;
-            expect(expected, default.value_type())?;
+            expect(&expected.at_never(), default.value_type())?;
         }
         if let Some((label, _)) = labels
             .entries()

@@ -969,3 +969,38 @@ fn v11_deep_values_patterns_trees_and_types_are_handled_on_a_small_stack() {
     assert!(same);
     assert!(formatted);
 }
+
+// -- Defaults of a generic function -----------------------------------------
+
+/// `pad(T)` with the labelled parameter `tail: List(T)` whose default is
+/// `default`.
+fn padded(default: Constant) -> Result<Arc<CheckedModuleSet>, IrError> {
+    let record = SignatureRecord::new(
+        vec![Binder::new("T", None).unwrap()],
+        Type::function(FnType {
+            parameters: Vec::new(),
+            labels: named(vec![("tail", Type::list(Type::Binder(0)))]),
+            result: Type::I32,
+        }),
+    )
+    .unwrap();
+    let mut pad = function("pad", record, int(1), 1);
+    pad.defaults = vec![("tail".to_owned(), default)];
+    let mut parts = library_parts();
+    parts.functions.push(pad);
+    CheckedModuleSet::try_new(parts)
+}
+
+/// A constant is closed: a default whose label's type mentions a binder has
+/// that type with every binder `Never`, and no other.
+#[test]
+fn a_generic_default_is_closed_at_never() {
+    let empty =
+        |element: Type| Constant::new(Type::list(element), Value::List(Vec::new()));
+    assert!(padded(empty(Type::Never).unwrap()).is_ok());
+    assert!(matches!(
+        padded(empty(Type::I32).unwrap()),
+        Err(IrError::TypeMismatch { .. })
+    ));
+    assert!(empty(Type::Binder(0)).is_err());
+}

@@ -822,7 +822,10 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         let program = self.program;
         match fold(&node, &self.layout.constants, &|id| program.library_of(id)) {
             Ok(value) => {
-                if let Ok(constant) = Constant::new(ty.clone(), value) {
+                // The default checked at `ty`, binders included, so it holds
+                // nothing at a binder's position; the checked IR keeps a
+                // constant closed, at `ty` with every binder `Never`.
+                if let Ok(constant) = Constant::new(ty.at_never(), value) {
                     Some(constant)
                 } else {
                     self.unavailable(span, "a labelled default of an open type");

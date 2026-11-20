@@ -1,0 +1,12 @@
+id = "V2-SRC-CALLS-default-generic"
+rule = "V2-SRC-CALLS-default-generic"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#constant-expressions-and-constant-patterns: a default whose type mentions a type parameter checks at it for every instantiation, and takes that value at each instantiation"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

@@ -1,0 +1,18 @@
+id = "V2-SRC-CALLS-default-generic-value"
+rule = "V2-SRC-CALLS-default-generic-value"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#constant-expressions-and-constant-patterns: a default that holds a value where the type parameter is required does not check for every instantiation, and is @type.mismatch at that value"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.mismatch"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 60, end = 64 }

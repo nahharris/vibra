@@ -238,6 +238,62 @@ fn a_dict_default_keyed_by_its_own_order_is_unavailable() {
     );
 }
 
+/// A default whose type mentions a type parameter is valid when it checks at
+/// that type for every instantiation; its value is the same at each one.
+#[test]
+fn a_default_may_mention_a_type_parameter() {
+    let pad = "fn pad(T) takes {xs: List(T)} labelled {tail: List(T) be [] \
+               spare: Option(T) be Option.none()} returns r: U64 do \
+               let n be match spare case Option.some(value: _) 1u64 case Option.none() 0u64 \
+               endmatch endlet \
+               return U64.add(n List.length(List.concat(xs tail))) endfn\n";
+    let source = format!(
+        "fn main returns r: U64 do return U64.add(pad([1i32 2i32]) \
+         pad([\"a\"] tail: [\"b\" \"c\"] spare: Option.some(value: \"d\"))) endfn\n{pad}"
+    );
+    assert_eq!(run(&source).as_deref(), Ok(value("u64", "6u64").as_str()));
+    // Through a generic caller, whose own parameter fixes the callee's.
+    let source = format!(
+        "fn main returns r: U64 do return outer(@a) endfn\n\
+         fn outer(U) takes {{u: U}} returns r: U64 do return pad([u u]) endfn\n{pad}"
+    );
+    assert_eq!(run(&source).as_deref(), Ok(value("u64", "2u64").as_str()));
+    // Through a function value, whose call takes the default the function
+    // carries.
+    let source = format!(
+        "fn main returns r: U64 do let f: Fn({{List(I32) tail: List(I32) \
+         spare: Option(I32)}} U64) be pad endlet return f([7i32]) endfn\n{pad}"
+    );
+    assert_eq!(run(&source).as_deref(), Ok(value("u64", "1u64").as_str()));
+    // An anonymous `fn` whose default mentions the enclosing parameter.
+    let source = "fn main returns r: U64 do return wrap(@a) endfn\n\
+                  fn wrap(T) takes {v: T} returns r: U64 do \
+                  let g be fn takes {x: T} labelled {xs: List(T) be []} returns r: U64 do \
+                  return List.length(List.append(xs x)) endfn endlet \
+                  return U64.add(g(v) g(v xs: [v v])) endfn\n";
+    assert_eq!(run(source).as_deref(), Ok(value("u64", "4u64").as_str()));
+}
+
+/// A default that holds a value of the type parameter does not check at it
+/// for every instantiation.
+#[test]
+fn a_default_must_check_at_every_instantiation() {
+    let source = "fn main returns r: U64 do return pad([1i32]) endfn\n\
+                  fn pad(T) takes {xs: List(T)} labelled {tail: List(T) be [1i32]} \
+                  returns r: U64 do return List.length(List.concat(xs tail)) endfn\n";
+    assert_eq!(
+        faults(source),
+        [(DiagnosticCode::TypeMismatch, at(source, "1i32", 1))]
+    );
+    let source = "fn main returns r: I32 do return pick(1i32) endfn\n\
+                  fn pick(T) takes {x: T} labelled {other: T be 0i32} \
+                  returns r: T do return other endfn\n";
+    assert_eq!(
+        faults(source),
+        [(DiagnosticCode::TypeMismatch, at(source, "0i32", 0))]
+    );
+}
+
 #[test]
 fn a_fn_type_has_its_labels() {
     let source = format!(

@@ -1080,6 +1080,15 @@ they denote the same value. The value of a constant dict is the value its
 literal evaluates to: its entries in canonical key order, where a later
 duplicate key replaces the earlier value.
 
+A default is checked at its label's type with the callable's type parameters
+in it, so a default whose type mentions a type parameter is valid exactly
+when it checks at that type for every instantiation, as `[]` at `List(T)`
+and `Option.none()` at `Option(T)` do. Such a value holds nothing of the
+parameter's type, and at each instantiation of the callable the default is
+that value at the instantiated label type. A default that holds a value
+where the parameter's type is required, such as `[1i32]` at `List(T)`, is
+`@type.mismatch` at that value.
+
 ### `try`
 
 `try` takes an operand of type `Option(T)` or `Result(T E)` inside a callable

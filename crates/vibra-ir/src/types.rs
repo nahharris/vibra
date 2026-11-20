@@ -793,6 +793,26 @@ impl Type {
             ..Substitution::default()
         })
     }
+
+    /// This type with every binder replaced by `Never`: the closed type of a
+    /// constant written at this type. A value of it holds nothing at a
+    /// binder's position, so it is a value of every instantiation of this
+    /// type (`docs/spec/02-type-system.md`, "Constant expressions and
+    /// constant patterns").
+    #[must_use]
+    pub fn at_never(&self) -> Self {
+        let mut count = 0;
+        self.visit(&mut |ty| {
+            if let Self::Binder(index) = ty {
+                count = count.max(index.saturating_add(1));
+            }
+        });
+        if count == 0 {
+            self.clone()
+        } else {
+            self.instantiate(&vec![Self::Never; count])
+        }
+    }
 }
 
 fn write_list(formatter: &mut fmt::Formatter<'_>, values: &[Type]) -> fmt::Result {

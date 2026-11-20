@@ -554,3 +554,5 @@ V2-TYPE-INFER-case-not-value-unexpected	active	02-type-system.md#functions-as-va
 V2-TYPE-INFER-case-applied-value	active	02-type-system.md#functions-as-values
 V2-SRC-CALLS-default-dict	active	02-type-system.md#constant-expressions-and-constant-patterns
 V2-SRC-CALLS-default-dict-not-constant	active	02-type-system.md#constant-expressions-and-constant-patterns
+V2-SRC-CALLS-default-generic	active	02-type-system.md#constant-expressions-and-constant-patterns
+V2-SRC-CALLS-default-generic-value	active	02-type-system.md#constant-expressions-and-constant-patterns
