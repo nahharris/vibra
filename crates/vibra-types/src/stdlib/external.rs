@@ -15,10 +15,10 @@
 //! The owner of a member of a type is the type's wire tag for a builtin type
 //! (`Intrinsic(@i32)` owns `i32`) and its role for a type that plays one
 //! (`role @str` owns `str`); the owner of a module-level function is the last
-//! part of its module path (`@std.assert` owns `assert`). The signature is the
-//! declaration's binders (the owner's type parameters, then its own), its
-//! positional parameter types, and its result type; a row has no labelled
-//! parameter, no bound, and no guard, and it is a `fn`.
+//! part of its module path. The signature is the declaration's binders (the
+//! owner's type parameters, then its own), its positional parameter types,
+//! and its result type; a row has no labelled parameter, no bound, and no
+//! guard, and it is a `fn`.
 //!
 //! An `external @host` declaration is checked here for its symbol, against the
 //! host registry, and for its kind: the host rows are `proc` operations.
