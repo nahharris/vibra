@@ -234,3 +234,46 @@ fn a_guarded_named_invariant_is_not_unfolded() {
          fn f takes {p: Positive} returns r: I32 do let Positive(raw) be p endlet return pos(raw) endfn\n";
     decides(source, &[(UNPROVED, "pos(raw)")], &[(REQUIRES, UNKNOWN)]);
 }
+
+// G5: the integer facts are derived under a budget, and running out of it
+// is a tool limit.
+
+/// `f` of `count` integers whose nested branches state `a0 ≤ a1`, …, and
+/// which calls `leReq(a0 aLast)` inside them.
+fn chain(count: usize) -> String {
+    let parameters = (0..count)
+        .map(|at| format!("a{at}: I32"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let mut body = format!("return leReq(a0 a{})", count - 1);
+    for at in (0..count - 1).rev() {
+        body = format!(
+            "if Ordered.lessOrEqual(a{at} a{}) then {body} endif",
+            at + 1
+        );
+    }
+    format!(
+        "fn leReq takes {{a: I32 b: I32}} returns r: I32 requires Ordered.lessOrEqual(a b) do return a endfn\n\
+         fn f takes {{{parameters}}} returns r: I32 do {body} return 0i32 endfn\n"
+    )
+}
+
+#[test]
+fn a_chain_of_facts_within_the_budget_is_closed() {
+    let source = chain(20);
+    decides(&source, &[], &[(REQUIRES, PASSED)]);
+    assert_eq!(rules(&source, REQUIRES), ["GUARD-3", "GUARD-6", "INT-7"]);
+}
+
+#[test]
+fn a_closure_over_the_budget_is_a_tool_limit_alone() {
+    let source = chain(80);
+    decides(
+        &source,
+        &[(
+            DiagnosticCode::ToolLimitExceeded,
+            "Ordered.lessOrEqual(a b)",
+        )],
+        &[(REQUIRES, UNKNOWN)],
+    );
+}

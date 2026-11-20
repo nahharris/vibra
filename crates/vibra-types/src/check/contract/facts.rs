@@ -1150,31 +1150,76 @@ impl FactSet {
     }
 }
 
-/// How many relations one saturation derives at most.
-const RELATIONS: usize = 4096;
+/// What the proof of one obligation may still spend. Each attempted
+/// derivation of an integer fact costs one, whether or not its conclusion
+/// is new: one application of a fact to one premise or one pair of
+/// premises, and one comparison of two constants.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Budget {
+    left: u64,
+    exhausted: bool,
+}
+
+impl Budget {
+    /// A budget of `derivations` attempts.
+    pub(crate) const fn new(derivations: u64) -> Self {
+        Self {
+            left: derivations,
+            exhausted: false,
+        }
+    }
+
+    /// Spends one attempt: `false`, and the budget exhausted, when none is
+    /// left.
+    const fn spend(&mut self) -> bool {
+        if self.left == 0 {
+            self.exhausted = true;
+            false
+        } else {
+            self.left -= 1;
+            true
+        }
+    }
+
+    /// Whether an attempt was refused: a verdict the proof did not reach
+    /// may have been stopped by the budget.
+    pub(crate) const fn exhausted(&self) -> bool {
+        self.exhausted
+    }
+}
+
+/// The relations known between values of one integer type, each with the
+/// evidence that first established it.
+type Known = HashMap<(Relation, Term, Term), Evidence>;
 
 /// The relations over values of the integer type of `like` that the facts
-/// and the constants among `extra` give, closed under `INT-1` to `INT-8`.
+/// and the constants among `extra` give, closed under `INT-1` to `INT-8`;
+/// `None` when `budget` runs out before the closure is complete. No
+/// relation is dropped: the closure is complete or there is none.
 fn relations(
     terms: &Terms,
     vocabulary: &Vocabulary<'_>,
     facts: &FactSet,
     like: &ContractCall,
     extra: &[Term],
-) -> HashMap<(Relation, Term, Term), Evidence> {
-    let mut known: HashMap<(Relation, Term, Term), Evidence> = HashMap::new();
+    budget: &mut Budget,
+) -> Option<Known> {
+    let mut known = Known::new();
     let mut order: Vec<(Relation, Term, Term)> = Vec::new();
-    let add = |known: &mut HashMap<(Relation, Term, Term), Evidence>,
+    // The places in `order` of the relations whose left operand is a term.
+    let mut by_left: HashMap<Term, Vec<usize>> = HashMap::new();
+    let add = |known: &mut Known,
                order: &mut Vec<(Relation, Term, Term)>,
+               by_left: &mut HashMap<Term, Vec<usize>>,
                key: (Relation, Term, Term),
                evidence: Evidence| {
-        if known.len() < RELATIONS && !known.contains_key(&key) {
-            known.insert(key, evidence);
-            order.push(key);
-            true
-        } else {
-            false
+        if known.contains_key(&key) {
+            return false;
         }
+        by_left.entry(key.1).or_default().push(order.len());
+        known.insert(key, evidence);
+        order.push(key);
+        true
     };
     let mut constants = BTreeSet::new();
     for fact in &facts.facts {
@@ -1196,7 +1241,13 @@ fn relations(
         } else {
             (relation.negation(), fact.evidence.clone().with(INTEGER))
         };
-        add(&mut known, &mut order, (relation, *left, *right), evidence);
+        add(
+            &mut known,
+            &mut order,
+            &mut by_left,
+            (relation, *left, *right),
+            evidence,
+        );
         constants.extend([*left, *right]);
     }
     constants.extend(extra.iter().copied());
@@ -1216,6 +1267,9 @@ fn relations(
             if left == right {
                 continue;
             }
+            if !budget.spend() {
+                return None;
+            }
             let evidence = Evidence::of(INTEGER).with(Rule::Int(8));
             let holds = [
                 (Relation::Less, a < b),
@@ -1230,6 +1284,7 @@ fn relations(
                     add(
                         &mut known,
                         &mut order,
+                        &mut by_left,
                         (relation, *left, *right),
                         evidence.clone(),
                     );
@@ -1238,8 +1293,12 @@ fn relations(
         }
     }
     loop {
-        let mut grew = false;
-        let snapshot = order.clone();
+        // Each round derives from the relations known when it starts, in
+        // the order they became known; a conclusion is kept with the
+        // evidence of its first derivation.
+        let count = order.len();
+        let mut found: Vec<((Relation, Term, Term), Evidence)> = Vec::new();
+        let mut seen: BTreeSet<(Relation, Term, Term)> = BTreeSet::new();
         let derive = |premises: &[&(Relation, Term, Term)], fact: u8| {
             premises
                 .iter()
@@ -1249,8 +1308,15 @@ fn relations(
                 .with(INTEGER)
                 .with(Rule::Int(fact))
         };
-        let mut found: Vec<((Relation, Term, Term), Evidence)> = Vec::new();
-        for first in &snapshot {
+        let mut keep =
+            |key: (Relation, Term, Term),
+             evidence: &dyn Fn() -> Evidence,
+             found: &mut Vec<((Relation, Term, Term), Evidence)>| {
+                if !known.contains_key(&key) && seen.insert(key) {
+                    found.push((key, evidence()));
+                }
+            };
+        for first in order.iter().take(count) {
             let (relation, x, y) = *first;
             let single: &[(Relation, Term, Term)] = match relation {
                 Relation::Less => &[
@@ -1276,7 +1342,10 @@ fn relations(
                 _ => 3,
             };
             for key in single {
-                found.push((*key, derive(&[first], fact)));
+                if !budget.spend() {
+                    return None;
+                }
+                keep(*key, &|| derive(&[first], fact), &mut found);
             }
             // `x ≥ y` is `y ≤ x` and `x > y` is `y < x`: the defining
             // relations read in either direction.
@@ -1288,11 +1357,34 @@ fn relations(
                 Relation::Equal | Relation::NotEqual => None,
             };
             if let Some(converse) = converse {
-                let evidence =
-                    known.get(first).cloned().unwrap_or_default().with(INTEGER);
-                found.push(((converse, y, x), evidence));
+                if !budget.spend() {
+                    return None;
+                }
+                keep(
+                    (converse, y, x),
+                    &|| known.get(first).cloned().unwrap_or_default().with(INTEGER),
+                    &mut found,
+                );
             }
-            for second in &snapshot {
+            // The second premise of INT-4, INT-6, and INT-7 starts at `y`;
+            // that of INT-5 at `x`.
+            let mut seconds = by_left
+                .get(&y)
+                .into_iter()
+                .chain(by_left.get(&x))
+                .flatten()
+                .copied()
+                .filter(|at| *at < count)
+                .collect::<Vec<_>>();
+            seconds.sort_unstable();
+            seconds.dedup();
+            for at in seconds {
+                let Some(second) = order.get(at) else {
+                    continue;
+                };
+                if !budget.spend() {
+                    return None;
+                }
                 let (other, y2, z) = *second;
                 if relation == Relation::LessOrEqual
                     && other == Relation::LessOrEqual
@@ -1300,14 +1392,22 @@ fn relations(
                     && z == x
                 {
                     // INT-4: x ≤ y and y ≤ x.
-                    found.push(((Relation::Equal, x, y), derive(&[first, second], 4)));
+                    keep(
+                        (Relation::Equal, x, y),
+                        &|| derive(&[first, second], 4),
+                        &mut found,
+                    );
                 }
                 if relation == Relation::LessOrEqual
                     && other == Relation::NotEqual
                     && y2 == x
                     && z == y
                 {
-                    found.push(((Relation::Less, x, y), derive(&[first, second], 5)));
+                    keep(
+                        (Relation::Less, x, y),
+                        &|| derive(&[first, second], 5),
+                        &mut found,
+                    );
                 }
                 if y2 != y {
                     continue;
@@ -1315,30 +1415,36 @@ fn relations(
                 match (relation, other) {
                     (Relation::Less, Relation::LessOrEqual)
                     | (Relation::LessOrEqual, Relation::Less) => {
-                        found.push((
+                        keep(
                             (Relation::Less, x, z),
-                            derive(&[first, second], 6),
-                        ));
+                            &|| derive(&[first, second], 6),
+                            &mut found,
+                        );
                     }
                     (Relation::LessOrEqual, Relation::LessOrEqual) => {
-                        found.push((
+                        keep(
                             (Relation::LessOrEqual, x, z),
-                            derive(&[first, second], 7),
-                        ));
+                            &|| derive(&[first, second], 7),
+                            &mut found,
+                        );
                     }
                     _ => {}
                 }
             }
         }
+        let mut grew = false;
         for (key, evidence) in found {
-            grew |= add(&mut known, &mut order, key, evidence);
+            grew |= add(&mut known, &mut order, &mut by_left, key, evidence);
         }
         if !grew {
-            break;
+            return Some(known);
         }
     }
-    known
 }
+
+/// The closures already computed in one proof, by receiver and the
+/// constants of the goal: `None` for one the budget stopped.
+type Closures = HashMap<(String, Vec<Term>), Option<Known>>;
 
 /// Decides a comparison goal by the integer facts: the evidence that the
 /// comparison `term` is `holds`.
@@ -1348,9 +1454,15 @@ fn compare(
     facts: &FactSet,
     term: Term,
     holds: bool,
+    (budget, closures): (&mut Budget, &mut Closures),
 ) -> Option<Evidence> {
     let (relation, call, operands) = vocabulary.comparison(terms, term)?;
-    let known = relations(terms, vocabulary, facts, &call, &operands);
+    let key = (format!("{:?}", call.receiver), operands.clone());
+    if !closures.contains_key(&key) {
+        let closed = relations(terms, vocabulary, facts, &call, &operands, budget);
+        closures.insert(key.clone(), closed);
+    }
+    let known = closures.get(&key)?.as_ref()?;
     let found = |relation: Relation, left: Term, right: Term| {
         known.get(&(relation, left, right)).cloned()
     };
@@ -1634,13 +1746,17 @@ fn read_through(
 
 /// The evidence that the `Bool` term `goal` is `true` under `facts`, by the
 /// facts themselves, the Boolean structure of rule 5, the integer facts of
-/// rule 6, and the case facts of rule 3.
+/// rule 6, and the case facts of rule 3. Each attempted derivation of an
+/// integer fact spends one of `budget`; a goal not established once it is
+/// exhausted may have been stopped by it.
 pub(crate) fn prove(
     terms: &mut Terms,
     vocabulary: &Vocabulary<'_>,
     facts: &FactSet,
     goal: Term,
+    budget: &mut Budget,
 ) -> Option<Evidence> {
+    let mut closures = Closures::new();
     // Each term's evidence of being `true` and of being `false`.
     let mut decided: HashMap<Term, (Option<Evidence>, Option<Evidence>)> =
         HashMap::new();
@@ -1701,7 +1817,7 @@ pub(crate) fn prove(
                     ),
                 }
             }
-            None => leaf(terms, vocabulary, facts, term),
+            None => leaf(terms, vocabulary, facts, term, (budget, &mut closures)),
         };
         decided.insert(term, (direct.0.or(derived.0), direct.1.or(derived.1)));
     }
@@ -1715,6 +1831,7 @@ fn leaf(
     vocabulary: &Vocabulary<'_>,
     facts: &FactSet,
     term: Term,
+    (budget, closures): (&mut Budget, &mut Closures),
 ) -> (Option<Evidence>, Option<Evidence>) {
     if let Some(holds) = terms
         .constant(term)
@@ -1727,8 +1844,8 @@ fn leaf(
             (None, evidence)
         };
     }
-    let mut yes = compare(terms, vocabulary, facts, term, true);
-    let mut no = compare(terms, vocabulary, facts, term, false);
+    let mut yes = compare(terms, vocabulary, facts, term, true, (budget, closures));
+    let mut no = compare(terms, vocabulary, facts, term, false, (budget, closures));
     if yes.is_none()
         && no.is_none()
         && let Some((holds, evidence)) = read_through(terms, vocabulary, facts, term)

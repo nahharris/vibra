@@ -36,11 +36,11 @@ use vibra_ir::{
 };
 
 use super::super::callables::substitute;
-use super::super::ctfe::{Evaluator, Outcome};
+use super::super::ctfe::{Evaluator, Outcome, PROFILE};
 use super::super::declare::{Entity, TypeKind};
 use super::super::obligation::{Obligation, ObligationKind, ObligationStatus};
 use super::facts::{
-    self, BRANCH, CONSTANTS, Callee, Connective, Data, Env, Evidence, FactSet,
+    self, BRANCH, Budget, CONSTANTS, Callee, Connective, Data, Env, Evidence, FactSet,
     INVARIANT, RESULT, Readable, SUBSTITUTION, Term, Terms, Vocabulary,
 };
 use super::fragment::{Standing, operands};
@@ -142,7 +142,10 @@ enum Verdict {
         related: ByteSpan,
     },
     Unknown,
+    /// A compile-time evaluation reached the reduction limit.
     Limit,
+    /// The proof budget stopped the rules before a verdict.
+    Budget,
     Unsupported,
 }
 
@@ -194,6 +197,17 @@ struct Declaration {
     /// The name of an implementation member, which a site of the contract
     /// guard copied into it relates.
     implementation: Option<ByteSpan>,
+}
+
+/// What the rules other than `GUARD-1` decided of one obligation.
+#[derive(Clone, Debug)]
+enum Proof {
+    /// It holds, by this evidence.
+    Proven(Evidence),
+    /// The rules examined it and could not establish it.
+    Unknown,
+    /// The proof budget stopped the rules before a verdict.
+    Limit,
 }
 
 /// What `GUARD-1` decided once, by owner, site, and kind.
@@ -1054,8 +1068,11 @@ impl<'v> Prover<'v> {
                     predicate,
                 );
                 match self.establish(facts, &[goal]) {
-                    Some(evidence) => Verdict::Passed(prefixed(substituted, evidence)),
-                    None => Verdict::Unknown,
+                    Proof::Proven(evidence) => {
+                        Verdict::Passed(prefixed(substituted, evidence))
+                    }
+                    Proof::Unknown => Verdict::Unknown,
+                    Proof::Limit => Verdict::Budget,
                 }
             }
         };
@@ -1206,10 +1223,11 @@ impl<'v> Prover<'v> {
                     }
                 }
                 match self.establish_except(facts, &goals, Some(term)) {
-                    Some(evidence) => {
+                    Proof::Proven(evidence) => {
                         Verdict::Passed(prefixed(substituted, evidence).and(&read))
                     }
-                    None => Verdict::Unknown,
+                    Proof::Unknown => Verdict::Unknown,
+                    Proof::Limit => Verdict::Budget,
                 }
             }
         };
@@ -1300,8 +1318,11 @@ impl<'v> Prover<'v> {
                     &guard.predicate,
                 );
                 match self.establish(facts, &[goal]) {
-                    Some(evidence) => Verdict::Passed(prefixed(substituted, evidence)),
-                    None => Verdict::Unknown,
+                    Proof::Proven(evidence) => {
+                        Verdict::Passed(prefixed(substituted, evidence))
+                    }
+                    Proof::Unknown => Verdict::Unknown,
+                    Proof::Limit => Verdict::Budget,
                 }
             }
         };
@@ -1388,10 +1409,10 @@ impl<'v> Prover<'v> {
         decided
     }
 
-    /// The evidence that one of `goals` holds under `facts`, with the
-    /// invariants (`GUARD-2`) and certified results (`GUARD-7`) of the terms
-    /// the goal is built from.
-    fn establish(&mut self, facts: &FactSet, goals: &[Term]) -> Option<Evidence> {
+    /// Whether one of `goals` holds under `facts`, with the invariants
+    /// (`GUARD-2`) and certified results (`GUARD-7`) of the terms the goal
+    /// is built from.
+    fn establish(&mut self, facts: &FactSet, goals: &[Term]) -> Proof {
         self.establish_except(facts, goals, None)
     }
 
@@ -1402,7 +1423,7 @@ impl<'v> Prover<'v> {
         facts: &FactSet,
         goals: &[Term],
         constructing: Option<Term>,
-    ) -> Option<Evidence> {
+    ) -> Proof {
         let mut local = facts.clone();
         let mut seen = BTreeSet::new();
         if let Some(term) = constructing {
@@ -1418,9 +1439,22 @@ impl<'v> Prover<'v> {
                 self.result_facts(&mut local, term);
             }
         }
-        goals.iter().find_map(|goal| {
-            facts::prove(&mut self.terms, &self.vocabulary, &local, *goal)
-        })
+        // One budget serves the whole proof of the obligation.
+        let mut budget = Budget::new(PROFILE.proof_derivations);
+        let found = goals.iter().find_map(|goal| {
+            facts::prove(
+                &mut self.terms,
+                &self.vocabulary,
+                &local,
+                *goal,
+                &mut budget,
+            )
+        });
+        match found {
+            Some(evidence) => Proof::Proven(evidence),
+            None if budget.exhausted() => Proof::Limit,
+            None => Proof::Unknown,
+        }
     }
 
     /// Assumes the invariant of the type of `term`, when it states one.
@@ -1517,7 +1551,10 @@ impl<'v> Prover<'v> {
             &mut env,
             &guard.predicate,
         );
-        self.establish(&FactSet::default(), &[goal]).is_some()
+        matches!(
+            self.establish(&FactSet::default(), &[goal]),
+            Proof::Proven(_)
+        )
     }
 
     /// Reports every obligation and writes its record.
@@ -1652,6 +1689,7 @@ impl<'v> Prover<'v> {
                 context.push(guard_module, diagnostic);
             }
             Verdict::Limit => context.limit(guard_module, guard_span),
+            Verdict::Budget => context.proof_limit(guard_module, guard_span),
             Verdict::Passed(_) | Verdict::Unsupported => {}
         }
         let record = record(
@@ -1722,6 +1760,9 @@ impl<'v> Prover<'v> {
         let limited = exits
             .iter()
             .any(|exit| matches!(exit.verdict, Verdict::Limit));
+        let budgeted = exits
+            .iter()
+            .any(|exit| matches!(exit.verdict, Verdict::Budget));
         let open = exits
             .iter()
             .filter(|exit| matches!(exit.verdict, Verdict::Unknown))
@@ -1772,6 +1813,8 @@ impl<'v> Prover<'v> {
             context.push(module, diagnostic);
         } else if limited {
             context.limit(module, span);
+        } else if budgeted {
+            context.proof_limit(module, span);
         } else if let (Some(first), Some((contract, name))) =
             (open.first(), data.contract)
         {
@@ -1889,7 +1932,7 @@ fn record(
                 }
                 status = ObligationStatus::Refuted;
             }
-            Verdict::Unknown | Verdict::Limit => {
+            Verdict::Unknown | Verdict::Limit | Verdict::Budget => {
                 if status == ObligationStatus::Passed {
                     status = ObligationStatus::Unknown;
                 }

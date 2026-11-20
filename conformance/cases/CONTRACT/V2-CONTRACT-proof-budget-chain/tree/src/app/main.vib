@@ -1,0 +1,9 @@
+fn leReq takes {a: I32 b: I32} returns r: I32
+  requires Ordered.lessOrEqual(a b)
+  do return a
+endfn
+fn f takes {a0: I32 a1: I32 a2: I32 a3: I32 a4: I32 a5: I32 a6: I32 a7: I32 a8: I32 a9: I32 a10: I32 a11: I32 a12: I32 a13: I32 a14: I32 a15: I32 a16: I32 a17: I32 a18: I32 a19: I32} returns r: I32
+  do
+    if Ordered.lessOrEqual(a0 a1) then if Ordered.lessOrEqual(a1 a2) then if Ordered.lessOrEqual(a2 a3) then if Ordered.lessOrEqual(a3 a4) then if Ordered.lessOrEqual(a4 a5) then if Ordered.lessOrEqual(a5 a6) then if Ordered.lessOrEqual(a6 a7) then if Ordered.lessOrEqual(a7 a8) then if Ordered.lessOrEqual(a8 a9) then if Ordered.lessOrEqual(a9 a10) then if Ordered.lessOrEqual(a10 a11) then if Ordered.lessOrEqual(a11 a12) then if Ordered.lessOrEqual(a12 a13) then if Ordered.lessOrEqual(a13 a14) then if Ordered.lessOrEqual(a14 a15) then if Ordered.lessOrEqual(a15 a16) then if Ordered.lessOrEqual(a16 a17) then if Ordered.lessOrEqual(a17 a18) then if Ordered.lessOrEqual(a18 a19) then return leReq(a0 a19) endif endif endif endif endif endif endif endif endif endif endif endif endif endif endif endif endif endif endif
+    return 0i32
+endfn
