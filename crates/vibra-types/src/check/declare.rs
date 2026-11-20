@@ -1153,6 +1153,20 @@ impl<'a> Program<'a> {
                     .collect::<Result<Vec<_>, _>>()?,
             )),
             TypeForm::Record(fields) => {
+                let mut seen: BTreeMap<&str, ByteSpan> = BTreeMap::new();
+                for (name, _) in &fields {
+                    if let Some(first) = seen.get(name.text()) {
+                        return Err(NoType::Fault(Box::new(
+                            Diagnostic::new(
+                                DiagnosticCode::NameRedeclaration,
+                                name.span(),
+                                format!("the field `{}` is written twice", name.text()),
+                            )
+                            .with_related(*first, "the earlier field"),
+                        )));
+                    }
+                    seen.insert(name.text(), name.span());
+                }
                 let fields = fields
                     .into_iter()
                     .map(|(name, field)| {

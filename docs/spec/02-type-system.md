@@ -266,7 +266,9 @@ are the same when they have the same arity and equal component types in
 order. Two record types are the same when they have the same set of field
 names with equal types, in any written order; a record's canonical field
 order sorts names by their UTF-8 bytes. `{}` is the empty tuple. Both forms
-are accepted in every type position.
+are accepted in every type position. A record type or a record value names
+each field once: `{a: I32 a: I32}` and `{a: 1i32 a: 2i32}` are
+`@name.redeclaration` at the later field, related to the earlier.
 
 A type nests at most 64 levels. A type with no component is one level, and
 every other type is one level more than its deepest component: an element,

@@ -1,0 +1,26 @@
+id = "V2-TYPE-NOMINAL-record-value-repeated-fields"
+rule = "V2-TYPE-NOMINAL-record-value-repeated-fields"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#structural-types: each field a record value repeats is @name.redeclaration at its later field"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@name.redeclaration"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 52, end = 53 }
+related = [{ source = "src/app/main.vib", span = { start = 36, end = 37 } }]
+
+[[expect.diagnostics]]
+code = "@name.redeclaration"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 60, end = 61 }
+related = [{ source = "src/app/main.vib", span = { start = 44, end = 45 } }]

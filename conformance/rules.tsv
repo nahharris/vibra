@@ -644,6 +644,11 @@ V2-SRC-CALLS-default-generic-value	active	02-type-system.md#constant-expressions
 V2-TYPE-NOMINAL-fn-type-repeated-label	active	02-type-system.md#callable-types
 V2-TYPE-NOMINAL-proc-type-repeated-label	active	02-type-system.md#callable-types
 V2-TYPE-NOMINAL-fn-type-distinct-labels	active	02-type-system.md#callable-types
+V2-TYPE-NOMINAL-record-value-repeated-field	active	02-type-system.md#structural-types
+V2-TYPE-NOMINAL-record-value-repeated-fields	active	02-type-system.md#structural-types
+V2-TYPE-NOMINAL-record-type-repeated-field	active	02-type-system.md#structural-types
+V2-TYPE-NOMINAL-record-type-repeated-field-local	active	02-type-system.md#structural-types
+V2-TYPE-NOMINAL-record-distinct-fields	active	02-type-system.md#structural-types
 V2-TYPE-GENERIC-bound-impl-target	active	02-type-system.md#implementations
 V2-TYPE-GENERIC-bound-impl-target-parameter	active	02-type-system.md#implementations
 V2-TYPE-GENERIC-bound-impl-target-satisfied	active	02-type-system.md#implementations

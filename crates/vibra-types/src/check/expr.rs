@@ -1139,6 +1139,26 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         );
     }
 
+    /// Reports each field of a record value that repeats an earlier one:
+    /// `@name.redeclaration` at the later field, related to the earlier.
+    fn repeated_fields(&mut self, names: impl Iterator<Item = Ident<'a>>) {
+        let mut seen: BTreeMap<&'a str, ByteSpan> = BTreeMap::new();
+        for name in names {
+            if let Some(first) = seen.get(name.text()) {
+                let diagnostic = Diagnostic::new(
+                    DiagnosticCode::NameRedeclaration,
+                    name.span(),
+                    format!("the field `{}` is written twice", name.text()),
+                )
+                .with_source_id(self.source_id.as_ref())
+                .with_related(*first, "the earlier field");
+                self.diagnostics.push(diagnostic);
+            } else {
+                seen.insert(name.text(), name.span());
+            }
+        }
+    }
+
     fn unavailable(&mut self, span: ByteSpan, what: &str) {
         self.report(
             DiagnosticCode::ToolUnavailable,
@@ -1547,6 +1567,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                 primary_span,
             ),
             Primary::Record(fields) => {
+                self.repeated_fields(fields.iter().map(|(name, _)| *name));
                 let names = fields
                     .iter()
                     .map(|(name, _)| name.text().to_owned())
@@ -3768,13 +3789,8 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         let mut ty = match &product {
             Product::Tuple => components.map(Type::Tuple),
             Product::Record(names) => components.and_then(|components| {
-                match Type::record(names.iter().cloned().zip(components)) {
-                    Ok(ty) => Some(ty),
-                    Err(_) => {
-                        self.unavailable(span, "a record value with a repeated field");
-                        None
-                    }
-                }
+                // A repeated field is reported where it is written.
+                Type::record(names.iter().cloned().zip(components)).ok()
             }),
             Product::List => match element {
                 Some(element) => Some(Type::list(element)),

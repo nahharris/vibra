@@ -1,0 +1,19 @@
+id = "V2-TYPE-NOMINAL-record-type-repeated-field-local"
+rule = "V2-TYPE-NOMINAL-record-type-repeated-field-local"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#structural-types: a record type written in a let annotation that writes a field twice is @name.redeclaration at the later field"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@name.redeclaration"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 49, end = 50 }
+related = [{ source = "src/app/main.vib", span = { start = 34, end = 35 } }]

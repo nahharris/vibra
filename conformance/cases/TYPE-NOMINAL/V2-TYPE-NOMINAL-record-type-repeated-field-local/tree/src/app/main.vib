@@ -1,0 +1,1 @@
+fn main returns r: I32 do let v: {a: I32 b: Bool a: I32} be {a: 1i32 b: Bool.true()} endlet return 1i32 endfn
