@@ -1330,7 +1330,16 @@ checked under the contract's `requires` and MUST establish the contract's
 `ensures`. A contract guard with `else` runs on every call of every
 implementation, as part of the member: the checker copies it into each
 implementation's checked function, so static and dynamic dispatch behave
-alike. An implementation member declares no guard of its own; a `requires`,
+alike. A call of a contract member whose `requires` is bare states one
+obligation. At a closed receiver whose implementation is a program's own
+and not generic, it is the guard copied into the member that implementation
+supplies. At any other receiver, such as a bounded type parameter, an
+interface value, or a type a generic implementation serves, it is the
+contract's predicate at the call's arguments, decided once, with the
+contract's default for each label the call does not write. A contract guard
+that does not check under an implementation's substitution is the
+contract's own fault, reported where the contract is declared. An
+implementation member declares no guard of its own; a `requires`,
 `ensures`, or `where` section on one is `@syntax.invalidSection`, and the
 checks it needs are written in its body.
 

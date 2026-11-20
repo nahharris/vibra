@@ -232,6 +232,10 @@ struct Prover<'v> {
     /// a closed receiver, by interface, interface arguments, receiver, and
     /// member name.
     members: &'v [(TypeId, Vec<Type>, Type, String, usize)],
+    /// The entry a call of a contract member at any other receiver is
+    /// decided from, by interface and member name: the default body, or
+    /// the abstract member's own guards.
+    contracts: BTreeMap<(TypeId, String), usize>,
 }
 
 /// A step of a walk.
@@ -257,7 +261,11 @@ enum Task<'n> {
 /// Discharges every bare-guard obligation of the local declarations.
 pub(super) fn discharge(
     context: &mut Context<'_, '_>,
-    (certified, closure_certified): (&super::Certified, &super::ClosureCertified),
+    (certified, closure_certified, contract_certified): (
+        &super::Certified,
+        &super::ClosureCertified,
+        &super::ContractCertified,
+    ),
     members: &[(TypeId, Vec<Type>, Type, String, usize)],
     evaluator: &mut Evaluator<'_>,
 ) {
@@ -269,6 +277,23 @@ pub(super) fn discharge(
     let (anonymous, keys, defaults) =
         closures(context, closure_certified, context.standings.len());
     guarded.extend(anonymous);
+    // Each abstract contract member with a bare `requires` is numbered
+    // after them.
+    let base = context.standings.len() + keys.len();
+    let (abstract_members, contracts) = contracts(context, contract_certified, base);
+    for (entry, data) in &abstract_members {
+        if let Some(contract) = context
+            .inputs
+            .contracts
+            .values()
+            .find(|contract| contract.identity == data.identity)
+        {
+            vocabulary
+                .defaults
+                .insert(*entry, contract.defaults.clone());
+        }
+    }
+    guarded.extend(abstract_members);
     vocabulary.closures = keys;
     vocabulary.defaults.extend(defaults);
     let mut prover = Prover {
@@ -283,6 +308,7 @@ pub(super) fn discharge(
         activations: 0,
         decided: BTreeMap::new(),
         members,
+        contracts,
     };
     let mut bodies = Vec::new();
     for (index, checked) in inputs.functions {
@@ -527,6 +553,36 @@ impl<'v> Prover<'v> {
                         Verdict::Unsupported
                     };
                     (ObligationKind::Where, *span, Guard::Type(*ty), verdict)
+                }
+                Site::Contract {
+                    interface,
+                    member,
+                    span,
+                } => {
+                    let Some(entry) = inputs
+                        .program
+                        .interfaces
+                        .get(*interface)
+                        .and_then(|data| data.id.clone())
+                        .and_then(|id| self.contracts.get(&(id, member.clone())))
+                        .copied()
+                    else {
+                        continue;
+                    };
+                    let Some(data) = self.guarded.get(&entry) else {
+                        continue;
+                    };
+                    let verdict = if data.requires_certified {
+                        Verdict::Unknown
+                    } else {
+                        Verdict::Unsupported
+                    };
+                    (
+                        ObligationKind::Requires,
+                        *span,
+                        Guard::Function(entry),
+                        verdict,
+                    )
                 }
                 Site::Pattern { .. } => continue,
             };
@@ -886,7 +942,16 @@ impl<'v> Prover<'v> {
                         && *receiver == call.receiver
                         && *member == call.member
                 })
-                .map(|(.., entry)| *entry)?,
+                .map(|(.., entry)| *entry)
+                .or_else(|| {
+                    self.contracts
+                        .get(&(call.interface.clone(), call.member.clone()))
+                        .copied()
+                })?,
+            CallTarget::Contract(call) => self
+                .contracts
+                .get(&(call.interface.clone(), call.member.clone()))
+                .copied()?,
             CallTarget::Value(_) => {
                 let (call, _) =
                     facts::build(&mut self.terms, &self.vocabulary, env, node);
@@ -895,7 +960,6 @@ impl<'v> Prover<'v> {
                     _ => return None,
                 }
             }
-            CallTarget::Contract(_) => return None,
         };
         let function = &function;
         let data = self.guarded.get(function)?;
@@ -934,6 +998,25 @@ impl<'v> Prover<'v> {
                 continue;
             };
             slots.insert(data.positional + slot, (*term, written.origin.span()));
+        }
+        // A contract call's term holds each label it does not write as an
+        // unknown; the callee's default is the argument it passes.
+        if let CallTarget::Contract(_) = target
+            && let Some(defaults) = self.vocabulary.defaults.get(function)
+        {
+            for (label, written) in &arguments.labelled {
+                if !matches!(written.expr, Expr::Default(_)) {
+                    continue;
+                }
+                let (Some(slot), Some((_, constant))) = (
+                    data.labels.iter().position(|name| name == label),
+                    defaults.iter().find(|(name, _)| name == label),
+                ) else {
+                    continue;
+                };
+                let term = self.terms.intern(Data::Constant(constant.clone()));
+                slots.insert(data.positional + slot, (term, written.origin.span()));
+            }
         }
         let names = data.names.clone();
         let types = data.types.clone();
@@ -2393,6 +2476,81 @@ fn closures<'v>(
         }
     }
     (out, keys, defaults)
+}
+
+/// What the discharge reads of each abstract contract member with a bare
+/// `requires`, numbered from `base`, and the entry a call of each contract
+/// member at a receiver whose implementation member is not known is decided
+/// from: that one, or the default body's.
+fn contracts<'v>(
+    context: &Context<'v, '_>,
+    certified: &super::ContractCertified,
+    base: usize,
+) -> (
+    BTreeMap<usize, Guarded<'v>>,
+    BTreeMap<(TypeId, String), usize>,
+) {
+    let inputs = context.inputs;
+    let program = inputs.program;
+    let mut out = BTreeMap::new();
+    let mut entries = BTreeMap::new();
+    for interface in &program.interfaces {
+        let Some(id) = &interface.id else { continue };
+        for member in &interface.members {
+            let entry = member.default.and_then(|function| {
+                inputs.layout.functions.get(function).copied().flatten()
+            });
+            if let Some(entry) = entry {
+                entries.insert((id.clone(), member.name.clone()), entry);
+            }
+        }
+    }
+    for (key, contract) in inputs.contracts {
+        let Some(id) = program
+            .interfaces
+            .get(key.0)
+            .and_then(|data| data.id.clone())
+        else {
+            continue;
+        };
+        let Some(requires) = contract
+            .guards
+            .entry
+            .as_ref()
+            .filter(|guard| guard.consequence.is_none())
+        else {
+            continue;
+        };
+        let at = base + out.len();
+        let signature = &contract.signature;
+        let mut types = signature.parameters.clone();
+        types.extend(signature.labels.entries().iter().map(|(_, ty)| ty.clone()));
+        out.insert(
+            at,
+            Guarded {
+                module: contract.module,
+                identity: contract.identity.clone(),
+                qualified: contract.qualified.clone(),
+                name: contract.name,
+                positional: signature.parameters.len(),
+                labels: signature.labels.names().map(str::to_owned).collect(),
+                names: contract.names.clone(),
+                types,
+                entry: Entry::Bare,
+                precondition: Some(requires),
+                requires: Some(requires),
+                requires_certified: certified.get(key).copied().unwrap_or_default(),
+                ensures: None,
+                ensures_certified: false,
+                result_name: contract.result_name.clone(),
+                result_type: signature.result.clone(),
+                anonymous: false,
+                contract: None,
+            },
+        );
+        entries.insert((id, key.1.clone()), at);
+    }
+    (out, entries)
 }
 
 /// What the discharge reads of each type with an invariant, by identity.

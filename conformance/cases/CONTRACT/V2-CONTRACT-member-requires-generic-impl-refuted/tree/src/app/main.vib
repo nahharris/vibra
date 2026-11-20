@@ -1,0 +1,18 @@
+interface Sized
+  fn size
+    takes {value: Self n: I32}
+    returns r: I32
+    requires Ordered.greater(n 0i32)
+  endfn
+endinterface
+type A of I32
+  impl Sized
+    fn size takes {value: Self m: I32} returns s: I32 do return m endfn
+  endimpl
+endtype
+type Wrap(T) of T
+  impl Sized
+    fn size takes {value: Self m: I32} returns s: I32 do return I32.add(m 1i32) endfn
+  endimpl
+endtype
+fn main returns r: I32 do return Sized.size(Wrap(1i32) 0i32) endfn

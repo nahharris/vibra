@@ -1,0 +1,12 @@
+id = "V2-CONTRACT-member-requires-open-branch"
+rule = "V2-CONTRACT-member-requires-open-branch"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#guards-and-callable-types: GUARD-3: a dominating branch establishes a contract member's bare requires at a call at a bounded type parameter"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

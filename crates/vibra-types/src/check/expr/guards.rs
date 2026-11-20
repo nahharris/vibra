@@ -131,7 +131,8 @@ impl<'a> BodyChecker<'_, 'a> {
     /// is bare and a construction of a type whose `where` is bare each
     /// state one, and so does a call of a contract member whose `requires`
     /// is bare: the guard copied into the implementation member a closed
-    /// receiver selects.
+    /// receiver selects, and otherwise the contract's own guard, decided
+    /// once at the call.
     pub(super) fn obligation(
         &mut self,
         site: Option<Result<usize, usize>>,
@@ -144,14 +145,11 @@ impl<'a> BodyChecker<'_, 'a> {
         } = &node.expr
             && self.contract_requires_bare(call)
         {
-            match self.implementation_member(call) {
-                Some(function) => self.sites.push(Site::Requires { function, span }),
-                None => self.unavailable(
-                    span,
-                    "a call of a contract member whose `requires` is bare at an open \
-                     receiver or through a generic implementation",
-                ),
-            }
+            let site = match self.implementation_member(call) {
+                Some(function) => Some(Site::Requires { function, span }),
+                None => self.contract_site(call, span),
+            };
+            self.sites.extend(site);
         }
         match site {
             Some(Ok(function)) => {
@@ -202,6 +200,31 @@ impl<'a> BodyChecker<'_, 'a> {
                         .map(|(_, function)| *function)
                 })
                 .flatten()
+        })
+    }
+
+    /// The site of a call at `span` of the contract member `call` calls at
+    /// a receiver whose implementation member is not known: the default
+    /// body's own guard, or the abstract member's.
+    fn contract_site(
+        &self,
+        call: &vibra_ir::ContractCall,
+        span: ByteSpan,
+    ) -> Option<Site> {
+        let (interface, data) = self
+            .program
+            .interfaces
+            .iter()
+            .enumerate()
+            .find(|(_, data)| data.id.as_ref() == Some(&call.interface))?;
+        let member = data.member(&call.member)?;
+        Some(match member.default {
+            Some(function) => Site::Requires { function, span },
+            None => Site::Contract {
+                interface,
+                member: member.name.clone(),
+                span,
+            },
         })
     }
 

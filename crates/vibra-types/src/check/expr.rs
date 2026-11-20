@@ -753,7 +753,9 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
     /// abstract contract member of type `signature`, whose labelled
     /// parameters are written as `labelled`, checked once under `scope` with
     /// `Self` open, so that the contract's own faults are reported where it
-    /// is declared.
+    /// is declared. The checked guards, which a call at a receiver no
+    /// implementation member is known for is decided from, or `None` when
+    /// one has a fault.
     pub(crate) fn abstract_guards(
         &mut self,
         signature: &FnType,
@@ -761,7 +763,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         labelled: &[Ident<'a>],
         scope: CallableScope,
         views: &GuardViews<'a>,
-    ) {
+    ) -> Option<Guards> {
         self.locals.clear();
         self.slots.clear();
         self.frames.clear();
@@ -776,14 +778,15 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         let mark = self.diagnostics.len();
         let (failed, _) = self.bind_parameters(signature, patterns, labelled);
         if failed || self.diagnostics.len() != mark {
-            return;
+            return None;
         }
         self.slots.truncate(signature.slot_count());
         self.locals.clear();
-        let _ = self.member_guards(signature, patterns, labelled, views);
+        let guards = self.member_guards(signature, patterns, labelled, views);
         // A contract guard is copied into each implementation, and an
         // obligation it states is one obligation of each implementation.
         self.sites.clear();
+        guards
     }
 
     /// The guards `views` of the contract member that the callable just

@@ -585,7 +585,8 @@ fn a_contract_guard_with_else_runs_in_every_implementation() {
 
 /// A call of a member whose `requires` is bare, at a closed receiver, is the
 /// obligation of the implementation the receiver selects; at an open
-/// receiver it is outside this checker.
+/// receiver, it is the contract's predicate at the call's arguments,
+/// decided once, with the contract's default for a label not written.
 #[test]
 fn a_call_of_a_member_with_a_bare_requires_is_an_obligation() {
     let contract = sized("requires Ordered.greater(n 0i32)", &[("A", "return m")]);
@@ -604,12 +605,41 @@ fn a_call_of_a_member_with_a_bare_requires_is_an_obligation() {
         "{contract}fn f(T) takes {{v: T}} returns r: I32 given {{T: Sized}} \
          do return Sized.size(v 1i32) endfn\n"
     );
+    assert_eq!(faults(&source), []);
+    assert_eq!(obligations(&source), [passed(REQUIRES, &["GUARD-1"])]);
+    let open = |call: &str| {
+        format!(
+            "{contract}fn f(T) takes {{v: T k: I32}} returns r: I32 given {{T: Sized}} \
+             do return {call} endfn\n"
+        )
+    };
+    let source = open("Sized.size(v 0i32)");
     assert_eq!(
         faults(&source),
         [(
-            DiagnosticCode::ToolUnavailable,
-            at(&source, "Sized.size(v 1i32)", 0)
+            DiagnosticCode::ContractRefuted,
+            at(&source, "Ordered.greater(n 0i32)", 0)
         )]
+    );
+    let source = open("Sized.size(v k)");
+    assert_eq!(
+        faults(&source),
+        [(
+            DiagnosticCode::ContractUnproved,
+            at(&source, "Sized.size(v k)", 0)
+        )]
+    );
+    let source =
+        open("if Ordered.greater(k 0i32) then Sized.size(v k) else 0i32 endif");
+    assert_eq!(faults(&source), []);
+    let source = format!(
+        "{contract}fn f takes {{v: Sized}} returns r: I32 do return Sized.size(v 2i32) endfn\n\
+         fn main returns r: I32 do return f(A(1i32)) endfn\n"
+    );
+    assert_eq!(faults(&source), []);
+    assert_eq!(
+        super::run(&source).as_deref(),
+        Ok(super::value("i32", "2i32").as_str())
     );
 }
 

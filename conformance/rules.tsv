@@ -766,3 +766,14 @@ V2-CONTRACT-where-anonymous-requires-lost	active	02-type-system.md#type-invarian
 V2-CONTRACT-where-anonymous-call-unproved	active	02-type-system.md#type-invariants
 V2-CONTRACT-where-anonymous-ensures-unproved	active	02-type-system.md#type-invariants
 V2-CONTRACT-where-anonymous-guards-ok	active	02-type-system.md#type-invariants
+V2-CONTRACT-member-requires-open	active	02-type-system.md#guards-and-callable-types
+V2-CONTRACT-member-requires-open-refuted	active	02-type-system.md#guards-and-callable-types
+V2-CONTRACT-member-requires-open-unproved	active	02-type-system.md#guards-and-callable-types
+V2-CONTRACT-member-requires-open-branch	active	02-type-system.md#guards-and-callable-types
+V2-CONTRACT-member-requires-interface-value	active	02-type-system.md#guards-and-callable-types
+V2-CONTRACT-member-requires-generic-impl	active	02-type-system.md#guards-and-callable-types
+V2-CONTRACT-member-requires-generic-impl-refuted	active	02-type-system.md#guards-and-callable-types
+V2-CONTRACT-member-requires-open-default	active	02-type-system.md#guards-and-callable-types
+V2-CONTRACT-member-requires-open-label-refuted	active	02-type-system.md#guards-and-callable-types
+V2-CONTRACT-member-guard-faulty-generic	active	02-type-system.md#guards-and-callable-types
+V2-CONTRACT-member-ensures-generic-impl	active	02-type-system.md#guards-and-callable-types

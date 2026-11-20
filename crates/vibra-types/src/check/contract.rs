@@ -136,6 +136,14 @@ pub(crate) enum Site {
         /// The construction.
         value: Node,
     },
+    /// A call, at `span`, of the abstract member `member` of the interface
+    /// at program index `interface`, whose `requires` is bare, at a receiver
+    /// whose implementation member is not known: decided from the contract.
+    Contract {
+        interface: usize,
+        member: String,
+        span: ByteSpan,
+    },
 }
 
 /// The run-time check of a guard with `else` whose predicate is constant:
@@ -175,6 +183,28 @@ pub(crate) enum Owner {
     Type(usize),
 }
 
+/// The guards of an abstract contract member, checked once with `Self` and
+/// the interface's parameters open: what a call at a receiver whose
+/// implementation member is not known is decided from.
+#[derive(Clone, Debug)]
+pub(crate) struct ContractGuard {
+    /// The interface's module, which the guards' spans are in.
+    pub(crate) module: usize,
+    /// The contract member's identity and its name as messages show it.
+    pub(crate) identity: String,
+    pub(crate) qualified: String,
+    /// The member's name as written.
+    pub(crate) name: ByteSpan,
+    pub(crate) signature: vibra_ir::FnType,
+    /// The name of each argument slot.
+    pub(crate) names: Vec<String>,
+    pub(crate) result_name: String,
+    /// The constant default of each labelled parameter, which a call that
+    /// does not write the label passes.
+    pub(crate) defaults: Vec<(String, Constant)>,
+    pub(crate) guards: Guards,
+}
+
 /// What the review looks at: the program, its layout, its checked
 /// functions, module values, tests, and invariants by program index, and its
 /// sites with the module and the declaration of each.
@@ -185,6 +215,8 @@ pub(crate) struct Inputs<'r, 'a> {
     pub(crate) values: &'r BTreeMap<usize, Checked>,
     pub(crate) tests: &'r BTreeMap<usize, Checked>,
     pub(crate) invariants: &'r BTreeMap<usize, CheckedInvariant>,
+    /// The guards of each abstract contract member, by interface and name.
+    pub(crate) contracts: &'r BTreeMap<(usize, String), ContractGuard>,
     pub(crate) sites: &'r [(usize, Owner, Site)],
 }
 
@@ -227,8 +259,10 @@ impl Context<'_, '_> {
         }
     }
 
+    /// Reports `diagnostic` once: a contract guard is reviewed for each
+    /// place it is copied to, and its faults are the contract's.
     fn push(&mut self, module: usize, diagnostic: Diagnostic) {
-        if self.local(module) {
+        if self.local(module) && !self.reviewed.diagnostics.contains(&diagnostic) {
             self.reviewed.diagnostics.push(diagnostic);
         }
     }
@@ -541,13 +575,14 @@ pub(crate) fn review(
     };
     let certified = guards(&mut context, &facts);
     let closures = closure_guards(&mut context, &facts);
+    let contracts = contract_guards(&mut context, &facts);
     invariants(&mut context, &facts);
     let standings = std::mem::take(&mut context.standings);
     let mut evaluator = Evaluator::new(&facts, &standings, build);
     context.standings.clone_from(&standings);
     prove::discharge(
         &mut context,
-        (&certified, &closures),
+        (&certified, &closures, &contracts),
         &facts.members,
         &mut evaluator,
     );
@@ -631,6 +666,29 @@ fn closure_guards(context: &mut Context<'_, '_>, facts: &Facts) -> ClosureCertif
             let exit = check(closure.guards.exit.as_ref().map(|(_, guard)| guard));
             certified.insert(closure.body.clone(), (entry, exit));
         }
+    }
+    certified
+}
+
+/// Whether the `requires` of each abstract contract member is certified,
+/// by interface and member name.
+type ContractCertified = BTreeMap<(usize, String), bool>;
+
+/// Reports what is outside the fragment in the `requires` of every abstract
+/// contract member.
+fn contract_guards(context: &mut Context<'_, '_>, facts: &Facts) -> ContractCertified {
+    let mut certified = BTreeMap::new();
+    let inputs = context.inputs;
+    for (key, contract) in inputs.contracts {
+        let entry = match &contract.guards.entry {
+            Some(guard) => {
+                let mut roots = vec![&guard.predicate];
+                roots.extend(guard.consequence.as_ref());
+                context.certify(facts, contract.module, &roots)
+            }
+            None => false,
+        };
+        certified.insert(key.clone(), entry);
     }
     certified
 }
