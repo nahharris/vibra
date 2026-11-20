@@ -1,0 +1,3 @@
+use @std.iter.compareLexicographic enduse
+
+fn main returns r: U8 do match compareLexicographic([1u8 2u8] [1u8 3u8]) case Ordering.less() return 1u8 case _ return 0u8 endmatch endfn

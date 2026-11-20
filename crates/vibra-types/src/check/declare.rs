@@ -24,6 +24,7 @@
 //! it is converted; an applied type supplies exactly its head's parameters;
 //! and the key of a `Dict` implements `Ordered`.
 
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
@@ -365,6 +366,22 @@ pub(crate) struct ImplData {
     pub(crate) usable: bool,
 }
 
+/// A written application of the interface `interface` at `arguments`, in
+/// `module`: an interface type, an interface value type, a bound, or an
+/// `impl` target. Each argument MUST satisfy the bound of its interface
+/// parameter (`docs/spec/02-type-system.md`, "Generics"), which is decided
+/// once every implementation is known.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct BoundGoal {
+    pub(crate) module: usize,
+    pub(crate) interface: usize,
+    pub(crate) arguments: Vec<Type>,
+    /// Where each argument is written.
+    pub(crate) spans: Vec<ByteSpan>,
+    /// The whole application.
+    pub(crate) application: ByteSpan,
+}
+
 /// Where an `impl` is nested: in a type, or in an interface.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Host {
@@ -403,6 +420,10 @@ pub(crate) struct Program<'a> {
     pub(crate) library: Vec<(Library, Entity)>,
     /// The receiver of every written `impl Ordered`.
     pub(crate) ordered: Vec<Type>,
+    /// Every written application of a bounded interface, whose arguments
+    /// are checked against the interface's bounds once every implementation
+    /// is known.
+    pub(crate) goals: RefCell<Vec<BoundGoal>>,
     local_package: PackageName,
     embedded_package: PackageName,
 }
@@ -457,6 +478,7 @@ impl<'a> Program<'a> {
             diagnostics: Vec::new(),
             library: Vec::new(),
             ordered: Vec::new(),
+            goals: RefCell::new(Vec::new()),
             local_package: inputs.local.clone(),
             embedded_package: inputs.embedded.clone(),
         };

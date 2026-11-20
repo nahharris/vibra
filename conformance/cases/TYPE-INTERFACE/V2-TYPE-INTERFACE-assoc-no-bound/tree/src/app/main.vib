@@ -1,0 +1,8 @@
+interface Has
+  type Item endtype
+  fn get
+    takes {x: Self}
+    returns r: Item
+    given {Item: Ordered}
+  endfn
+endinterface

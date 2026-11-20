@@ -16,8 +16,8 @@ use vibra_ir::{FnType, NamedTypes, Substitution, Type, TypeId};
 use vibra_syntax::source::{Callable, Given, Ident, Impl, Path, TypeExpr, TypeForm};
 
 use super::declare::{
-    BoundData, Entity, FnData, Host, ImplData, InterfaceMemberData, NoType, Program,
-    Scope, TypeKind, unguarded,
+    BoundData, BoundGoal, Entity, FnData, Host, ImplData, InterfaceMemberData, NoType,
+    Program, Scope, TypeKind, unguarded,
 };
 
 /// An interface as applied: its index, its positional arguments, and the
@@ -136,6 +136,13 @@ impl<'a> Program<'a> {
             .iter()
             .map(|argument| self.written(module, *argument, scope))
             .collect::<Result<Vec<_>, _>>()?;
+        self.bound_goal(
+            module,
+            index,
+            &arguments,
+            positional.iter().map(TypeExpr::span).collect(),
+            written.span(),
+        );
         let mut choices = labelled
             .iter()
             .map(|(label, ty)| {
@@ -144,6 +151,34 @@ impl<'a> Program<'a> {
             .collect::<Result<Vec<_>, NoType>>()?;
         choices.sort_by(|left, right| left.0.cmp(&right.0));
         Ok((index, arguments, choices))
+    }
+
+    /// Records that `arguments`, written at `spans` in the application
+    /// `application` of the interface `interface`, must satisfy the
+    /// interface's bounds. The bounds may not be read yet, so every
+    /// application with an argument is recorded.
+    fn bound_goal(
+        &self,
+        module: usize,
+        interface: usize,
+        arguments: &[Type],
+        spans: Vec<ByteSpan>,
+        application: ByteSpan,
+    ) {
+        if arguments.is_empty() {
+            return;
+        }
+        let goal = BoundGoal {
+            module,
+            interface,
+            arguments: arguments.to_vec(),
+            spans,
+            application,
+        };
+        let mut goals = self.goals.borrow_mut();
+        if !goals.contains(&goal) {
+            goals.push(goal);
+        }
     }
 
     /// The bound written `written`: `None` for `Any`. A bound that is not an
@@ -586,7 +621,7 @@ impl<'a> Program<'a> {
             associated: &[],
         };
         let mut arguments = Vec::new();
-        for argument in positional {
+        for argument in positional.iter().copied() {
             match self.written(module, argument, scope) {
                 Ok(ty) => arguments.push(ty),
                 Err(why) => {
@@ -596,6 +631,13 @@ impl<'a> Program<'a> {
                 }
             }
         }
+        self.bound_goal(
+            module,
+            interface,
+            &arguments,
+            positional.iter().map(TypeExpr::span).collect(),
+            target.span(),
+        );
         let bounds = vec![None; binders.len()];
         Some(ImplHead {
             module,

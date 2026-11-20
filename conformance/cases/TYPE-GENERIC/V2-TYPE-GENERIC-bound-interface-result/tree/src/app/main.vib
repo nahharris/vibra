@@ -1,0 +1,10 @@
+interface Feed(S)
+  given {S: Ordered}
+  fn feed
+    takes {x: Self item: S}
+    returns r: U8
+  endfn
+endinterface
+
+type Plain of U8 endtype
+fn f returns r: Option(Feed(Plain)) do return Option.none() endfn

@@ -657,7 +657,12 @@ So `impl From(I16)` in `type Cents` has the key `From`, `Cents`, `I16`, and
 one receiver may implement `From(I16)` and `From(I8)`. An implementation
 written in a generic interface covers every application of that interface
 to its receiver. A key may be open in the parameters of its enclosing
-declaration and in nothing else. A target admits no label
+declaration and in nothing else. The arguments written in a target inside a
+`type` are type arguments of the interface, so each MUST implement its
+parameter's bound, where a parameter of the enclosing type has no bound:
+`impl Feed(Plain)`, where `Feed(S)` has `given {S: Ordered}` and `Plain`
+implements no `Ordered`, is `@type.unsatisfiedBound` at `Plain`, related to
+the bound. A target admits no label
 (`@type.typeArgumentMismatch` at the label), so a key is always visibly
 positional. Two keys of the same interface whose receivers and positional
 arguments unify [overlap](#overlap): the later implementation is
@@ -833,7 +838,12 @@ selected.
    select the implementations of this interface whose key unifies with them
    without fixing a type parameter in scope. None is
    `@type.unsatisfiedBound` at the receiver operand or the expected type,
-   related to the interface. More than one, which happens only when a
+   related to the interface, unless a positional constraint fixes a
+   parameter of the interface to a type that does not implement that
+   parameter's bound: the call is then `@type.unsatisfiedBound` at the
+   operand or the expected type that fixes it, related to the bound. A
+   parameter that only the expected type fixes is checked against its bound
+   once it is fixed, like any other. More than one, which happens only when a
    positional argument is still undetermined, is
    `@type.ambiguousImplementation` at the application.
 5. **Checking.** The selected implementation's substitution, or the

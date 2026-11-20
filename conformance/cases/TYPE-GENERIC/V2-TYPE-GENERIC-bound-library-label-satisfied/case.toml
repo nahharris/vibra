@@ -1,0 +1,12 @@
+id = "V2-TYPE-GENERIC-bound-library-label-satisfied"
+rule = "V2-TYPE-GENERIC-bound-library-label-satisfied"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#bounds: a library bound whose labelled parameter meets its own bound is accepted"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

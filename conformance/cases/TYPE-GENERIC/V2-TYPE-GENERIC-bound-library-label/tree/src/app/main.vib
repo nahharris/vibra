@@ -1,0 +1,5 @@
+use @std.iter.compareLexicographic enduse
+
+type Plain of U8 endtype
+
+fn f returns r: U8 do let o: Ordering be compareLexicographic([Plain(1u8)] [Plain(2u8)]) endlet return 1u8 endfn

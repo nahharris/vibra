@@ -318,7 +318,7 @@ Every row is an error with no automatic fix.
 | coverage the checker cannot decide for this type | `@pattern.unsupportedCoverage`, the `match` |
 | an arm that is repeated, already covered, or uninhabited | `@pattern.unreachableArm`, the arm's pattern |
 | a type argument the call does not determine, including one still undetermined when no bound is resolvable | `@type.ambiguousInference`, the application |
-| a type argument that does not meet its bound | `@type.unsatisfiedBound`, the actual type, related to the bound |
+| a type argument that does not meet its bound, written, inferred, or an `impl` target's argument; an argument of an interface at a call that does not meet its parameter's bound | `@type.unsatisfiedBound`, the actual type as written, or the operand or expected type that fixes it, related to the bound |
 | an `impl` for `Never` or for an anonymous type | `@name.wrongEntityKind`, the `impl` |
 
 - An explicit `return` in tail position is the normal spelling and is never

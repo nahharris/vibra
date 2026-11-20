@@ -2252,6 +2252,22 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                     assignment = trial;
                 }
             }
+            // The expected type fixes the type arguments, so a breach of a
+            // bound is reported where that type is written.
+            let source = self.written_span(span).unwrap_or(span);
+            let mut resolved = vec![false; data.binders.len()];
+            let sources = vec![Some(source); data.binders.len()];
+            if !self.resolve_bounds(
+                &data.bounds,
+                data.module,
+                &mut assignment,
+                &mut resolved,
+                &sources,
+                span,
+                true,
+            ) {
+                return Out::error();
+            }
             let missing = data
                 .binders
                 .iter()
