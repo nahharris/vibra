@@ -13,7 +13,9 @@
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 use vibra_ir::external::compiler::CompilerIntrinsic;
 use vibra_ir::{FnType, NamedTypes, Substitution, Type, TypeId};
-use vibra_syntax::source::{Callable, Given, Ident, Impl, Path, TypeExpr, TypeForm};
+use vibra_syntax::source::{
+    Callable, CallableKind, Given, Ident, Impl, Path, TypeExpr, TypeForm,
+};
 
 use super::declare::{
     BoundData, BoundGoal, Entity, FnData, Host, ImplData, InterfaceMemberData, NoType,
@@ -365,7 +367,7 @@ impl<'a> Program<'a> {
             for member in view.members() {
                 let Some(name) = member.name() else { continue };
                 let what = format!("the member `{interface_name}.{}`", name.text());
-                if !unguarded(&member) {
+                if !unguarded(&member) || member.kind() == CallableKind::Proc {
                     self.unsupported(module, member.construct().span(), &what);
                     continue;
                 }
@@ -989,7 +991,7 @@ impl<'a> Program<'a> {
                 "the member `{}` of an implementation in `{host}`",
                 name.text()
             );
-            if !unguarded(&member) {
+            if !unguarded(&member) || member.kind() == CallableKind::Proc {
                 self.unsupported(module, member.construct().span(), &what);
                 usable = false;
                 continue;

@@ -32,9 +32,9 @@ use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 use vibra_ir::external::compiler::CompilerIntrinsic;
 use vibra_ir::{FnType, Library, NamedTypes, Type, TypeId};
 use vibra_syntax::source::{
-    Callable, Declaration, ExprForm, Given, Impl, Inputs, InterfaceDecl, Module,
-    ModuleLet, Primary, SourceOptions, Suffix, Test, TypeBody, TypeDecl, TypeExpr,
-    TypeForm,
+    Callable, CallableKind, Declaration, ExprForm, Given, Impl, Inputs, InterfaceDecl,
+    Module, ModuleLet, Primary, SourceOptions, Suffix, Test, TypeBody, TypeDecl,
+    TypeExpr, TypeForm,
 };
 use vibra_syntax::{CstNode, Document, parse_source, parse_source_with};
 
@@ -1465,6 +1465,7 @@ impl<'a> Program<'a> {
             };
             let own = data.view.params().len();
             let header = if !unguarded(&data.view)
+                || data.view.kind() == CallableKind::Proc
                 || (external.is_none() && data.view.body().is_none())
             {
                 Err(NoType::Unsupported)
@@ -1488,7 +1489,10 @@ impl<'a> Program<'a> {
             };
             let module = data.module;
             let span = data.view.construct().span();
-            let what = format!("the function `{}`", data.qualified);
+            let what = match data.view.kind() {
+                CallableKind::Proc => format!("the procedure `{}`", data.qualified),
+                CallableKind::Fn => format!("the function `{}`", data.qualified),
+            };
             match header {
                 Ok((signature, bounds)) => {
                     if let Some(data) = self.functions.get_mut(index) {
