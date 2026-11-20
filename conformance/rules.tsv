@@ -742,3 +742,5 @@ V2-SRC-CALLS-literal-dict-value-argument	active	02-type-system.md#application
 V2-SRC-CALLS-literal-initializer-mismatch	active	02-type-system.md#application
 V2-SRC-CALLS-literal-list-initializer-mismatch	active	02-type-system.md#application
 V2-SRC-CALLS-literal-argument-fits	active	02-type-system.md#application
+V2-CONTRACT-guard-else-limit	active	07-diagnostics-and-conformance.md#runtime-and-tool-failures
+V2-CONTRACT-guard-else-folds	active	07-diagnostics-and-conformance.md#runtime-and-tool-failures

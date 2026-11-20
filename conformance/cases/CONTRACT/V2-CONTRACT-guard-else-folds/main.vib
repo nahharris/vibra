@@ -1,0 +1,33 @@
+fn guarded takes {x: I32} returns r: I32 requires f3(1i32) else 0i32 do return x endfn
+fn f0 takes {x: I32} returns r: Bool do return Ordered.greater(x 0i32) endfn
+fn f1 takes {x: I32} returns r: Bool do return Bool.and(f0(x) f0(x)) endfn
+fn f2 takes {x: I32} returns r: Bool do return Bool.and(f1(x) f1(x)) endfn
+fn f3 takes {x: I32} returns r: Bool do return Bool.and(f2(x) f2(x)) endfn
+fn f4 takes {x: I32} returns r: Bool do return Bool.and(f3(x) f3(x)) endfn
+fn f5 takes {x: I32} returns r: Bool do return Bool.and(f4(x) f4(x)) endfn
+fn f6 takes {x: I32} returns r: Bool do return Bool.and(f5(x) f5(x)) endfn
+fn f7 takes {x: I32} returns r: Bool do return Bool.and(f6(x) f6(x)) endfn
+fn f8 takes {x: I32} returns r: Bool do return Bool.and(f7(x) f7(x)) endfn
+fn f9 takes {x: I32} returns r: Bool do return Bool.and(f8(x) f8(x)) endfn
+fn f10 takes {x: I32} returns r: Bool do return Bool.and(f9(x) f9(x)) endfn
+fn f11 takes {x: I32} returns r: Bool do return Bool.and(f10(x) f10(x)) endfn
+fn f12 takes {x: I32} returns r: Bool do return Bool.and(f11(x) f11(x)) endfn
+fn f13 takes {x: I32} returns r: Bool do return Bool.and(f12(x) f12(x)) endfn
+fn f14 takes {x: I32} returns r: Bool do return Bool.and(f13(x) f13(x)) endfn
+fn f15 takes {x: I32} returns r: Bool do return Bool.and(f14(x) f14(x)) endfn
+fn f16 takes {x: I32} returns r: Bool do return Bool.and(f15(x) f15(x)) endfn
+fn f17 takes {x: I32} returns r: Bool do return Bool.and(f16(x) f16(x)) endfn
+fn f18 takes {x: I32} returns r: Bool do return Bool.and(f17(x) f17(x)) endfn
+fn f19 takes {x: I32} returns r: Bool do return Bool.and(f18(x) f18(x)) endfn
+fn f20 takes {x: I32} returns r: Bool do return Bool.and(f19(x) f19(x)) endfn
+fn f21 takes {x: I32} returns r: Bool do return Bool.and(f20(x) f20(x)) endfn
+fn f22 takes {x: I32} returns r: Bool do return Bool.and(f21(x) f21(x)) endfn
+fn f23 takes {x: I32} returns r: Bool do return Bool.and(f22(x) f22(x)) endfn
+fn f24 takes {x: I32} returns r: Bool do return Bool.and(f23(x) f23(x)) endfn
+fn f25 takes {x: I32} returns r: Bool do return Bool.and(f24(x) f24(x)) endfn
+fn f26 takes {x: I32} returns r: Bool do return Bool.and(f25(x) f25(x)) endfn
+fn f27 takes {x: I32} returns r: Bool do return Bool.and(f26(x) f26(x)) endfn
+fn f28 takes {x: I32} returns r: Bool do return Bool.and(f27(x) f27(x)) endfn
+fn f29 takes {x: I32} returns r: Bool do return Bool.and(f28(x) f28(x)) endfn
+fn f30 takes {x: I32} returns r: Bool do return Bool.and(f29(x) f29(x)) endfn
+fn main returns r: I32 do return guarded(1i32) endfn
