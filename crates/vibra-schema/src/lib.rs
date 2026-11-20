@@ -28,6 +28,7 @@
 mod capability;
 mod diagnostic;
 mod envelope;
+mod test_payload;
 mod validate;
 
 pub use capability::CommandCapability;
@@ -38,6 +39,10 @@ pub use diagnostic::{
 pub use envelope::{
     CheckPayload, CommandOutcome, Envelope, FmtPayload, HelpPayload, Limits,
     ObligationKind, ObligationRecord, Payload, Status,
+};
+pub use test_payload::{
+    AuditEvent, ObservationError, ObservationErrorCode, TestFailure, TestFailureKind,
+    TestItem, TestPayload, TestResult, TrapRecord,
 };
 pub use validate::{SchemaViolation, validate_command_result, validate_diagnostic};
 

@@ -2,8 +2,15 @@
 //!
 //! A producer MUST validate every document it emits, "including rules that
 //! relate fields" (`docs/spec/05-tooling.md`, "Versioned envelope and
-//! results"). The schemas state the relations a schema can state; the one it
-//! cannot, a span whose start is not after its end, is checked here.
+//! results"). The schemas state the relations a schema can state; the ones
+//! it cannot are checked here:
+//!
+//! - a span's start is not after its end;
+//! - a `test` payload's `selected` is its number of items, `passed` the
+//!   number of `@test.passed` items, and `failed` their difference
+//!   ("Tests and selection");
+//! - every code attributed to a test item is the code of a diagnostic of the
+//!   envelope, where it appears once.
 
 use std::fmt;
 use std::sync::OnceLock;
@@ -98,6 +105,72 @@ fn misordered_spans(value: &Value, path: &str, found: &mut Vec<String>) {
     }
 }
 
+/// The count and attribution relations of a `test` payload.
+fn test_relations(envelope: &Value, found: &mut Vec<String>) {
+    if envelope.get("command").and_then(Value::as_str) != Some("test") {
+        return;
+    }
+    let payload = envelope.get("payload");
+    let Some(tests) = payload
+        .and_then(|payload| payload.get("tests"))
+        .and_then(Value::as_array)
+    else {
+        return;
+    };
+    let count = |field: &str| {
+        payload
+            .and_then(|payload| payload.get(field))
+            .and_then(Value::as_u64)
+    };
+    let selected = u64::try_from(tests.len()).ok();
+    let passed = u64::try_from(
+        tests
+            .iter()
+            .filter(|item| {
+                item.get("result").and_then(Value::as_str) == Some("@test.passed")
+            })
+            .count(),
+    )
+    .ok();
+    let failed = selected.zip(passed).map(|(all, good)| all - good);
+    for (field, expected) in [
+        ("selected", selected),
+        ("passed", passed),
+        ("failed", failed),
+    ] {
+        if count(field) != expected {
+            found.push(format!(
+                "/payload/{field}: {:?} is not the count of the items, {expected:?}",
+                count(field)
+            ));
+        }
+    }
+    let codes = envelope
+        .get("diagnostics")
+        .and_then(Value::as_array)
+        .map(|diagnostics| {
+            diagnostics
+                .iter()
+                .filter_map(|diagnostic| diagnostic.get("code").and_then(Value::as_str))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    for (index, item) in tests.iter().enumerate() {
+        let attributed = item
+            .get("diagnostics")
+            .and_then(Value::as_array)
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        for code in attributed.iter().filter_map(Value::as_str) {
+            if !codes.contains(&code) {
+                found.push(format!(
+                    "/payload/tests/{index}/diagnostics: `{code}` is not a diagnostic of the envelope"
+                ));
+            }
+        }
+    }
+}
+
 fn check(
     document: &'static str,
     validator: &Result<Validator, String>,
@@ -111,6 +184,7 @@ fn check(
         .map(|error| format!("{}: {error}", error.instance_path))
         .collect::<Vec<_>>();
     misordered_spans(value, "", &mut messages);
+    test_relations(value, &mut messages);
     if messages.is_empty() {
         Ok(())
     } else {

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:vibra:schema:v2:command-result",
   "title": "Vibra command result",
-  "description": "The versioned envelope of every structured command response. The payload is keyed by the command; this version publishes the help, fmt, and check payloads and the empty payload.",
+  "description": "The versioned envelope of every structured command response. The payload is keyed by the command; this version publishes the help, fmt, check, and test payloads and the empty payload.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -140,13 +140,155 @@
       }
     },
     {
+      "description": "test that admitted its selector carries the test payload. The suite result follows from the items by the precedence trap, operational exhaustion, unavailable, test failed, ok; static errors make every item invalid. A trap the tool itself raises because its own document failed validation keeps the empty payload.",
+      "if": { "$ref": "#/$defs/testResponse" },
+      "then": {
+        "if": {
+          "properties": { "result": { "const": "@command.trap" } },
+          "required": ["result"]
+        },
+        "then": {
+          "properties": {
+            "payload": {
+              "anyOf": [
+                {
+                  "allOf": [
+                    { "$ref": "#/$defs/testPayload" },
+                    { "$ref": "#/$defs/someTrapped" }
+                  ]
+                },
+                { "$ref": "#/$defs/emptyPayload" }
+              ]
+            }
+          }
+        },
+        "else": {
+          "properties": { "payload": { "$ref": "#/$defs/testPayload" } },
+          "allOf": [
+            {
+              "if": {
+                "properties": { "result": { "const": "@command.ok" } },
+                "required": ["result"]
+              },
+              "then": {
+                "properties": {
+                  "payload": {
+                    "properties": {
+                      "tests": { "items": { "$ref": "#/$defs/itemPassed" } }
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": { "result": { "const": "@command.diagnostics" } },
+                "required": ["result"]
+              },
+              "then": {
+                "properties": {
+                  "diagnostics": { "minItems": 1 },
+                  "payload": {
+                    "properties": {
+                      "tests": { "items": { "$ref": "#/$defs/itemInvalid" } }
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": { "result": { "const": "@command.testFailed" } },
+                "required": ["result"]
+              },
+              "then": {
+                "properties": {
+                  "payload": {
+                    "properties": {
+                      "tests": {
+                        "contains": { "$ref": "#/$defs/itemFailed" },
+                        "items": {
+                          "not": {
+                            "anyOf": [
+                              { "$ref": "#/$defs/itemTrapped" },
+                              { "$ref": "#/$defs/itemExhausted" },
+                              { "$ref": "#/$defs/itemUnavailable" },
+                              { "$ref": "#/$defs/itemInvalid" }
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "result": { "const": "@command.operationalFailure" }
+                },
+                "required": ["result"]
+              },
+              "then": {
+                "properties": {
+                  "payload": {
+                    "properties": {
+                      "tests": {
+                        "contains": { "$ref": "#/$defs/itemExhausted" },
+                        "items": {
+                          "not": {
+                            "anyOf": [
+                              { "$ref": "#/$defs/itemTrapped" },
+                              { "$ref": "#/$defs/itemInvalid" }
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": { "result": { "const": "@command.unavailable" } },
+                "required": ["result"]
+              },
+              "then": {
+                "properties": {
+                  "payload": {
+                    "properties": {
+                      "tests": {
+                        "contains": { "$ref": "#/$defs/itemUnavailable" },
+                        "items": {
+                          "not": {
+                            "anyOf": [
+                              { "$ref": "#/$defs/itemTrapped" },
+                              { "$ref": "#/$defs/itemExhausted" },
+                              { "$ref": "#/$defs/itemInvalid" }
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
       "description": "Every other response carries the empty payload.",
       "if": {
         "not": {
           "anyOf": [
             { "$ref": "#/$defs/helpResponse" },
             { "$ref": "#/$defs/fmtResponse" },
-            { "$ref": "#/$defs/checkResponse" }
+            { "$ref": "#/$defs/checkResponse" },
+            { "$ref": "#/$defs/testResponse" }
           ]
         }
       },
@@ -210,6 +352,234 @@
         }
       },
       "required": ["command", "result"]
+    },
+    "testResponse": {
+      "properties": {
+        "command": { "const": "test" },
+        "result": {
+          "enum": [
+            "@command.ok",
+            "@command.diagnostics",
+            "@command.testFailed",
+            "@command.operationalFailure",
+            "@command.unavailable",
+            "@command.trap"
+          ]
+        }
+      },
+      "required": ["command", "result"]
+    },
+    "testPayload": {
+      "description": "The test payload. selected counts the items, passed only the items whose result is @test.passed, and failed is their difference; the validator checks these counts, which a schema cannot state.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["selected", "passed", "failed", "tests"],
+      "properties": {
+        "selected": { "type": "integer", "minimum": 0 },
+        "passed": { "type": "integer", "minimum": 0 },
+        "failed": { "type": "integer", "minimum": 0 },
+        "tests": {
+          "description": "Every selected test, in discovery order.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/testItem" }
+        }
+      }
+    },
+    "someTrapped": {
+      "properties": {
+        "tests": { "contains": { "$ref": "#/$defs/itemTrapped" } }
+      }
+    },
+    "itemPassed": {
+      "properties": { "result": { "const": "@test.passed" } },
+      "required": ["result"]
+    },
+    "itemFailed": {
+      "properties": { "result": { "const": "@test.assertionFailed" } },
+      "required": ["result"]
+    },
+    "itemTrapped": {
+      "properties": { "result": { "const": "@test.trap" } },
+      "required": ["result"]
+    },
+    "itemInvalid": {
+      "properties": { "result": { "const": "@test.invalid" } },
+      "required": ["result"]
+    },
+    "itemUnavailable": {
+      "properties": { "result": { "const": "@test.unavailable" } },
+      "required": ["result"]
+    },
+    "itemExhausted": {
+      "properties": { "result": { "const": null } },
+      "required": ["result"]
+    },
+    "testItem": {
+      "description": "TestItem: the JSON projection of a test record of @testRun.v2. result is null when a host event stopped the test, because no @test.* result describes it; failure is present exactly for @test.assertionFailed and trap exactly for @test.trap.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "result",
+        "failure",
+        "trap",
+        "auditTrace",
+        "diagnostics",
+        "status"
+      ],
+      "properties": {
+        "name": {
+          "description": "The test's selector: the test module's atom, ::, and the name as one canonical string literal.",
+          "type": "string",
+          "pattern": "^@tests(\\.[A-Za-z][A-Za-z0-9]*)+::\".*\"$"
+        },
+        "result": {
+          "enum": [
+            "@test.passed",
+            "@test.assertionFailed",
+            "@test.trap",
+            "@test.invalid",
+            "@test.unavailable",
+            null
+          ]
+        },
+        "failure": {
+          "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/testFailure" }]
+        },
+        "trap": {
+          "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/trapRecord" }]
+        },
+        "auditTrace": {
+          "description": "The audit events the test completed. This version publishes no event kind, so the trace is empty.",
+          "type": "array",
+          "maxItems": 0
+        },
+        "diagnostics": {
+          "description": "The code of every envelope diagnostic attributed to the item.",
+          "type": "array",
+          "items": { "$ref": "urn:vibra:schema:v2:diagnostic#/$defs/diagnosticCode" }
+        },
+        "status": { "enum": ["passed", "refuted", "unknown", "unsupported"] }
+      },
+      "allOf": [
+        {
+          "if": { "$ref": "#/$defs/itemPassed" },
+          "then": {
+            "properties": {
+              "failure": { "type": "null" },
+              "trap": { "type": "null" },
+              "status": { "const": "passed" }
+            }
+          }
+        },
+        {
+          "if": { "$ref": "#/$defs/itemFailed" },
+          "then": {
+            "properties": {
+              "failure": { "type": "object" },
+              "trap": { "type": "null" },
+              "status": { "const": "refuted" }
+            }
+          }
+        },
+        {
+          "if": { "$ref": "#/$defs/itemTrapped" },
+          "then": {
+            "properties": {
+              "failure": { "type": "null" },
+              "trap": { "type": "object" },
+              "status": { "const": "unknown" }
+            }
+          }
+        },
+        {
+          "if": { "$ref": "#/$defs/itemInvalid" },
+          "then": {
+            "properties": {
+              "failure": { "type": "null" },
+              "trap": { "type": "null" },
+              "status": { "const": "refuted" },
+              "diagnostics": { "minItems": 1 }
+            }
+          }
+        },
+        {
+          "if": { "$ref": "#/$defs/itemUnavailable" },
+          "then": {
+            "properties": {
+              "failure": { "type": "null" },
+              "trap": { "type": "null" },
+              "status": { "const": "unsupported" },
+              "diagnostics": {
+                "contains": { "const": "@tool.unavailable" }
+              }
+            }
+          }
+        },
+        {
+          "if": { "$ref": "#/$defs/itemExhausted" },
+          "then": {
+            "properties": {
+              "failure": { "type": "null" },
+              "trap": { "type": "null" },
+              "status": { "const": "unknown" },
+              "diagnostics": { "minItems": 1 }
+            }
+          }
+        }
+      ]
+    },
+    "testFailure": {
+      "description": "TestItem.failure: the assertion that ended the test. observationError is null for an assertion and present for an observation.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "assertion",
+        "expected",
+        "actual",
+        "primarySpan",
+        "observationError"
+      ],
+      "properties": {
+        "kind": { "enum": ["assertion", "observation"] },
+        "assertion": { "type": ["string", "null"] },
+        "expected": { "type": ["string", "null"] },
+        "actual": { "type": ["string", "null"] },
+        "primarySpan": { "$ref": "urn:vibra:schema:v2:diagnostic#/$defs/span" },
+        "observationError": {
+          "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/observationError" }]
+        }
+      },
+      "if": {
+        "properties": { "kind": { "const": "assertion" } },
+        "required": ["kind"]
+      },
+      "then": { "properties": { "observationError": { "type": "null" } } },
+      "else": { "properties": { "observationError": { "type": "object" } } }
+    },
+    "trapRecord": {
+      "description": "TrapRecord: one of the two defect traps, and the source-origin ordinal of the trapping operation when it is known.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["trapCode", "origin"],
+      "properties": {
+        "trapCode": {
+          "enum": ["@runtime.invalidCheckedProgram", "@runtime.invalidHostValue"]
+        },
+        "origin": { "type": ["integer", "null"], "minimum": 0 }
+      }
+    },
+    "observationError": {
+      "description": "ObservationError: a value that cannot be shown.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "type", "origin"],
+      "properties": {
+        "code": { "const": "unsupportedValue" },
+        "type": { "type": ["string", "null"] },
+        "origin": { "type": ["integer", "null"], "minimum": 0 }
+      }
     },
     "fmtPayload": {
       "description": "The fmt payload: a preview carries the formatted text, a written file carries null text, and only a changed file is written.",
