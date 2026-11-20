@@ -1,0 +1,2 @@
+fn apply takes {f: Fn({I32} I32) v: I32} returns r: I32 do return f(v) endfn
+fn g returns r: I32 do return apply(fn(T) takes {x: T} returns r: T do return x endfn 1i32) endfn

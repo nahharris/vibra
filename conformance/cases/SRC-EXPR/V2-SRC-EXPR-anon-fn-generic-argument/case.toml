@@ -1,0 +1,12 @@
+id = "V2-SRC-EXPR-anon-fn-generic-argument"
+rule = "V2-SRC-EXPR-anon-fn-generic-argument"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#generics: a generic anonymous fn as an argument is instantiated from the parameter type"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

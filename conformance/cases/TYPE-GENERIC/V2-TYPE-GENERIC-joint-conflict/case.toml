@@ -1,0 +1,18 @@
+id = "V2-TYPE-GENERIC-joint-conflict"
+rule = "V2-TYPE-GENERIC-joint-conflict"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#inference-and-checking: an operand that disagrees with the type another operand fixed does not fit its slot"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.argumentMismatch"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 100, end = 103 }

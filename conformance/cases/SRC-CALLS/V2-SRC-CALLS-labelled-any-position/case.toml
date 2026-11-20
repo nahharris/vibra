@@ -1,0 +1,12 @@
+id = "V2-SRC-CALLS-labelled-any-position"
+rule = "V2-SRC-CALLS-labelled-any-position"
+profile = "interpreterV2"
+operation = "interpret"
+description = "01-source-language.md#application: a labelled argument binds by name in any position among the positional ones"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

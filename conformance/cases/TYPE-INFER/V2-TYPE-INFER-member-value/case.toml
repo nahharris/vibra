@@ -1,0 +1,12 @@
+id = "V2-TYPE-INFER-member-value"
+rule = "V2-TYPE-INFER-member-value"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#functions-as-values: a nested member path is a function value"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

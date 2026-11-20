@@ -1,0 +1,1 @@
+fn main returns r: I32 do let base be 10i32 endlet let add be fn takes {x: I32} returns r: I32 do return I32.add(x base) endfn endlet return add(1i32) endfn

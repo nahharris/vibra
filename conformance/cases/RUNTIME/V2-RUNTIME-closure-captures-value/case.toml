@@ -1,0 +1,12 @@
+id = "V2-RUNTIME-closure-captures-value"
+rule = "V2-RUNTIME-closure-captures-value"
+profile = "interpreterV2"
+operation = "interpret"
+description = "06-runtime.md#value-arena: a closure keeps the value it captured after the activation that made it has left"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

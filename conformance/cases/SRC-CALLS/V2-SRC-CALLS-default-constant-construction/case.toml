@@ -1,0 +1,12 @@
+id = "V2-SRC-CALLS-default-constant-construction"
+rule = "V2-SRC-CALLS-default-constant-construction"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#constant-expressions-and-constant-patterns: a construction of constants is a constant labelled default"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
