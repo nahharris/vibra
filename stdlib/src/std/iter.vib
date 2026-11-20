@@ -62,6 +62,38 @@ interface Iter
   endfn
 endinterface
 
+// The lexicographic order of two iterators: the first pair of items that
+// differ decides, by `Ordered.compare`, and an iterator that ends first is
+// less. `Str` and `Bytes` order themselves with it.
+fn compareLexicographic(T I)
+  takes {left: I right: I}
+  returns order: Ordering
+  given {T: Ordered I: Iter(Item: T)}
+  visibility @public
+  do
+    match Iter.next(left)
+      case Option.none()
+        match Iter.next(right)
+          case Option.none()
+            return Ordering.equal()
+          case Option.some(value: _)
+            return Ordering.less()
+        endmatch
+      case Option.some(value: {leftItem leftRest})
+        match Iter.next(right)
+          case Option.none()
+            return Ordering.greater()
+          case Option.some(value: {rightItem rightRest})
+            match Ordered.compare(leftItem rightItem)
+              case Ordering.equal()
+                return compareLexicographic(leftRest rightRest)
+              case order
+                return order
+            endmatch
+        endmatch
+    endmatch
+endfn
+
 type MappedIter(In Out) of {source: Iter(Item: In) f: Fn({In} Out)}
   visibility @public
   representation @private

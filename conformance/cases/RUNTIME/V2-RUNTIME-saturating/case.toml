@@ -1,0 +1,12 @@
+id = "V2-RUNTIME-saturating"
+rule = "V2-RUNTIME-saturating"
+profile = "interpreterV2"
+operation = "interpret"
+description = "06-runtime.md#integer-operations: plain arithmetic and shifts saturate at the bounds of their type"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

@@ -1,0 +1,1 @@
+fn main returns r: List(U8) do return Iter.collect(Str.toUtf8("é")) endfn

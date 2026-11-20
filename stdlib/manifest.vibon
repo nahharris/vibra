@@ -14,8 +14,13 @@
     }
     {
       path: @std.builtin
-      digest: "sha256:10b68643e475e4489dc5bd9d97aa6d5326f043ed8fe02309e8ddaf87ba281ec2"
-      languageRoles: [@bytes @dict @str]
+      digest: "sha256:ccdf09f4f13106d3428cd4503d81dacd3d9d42faf76cd5e58120e35a0b7d1e62"
+      languageRoles: [@dict]
+    }
+    {
+      path: @std.bytes
+      digest: "sha256:7d70f3ced78044f67efb2a4cd433b1d624597dadf6657613b830f229cab692c6"
+      languageRoles: [@bytes]
     }
     {
       path: @std.core
@@ -24,12 +29,12 @@
     }
     {
       path: @std.iter
-      digest: "sha256:cc1f9dd29ab6e8e7b8811f3fe16960f56b052564fe994d6f636ef55a89afa6f2"
+      digest: "sha256:3328d9d52161f58d2adacd03043954ded8e920bb507ea2478e7616f1c93eced7"
       languageRoles: [@iter]
     }
     {
       path: @std.option
-      digest: "sha256:656a8e9201e2d8d2dea402d20bc514670dbb8e2922a883905dc811e4dc4ec87d"
+      digest: "sha256:6224627fc38f460e20cea84e7419381e7aee739449af907abe7733f316ef959f"
       languageRoles: [@option]
     }
     {
@@ -37,29 +42,43 @@
       digest: "sha256:65e3263072955285b838492df574a49afbb958acfadea7c0881d33377b2e224f"
       languageRoles: [@result]
     }
+    {
+      path: @std.str
+      digest: "sha256:7b82f2b6d0ddc4c4ce7a08831ba7fa6ad72b4218f127e6b332ed934471b805ad"
+      languageRoles: [@str]
+    }
   ]
   symbols: {
     compiler: [
       "assert.equal"
       "assert.false"
       "assert.true"
+      "bytes.concat"
+      "bytes.equal"
+      "bytes.length"
+      "bytes.slice"
       "char.fromU32"
       "char.toU32"
       "dict.entries"
+      "dict.next"
       "f32.add"
       "f32.compareTotal"
       "f32.div"
       "f32.equal"
       "f32.mul"
       "f32.neg"
+      "f32.parse"
       "f32.sub"
+      "f32.toStr"
       "f64.add"
       "f64.compareTotal"
       "f64.div"
       "f64.equal"
       "f64.mul"
       "f64.neg"
+      "f64.parse"
       "f64.sub"
+      "f64.toStr"
       "i16.add"
       "i16.addChecked"
       "i16.compare"
@@ -69,6 +88,7 @@
       "i16.mulChecked"
       "i16.neg"
       "i16.negChecked"
+      "i16.parse"
       "i16.remChecked"
       "i16.shiftLeft"
       "i16.shiftLeftChecked"
@@ -79,6 +99,7 @@
       "i16.toI32"
       "i16.toI64"
       "i16.toI8"
+      "i16.toStr"
       "i16.toU16"
       "i16.toU32"
       "i16.toU64"
@@ -92,6 +113,7 @@
       "i32.mulChecked"
       "i32.neg"
       "i32.negChecked"
+      "i32.parse"
       "i32.remChecked"
       "i32.shiftLeft"
       "i32.shiftLeftChecked"
@@ -102,6 +124,7 @@
       "i32.toI16"
       "i32.toI64"
       "i32.toI8"
+      "i32.toStr"
       "i32.toU16"
       "i32.toU32"
       "i32.toU64"
@@ -115,6 +138,7 @@
       "i64.mulChecked"
       "i64.neg"
       "i64.negChecked"
+      "i64.parse"
       "i64.remChecked"
       "i64.shiftLeft"
       "i64.shiftLeftChecked"
@@ -125,6 +149,7 @@
       "i64.toI16"
       "i64.toI32"
       "i64.toI8"
+      "i64.toStr"
       "i64.toU16"
       "i64.toU32"
       "i64.toU64"
@@ -138,6 +163,7 @@
       "i8.mulChecked"
       "i8.neg"
       "i8.negChecked"
+      "i8.parse"
       "i8.remChecked"
       "i8.shiftLeft"
       "i8.shiftLeftChecked"
@@ -148,6 +174,7 @@
       "i8.toI16"
       "i8.toI32"
       "i8.toI64"
+      "i8.toStr"
       "i8.toU16"
       "i8.toU32"
       "i8.toU64"
@@ -157,7 +184,12 @@
       "list.length"
       "list.next"
       "list.slice"
-      "str.compare"
+      "str.concat"
+      "str.equal"
+      "str.fromUtf8"
+      "str.length"
+      "str.slice"
+      "str.toUtf8"
       "u16.add"
       "u16.addChecked"
       "u16.compare"
@@ -165,6 +197,7 @@
       "u16.equal"
       "u16.mul"
       "u16.mulChecked"
+      "u16.parse"
       "u16.remChecked"
       "u16.shiftLeft"
       "u16.shiftLeftChecked"
@@ -176,6 +209,7 @@
       "u16.toI32"
       "u16.toI64"
       "u16.toI8"
+      "u16.toStr"
       "u16.toU32"
       "u16.toU64"
       "u16.toU8"
@@ -186,6 +220,7 @@
       "u32.equal"
       "u32.mul"
       "u32.mulChecked"
+      "u32.parse"
       "u32.remChecked"
       "u32.shiftLeft"
       "u32.shiftLeftChecked"
@@ -197,6 +232,7 @@
       "u32.toI32"
       "u32.toI64"
       "u32.toI8"
+      "u32.toStr"
       "u32.toU16"
       "u32.toU64"
       "u32.toU8"
@@ -207,6 +243,7 @@
       "u64.equal"
       "u64.mul"
       "u64.mulChecked"
+      "u64.parse"
       "u64.remChecked"
       "u64.shiftLeft"
       "u64.shiftLeftChecked"
@@ -218,6 +255,7 @@
       "u64.toI32"
       "u64.toI64"
       "u64.toI8"
+      "u64.toStr"
       "u64.toU16"
       "u64.toU32"
       "u64.toU8"
@@ -228,6 +266,7 @@
       "u8.equal"
       "u8.mul"
       "u8.mulChecked"
+      "u8.parse"
       "u8.remChecked"
       "u8.shiftLeft"
       "u8.shiftLeftChecked"
@@ -239,6 +278,7 @@
       "u8.toI32"
       "u8.toI64"
       "u8.toI8"
+      "u8.toStr"
       "u8.toU16"
       "u8.toU32"
       "u8.toU64"

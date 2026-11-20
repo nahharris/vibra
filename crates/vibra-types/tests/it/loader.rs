@@ -15,7 +15,7 @@ fn the_embedded_library_loads() {
         stdlib.modules().len(),
         stdlib.roles().len()
     );
-    assert_eq!(stdlib.modules().len(), 7);
+    assert_eq!(stdlib.modules().len(), 9);
     assert_eq!(stdlib.roles().len(), 9);
     assert_eq!(stdlib.package_name(), "std");
     assert_eq!(stdlib.package_version(), "0.0.2");
@@ -26,8 +26,8 @@ fn every_role_has_its_declaration() {
     let stdlib = load_stdlib().expect("the embedded standard library loads");
     let expected = [
         (Role::Bool, "@std.bool", "Bool", "@type"),
-        (Role::Str, "@std.builtin", "Str", "@type"),
-        (Role::Bytes, "@std.builtin", "Bytes", "@type"),
+        (Role::Str, "@std.str", "Str", "@type"),
+        (Role::Bytes, "@std.bytes", "Bytes", "@type"),
         (Role::Option, "@std.option", "Option", "@type"),
         (Role::Result, "@std.result", "Result", "@type"),
         (Role::Dict, "@std.builtin", "Dict", "@type"),
@@ -75,13 +75,15 @@ fn the_prelude_table_binds_every_declared_name() {
     let stdlib = load_stdlib().expect("the embedded standard library loads");
     let builtin = [
         "Void", "Never", "Atom", "Char", "I8", "I16", "I32", "I64", "U8", "U16", "U32",
-        "U64", "F32", "F64", "List", "Str", "Bytes", "Dict",
+        "U64", "F32", "F64", "List", "Dict",
     ];
     let expected = |name: &str| match name {
         "Bool" | "true" | "false" => Some("@std.bool"),
         "Option" => Some("@std.option"),
         "Result" => Some("@std.result"),
         "Iter" => Some("@std.iter"),
+        "Str" => Some("@std.str"),
+        "Bytes" => Some("@std.bytes"),
         "Equatable" | "Ordered" | "From" | "TryFrom" | "Ordering" => Some("@std.core"),
         "Any" | "Self" => None,
         name if builtin.contains(&name) => Some("@std.builtin"),
@@ -136,6 +138,7 @@ fn the_overlay_is_the_unit_std() {
                 "builtin".to_owned(),
                 "stdlib/src/std/builtin.vib"
             ),
+            ("@std.bytes", "bytes".to_owned(), "stdlib/src/std/bytes.vib"),
             ("@std.core", "core".to_owned(), "stdlib/src/std/core.vib"),
             ("@std.iter", "iter".to_owned(), "stdlib/src/std/iter.vib"),
             (
@@ -148,6 +151,7 @@ fn the_overlay_is_the_unit_std() {
                 "result".to_owned(),
                 "stdlib/src/std/result.vib"
             ),
+            ("@std.str", "str".to_owned(), "stdlib/src/std/str.vib"),
         ]
     );
     assert_eq!(&overlay.prelude, stdlib.prelude());
@@ -176,10 +180,12 @@ fn the_overlay_is_resolution_s_embedded_unit() {
             ("@std.assert", "stdlib/src/std/assert.vib"),
             ("@std.bool", "stdlib/src/std/bool.vib"),
             ("@std.builtin", "stdlib/src/std/builtin.vib"),
+            ("@std.bytes", "stdlib/src/std/bytes.vib"),
             ("@std.core", "stdlib/src/std/core.vib"),
             ("@std.iter", "stdlib/src/std/iter.vib"),
             ("@std.option", "stdlib/src/std/option.vib"),
             ("@std.result", "stdlib/src/std/result.vib"),
+            ("@std.str", "stdlib/src/std/str.vib"),
         ]
     );
     for module in unit.modules() {

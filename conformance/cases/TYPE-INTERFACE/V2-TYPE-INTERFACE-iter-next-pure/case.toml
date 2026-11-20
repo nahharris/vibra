@@ -1,0 +1,12 @@
+id = "V2-TYPE-INTERFACE-iter-next-pure"
+rule = "V2-TYPE-INTERFACE-iter-next-pure"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#iteration: next applied again to the same value gives the same answer"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

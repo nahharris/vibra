@@ -1,0 +1,12 @@
+fn main
+  returns r: {Bool Bool Bool Bool Bool Bool}
+  do
+    return {
+      Char.isAsciiDigit('7')
+      Char.isAsciiDigit('a')
+      Char.isAsciiAlphabetic('Z')
+      Char.isAsciiAlphabetic('é')
+      Char.isAsciiWhitespace('\n')
+      Char.isAsciiWhitespace('x')
+    }
+endfn

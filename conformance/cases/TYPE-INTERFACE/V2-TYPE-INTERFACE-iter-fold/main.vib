@@ -1,0 +1,14 @@
+fn main
+  returns r: Str
+  do
+    return Iter.fold(
+      [1i32 2i32 3i32]
+      ""
+      fn
+        takes {acc: Str x: I32}
+        returns r: Str
+        do
+          return Str.concat(acc From.convert(x))
+      endfn
+    )
+endfn

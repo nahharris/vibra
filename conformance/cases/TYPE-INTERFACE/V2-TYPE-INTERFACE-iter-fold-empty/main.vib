@@ -1,0 +1,15 @@
+fn main
+  returns r: I32
+  do
+    let xs: List(I32) be [] endlet
+    return Iter.fold(
+      xs
+      7i32
+      fn
+        takes {acc: I32 x: I32}
+        returns r: I32
+        do
+          return I32.add(acc x)
+      endfn
+    )
+endfn

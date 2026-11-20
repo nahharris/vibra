@@ -1,0 +1,202 @@
+// The text type, which plays the `@str` role: a wrapper over the Unicode
+// scalars of the text, in order. String literals are its values. Its length,
+// concatenation, slicing, and UTF-8 conversions are bound to `@compiler`
+// intrinsics; its order is the lexicographic walk of `compareLexicographic`,
+// and `trim` is ordinary Vibra over the scalars.
+
+use @std.core.ConversionError enduse
+
+use @std.iter.compareLexicographic enduse
+
+type Str of List(Char)
+  role @str
+  visibility @public
+  fn length
+    takes {value: Self}
+    returns count: U64
+    visibility @public
+    external @compiler
+    symbol "str.length"
+  endfn
+  fn concat
+    takes {left: Self right: Self}
+    returns joined: Self
+    visibility @public
+    external @compiler
+    symbol "str.concat"
+  endfn
+  fn slice
+    takes {value: Self start: U64 end: U64}
+    returns part: Option(Self)
+    visibility @public
+    external @compiler
+    symbol "str.slice"
+  endfn
+  fn toUtf8
+    takes {value: Self}
+    returns encoded: Bytes
+    visibility @public
+    external @compiler
+    symbol "str.toUtf8"
+  endfn
+  fn fromUtf8
+    takes {encoded: Bytes}
+    returns decoded: Result(Self ConversionError)
+    visibility @public
+    external @compiler
+    symbol "str.fromUtf8"
+  endfn
+  fn trim
+    takes {value: Self}
+    returns trimmed: Self
+    visibility @public
+    do
+      let Str(scalars) be value endlet
+      let rest be withoutLeadingWhitespace(scalars) endlet
+      let {_ end} be Iter.fold(rest {0u64 0u64} throughLastNonWhitespace) endlet
+      let Option.some(value: kept) be List.slice(rest 0u64 end) else
+        return Str([])
+      endlet
+      return Str(kept)
+  endfn
+  impl Equatable
+    fn equal
+      takes {left: Self right: Self}
+      returns same: Bool
+      external @compiler
+      symbol "str.equal"
+    endfn
+  endimpl
+  impl Ordered
+    fn compare
+      takes {left: Self right: Self}
+      returns order: Ordering
+      do
+        return compareLexicographic(left right)
+    endfn
+  endimpl
+  impl Iter
+    type Item of Char endtype
+    fn next
+      takes {value: Self}
+      returns step: Option({Item Self})
+      do
+        let Str(scalars) be value endlet
+        let Option.some(value: {first rest}) be Iter.next(scalars) else
+          return Option.none()
+        endlet
+        return Option.some(value: {first Str(rest)})
+    endfn
+  endimpl
+  impl From(I8)
+    fn convert
+      takes {value: I8}
+      returns converted: Self
+      external @compiler
+      symbol "i8.toStr"
+    endfn
+  endimpl
+  impl From(I16)
+    fn convert
+      takes {value: I16}
+      returns converted: Self
+      external @compiler
+      symbol "i16.toStr"
+    endfn
+  endimpl
+  impl From(I32)
+    fn convert
+      takes {value: I32}
+      returns converted: Self
+      external @compiler
+      symbol "i32.toStr"
+    endfn
+  endimpl
+  impl From(I64)
+    fn convert
+      takes {value: I64}
+      returns converted: Self
+      external @compiler
+      symbol "i64.toStr"
+    endfn
+  endimpl
+  impl From(U8)
+    fn convert
+      takes {value: U8}
+      returns converted: Self
+      external @compiler
+      symbol "u8.toStr"
+    endfn
+  endimpl
+  impl From(U16)
+    fn convert
+      takes {value: U16}
+      returns converted: Self
+      external @compiler
+      symbol "u16.toStr"
+    endfn
+  endimpl
+  impl From(U32)
+    fn convert
+      takes {value: U32}
+      returns converted: Self
+      external @compiler
+      symbol "u32.toStr"
+    endfn
+  endimpl
+  impl From(U64)
+    fn convert
+      takes {value: U64}
+      returns converted: Self
+      external @compiler
+      symbol "u64.toStr"
+    endfn
+  endimpl
+  impl From(F32)
+    fn convert
+      takes {value: F32}
+      returns converted: Self
+      external @compiler
+      symbol "f32.toStr"
+    endfn
+  endimpl
+  impl From(F64)
+    fn convert
+      takes {value: F64}
+      returns converted: Self
+      external @compiler
+      symbol "f64.toStr"
+    endfn
+  endimpl
+endtype
+
+// The scalars after the longest prefix of ASCII whitespace.
+fn withoutLeadingWhitespace
+  takes {scalars: List(Char)}
+  returns rest: List(Char)
+  do
+    let Option.some(value: {first rest}) be Iter.next(scalars) else
+      return scalars
+    endlet
+    if Char.isAsciiWhitespace(first) then
+      return withoutLeadingWhitespace(rest)
+    else
+      return scalars
+    endif
+endfn
+
+// One step of the walk that finds where the trailing ASCII whitespace starts:
+// the count of scalars seen, and the count up to the last one that is not
+// whitespace.
+fn throughLastNonWhitespace
+  takes {seen: {U64 U64} scalar: Char}
+  returns next: {U64 U64}
+  do
+    let {count end} be seen endlet
+    let counted be U64.add(count 1u64) endlet
+    if Char.isAsciiWhitespace(scalar) then
+      return {counted end}
+    else
+      return {counted counted}
+    endif
+endfn

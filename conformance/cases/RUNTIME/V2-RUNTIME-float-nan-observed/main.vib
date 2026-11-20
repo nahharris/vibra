@@ -1,0 +1,1 @@
+fn main returns r: F32 do return F32.div(0.0f32 0.0f32) endfn

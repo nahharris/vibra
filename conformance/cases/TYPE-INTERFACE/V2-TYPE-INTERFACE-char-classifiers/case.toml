@@ -1,0 +1,12 @@
+id = "V2-TYPE-INTERFACE-char-classifiers"
+rule = "V2-TYPE-INTERFACE-char-classifiers"
+profile = "interpreterV2"
+operation = "interpret"
+description = "06-runtime.md#character-sequence-and-dictionary-operations: the ASCII classifiers of Char are inRange and equal tests on scalars"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

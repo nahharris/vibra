@@ -1,0 +1,6 @@
+fn main
+  returns r: {List(Char) List(I32) List(I32)}
+  do
+    let none: Option(I32) be Option.none() endlet
+    return {Iter.collect("ab") Iter.collect(Option.some(value: 1i32)) Iter.collect(none)}
+endfn

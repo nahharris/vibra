@@ -6,6 +6,7 @@
 #![allow(clippy::expect_used)]
 
 mod externals;
+mod library;
 mod loader;
 mod manifest;
 mod modules;

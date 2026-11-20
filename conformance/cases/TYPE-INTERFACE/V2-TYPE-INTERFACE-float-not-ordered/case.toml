@@ -1,0 +1,19 @@
+id = "V2-TYPE-INTERFACE-float-not-ordered"
+rule = "V2-TYPE-INTERFACE-float-not-ordered"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "06-runtime.md#floating-point-operations: the float types implement neither Equatable nor Ordered"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.unsatisfiedBound"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 44, end = 50 }
+related = [{ source = "stdlib/src/std/core.vib", span = { start = 674, end = 681 } }]

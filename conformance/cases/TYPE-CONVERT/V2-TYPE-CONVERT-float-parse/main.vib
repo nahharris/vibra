@@ -1,0 +1,10 @@
+use @std.core.ConversionError enduse
+
+fn main
+  returns r: {Result(F64 ConversionError) Result(F64 ConversionError) Result(F64 ConversionError)}
+  do
+    let a: Result(F64 ConversionError) be TryFrom.convert("1.5") endlet
+    let b: Result(F64 ConversionError) be TryFrom.convert("1e400") endlet
+    let c: Result(F64 ConversionError) be TryFrom.convert("nan") endlet
+    return {a b c}
+endfn

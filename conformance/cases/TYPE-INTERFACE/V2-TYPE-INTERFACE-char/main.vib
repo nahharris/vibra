@@ -1,0 +1,5 @@
+fn main
+  returns r: {U32 Option(Char)}
+  do
+    return {Char.toU32('A') Char.fromU32(55296u32)}
+endfn

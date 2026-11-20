@@ -1,0 +1,12 @@
+id = "V2-TYPE-INTERFACE-str-utf8"
+rule = "V2-TYPE-INTERFACE-str-utf8"
+profile = "interpreterV2"
+operation = "interpret"
+description = "06-runtime.md#character-sequence-and-dictionary-operations: Str.fromUtf8 inverts Str.toUtf8 and is invalidFormat for ill-formed UTF-8"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

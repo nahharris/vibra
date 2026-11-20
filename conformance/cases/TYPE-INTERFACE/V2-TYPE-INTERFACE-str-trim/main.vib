@@ -1,0 +1,5 @@
+fn main
+  returns r: {Str Str Str}
+  do
+    return {Str.trim("  a b\t") Str.trim(" \n\r\t") Str.trim("\u{A0}a")}
+endfn

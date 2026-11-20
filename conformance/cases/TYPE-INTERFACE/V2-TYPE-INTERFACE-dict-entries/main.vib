@@ -1,0 +1,5 @@
+fn main
+  returns r: List({Str I32})
+  do
+    return Dict.entries(["b": 1i32 "a": 2i32])
+endfn

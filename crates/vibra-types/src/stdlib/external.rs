@@ -20,17 +20,19 @@
 //! and its result type; a row has no labelled parameter, no bound, and no
 //! guard, and it is a `fn`.
 //!
-//! A conversion row `<s>.to<T>` is the body of an implementation, never a
-//! member a source path names: it is bound by the `convert` member of an
+//! A conversion row is the body of an implementation, never a member a
+//! source path names: it is bound by the `convert` member of an
 //! `impl From(S)` or `impl TryFrom(S)` nested in the destination type, so
-//! its owner there is the destination and its name `convert`.
+//! its owner there is the destination and its name `convert`. The
+//! conversion rows are `<s>.to<T>` (destination `T`), `<t>.toStr`
+//! (destination `Str`), and `<t>.parse` (destination `T`).
 //!
 //! An `external @host` declaration is checked here for its symbol, against the
 //! host registry, and for its kind: the host rows are `proc` operations.
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
-use vibra_ir::external::CompilerIntrinsic;
 use vibra_ir::external::host::host_row;
+use vibra_ir::external::{CompilerIntrinsic, FloatOp, IntegerOp};
 use vibra_syntax::SyntaxKind;
 use vibra_syntax::source::{
     Callable, CallableKind, Declaration, Module, TypeBody, TypeForm,
@@ -183,11 +185,10 @@ fn check(
                 ));
                 return;
             };
-            let (row_owner, member) = match row {
-                CompilerIntrinsic::Convert(_, target) if conversion => {
-                    (target.owner(), "convert".to_owned())
-                }
-                _ => (
+            let destination = conversion.then(|| conversion_destination(row)).flatten();
+            let (row_owner, member) = match destination {
+                Some(destination) => (destination, "convert".to_owned()),
+                None => (
                     row.owner(),
                     symbol
                         .split_once('.')
@@ -256,6 +257,19 @@ fn check(
             }
         }
         _ => {}
+    }
+}
+
+/// The owner of the destination of a conversion row, the type whose
+/// `From` or `TryFrom` implementation binds it; `None` for any other row.
+const fn conversion_destination(row: CompilerIntrinsic) -> Option<&'static str> {
+    match row {
+        CompilerIntrinsic::Convert(_, target) => Some(target.owner()),
+        CompilerIntrinsic::Integer(_, IntegerOp::ToStr)
+        | CompilerIntrinsic::Float(_, FloatOp::ToStr) => Some("str"),
+        CompilerIntrinsic::Integer(integer, IntegerOp::Parse) => Some(integer.owner()),
+        CompilerIntrinsic::Float(float, FloatOp::Parse) => Some(float.owner()),
+        _ => None,
     }
 }
 

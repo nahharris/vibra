@@ -1,0 +1,5 @@
+fn main
+  returns r: {U64 Str Option(Str) Option(Str)}
+  do
+    return {Str.length("héllo") Str.concat("a" "b") Str.slice("hello" 1u64 3u64) Str.slice("hello" 3u64 1u64)}
+endfn

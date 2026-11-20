@@ -1,0 +1,12 @@
+id = "V2-TYPE-INTERFACE-iter-str-option"
+rule = "V2-TYPE-INTERFACE-iter-str-option"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#iteration: a Str iterates its scalars and an Option zero or one item"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

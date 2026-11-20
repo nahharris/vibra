@@ -12,7 +12,7 @@ use vibra_resolve::{
 pub(crate) const STD_PACKAGE: (&str, &str) = ("std", "0.0.2");
 
 /// The modules of `stdlib/`, by module path.
-pub(crate) const STD_MODULES: [(&str, &[u8]); 6] = [
+pub(crate) const STD_MODULES: [(&str, &[u8]); 8] = [
     (
         "@std.bool",
         include_bytes!("../../../../stdlib/src/std/bool.vib"),
@@ -20,6 +20,10 @@ pub(crate) const STD_MODULES: [(&str, &[u8]); 6] = [
     (
         "@std.builtin",
         include_bytes!("../../../../stdlib/src/std/builtin.vib"),
+    ),
+    (
+        "@std.bytes",
+        include_bytes!("../../../../stdlib/src/std/bytes.vib"),
     ),
     (
         "@std.core",
@@ -36,6 +40,10 @@ pub(crate) const STD_MODULES: [(&str, &[u8]); 6] = [
     (
         "@std.result",
         include_bytes!("../../../../stdlib/src/std/result.vib"),
+    ),
+    (
+        "@std.str",
+        include_bytes!("../../../../stdlib/src/std/str.vib"),
     ),
 ];
 
@@ -57,8 +65,8 @@ pub(crate) const PRELUDE: [(&str, &str, DeclarationKind); 29] = [
     ("F32", "@std.builtin", DeclarationKind::Type),
     ("F64", "@std.builtin", DeclarationKind::Type),
     ("List", "@std.builtin", DeclarationKind::Type),
-    ("Str", "@std.builtin", DeclarationKind::Type),
-    ("Bytes", "@std.builtin", DeclarationKind::Type),
+    ("Str", "@std.str", DeclarationKind::Type),
+    ("Bytes", "@std.bytes", DeclarationKind::Type),
     ("Dict", "@std.builtin", DeclarationKind::Type),
     ("Bool", "@std.bool", DeclarationKind::Type),
     ("true", "@std.bool", DeclarationKind::Value),
