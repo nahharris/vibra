@@ -100,94 +100,27 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
             "vibra-syntax",
         ],
     ),
-    // The leaf. Diagnostics are a language surface and know nothing else.
+    // The five crates below are the contracts the native track is still
+    // compiled against. Package X2-01 of the Nexus plan moves the native track
+    // to `vibra-ir`, `vibra-native`, and `vibra-host` and deletes them
+    // (`the_only_v1_crates_are_the_native_tracks_contracts`).
+    //
+    // The diagnostic model of the native track's source origins.
     ("vibra-diagnostics-v1", &[]),
-    // The reader. Emits diagnostics; must not reach the formatter or schemas.
+    // The data grammar the host provider decodes its two documents with.
     ("vibra-syntax-v1", &["vibra-diagnostics-v1"]),
-    // Checked semantic IR is independent of syntax and wire formats.
+    // The checked IR the native track lowers, with its closed registries.
     ("vibra-ir-v1", &["vibra-diagnostics-v1"]),
-    // The checker lowers syntax and resolved identities to checked IR.
-    (
-        "vibra-types-v1",
-        &[
-            "vibra-diagnostics-v1",
-            "vibra-ir-v1",
-            "vibra-resolve-v1",
-            "vibra-syntax-v1",
-        ],
-    ),
-    // The interpreter consumes checked IR and has no frontend dependency.
-    // It calls the toolchain-owned native code directly, over its own values.
-    (
-        "vibra-interp-v1",
-        &[
-            "vibra-diagnostics-v1",
-            "vibra-host-v1",
-            "vibra-ir-v1",
-            "vibra-native-v1",
-        ],
-    ),
-    // Consumes the reader's tree; nothing in the language depends on it.
-    ("vibra-fmt-v1", &["vibra-diagnostics-v1", "vibra-syntax-v1"]),
-    // The wire format. The Step 10 adapter consumes syntax and workspace
-    // facts; no phase depends on the wire crate.
-    (
-        "vibra-schema-v1",
-        &[
-            "vibra-diagnostics-v1",
-            "vibra-syntax-v1",
-            "vibra-workspace-v1",
-        ],
-    ),
-    // The workspace hands the reference interpreter a provider: a world for a
-    // test and a conformance case, and the system provider for `run`, which the
-    // command line builds (Milestone 4, Step 16b).
-    // Project schema decoding sits above syntax and diagnostics. Later
-    // workspace phases may widen this row when their inputs exist.
-    (
-        "vibra-workspace-v1",
-        &[
-            "vibra-diagnostics-v1",
-            "vibra-fmt-v1",
-            "vibra-host-v1",
-            "vibra-interp-v1",
-            "vibra-ir-v1",
-            "vibra-resolve-v1",
-            "vibra-syntax-v1",
-            "vibra-types-v1",
-        ],
-    ),
-    // Command services consume the workspace plan and render schema facts;
-    // no language phase depends on the process interface.
-    (
-        "vibra-cli-v1",
-        &[
-            "vibra-diagnostics-v1",
-            "vibra-fmt-v1",
-            "vibra-host-v1",
-            "vibra-schema-v1",
-            "vibra-syntax-v1",
-            "vibra-types-v1",
-            "vibra-workspace-v1",
-        ],
-    ),
-    // Resolution owns its neutral graph input and depends only on language
-    // structure; workspace and conformance adapt filesystem snapshots into it.
-    (
-        "vibra-resolve-v1",
-        &["vibra-diagnostics-v1", "vibra-syntax-v1"],
-    ),
     // The toolchain-owned native code, written once against a value-access
-    // interface that the interpreter and Nexus each implement. It reaches no
-    // code generator: it reads the closed table of native rows and the shape
-    // of an arena object recorded in `vibra-ir-v1`.
+    // interface that Nexus implements. It reaches no code generator: it reads
+    // the closed table of native rows and the shape of an arena object
+    // recorded in `vibra-ir-v1`.
     ("vibra-native-v1", &["vibra-ir-v1"]),
     // The host provider: the provider trait, the system provider, the in-memory
-    // host world, and the audit event (Milestone 4, Step 16a). It reads the
-    // closed host registry of `vibra-ir-v1`, and the reader's VIBON data for the
-    // two documents it owns, the world and the event. It reaches no code
-    // generator and no checker. The reference interpreter and Nexus call it;
-    // the harness decodes a case's world and hands each backend a fresh provider.
+    // host world, and the audit event. It reads the closed host registry of
+    // `vibra-ir-v1`, and the reader's VIBON data for the two documents it owns,
+    // the world and the event. It reaches no code generator and no checker.
+    // Nexus calls it.
     (
         "vibra-host-v1",
         &["vibra-diagnostics-v1", "vibra-ir-v1", "vibra-syntax-v1"],
@@ -259,7 +192,7 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
     // execution IR, the generator, and the checked IR for the entry's result
     // type. It is not a semantic crate: it reads the environment, starts the
     // linker, and writes files, in one module (`system`). No command depends on
-    // it yet (`vibra-cli-v1` is not changed until the specification is approved).
+    // it yet.
     (
         "vibra-build",
         &["vibra-codegen", "vibra-exec", "vibra-ir-v1", "vibra-lower"],
@@ -268,27 +201,6 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
     // knows no language: it opens files below a held directory handle. No
     // crate depends on it yet.
     ("vibra-fs-scope", &[]),
-    // The harness. Legitimately sits above every node.
-    (
-        "vibra-conformance-v1",
-        &[
-            "vibra-build",
-            "vibra-diagnostics-v1",
-            "vibra-fmt-v1",
-            "vibra-schema-v1",
-            "vibra-resolve-v1",
-            "vibra-syntax-v1",
-            "vibra-workspace-v1",
-            "vibra-exec",
-            "vibra-host-v1",
-            "vibra-interp-v1",
-            "vibra-ir-v1",
-            "vibra-lower",
-            "vibra-nexus",
-            "vibra-nexus-eval",
-            "vibra-types-v1",
-        ],
-    ),
 ];
 
 /// Every dependency section a manifest may use to create an arrow.
@@ -430,7 +342,87 @@ fn workspace_matches_the_declared_architecture() {
 }
 
 /// The number of rows, one for each crate directory.
-const ROWS: usize = 35;
+const ROWS: usize = 27;
+
+/// The `-v1` crates that stay after the cutover: the contracts the native
+/// track is compiled against until package X2-01 of the Nexus plan moves it
+/// to the new `vibra-ir`, `vibra-native`, and `vibra-host`.
+const NATIVE_TRACK_V1_CRATES: &[&str] = &[
+    "vibra-diagnostics-v1",
+    "vibra-host-v1",
+    "vibra-ir-v1",
+    "vibra-native-v1",
+    "vibra-syntax-v1",
+];
+
+/// The crates of the native track, the only crates outside that set that
+/// may depend on one of them.
+const NATIVE_TRACK_CRATES: &[&str] = &[
+    "vibra-build",
+    "vibra-codegen",
+    "vibra-exec",
+    "vibra-lower",
+    "vibra-nexus",
+    "vibra-nexus-bridge",
+    "vibra-nexus-eval",
+];
+
+#[test]
+fn the_only_v1_crates_are_the_native_tracks_contracts() {
+    let graph = workspace_graph(&workspace_root());
+    let v1 = graph
+        .keys()
+        .filter(|name| name.ends_with("-v1"))
+        .map(String::as_str)
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        v1,
+        NATIVE_TRACK_V1_CRATES
+            .iter()
+            .copied()
+            .collect::<BTreeSet<_>>(),
+        "the workspace keeps only the `-v1` crates the native track builds on"
+    );
+    let permitted = NATIVE_TRACK_V1_CRATES
+        .iter()
+        .chain(NATIVE_TRACK_CRATES)
+        .copied()
+        .collect::<BTreeSet<_>>();
+    for (name, edges) in &graph {
+        if edges.iter().any(|edge| edge.ends_with("-v1")) {
+            assert!(
+                permitted.contains(name.as_str()),
+                "`{name}` depends on a `-v1` crate; only the native track may"
+            );
+        }
+    }
+}
+
+/// The v0.0.1 trees the cutover removed from the repository root. Their
+/// names are built from parts, so that the repository-wide search for a
+/// reference to them finds none here.
+fn removed_trees() -> [PathBuf; 4] {
+    let suffixed = |tree: &str| PathBuf::from(format!("{tree}-v1"));
+    [
+        suffixed("stdlib"),
+        suffixed("examples"),
+        suffixed("fuzz"),
+        Path::new("conformance").join("v1"),
+    ]
+}
+
+#[test]
+fn no_v1_paths() {
+    let root = workspace_root();
+    let present = removed_trees()
+        .into_iter()
+        .filter(|tree| root.join(tree).exists())
+        .collect::<Vec<_>>();
+    assert!(
+        present.is_empty(),
+        "the repository root holds v0.0.1 trees: {present:?}"
+    );
+}
 
 #[test]
 fn every_crate_directory_has_exactly_one_row() {
@@ -483,20 +475,20 @@ fn an_unused_permitted_arrow_is_reported() {
 fn a_forbidden_arrow_is_reported() {
     let graph = BTreeMap::from([
         (
-            "vibra-diagnostics-v1".to_owned(),
-            BTreeSet::from(["vibra-fmt-v1".to_owned()]),
+            "vibra-diagnostics".to_owned(),
+            BTreeSet::from(["vibra-fmt".to_owned()]),
         ),
-        ("vibra-fmt-v1".to_owned(), BTreeSet::new()),
+        ("vibra-fmt".to_owned(), BTreeSet::new()),
     ]);
     let allowed = BTreeMap::from([
-        ("vibra-diagnostics-v1".to_owned(), BTreeSet::new()),
-        ("vibra-fmt-v1".to_owned(), BTreeSet::new()),
+        ("vibra-diagnostics".to_owned(), BTreeSet::new()),
+        ("vibra-fmt".to_owned(), BTreeSet::new()),
     ]);
 
     let found = violations(&graph, &allowed);
     assert_eq!(found.len(), 1, "{found:?}");
-    assert!(found[0].contains("vibra-diagnostics-v1"), "{}", found[0]);
-    assert!(found[0].contains("vibra-fmt-v1"), "{}", found[0]);
+    assert!(found[0].contains("vibra-diagnostics"), "{}", found[0]);
+    assert!(found[0].contains("vibra-fmt"), "{}", found[0]);
 }
 
 #[test]
@@ -559,7 +551,7 @@ fn the_workspace_excludes_the_archived_tree() {
 
 /// Crates that implement language semantics. The M2 plan says they accept
 /// explicit inputs and never search disk; filesystem acquisition belongs to
-/// `vibra-workspace-v1`.
+/// `vibra-workspace`.
 const SEMANTIC_CRATES: &[&str] = &[
     "vibra-diagnostics",
     "vibra-syntax",
@@ -571,11 +563,7 @@ const SEMANTIC_CRATES: &[&str] = &[
     "vibra-types",
     "vibra-diagnostics-v1",
     "vibra-syntax-v1",
-    "vibra-resolve-v1",
-    "vibra-types-v1",
     "vibra-ir-v1",
-    "vibra-interp-v1",
-    "vibra-fmt-v1",
     "vibra-native-v1",
     "vibra-exec",
     "vibra-actors",
@@ -600,12 +588,11 @@ fn all_dependencies(manifest: &toml::Table) -> BTreeSet<String> {
     found
 }
 
-/// The v1 toolchain-owned native code crate, which the v1 reference
-/// interpreter and Nexus call.
+/// The v1 toolchain-owned native code crate, which Nexus calls.
 const NATIVE_CRATE: &str = "vibra-native-v1";
 
 #[test]
-fn only_the_two_backends_run_the_native_code() {
+fn only_nexus_runs_the_v1_native_code() {
     let graph = workspace_graph(&workspace_root());
     let dependents = graph
         .iter()
@@ -615,8 +602,8 @@ fn only_the_two_backends_run_the_native_code() {
     assert_eq!(
         dependents,
         // Nexus hands the native code a view of its value store (N7).
-        BTreeSet::from(["vibra-interp-v1", "vibra-nexus"]),
-        "the v1 reference interpreter and Nexus call the v1 native code, and nothing else does"
+        BTreeSet::from(["vibra-nexus"]),
+        "Nexus calls the v1 native code, and nothing else does"
     );
     let own = graph.get(NATIVE_CRATE).expect("the native crate exists");
     assert_eq!(
@@ -626,15 +613,13 @@ fn only_the_two_backends_run_the_native_code() {
     );
 }
 
-/// The v1 host provider crate. The v1 reference interpreter and the native
-/// track may call it, and the v1 harness depends on it to decode a case's host
-/// world and hand each backend a fresh provider. The language phases never do:
-/// the checker binds a host operation only by the registry symbol and signature
-/// that `vibra-ir-v1` records.
+/// The v1 host provider crate. Only the native track may call it. The
+/// language phases never do: a host operation is bound only by the registry
+/// symbol and signature that the checked IR records.
 const HOST_CRATE: &str = "vibra-host-v1";
 
 #[test]
-fn only_the_backends_and_the_harness_depend_on_the_host_provider() {
+fn only_the_native_track_depends_on_the_v1_host_provider() {
     let graph = workspace_graph(&workspace_root());
     let dependents = graph
         .iter()
@@ -642,9 +627,6 @@ fn only_the_backends_and_the_harness_depend_on_the_host_provider() {
         .map(|(name, _)| name.as_str())
         .collect::<BTreeSet<_>>();
     let permitted = BTreeSet::from([
-        "vibra-cli-v1",
-        "vibra-conformance-v1",
-        "vibra-interp-v1",
         // Nexus performs a native program's host operations, and the
         // reference stepper's tests hand it a host world.
         "vibra-nexus",
@@ -652,7 +634,6 @@ fn only_the_backends_and_the_harness_depend_on_the_host_provider() {
         // its `harness` profile a world provider.
         "vibra-nexus-bridge",
         "vibra-nexus-eval",
-        "vibra-workspace-v1",
     ]);
     assert!(
         dependents.is_subset(&permitted),
@@ -774,17 +755,16 @@ fn a_filesystem_reference_is_reported() {
 
 /// Crates compiled into the shipped `vibra` binary.
 const SHIPPED_CRATES: &[&str] = &[
-    "vibra-diagnostics-v1",
-    "vibra-syntax-v1",
-    "vibra-resolve-v1",
-    "vibra-types-v1",
-    "vibra-ir-v1",
-    "vibra-interp-v1",
-    "vibra-native-v1",
-    "vibra-fmt-v1",
-    "vibra-schema-v1",
-    "vibra-workspace-v1",
-    "vibra-cli-v1",
+    "vibra-diagnostics",
+    "vibra-syntax",
+    "vibra-fmt",
+    "vibra-resolve",
+    "vibra-types",
+    "vibra-ir",
+    "vibra-interp",
+    "vibra-schema",
+    "vibra-workspace",
+    "vibra-cli",
 ];
 
 #[test]
@@ -1110,7 +1090,8 @@ fn the_bridge_carries_no_compiler_ir() {
     let compiler = [
         "vibra-exec",
         "vibra-lower",
-        "vibra-types-v1",
+        "vibra-types",
+        "vibra-syntax",
         "vibra-syntax-v1",
     ];
     for (name, edges) in workspace_graph(&root) {

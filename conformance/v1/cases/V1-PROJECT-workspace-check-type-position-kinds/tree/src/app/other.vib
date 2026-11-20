@@ -1,3 +1,0 @@
-(def limit i32 1i32 visibility: @public)
-
-(defn helper () i32 visibility: @public 1i32)

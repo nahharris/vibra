@@ -35,8 +35,8 @@ pub const EXIT_PROGRAM_FAILED: i32 = 6;
 /// operational failure.
 pub const EXIT_ADMISSION_REFUSED: i32 = EXIT_HOST_EVENT;
 
-/// The memory a native program's context may hold: the budget `vibra run`
-/// gives the interpreter (`MEMORY_BUDGET` of `vibra-cli-v1`). The limit belongs to
+/// The memory a native program's context may hold: the budget the `vibra`
+/// binary gives the interpreter (`MEMORY_BUDGET` of `vibra-cli`). The limit belongs to
 /// the embedding host.
 pub const SYSTEM_MEMORY_LIMIT: u64 = 256 * 1024 * 1024;
 

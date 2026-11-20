@@ -1,1 +1,0 @@
-(record format: @host-world.v1 random: (record seed: 1234567u64))

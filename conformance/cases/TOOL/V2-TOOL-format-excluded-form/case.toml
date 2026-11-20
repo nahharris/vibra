@@ -1,0 +1,20 @@
+id = "V2-TOOL-format-excluded-form"
+rule = "V2-TOOL-format-excluded-form"
+profile = "toolingV2"
+operation = "format"
+description = "01-source-language.md#exclusions: a parenthesized top-level form is one invalid form over the balanced form, and the parser recovers at the next fn; by 01-source-language.md#canonical-format the formatter returns the bytes of a recovered file unchanged, so the non-canonical fn after it is not formatted"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+source = "tree/src/app/main.vib"
+
+[expect]
+verdict = "refuted"
+formatted = "formatted.vib"
+
+[[expect.diagnostics]]
+code = "@syntax.invalidForm"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 0, end = 24 }

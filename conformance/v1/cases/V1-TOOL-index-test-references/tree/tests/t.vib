@@ -1,5 +1,0 @@
-(import assert @std.assert)
-
-(import main @app.main)
-
-(test "one is one" (assert.equal (main.one) 1i32))

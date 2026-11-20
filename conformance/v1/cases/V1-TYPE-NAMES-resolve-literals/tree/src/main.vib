@@ -1,1 +1,0 @@
-(defn run () void @app.lib "app.lib")

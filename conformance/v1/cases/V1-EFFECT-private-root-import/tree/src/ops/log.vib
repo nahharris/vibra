@@ -1,2 +1,0 @@
-(deffect secret
-  (defn quiet () void (do)))

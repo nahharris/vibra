@@ -1,6 +1,0 @@
-(defn attempt () (result void str) (result.ok))
-
-(defn mixed (c bool) (result void str)
-  (try (attempt))
-  (if c (return (result.ok)) void)
-  (result.ok))

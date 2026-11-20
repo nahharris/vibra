@@ -1,2 +1,0 @@
-(defn answer () str
-  (str.concat "A😀" ""))

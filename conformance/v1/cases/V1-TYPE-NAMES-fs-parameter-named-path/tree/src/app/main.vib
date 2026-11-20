@@ -1,7 +1,0 @@
-(deftype path str visibility: @public)
-
-(defn size (path path) u64
-  0u64)
-
-(defn main () void
-  (do))

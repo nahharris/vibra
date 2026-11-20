@@ -11,11 +11,10 @@
 | v0.1.0 | First alpha | Goal to be defined during pre-alpha | |
 | v1.0.0 | Stable | Scope to be defined | |
 
-Only v0.0.1 has shipped. While milestone 1 of v0.0.2 is in progress, the
-v0.0.1 toolchain is the `vibra-v1` binary. The plans for v0.0.2 and later were
-rewritten in place on 2026-11-16 against the rewritten
-[specification](../spec/00-charter.md); earlier plans for those releases are
-not kept. The existing v0.1.x Git tags belong to the
+Only v0.0.1 has shipped. The repository's `vibra` binary implements the
+language of the active [specification](../spec/00-charter.md) as far as the
+milestones of v0.0.2 have landed: milestone 1 checks, formats, and tests pure
+programs. The existing v0.1.x Git tags belong to the
 [archived implementation](../../archive/pre-v1/ARCHIVE.md).
 
 The [scratchpad](scratchpad/README.md) holds unscheduled research and the

@@ -30,9 +30,9 @@ use vibra_nexus::{
 
 /// The runtime operation that executes an execution IR scalar operation: the
 /// stepper's one mapping, with no wildcard, so a new `vibra_exec::ScalarOp` does
-/// not compile until it is mapped. `vibra-conformance-v1` holds it to the name
-/// the execution IR gives the operation, and the generator's tests hold the
-/// bridge's decoding of the generator's encoding to the same name.
+/// not compile until it is mapped. The generator's tests hold the bridge's
+/// decoding of the generator's encoding to the name the execution IR gives the
+/// operation.
 #[must_use]
 pub const fn runtime_op(op: ExecOp) -> ScalarOp {
     match op {

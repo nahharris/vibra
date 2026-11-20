@@ -1,7 +1,0 @@
-(import log @ops.log)
-
-(defn emit (target str) void
-  effects: (log.write)
-  (log.write.text target))
-
-(defn execute () void void)

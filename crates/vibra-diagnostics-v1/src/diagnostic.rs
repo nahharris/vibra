@@ -12,7 +12,7 @@
 //! would create a second place for the two to disagree.
 //!
 //! The **schema version** belongs to the wire format and is applied by
-//! `vibra-schema-v1` when a diagnostic is serialized. It describes the JSON
+//! wire crate when a diagnostic is serialized. It describes the JSON
 //! contract, not the language fact, and storing a constant on every in-memory
 //! record would put a tooling concern inside the language crates — which the
 //! roadmap's dependency direction forbids.

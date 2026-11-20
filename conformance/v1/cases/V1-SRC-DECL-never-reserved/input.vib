@@ -1,7 +1,0 @@
-(deftype never i32)
-
-(defint never)
-
-(def never i32 1i32)
-
-(deftype generic (record n i32) where: (never any))

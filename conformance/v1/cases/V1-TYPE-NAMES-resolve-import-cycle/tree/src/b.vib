@@ -1,2 +1,0 @@
-(import a @app.a)
-(defn call () void visibility: @public (a.run))
