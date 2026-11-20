@@ -666,8 +666,7 @@ struct RawExpectations {
     result: Option<String>,
     #[serde(default)]
     test_run: Option<String>,
-    /// Spelled as `docs/spec/07-diagnostics-and-conformance.md` writes it.
-    #[serde(default, rename = "host_event")]
+    #[serde(default)]
     host_event: Option<String>,
 }
 
