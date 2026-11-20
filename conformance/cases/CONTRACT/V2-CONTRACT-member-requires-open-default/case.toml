@@ -1,0 +1,12 @@
+id = "V2-CONTRACT-member-requires-open-default"
+rule = "V2-CONTRACT-member-requires-open-default"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#guards-and-callable-types: a call at a bounded type parameter that does not write a label passes the contract's default, which decides the contract's bare requires"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

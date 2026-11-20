@@ -329,8 +329,23 @@ pub(crate) fn substitute(node: &mut Node, binders: &[Type]) {
             IrExpr::Closure { closure, captures } => {
                 let body = Arc::make_mut(closure);
                 replace(&mut body.value_type);
+                // A default is a closed constant at its label's type with
+                // every open form `Never`, so it takes the instantiated
+                // label's type the same way.
+                if let Type::Fn(signature) = &body.value_type {
+                    for (label, default) in &mut body.defaults {
+                        if let Some(ty) = signature.labels.get(label)
+                            && let Ok(retyped) = vibra_ir::Constant::new(
+                                ty.at_never(),
+                                default.value().clone(),
+                            )
+                        {
+                            *default = retyped;
+                        }
+                    }
+                }
                 body.captures.iter_mut().for_each(replace);
-                pending.push(&mut body.body);
+                pending.extend(body.nodes_mut());
                 pending.extend(captures.iter_mut());
             }
             IrExpr::Let { value, body, .. } => {

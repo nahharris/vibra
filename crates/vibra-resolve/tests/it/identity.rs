@@ -129,3 +129,69 @@ fn a_test_is_anchored_by_its_name_value() {
     assert_eq!(test.anchor().name(), "adds \"two\"");
     assert_eq!(test.anchor().module(), "@tests.math");
 }
+
+/// A member of an `impl` block has a declaration record: the block's
+/// identity, the hash of its anchor of kind `@impl` named by its target,
+/// then `.` and the member's name. White space in the target does not
+/// change it; another target does.
+#[test]
+fn an_implementation_member_is_identified_through_its_block() {
+    let source = |target: &str| {
+        format!(
+            "interface Sized\n  fn size takes {{value: Self}} returns r: I32 endfn\nendinterface\n\
+             type A of I32\n  impl {target}\n    fn size takes {{value: Self}} returns r: I32 do return 1i32 endfn\n  endimpl\nendtype\n"
+        )
+    };
+    let member = |text: &str| {
+        let resolution = resolve_modules(&[("@app.model", text)]);
+        let found = resolution
+            .declarations()
+            .iter()
+            .filter(|declaration| declaration.implementation().is_some())
+            .map(|declaration| {
+                (
+                    declaration.identity().as_str().to_owned(),
+                    declaration.implementation().map(str::to_owned),
+                    declaration.anchor().owner().to_owned(),
+                    declaration.anchor().name().to_owned(),
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(found.len(), 1, "{:?}", resolution.declarations());
+        found.into_iter().next().unwrap_or_default()
+    };
+    let block = vibra_resolve::implementation_identity(
+        "hello",
+        "0.1.0",
+        "@app.model",
+        "A",
+        "Sized",
+    );
+    assert_eq!(
+        member(&source("Sized")),
+        (
+            format!("{}.size", block.as_str()),
+            Some("Sized".to_owned()),
+            "A".to_owned(),
+            "size".to_owned()
+        )
+    );
+    assert_eq!(
+        vibra_resolve::implementation_name(" Iter(  U8\n  Str ) "),
+        "Iter(U8 Str)"
+    );
+    assert_eq!(
+        vibra_resolve::implementation_name("From( {a: I32  b: U8} )"),
+        "From({a:I32 b:U8})"
+    );
+    assert_ne!(
+        block,
+        vibra_resolve::implementation_identity(
+            "hello",
+            "0.1.0",
+            "@app.model",
+            "B",
+            "Sized"
+        )
+    );
+}

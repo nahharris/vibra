@@ -44,6 +44,37 @@ impl<'a> GuardViews<'a> {
     }
 }
 
+/// One guard operand of an anonymous callable: of its `ensures` when
+/// `exit`, and its consequence when `consequence`.
+#[derive(Clone)]
+struct GuardJob<'a> {
+    exit: bool,
+    consequence: bool,
+    written: Expr<'a>,
+}
+
+/// The guards of an anonymous callable being checked, one operand at a
+/// time as a task of the checker's work list, so that a guard holding
+/// another anonymous callable grows no host stack.
+#[derive(Default)]
+pub(super) struct ClosureGuards<'a> {
+    /// The operands still to check, last first.
+    jobs: Vec<GuardJob<'a>>,
+    /// The operand being checked, and the diagnostic count when it began.
+    current: Option<(GuardJob<'a>, usize)>,
+    /// The checked predicate and consequence of the `requires`, then of
+    /// the `ensures`.
+    parts: [[Option<Node>; 2]; 2],
+    /// The span of the predicate of the `requires`, then of the `ensures`.
+    spans: [Option<ByteSpan>; 2],
+    /// The result name.
+    result: Option<Ident<'a>>,
+    /// The slot the candidate is bound to, and the length of the locals
+    /// before the result name.
+    candidate: Option<(usize, usize)>,
+    failed: bool,
+}
+
 /// What checking a `where` found.
 #[derive(Debug, Default)]
 pub(crate) struct InvariantCheck {
@@ -100,7 +131,8 @@ impl<'a> BodyChecker<'_, 'a> {
     /// is bare and a construction of a type whose `where` is bare each
     /// state one, and so does a call of a contract member whose `requires`
     /// is bare: the guard copied into the implementation member a closed
-    /// receiver selects.
+    /// receiver selects, and otherwise the contract's own guard, decided
+    /// once at the call.
     pub(super) fn obligation(
         &mut self,
         site: Option<Result<usize, usize>>,
@@ -113,14 +145,11 @@ impl<'a> BodyChecker<'_, 'a> {
         } = &node.expr
             && self.contract_requires_bare(call)
         {
-            match self.implementation_member(call) {
-                Some(function) => self.sites.push(Site::Requires { function, span }),
-                None => self.unavailable(
-                    span,
-                    "a call of a contract member whose `requires` is bare at an open \
-                     receiver or through a generic implementation",
-                ),
-            }
+            let site = match self.implementation_member(call) {
+                Some(function) => Some(Site::Requires { function, span }),
+                None => self.contract_site(call, span),
+            };
+            self.sites.extend(site);
         }
         match site {
             Some(Ok(function)) => {
@@ -171,6 +200,31 @@ impl<'a> BodyChecker<'_, 'a> {
                         .map(|(_, function)| *function)
                 })
                 .flatten()
+        })
+    }
+
+    /// The site of a call at `span` of the contract member `call` calls at
+    /// a receiver whose implementation member is not known: the default
+    /// body's own guard, or the abstract member's.
+    fn contract_site(
+        &self,
+        call: &vibra_ir::ContractCall,
+        span: ByteSpan,
+    ) -> Option<Site> {
+        let (interface, data) = self
+            .program
+            .interfaces
+            .iter()
+            .enumerate()
+            .find(|(_, data)| data.id.as_ref() == Some(&call.interface))?;
+        let member = data.member(&call.member)?;
+        Some(match member.default {
+            Some(function) => Site::Requires { function, span },
+            None => Site::Contract {
+                interface,
+                member: member.name.clone(),
+                span,
+            },
         })
     }
 
@@ -290,6 +344,162 @@ impl<'a> BodyChecker<'_, 'a> {
         (failed, guards)
     }
 
+    /// The guards `views` of an anonymous callable, to check one operand at
+    /// a time with [`Self::next_closure_guard`].
+    pub(super) fn closure_guards(
+        &mut self,
+        views: &GuardViews<'a>,
+    ) -> ClosureGuards<'a> {
+        let mut guards = ClosureGuards {
+            result: views.result,
+            ..ClosureGuards::default()
+        };
+        let truth = self
+            .program
+            .library_type(Library::Bool, Vec::new())
+            .is_some();
+        for (exit, view) in [(false, views.requires), (true, views.ensures)] {
+            let Some(view) = view else { continue };
+            let Some(written) = view.predicate() else {
+                guards.failed = true;
+                continue;
+            };
+            let span = expr_span(&written);
+            if let Some(at) = guards.spans.get_mut(usize::from(exit)) {
+                *at = Some(span);
+            }
+            if !truth {
+                self.unavailable(span, "a predicate without `Bool`");
+                guards.failed = true;
+                continue;
+            }
+            guards.jobs.push(GuardJob {
+                exit,
+                consequence: false,
+                written,
+            });
+            if let Some(written) = view.consequence() {
+                guards.jobs.push(GuardJob {
+                    exit,
+                    consequence: true,
+                    written,
+                });
+            }
+        }
+        guards.jobs.reverse();
+        guards
+    }
+
+    /// Takes the operand of `guards` that arrived as `input`, and gives the
+    /// task of the next one, of a callable of type `signature`: the
+    /// `ensures` sees the result name, bound to the candidate's slot.
+    /// `None` once every operand is checked.
+    pub(super) fn next_closure_guard(
+        &mut self,
+        guards: &mut ClosureGuards<'a>,
+        signature: &FnType,
+        input: Option<Out>,
+    ) -> Option<Task<'a>> {
+        let truth = self.program.library_type(Library::Bool, Vec::new());
+        if let (Some((job, mark)), Some(out)) = (guards.current.take(), input) {
+            let (expected, code) = if job.consequence {
+                (
+                    Some(signature.result.clone()),
+                    DiagnosticCode::ContractInvalidConsequence,
+                )
+            } else {
+                (truth.clone(), DiagnosticCode::ContractInvalidPredicate)
+            };
+            let span = expr_span(&job.written);
+            let node = expected.and_then(|expected| {
+                self.operand_done(out, &expected, span, code, mark)
+            });
+            let part = guards
+                .parts
+                .get_mut(usize::from(job.exit))
+                .and_then(|parts| parts.get_mut(usize::from(job.consequence)));
+            match (node, part) {
+                (Some(node), Some(part)) => *part = Some(node),
+                _ => guards.failed = true,
+            }
+        }
+        let Some(job) = guards.jobs.pop() else {
+            if let Some((_, locals)) = guards.candidate {
+                self.locals.truncate(locals);
+            }
+            return None;
+        };
+        if job.exit && guards.candidate.is_none() {
+            let slot = self.new_slot(Some(&signature.result));
+            let locals = self.locals.len();
+            if let Some(name) = guards.result {
+                self.locals.push(Local {
+                    name: name.text().to_owned(),
+                    slot,
+                    ty: Some(signature.result.clone()),
+                    frame: self.frames.len(),
+                    generic: None,
+                });
+            }
+            guards.candidate = Some((slot, locals));
+        }
+        let expected = if job.consequence {
+            Some(signature.result.clone())
+        } else {
+            truth
+        };
+        let task = Task::Expr(job.written.clone(), Ctx::Value(expected));
+        guards.current = Some((job, self.diagnostics.len()));
+        Some(task)
+    }
+
+    /// The checked guards of `guards`, of a callable of type `signature`
+    /// whose parameters `destructured` are taken apart by patterns that
+    /// bind the slots `bound`, and whether one had a fault.
+    pub(super) fn finish_closure_guards(
+        &self,
+        guards: &mut ClosureGuards<'a>,
+        signature: &FnType,
+        destructured: &[Destructure],
+        bound: &Range<usize>,
+    ) -> (bool, Guards) {
+        let mut out = Guards::default();
+        let Some(truth) = self.program.library_type(Library::Bool, Vec::new()) else {
+            return (guards.failed, out);
+        };
+        for exit in [false, true] {
+            let at = usize::from(exit);
+            let Some([predicate, consequence]) =
+                guards.parts.get_mut(at).map(std::mem::take)
+            else {
+                continue;
+            };
+            let (Some(predicate), Some(span)) =
+                (predicate, guards.spans.get(at).copied().flatten())
+            else {
+                continue;
+            };
+            let guard = CheckedGuard {
+                predicate: self.wrap_guard(
+                    predicate,
+                    destructured,
+                    bound,
+                    truth.clone(),
+                ),
+                consequence: consequence.map(|node| {
+                    self.wrap_guard(node, destructured, bound, signature.result.clone())
+                }),
+                span,
+            };
+            if !exit {
+                out.entry = Some(guard);
+            } else if let Some((slot, _)) = guards.candidate {
+                out.exit = Some((slot, guard));
+            }
+        }
+        (guards.failed, out)
+    }
+
     /// Checks one guard: its predicate as a `Bool` and its consequence at
     /// `result`.
     fn guard(
@@ -340,6 +550,20 @@ impl<'a> BodyChecker<'_, 'a> {
         let span = expr_span(&written);
         let mark = self.diagnostics.len();
         let out = self.run(Task::Expr(written, Ctx::Value(Some(expected.clone()))));
+        self.operand_done(out, expected, span, code, mark)
+    }
+
+    /// The node of a guard operand written at `span` and checked at
+    /// `expected` as `out`, the diagnostics found since `mark` of a wrong
+    /// type reported as `code`.
+    fn operand_done(
+        &mut self,
+        out: Out,
+        expected: &Type,
+        span: ByteSpan,
+        code: DiagnosticCode,
+        mark: usize,
+    ) -> Option<Node> {
         let node = match out.ty {
             Some(Type::Never) => {
                 self.report(
@@ -479,17 +703,26 @@ impl<'a> BodyChecker<'_, 'a> {
             }
             None => None,
         };
-        found.checked = match (predicate, consequence) {
-            (Some(predicate), None) => Some(CheckedInvariant {
+        let closures = std::mem::take(&mut self.closures);
+        // A `where … else` whose consequence is not a constant has no
+        // checked invariant.
+        found.checked = match (predicate, consequence, node) {
+            (Some(predicate), None, Some(operand)) => Some(CheckedInvariant {
                 predicate,
                 consequence: None,
                 span,
+                operand,
+                closures,
             }),
-            (Some(predicate), Some(Some(constant))) => Some(CheckedInvariant {
-                predicate,
-                consequence: Some(constant),
-                span,
-            }),
+            (Some(predicate), Some(Some(constant)), Some(operand)) => {
+                Some(CheckedInvariant {
+                    predicate,
+                    consequence: Some(constant),
+                    span,
+                    operand,
+                    closures,
+                })
+            }
             _ => None,
         };
         found
@@ -526,6 +759,9 @@ impl<'a> BodyChecker<'_, 'a> {
         };
         match folded {
             Ok(value) => {
+                // Unreachable: a consequence is checked with no expected
+                // type, so a constant one has the closed type of its
+                // operands; kept as a defect net.
                 let constant = Constant::new(ty, value).ok();
                 if constant.is_none() {
                     self.unavailable(span, "a consequence of an open type");

@@ -1,0 +1,19 @@
+id = "V2-TYPE-GENERIC-anonymous-bound-outer-unsatisfied"
+rule = "V2-TYPE-GENERIC-anonymous-bound-outer-unsatisfied"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#generics: a bounded generic anonymous callable instantiated at an enclosing type parameter without that bound is @type.unsatisfiedBound"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.unsatisfiedBound"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 40, end = 41 }
+related = [{ source = "src/app/main.vib", span = { start = 108, end = 115 } }]

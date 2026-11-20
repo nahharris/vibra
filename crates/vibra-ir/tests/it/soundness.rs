@@ -781,6 +781,8 @@ fn closure_call(
             captures: Vec::new(),
             defaults,
             body: variable(1, Type::I32),
+            entry_guard: None,
+            exit_guard: None,
         }),
         captures: Vec::new(),
     });
@@ -823,6 +825,78 @@ fn v9_a_function_carries_a_default_for_each_label() {
     ));
 }
 
+// -- V12: a closure's guards ----------------------------------------------------
+
+/// A closure of `Fn({I32} I32)` returning its argument, with the `requires`
+/// and the `ensures` given, applied to `1i32`. Its slot 0 is the argument
+/// and its slot 1 the candidate of the `ensures`.
+fn guarded_closure(
+    entry_guard: Option<vibra_ir::Guard>,
+    exit_guard: Option<vibra_ir::ExitGuard>,
+) -> Result<Arc<CheckedModuleSet>, IrError> {
+    let closure = node(Expr::Closure {
+        closure: Arc::new(vibra_ir::ClosureBody {
+            value_type: Type::function(FnType::new(vec![Type::I32], Type::I32)),
+            slot_count: 2,
+            captures: Vec::new(),
+            defaults: Vec::new(),
+            body: variable(0, Type::I32),
+            entry_guard,
+            exit_guard,
+        }),
+        captures: Vec::new(),
+    });
+    let call = node(Expr::Call {
+        target: CallTarget::Value(Box::new(closure)),
+        arguments: positional(vec![int(1)]),
+    });
+    let mut parts = library_parts();
+    parts.globals = vec![global("guarded", Type::I32, call)];
+    CheckedModuleSet::try_new(parts)
+}
+
+fn truth() -> Node {
+    literal(crate::bool_type(), Value::bool(true))
+}
+
+/// A closure's guards are checked as a function's are: a `Bool` predicate
+/// and a consequence of the result type, in the closure's activation, the
+/// `ensures` with its candidate bound.
+#[test]
+fn v12_a_closure_guard_is_checked_in_its_activation() {
+    let guard = |predicate: Node, consequence: Node| vibra_ir::Guard {
+        predicate,
+        consequence,
+    };
+    let exit = |candidate: usize, guard| vibra_ir::ExitGuard { candidate, guard };
+    assert!(
+        guarded_closure(
+            Some(guard(truth(), variable(0, Type::I32))),
+            Some(exit(1, guard(truth(), variable(1, Type::I32)))),
+        )
+        .is_ok()
+    );
+    assert!(matches!(
+        guarded_closure(Some(guard(int(1), int(0))), None),
+        Err(IrError::TypeMismatch { .. })
+    ));
+    assert!(matches!(
+        guarded_closure(Some(guard(truth(), truth())), None),
+        Err(IrError::TypeMismatch { .. })
+    ));
+    // The candidate is not bound in the `requires`, and an `ensures` reads
+    // only slots of the closure.
+    assert!(matches!(
+        guarded_closure(Some(guard(truth(), variable(1, Type::I32))), None),
+        Err(IrError::UnsetSlot(_))
+    ));
+    assert!(guarded_closure(None, Some(exit(2, guard(truth(), int(0))))).is_err());
+    assert!(
+        guarded_closure(None, Some(exit(1, guard(truth(), variable(5, Type::I32)))))
+            .is_err()
+    );
+}
+
 // -- V11: no host stack in proportion to depth ---------------------------------
 
 /// A depth far beyond what host recursion on a small stack survives.
@@ -854,6 +928,8 @@ fn nested_closures(depth: usize) -> Node {
                 captures: Vec::new(),
                 defaults: Vec::new(),
                 body,
+                entry_guard: None,
+                exit_guard: None,
             }),
             captures: Vec::new(),
         });
@@ -1006,6 +1082,29 @@ fn a_generic_default_is_closed_at_never() {
         Err(IrError::TypeMismatch { .. })
     ));
     assert!(empty(Type::Binder(0)).is_err());
+}
+
+/// In a member of an interface a default's type may hold `Self` and the
+/// association slots too; its closed type has `Never` at each, and at no
+/// other position.
+#[test]
+fn a_default_is_closed_at_never_at_every_open_form() {
+    let open = Type::Tuple(vec![
+        Type::list(Type::SelfType),
+        Type::list(Type::Associated("Item".to_owned())),
+        Type::list(Type::Binder(1)),
+        Type::I32,
+    ]);
+    assert_eq!(
+        open.at_never(),
+        Type::Tuple(vec![
+            Type::list(Type::Never),
+            Type::list(Type::Never),
+            Type::list(Type::Never),
+            Type::I32,
+        ])
+    );
+    assert_eq!(Type::list(Type::U8).at_never(), Type::list(Type::U8));
 }
 
 /// `dict.fromList` keys its dict as a literal does: a closed key without

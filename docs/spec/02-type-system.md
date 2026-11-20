@@ -180,6 +180,15 @@ package `hello` version `0.1.0`, module `@hello.main`, no owner, kind
 `@proc`, name `main` gives
 `sha256:213e3a01ef10d7c10032616f8ab0da9a97fb729b9f98d723f4beb3158a25e2ad`.
 
+An `impl` block is no declaration, but it has an identity hashed the same
+way: its anchor has its module's package, version, and path, the type or
+interface it is nested in as owner path, the kind `@impl`, and its target as
+the name. The target is its source text with every run of white space
+dropped next to `(`, `)`, `{`, `}`, and `:`, and shortened to one space
+elsewhere, so `Iter( U8 )` and `Iter(U8)` name one block. A member of an
+`impl` block is identified by the block's identity followed by `.` and the
+member's name.
+
 | Body | Declares | Constructor | Pattern |
 | --- | --- | --- | --- |
 | `of {name: T …}` | declared record | `User(name: n id: i)` | `User(name: p)` |
@@ -218,7 +227,10 @@ invariant. Its operand is a predicate: a pure function value of type
 `Fn({R} Bool)`, where `R` is the representation type. A `where` on a variant
 type is `@type.invalidInvariant`. The operand is an expression like any
 other function value: an anonymous `fn`, or the name of a `fn`, which
-resolves in the flat module scope and so may be declared after the type.
+resolves in the flat module scope and so may be declared after the type. It
+converts to `Fn({R} Bool)` under
+[Guards and callable types](#guards-and-callable-types), and an anonymous
+operand's guards and calls state their obligations for the type.
 
 ```vibra
 type Percent of U8
@@ -263,7 +275,9 @@ are the same when they have the same arity and equal component types in
 order. Two record types are the same when they have the same set of field
 names with equal types, in any written order; a record's canonical field
 order sorts names by their UTF-8 bytes. `{}` is the empty tuple. Both forms
-are accepted in every type position.
+are accepted in every type position. A record type or a record value names
+each field once: `{a: I32 a: I32}` and `{a: 1i32 a: 2i32}` are
+`@name.redeclaration` at the later field, related to the earlier.
 
 A type nests at most 64 levels. A type with no component is one level, and
 every other type is one level more than its deepest component: an element,
@@ -420,10 +434,10 @@ required; a path that resolves to another kind is `@name.wrongEntityKind`
 and names what it found. Tooling MUST return the resolved kind and identity,
 never a dotted string.
 
-An `impl` block has no name. Its identity is the pair of its applied
-interface target and its receiver type, and a member's identity adds the
-contract member. Nothing addresses an implementation at a use site; dispatch
-selects it.
+An `impl` block has no name. It is keyed by the pair of its applied
+interface target and its receiver type, and it and its members have the
+identities of [Declared types](#declared-types). Nothing addresses an
+implementation at a use site; dispatch selects it.
 
 ## Functions as values
 
@@ -576,6 +590,15 @@ endfn
   choice. If another operand or the expected type also fixes `T`, the two
   MUST agree, or the operand is `@type.mismatch`; and `T` MUST then satisfy
   its own bound, or the application is `@type.unsatisfiedBound`.
+- A bound that leaves an associated type open names it all the same. Inside
+  the generic the associated type is abstract: it equals only itself, so it
+  satisfies no bound that fixes the label to another type, and a label of
+  another bound that names a parameter determines that parameter as it. At
+  each use it is the choice of the implementation the bound selects, as if a
+  label had bound it to a parameter. This holds for an anonymous callable,
+  a member, and an implementation in a generic type alike; an
+  implementation's parameter that a bound's label names is determined when
+  the implementation is selected.
 - A positional argument of a bound may likewise name a parameter of the same
   header: `given {T: From(S)}`. The bound's implementation is selected by
   its [key](#implementations): the interface, the actual type of the bounded
@@ -601,9 +624,11 @@ additional ones; redeclaring an inherited name is
 `@name.genericRedeclaration`. An `impl` block declares none: inside a `type`
 it passes the type's parameters through, and inside an `interface` its target
 MUST be a closed type expression. An anonymous callable sees the parameters
-of every enclosing declaration and may declare its own; a generic anonymous
-callable bound by `let` stays generic, and anywhere else it is instantiated
-from its written expected type.
+of every enclosing declaration and may declare its own, with bounds in
+`given` as any generic declaration's; a generic anonymous callable bound by
+`let` stays generic, and anywhere else it is instantiated from its written
+expected type. Each instantiation satisfies its bounds, as a call of a
+generic `fn` does; a breach is `@type.unsatisfiedBound`.
 
 Specialization strategy is not observable.
 
@@ -1116,13 +1141,16 @@ literal evaluates to: its entries in canonical key order, where a later
 duplicate key replaces the earlier value.
 
 A default is checked at its label's type with the callable's type parameters
-in it, so a default whose type mentions a type parameter is valid exactly
-when it checks at that type for every instantiation, as `[]` at `List(T)`
-and `Option.none()` at `Option(T)` do. Such a value holds nothing of the
-parameter's type, and at each instantiation of the callable the default is
+in it, and in a member of an interface with `Self` and the interface's
+associated types in it, so a default whose type mentions one is valid
+exactly when it checks at that type for every instantiation, as `[]` at
+`List(T)` or `List(Item)` and `Option.none()` at `Option(T)` or
+`Option(Self)` do. Such a value holds nothing of that type, and at each
+instantiation of the callable, an anonymous one included, the default is
 that value at the instantiated label type. A default that holds a value
-where the parameter's type is required, such as `[1i32]` at `List(T)`, is
-`@type.mismatch` at that value.
+where such a type is required, such as `[1i32]` at `List(T)`, is
+`@type.mismatch` at that value. A guard's consequence is checked with no
+expected type, so a constant consequence never has an open type.
 
 ### `try`
 
@@ -1308,6 +1336,14 @@ establish that `requires`; otherwise the conversion is
 `@contract.obligationLost`. A callable whose `requires` has an `else`
 converts freely, and the resulting value keeps its entry and exit checks.
 
+An anonymous callable's guards are those of any callable. Its bare
+`requires` states an obligation at each call whose callee is statically that
+callable: the anonymous callable written as the callee, or a name a `let` of
+the same activation binds to it, directly or through another such name.
+Every other use of it, a capture of that name included, converts it to its
+callable type under the rule above. A call through any other function value
+states no obligation, since no value of a callable type carries one.
+
 A bare `requires` on a `proc` is discharged where the plan is built, from the
 arguments the plan captures. A `requires … else` and an `ensures … else` on a
 `proc` run on each `await` of its plan.
@@ -1317,7 +1353,16 @@ checked under the contract's `requires` and MUST establish the contract's
 `ensures`. A contract guard with `else` runs on every call of every
 implementation, as part of the member: the checker copies it into each
 implementation's checked function, so static and dynamic dispatch behave
-alike. An implementation member declares no guard of its own; a `requires`,
+alike. A call of a contract member whose `requires` is bare states one
+obligation. At a closed receiver whose implementation is a program's own
+and not generic, it is the guard copied into the member that implementation
+supplies. At any other receiver, such as a bounded type parameter, an
+interface value, or a type a generic implementation serves, it is the
+contract's predicate at the call's arguments, decided once, with the
+contract's default for each label the call does not write. A contract guard
+that does not check under an implementation's substitution is the
+contract's own fault, reported where the contract is declared. An
+implementation member declares no guard of its own; a `requires`,
 `ensures`, or `where` section on one is `@syntax.invalidSection`, and the
 checks it needs are written in its body.
 

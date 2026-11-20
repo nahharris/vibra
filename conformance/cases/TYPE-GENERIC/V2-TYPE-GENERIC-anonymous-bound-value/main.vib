@@ -1,0 +1,4 @@
+fn apply takes {f: Fn({I32 I32} I32)} returns r: I32 do return f(4i32 9i32) endfn
+fn main returns r: I32 do
+  return apply(fn(T) takes {a: T b: T} returns m: T given {T: Ordered} do if Ordered.greater(a b) then return a else return b endif endfn)
+endfn

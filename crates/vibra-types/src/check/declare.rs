@@ -27,7 +27,10 @@
 //! each meeting its parameter's bound; and the key of a `Dict` implements
 //! `Ordered`. The bounds and an open key are decided once every
 //! implementation is known, under the bounds in scope where the type is
-//! written (a [`BoundGoal`]).
+//! written (a [`BoundGoal`]). An associated type a bound leaves open is one
+//! more type parameter of the `fn`, member, anonymous callable, or
+//! implementation the bound is on, abstract inside it and fixed at each use
+//! by the implementation the bound selects ([`Program::open_choices`]).
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
@@ -1153,6 +1156,20 @@ impl<'a> Program<'a> {
                     .collect::<Result<Vec<_>, _>>()?,
             )),
             TypeForm::Record(fields) => {
+                let mut seen: BTreeMap<&str, ByteSpan> = BTreeMap::new();
+                for (name, _) in &fields {
+                    if let Some(first) = seen.get(name.text()) {
+                        return Err(NoType::Fault(Box::new(
+                            Diagnostic::new(
+                                DiagnosticCode::NameRedeclaration,
+                                name.span(),
+                                format!("the field `{}` is written twice", name.text()),
+                            )
+                            .with_related(*first, "the earlier field"),
+                        )));
+                    }
+                    seen.insert(name.text(), name.span());
+                }
                 let fields = fields
                     .into_iter()
                     .map(|(name, field)| {
@@ -1498,6 +1515,34 @@ impl<'a> Program<'a> {
         ))
     }
 
+    /// The identity of the `impl` block nested in `owner` in the module
+    /// `module` whose target is written `target`: see
+    /// [`vibra_resolve::implementation_identity`].
+    pub(crate) fn implementation_identity(
+        &self,
+        module: usize,
+        owner: &str,
+        target: &str,
+    ) -> String {
+        let Some(data) = self.modules.get(module) else {
+            return String::new();
+        };
+        let package = if data.embedded {
+            &self.embedded_package
+        } else {
+            &self.local_package
+        };
+        vibra_resolve::implementation_identity(
+            &package.name,
+            &package.version,
+            &data.path,
+            owner,
+            target,
+        )
+        .as_str()
+        .to_owned()
+    }
+
     pub(crate) fn identity_of(
         &self,
         module: &str,
@@ -1560,6 +1605,52 @@ impl<'a> Program<'a> {
             labels,
             result,
         })
+    }
+
+    /// The type parameters `binders` of a `fn` and their bounds `bounds`,
+    /// with one more type parameter after them for each associated type a
+    /// bound leaves open: the bound's label names it, so each use takes it
+    /// from the implementation the bound selects, and inside the `fn` it
+    /// equals only itself. It is named after the bounded parameter and the
+    /// associated type, `TItem` for `T` and `Item`, with a number after a
+    /// name already taken.
+    pub(crate) fn open_choices(
+        &self,
+        binders: &[String],
+        mut bounds: Vec<Option<BoundData>>,
+    ) -> (Vec<String>, Vec<Option<BoundData>>) {
+        let mut binders = binders.to_vec();
+        bounds.resize(binders.len(), None);
+        for at in 0..binders.len() {
+            let Some(Some(bound)) = bounds.get(at).cloned() else {
+                continue;
+            };
+            let Some(interface) = self.interfaces.get(bound.interface) else {
+                continue;
+            };
+            let mut choices = bound.choices.clone();
+            for (name, _) in &interface.associated {
+                if choices.iter().any(|(chosen, _)| chosen == name) {
+                    continue;
+                }
+                let base =
+                    format!("{}{name}", binders.get(at).map_or("", String::as_str));
+                let mut fresh = base.clone();
+                let mut suffix = 2;
+                while binders.contains(&fresh) {
+                    fresh = format!("{base}{suffix}");
+                    suffix += 1;
+                }
+                choices.push((name.clone(), Type::Binder(binders.len())));
+                binders.push(fresh);
+                bounds.push(None);
+            }
+            choices.sort_by(|left, right| left.0.cmp(&right.0));
+            if let Some(Some(slot)) = bounds.get_mut(at) {
+                slot.choices = choices;
+            }
+        }
+        (binders, bounds)
     }
 
     /// Reads the header of every `fn`.
@@ -1627,9 +1718,11 @@ impl<'a> Program<'a> {
             };
             match header {
                 Ok((signature, bounds)) => {
+                    let (binders, bounds) = self.open_choices(&data.binders, bounds);
                     if let Some(data) = self.functions.get_mut(index) {
                         data.signature = Some(signature);
                         data.external = external;
+                        data.binders = binders;
                         data.bounds = bounds;
                         data.self_type = self_type;
                     }
@@ -1800,13 +1893,6 @@ impl<'a> Program<'a> {
         }
         None
     }
-}
-
-/// Whether a callable header has only what this checker supports besides
-/// its types, labelled parameters, and type parameters: no guards, row, or
-/// bound other than `Any`.
-pub(crate) fn plain_callable(view: &Callable<'_>) -> bool {
-    bounds_are_any(view.given()) && unguarded(view)
 }
 
 /// Whether a callable header has no guard and no row.

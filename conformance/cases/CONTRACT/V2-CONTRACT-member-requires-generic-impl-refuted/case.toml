@@ -1,0 +1,19 @@
+id = "V2-CONTRACT-member-requires-generic-impl-refuted"
+rule = "V2-CONTRACT-member-requires-generic-impl-refuted"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#guards-and-callable-types: a contract member's bare requires false at a call through a generic implementation is @contract.refuted at the contract's predicate"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@contract.refuted"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 89, end = 112 }
+related = [{ source = "src/app/main.vib", span = { start = 441, end = 445 } }]

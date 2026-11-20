@@ -275,6 +275,8 @@ fn an_initializer_cycle_through_a_stored_closure_is_found() {
             captures: Vec::new(),
             defaults: Vec::new(),
             body: node(Expr::Global(0)),
+            entry_guard: None,
+            exit_guard: None,
         }),
         captures: Vec::new(),
     });

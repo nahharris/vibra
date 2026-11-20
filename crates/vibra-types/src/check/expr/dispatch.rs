@@ -11,7 +11,10 @@
 //! member, the one implementation whose key matches, and the structural
 //! `Equatable` and `Ordered` of atoms, tuples, and records. A contract
 //! member read as a value is the implementation's function when it supplies
-//! the member, and otherwise a closure that makes the contract call.
+//! the member, and otherwise a closure that makes the contract call. A
+//! contract call on an interface's own parameter whose bound leaves an
+//! associated type open is `@tool.unavailable`: an interface takes no extra
+//! parameter for the choice.
 
 use std::sync::Arc;
 
@@ -923,7 +926,7 @@ impl<'a> BodyChecker<'_, 'a> {
             let value = choice.unwrap_or_else(|| {
                 self.gaps.push((
                     application,
-                    "a contract call on a type parameter whose bound leaves an associated type open"
+                    "a contract call on a type parameter of an interface whose bound leaves an associated type open"
                         .to_owned(),
                 ));
                 Type::Associated(name.clone())
@@ -1729,6 +1732,8 @@ impl<'a> BodyChecker<'_, 'a> {
             captures: Vec::new(),
             defaults,
             body,
+            entry_guard: None,
+            exit_guard: None,
         };
         Some(self.node(
             IrExpr::Closure {

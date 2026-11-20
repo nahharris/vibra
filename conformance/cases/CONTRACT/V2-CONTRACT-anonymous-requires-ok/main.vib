@@ -1,0 +1,6 @@
+fn f takes {n: I32} returns r: I32 do
+  let c be fn takes {x: I32} returns s: I32 requires Ordered.greater(x 0i32) do return x endfn endlet
+  let d be c endlet
+  if Ordered.greater(n 0i32) then return c(n) else return d(1i32) endif
+endfn
+fn main returns r: I32 do return I32.add(f(4i32) f(0i32)) endfn

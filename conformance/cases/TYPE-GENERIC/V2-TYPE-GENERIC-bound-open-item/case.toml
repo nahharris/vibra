@@ -1,0 +1,12 @@
+id = "V2-TYPE-GENERIC-bound-open-item"
+rule = "V2-TYPE-GENERIC-bound-open-item"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#bounds: a contract call on a type parameter whose bound leaves an associated type open checks with that type abstract, and each use takes it from the implementation selected"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

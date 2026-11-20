@@ -1,0 +1,19 @@
+id = "V2-CONTRACT-member-ensures-generic-impl"
+rule = "V2-CONTRACT-member-ensures-generic-impl"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#guards-and-callable-types: a member of a generic implementation is checked under its contract's bare ensures, @contract.unproved at a return that does not establish it"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "unknown"
+
+[[expect.diagnostics]]
+code = "@contract.unproved"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 207, end = 215 }
+related = [{ source = "src/app/main.vib", span = { start = 21, end = 25 } }]

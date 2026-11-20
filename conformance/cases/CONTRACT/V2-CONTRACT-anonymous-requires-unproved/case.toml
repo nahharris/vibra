@@ -1,0 +1,19 @@
+id = "V2-CONTRACT-anonymous-requires-unproved"
+rule = "V2-CONTRACT-anonymous-requires-unproved"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#guards-and-callable-types: a bare requires of an anonymous callable the discharge rules do not establish at a call is @contract.unproved at the call, related to the callable"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "unknown"
+
+[[expect.diagnostics]]
+code = "@contract.unproved"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 149, end = 153 }
+related = [{ source = "src/app/main.vib", span = { start = 49, end = 132 } }]

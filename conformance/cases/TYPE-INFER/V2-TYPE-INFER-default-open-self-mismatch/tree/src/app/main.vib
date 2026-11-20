@@ -1,0 +1,4 @@
+interface Pick
+  fn pick takes {value: Self} labelled {other: Option(Self) be Option.some(value: 1i32)} returns r: I32 do return 1i32 endfn
+endinterface
+fn main returns r: I32 do return 1i32 endfn

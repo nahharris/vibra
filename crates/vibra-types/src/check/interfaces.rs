@@ -406,7 +406,13 @@ impl<'a> Program<'a> {
                         Ok((own, self.callable_type(module, &member, scope)?))
                     });
                 let (own_bounds, signature) = match header {
-                    Ok(header) => header,
+                    Ok((own, signature)) => {
+                        // An associated type a member-local bound leaves open
+                        // is one more member-local parameter.
+                        let (all, own) = self.open_choices(&binders, own);
+                        binders = all;
+                        (own, signature)
+                    }
                     Err(why) => {
                         self.no_type_at(module, member.construct().span(), &what, why);
                         continue;
@@ -666,6 +672,11 @@ impl<'a> Program<'a> {
             .types
             .get(owner)
             .map_or_else(|| vec![None; binders.len()], |data| data.bounds.clone());
+        // An associated type the type's bound leaves open is one more
+        // parameter of the implementation, which selecting it determines.
+        let (binders, bounds) = self.open_choices(&binders, bounds);
+        let mut binder_spans: Vec<ByteSpan> = binder_spans;
+        binder_spans.resize(binders.len(), head);
         Some(ImplHead {
             module,
             owner: Some(owner),
@@ -952,6 +963,15 @@ impl<'a> Program<'a> {
         let choices_complete = declared_associated
             .iter()
             .all(|(name, _)| chosen.iter().any(|(chosen, _, _)| chosen == name));
+        let target = block.target().map_or("", |target| {
+            let span = target.span();
+            self.modules
+                .get(module)
+                .and_then(|data| data.text)
+                .and_then(|text| text.get(span.start()..span.end()))
+                .unwrap_or_default()
+        });
+        let implementation = self.implementation_identity(module, &host, target);
         let mut members: Vec<(String, usize)> = Vec::new();
         let mut seen: Vec<(String, ByteSpan)> = Vec::new();
         for member in block.members() {
@@ -1021,7 +1041,6 @@ impl<'a> Program<'a> {
                 usable = false;
                 continue;
             }
-            let own = member.params().len();
             let declared_own = declared.binders.len().saturating_sub(arguments.len());
             let mut member_binders = binders.clone();
             member_binders
@@ -1041,13 +1060,18 @@ impl<'a> Program<'a> {
                 )
                 .and_then(|own| Ok((own, self.callable_type(module, &member, scope)?)));
             let (own_bounds, signature) = match header {
-                Ok(header) => header,
+                Ok((own, signature)) => {
+                    let (all, own) = self.open_choices(&member_binders, own);
+                    member_binders = all;
+                    (own, signature)
+                }
                 Err(why) => {
                     self.no_type_at(module, member.construct().span(), &what, why);
                     usable = false;
                     continue;
                 }
             };
+            let own = member_binders.len().saturating_sub(binders.len());
             let mut substitution_binders = arguments.clone();
             substitution_binders.extend(
                 (0..declared_own)
@@ -1151,7 +1175,7 @@ impl<'a> Program<'a> {
                 contract: None,
                 name: name.text().to_owned(),
                 view: member,
-                identity: String::new(),
+                identity: format!("{implementation}.{}", name.text()),
                 qualified: format!("{dotted}.{host}.{key}.{}", name.text()),
                 binders: member_binders,
                 bounds: all_bounds,

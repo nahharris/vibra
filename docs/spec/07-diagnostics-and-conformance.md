@@ -229,7 +229,7 @@ command-line context.
 | use of a hidden constructor, pattern, or field read | `@name.inaccessibleRepresentation`, the use, related to the type |
 | a name that resolves to nothing: a path part, a `given` key, an `impl` member or choice that is no member of the interface, an entity reference slot | `@name.unknownSymbol`, the name |
 | an entity of the wrong kind: an import of a member, an `impl` target of the wrong kind, a bound that is not an interface, a typed data slot | `@name.wrongEntityKind`, the reference |
-| a repeated module, import, local, test, or `given` key name; an associated type chosen twice in one `impl` | `@name.redeclaration`, the later name, related to the earlier |
+| a repeated module, import, local, test, or `given` key name; an associated type chosen twice in one `impl`; a field repeated in a record type or a record value | `@name.redeclaration`, the later name, related to the earlier |
 | two members of one owner with one name, an associated type and another member of its interface included; a callable member supplied twice in one `impl` | `@name.memberCollision`, the later name, related to the first |
 | a repeated type parameter; an associated type with the name of a visible type parameter | `@name.genericRedeclaration`, the later parameter, the associated type, or the `impl` head |
 | a reserved word in a label position | `@name.reservedLabel`, the word |
@@ -682,9 +682,13 @@ The records are those of the local package: the embedded standard library
 contributes none, though a `to` may name one of its identities. A module
 has no declaration record; its identity, which an import's `to` names, is
 the hash of its [anchor](02-type-system.md#declared-types).
-An `impl` block has no anchor, so neither it nor its members have a
-declaration record. A declaration's span is its whole form, an import's the
-whole `use`, and a reference's the bytes of its path.
+An `impl` block has no declaration record. Each member of one has a record
+whose `identity` is the block's identity, `.`, and the member's name; whose
+`anchor` is the block's, with the kind `@impl` and the block's target as
+`name`; whose `member` (`Str`) is the member's name; and whose `access` is
+that of the type or interface the block is nested in. A declaration's span
+is its whole form, an import's the whole `use`, and a reference's the bytes
+of its path.
 
 ```vibon
 {
@@ -747,7 +751,9 @@ for an `ensures`, its result name, such as `{kind: @record fields: {x: 0i32}}`;
 an anonymous `where` predicate gives the refuting value itself. For the
 `ensures` of a contract member, `declaration` is the implementation member and
 `span` is the contract's predicate, in the interface's module; its
-`@contract.unproved` is at the implementation's `return`. A module value is
+`@contract.unproved` is at the implementation's `return`. An anonymous
+callable is no declaration: for its guards, `declaration` and `predicate`
+are both the declaration it is written in. A module value is
 never generic, so its `typeInfo` is a closed type encoding.
 
 The document is produced whenever every type is known: when the check has

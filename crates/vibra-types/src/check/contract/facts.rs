@@ -16,7 +16,9 @@
 //! a program.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::sync::Arc;
 
+use vibra_diagnostics::ByteSpan;
 use vibra_ir::{
     CallTarget, Constant, Construction, ContractCall, Expr, NamedTypes, Node, Pattern,
     Type, TypeId, Value,
@@ -137,6 +139,9 @@ pub(crate) enum Callee {
 pub(crate) enum Data {
     /// A value nothing more is known of; each is distinct.
     Opaque,
+    /// An anonymous callable with a guard, by the index the discharge gives
+    /// it: a call whose callee is this term calls it.
+    Closure(usize),
     /// A slot of one activation: a parameter, or a binding nothing names.
     Slot(usize, usize),
     /// A constant.
@@ -390,6 +395,9 @@ pub(crate) struct Vocabulary<'v> {
     pub(crate) defaults: BTreeMap<usize, Vec<(String, Constant)>>,
     /// The bodies of the certified functions, by checked index.
     pub(crate) certified: BTreeMap<usize, Readable<'v>>,
+    /// The index of each anonymous callable with a guard, by the source and
+    /// the span of its body.
+    pub(crate) closures: BTreeMap<(Arc<str>, ByteSpan), usize>,
 }
 
 impl Vocabulary<'_> {
@@ -741,6 +749,26 @@ pub(crate) fn build(
                     let children = children.collect::<Vec<_>>();
                     pending.extend(children.into_iter().rev().map(Build::Visit));
                 }
+                // A call of a value is known only when its callee is an
+                // anonymous callable with a guard.
+                Expr::Call {
+                    target: CallTarget::Value(callee),
+                    arguments,
+                }
+                | Expr::TailCall {
+                    target: CallTarget::Value(callee),
+                    arguments,
+                } => {
+                    pending.push(Build::Make(node));
+                    let children = arguments
+                        .positional
+                        .iter()
+                        .chain(arguments.labelled.iter().map(|(_, node)| node));
+                    let children = children.collect::<Vec<_>>();
+                    pending.extend(children.into_iter().rev().map(Build::Visit));
+                    pending.push(Build::Visit(callee));
+                }
+                Expr::Closure { .. } => pending.push(Build::Make(node)),
                 Expr::Intrinsic { arguments, .. } => {
                     pending.push(Build::Make(node));
                     pending.extend(arguments.iter().rev().map(Build::Visit));
@@ -880,9 +908,42 @@ fn make(
                     Callee::Function(*function, type_arguments.clone())
                 }
                 CallTarget::Contract(call) => Callee::Contract(call.clone()),
-                CallTarget::Value(_) => return terms.opaque(),
+                CallTarget::Value(_) => {
+                    let callee = stack.pop().unwrap_or_else(|| terms.opaque());
+                    let Some(Data::Closure(closure)) = terms.get(callee).cloned()
+                    else {
+                        return terms.opaque();
+                    };
+                    // A label not written holds the closure's default.
+                    let defaults = vocabulary.defaults.get(&closure);
+                    for (at, (label, written)) in arguments.labelled.iter().enumerate()
+                    {
+                        if !matches!(written.expr, Expr::Default(_)) {
+                            continue;
+                        }
+                        let default = defaults
+                            .and_then(|defaults| {
+                                defaults.iter().find(|(name, _)| name == label)
+                            })
+                            .map(|(_, constant)| constant.clone());
+                        if let (Some(default), Some(slot)) =
+                            (default, operands.get_mut(arguments.positional.len() + at))
+                        {
+                            *slot = terms.intern(Data::Constant(default));
+                        }
+                    }
+                    Callee::Function(closure, Vec::new())
+                }
             };
             terms.intern(Data::Call(callee, operands))
+        }
+        Expr::Closure { closure, .. } => {
+            let origin = &closure.body.origin;
+            let key = (Arc::from(origin.source_id()), origin.span());
+            match vocabulary.closures.get(&key) {
+                Some(closure) => terms.intern(Data::Closure(*closure)),
+                None => terms.opaque(),
+            }
         }
         Expr::Intrinsic {
             intrinsic,

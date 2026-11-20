@@ -1,0 +1,12 @@
+id = "V2-TYPE-GENERIC-bound-open-item-let"
+rule = "V2-TYPE-GENERIC-bound-open-item-let"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#bounds: a value of an associated type a bound leaves open is bound by let and passed back to the contract"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

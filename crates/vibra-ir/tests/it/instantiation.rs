@@ -164,6 +164,8 @@ fn a_function_value_and_a_closure_body_are_instantiations() {
                     type_arguments: vec![Type::list(binder())],
                 },
             }),
+            entry_guard: None,
+            exit_guard: None,
         }),
         captures: Vec::new(),
     });
@@ -293,4 +295,132 @@ fn the_evidence_for_a_bound_instantiates_the_selected_implementation() {
         "showList",
         "f"
     ));
+}
+
+/// `Holder` with the associated type `Item`, and `Box(T)` implementing
+/// `Sized` under `T: Holder(Item: I)`, a binder its key does not mention.
+fn holder_id() -> TypeId {
+    id("app.main.Holder")
+}
+
+fn sized_id() -> TypeId {
+    id("app.main.Sized")
+}
+
+fn bag_for(item: Type) -> ImplementationRecord {
+    ImplementationRecord::new(
+        vec![
+            Binder::new(
+                "T",
+                Some(Bound {
+                    contract: InterfaceKey::new(holder_id(), Vec::new()),
+                    choices: NamedTypes::new([("Item".to_owned(), item)]).unwrap(),
+                }),
+            )
+            .unwrap(),
+            Binder::new("TItem", None).unwrap(),
+        ],
+        InterfaceKey::new(sized_id(), Vec::new()),
+        Type::list(Type::Binder(0)),
+        NamedTypes::empty(),
+    )
+    .unwrap()
+}
+
+/// An implementation binder is fixed by the key or by a label of the bound
+/// of a fixed binder; one neither fixes is invalid.
+#[test]
+fn an_implementation_binder_is_fixed_by_its_key_or_a_bound_label() {
+    let _ = bag_for(Type::Binder(1));
+    let unfixed = ImplementationRecord::new(
+        vec![
+            Binder::new("T", None).unwrap(),
+            Binder::new("U", None).unwrap(),
+        ],
+        InterfaceKey::new(sized_id(), Vec::new()),
+        Type::list(Type::Binder(0)),
+        NamedTypes::empty(),
+    );
+    assert!(
+        matches!(&unfixed, Err(IrError::InvalidType(message)) if message.contains("fixed neither")),
+        "{unfixed:?}"
+    );
+    // A label of the bound of a binder nothing fixes fixes nothing.
+    let chained = ImplementationRecord::new(
+        vec![
+            Binder::new("T", None).unwrap(),
+            Binder::new(
+                "U",
+                Some(Bound {
+                    contract: InterfaceKey::new(holder_id(), Vec::new()),
+                    choices: NamedTypes::new([("Item".to_owned(), Type::Binder(2))])
+                        .unwrap(),
+                }),
+            )
+            .unwrap(),
+            Binder::new("V", None).unwrap(),
+        ],
+        InterfaceKey::new(sized_id(), Vec::new()),
+        Type::list(Type::Binder(0)),
+        NamedTypes::empty(),
+    );
+    assert!(
+        matches!(chained, Err(IrError::InvalidType(_))),
+        "{chained:?}"
+    );
+}
+
+/// Selecting an implementation fixes a binder its key leaves open from the
+/// choices of the evidence for the bound whose label names it: the
+/// implementation that bound selects, completed the same way, or the
+/// evidence the caller gives.
+#[test]
+fn selection_fixes_a_binder_from_the_choice_of_a_bound() {
+    let bag = Implementation::new(bag_for(Type::Binder(1)), Vec::new()).unwrap();
+    let holder = |receiver: Type, item: Type| {
+        Implementation::new(
+            ImplementationRecord::new(
+                Vec::new(),
+                InterfaceKey::new(holder_id(), Vec::new()),
+                receiver,
+                NamedTypes::new([("Item".to_owned(), item)]).unwrap(),
+            )
+            .unwrap(),
+            Vec::new(),
+        )
+        .unwrap()
+    };
+    let implementations = vec![bag, holder(Type::U8, Type::I32)];
+    let selected = vibra_ir::select_implementation(
+        &implementations,
+        &Type::list(Type::U8),
+        &sized_id(),
+        &[],
+        |_, _, _| None,
+    );
+    assert_eq!(
+        selected.map(|found| found.map(|(_, binders)| binders)),
+        Ok(Some(vec![Type::U8, Type::I32]))
+    );
+    // The evidence the caller gives decides first.
+    let given = vibra_ir::select_implementation(
+        &implementations,
+        &Type::list(Type::U8),
+        &sized_id(),
+        &[],
+        |_, _, _| NamedTypes::new([("Item".to_owned(), Type::Char)]).ok(),
+    );
+    assert_eq!(
+        given.map(|found| found.map(|(_, binders)| binders)),
+        Ok(Some(vec![Type::U8, Type::Char]))
+    );
+    // With no evidence for the bound, nothing is selected.
+    let none = vibra_ir::select_implementation(
+        &implementations,
+        &Type::list(Type::Char),
+        &sized_id(),
+        &[],
+        |_, _, _| None,
+    );
+    assert_eq!(none.map(|found| found.is_some()), Ok(false));
 }

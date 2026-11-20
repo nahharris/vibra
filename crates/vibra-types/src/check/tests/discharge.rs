@@ -585,7 +585,8 @@ fn a_contract_guard_with_else_runs_in_every_implementation() {
 
 /// A call of a member whose `requires` is bare, at a closed receiver, is the
 /// obligation of the implementation the receiver selects; at an open
-/// receiver it is outside this checker.
+/// receiver, it is the contract's predicate at the call's arguments,
+/// decided once, with the contract's default for a label not written.
 #[test]
 fn a_call_of_a_member_with_a_bare_requires_is_an_obligation() {
     let contract = sized("requires Ordered.greater(n 0i32)", &[("A", "return m")]);
@@ -604,11 +605,215 @@ fn a_call_of_a_member_with_a_bare_requires_is_an_obligation() {
         "{contract}fn f(T) takes {{v: T}} returns r: I32 given {{T: Sized}} \
          do return Sized.size(v 1i32) endfn\n"
     );
+    assert_eq!(faults(&source), []);
+    assert_eq!(obligations(&source), [passed(REQUIRES, &["GUARD-1"])]);
+    let open = |call: &str| {
+        format!(
+            "{contract}fn f(T) takes {{v: T k: I32}} returns r: I32 given {{T: Sized}} \
+             do return {call} endfn\n"
+        )
+    };
+    let source = open("Sized.size(v 0i32)");
     assert_eq!(
         faults(&source),
         [(
-            DiagnosticCode::ToolUnavailable,
-            at(&source, "Sized.size(v 1i32)", 0)
+            DiagnosticCode::ContractRefuted,
+            at(&source, "Ordered.greater(n 0i32)", 0)
         )]
+    );
+    let source = open("Sized.size(v k)");
+    assert_eq!(
+        faults(&source),
+        [(
+            DiagnosticCode::ContractUnproved,
+            at(&source, "Sized.size(v k)", 0)
+        )]
+    );
+    let source =
+        open("if Ordered.greater(k 0i32) then Sized.size(v k) else 0i32 endif");
+    assert_eq!(faults(&source), []);
+    let source = format!(
+        "{contract}fn f takes {{v: Sized}} returns r: I32 do return Sized.size(v 2i32) endfn\n\
+         fn main returns r: I32 do return f(A(1i32)) endfn\n"
+    );
+    assert_eq!(faults(&source), []);
+    assert_eq!(
+        super::run(&source).as_deref(),
+        Ok(super::value("i32", "2i32").as_str())
+    );
+}
+
+/// An anonymous callable's guards are discharged as a named callable's: a
+/// bare `requires` at each call whose callee is the callable or a name a
+/// `let` binds it to, and a bare `ensures` at each of its `return`s, each
+/// obligation belonging to the declaration the callable is written in.
+#[test]
+fn an_anonymous_callable_states_its_guards_where_it_is_written() {
+    let source = "fn f takes {n: I32} returns r: I32 do \
+         let c be fn takes {x: I32} returns s: I32 requires Ordered.greater(x 0i32) \
+         ensures Ordered.greater(s 0i32) do return x endfn endlet \
+         let d be c endlet \
+         if Ordered.greater(n 0i32) then return c(n) else return d(1i32) endif endfn\n";
+    assert_eq!(faults(source), []);
+    let ensures = ObligationKind::Ensures;
+    assert_eq!(
+        obligations(source),
+        [
+            passed(ensures, &["GUARD-4"]),
+            passed(REQUIRES, &["GUARD-4", "GUARD-3"]),
+            passed(REQUIRES, &["GUARD-4", "GUARD-1"]),
+        ]
+    );
+    // `f` is the one declaration, which contains every site and every
+    // guard.
+    let result = check_source(SOURCE, source);
+    let identity = result
+        .obligations()
+        .first()
+        .map(|obligation| obligation.declaration().to_owned())
+        .unwrap_or_default();
+    assert!(identity.starts_with("sha256:"), "{identity}");
+    for obligation in result.obligations() {
+        assert_eq!(obligation.declaration(), identity);
+        assert_eq!(obligation.predicate(), identity);
+    }
+    let source = "fn f takes {n: I32} returns r: I32 do \
+         let c be fn takes {x: I32} returns s: I32 requires Ordered.greater(x 0i32) \
+         do return x endfn endlet return c(n) endfn\n";
+    assert_eq!(
+        faults(source),
+        [(DiagnosticCode::ContractUnproved, at(source, "c(n)", 0))]
+    );
+    assert_eq!(obligations(source), [unknown(REQUIRES)]);
+}
+
+/// Any other use of an anonymous callable with a bare `requires` converts
+/// it to a callable type, which keeps no obligation: a capture of its name
+/// as much as an argument.
+#[test]
+fn an_anonymous_callable_keeps_no_obligation_as_a_value() {
+    let apply =
+        "fn apply takes {f: Fn({I32} I32)} returns r: I32 do return f(1i32) endfn\n";
+    let closure = "fn takes {x: I32} returns s: I32 requires Ordered.greater(x 0i32) do return x endfn";
+    let source =
+        format!("{apply}fn main returns r: I32 do return apply({closure}) endfn\n");
+    assert_eq!(
+        faults(&source),
+        [(
+            DiagnosticCode::ContractObligationLost,
+            at(&source, closure, 0)
+        )]
+    );
+    let source = format!(
+        "fn main returns r: I32 do let c be {closure} endlet \
+         let g be fn returns t: I32 do return c(1i32) endfn endlet return g() endfn\n"
+    );
+    let call = at(&source, "c(1i32)", 0);
+    assert_eq!(
+        faults(&source),
+        [(
+            DiagnosticCode::ContractObligationLost,
+            vibra_diagnostics::ByteSpan::new(call.start(), call.start() + 1)
+        )]
+    );
+    let source = format!(
+        "{POSITIVE}fn applyP takes {{f: Fn({{Positive}} I32)}} returns r: I32 do \
+         return f(Positive(1i32)) endfn\n\
+         fn main returns r: I32 do \
+         return applyP(fn takes {{Positive(raw): Positive}} returns s: I32 \
+         requires isPositive(raw) do return raw endfn) endfn\n"
+    );
+    assert_eq!(faults(&source), []);
+}
+
+/// A `where` operand is a function value of `Fn({R} Bool)`: a bare
+/// `requires` on it is lost, named or anonymous, and an anonymous one's
+/// `ensures` and calls state obligations for the type.
+#[test]
+fn a_where_operand_is_a_function_value() {
+    let construct =
+        "fn main returns r: I32 do let Pos(x) be Pos(1i32) endlet return x endfn\n";
+    let source = format!(
+        "type Pos of I32 where isPos endtype\n\
+         fn isPos takes {{v: I32}} returns b: Bool requires Ordered.greater(v 0i32) \
+         do return Bool.true() endfn\n{construct}"
+    );
+    assert_eq!(
+        faults(&source),
+        [(
+            DiagnosticCode::ContractObligationLost,
+            at(&source, "isPos", 0)
+        )]
+    );
+    let closure = "fn takes {v: I32} returns b: Bool requires Ordered.greater(v 0i32) \
+                   do return Bool.true() endfn";
+    let source = format!("type Pos of I32 where {closure} endtype\n{construct}");
+    assert_eq!(
+        faults(&source),
+        [(
+            DiagnosticCode::ContractObligationLost,
+            at(&source, closure, 0)
+        )]
+    );
+    let source = format!(
+        "{POS}type Pos of I32 where fn takes {{v: I32}} returns b: Bool \
+         do return Ordered.greater(pos(v) 0i32) endfn endtype\n{construct}"
+    );
+    assert_eq!(
+        faults(&source),
+        [(DiagnosticCode::ContractUnproved, at(&source, "pos(v)", 0))]
+    );
+    let source = format!(
+        "type Pos of I32 where fn takes {{v: I32}} returns b: Bool \
+         ensures Ordered.greater(v 5i32) do return Ordered.greater(v 0i32) endfn endtype\n{construct}"
+    );
+    assert_eq!(
+        faults(&source),
+        [(
+            DiagnosticCode::ContractUnproved,
+            at(&source, "Ordered.greater(v 5i32)", 0)
+        )]
+    );
+    let source = format!(
+        "type Pos of I32 where fn takes {{v: I32}} returns b: Bool \
+         requires Ordered.greater(v 0i32) else Bool.false() ensures b \
+         do return Bool.true() endfn endtype\n{construct}"
+    );
+    assert_eq!(faults(&source), []);
+    assert_eq!(
+        super::run(&source).as_deref(),
+        Ok(super::value("i32", "1i32").as_str())
+    );
+}
+
+/// A member of an implementation is identified by its block's identity,
+/// `.`, and its name: the `@types.v2` callables list it, and the obligation
+/// of its copied guard belongs to it.
+#[test]
+fn an_implementation_member_has_its_blocks_identity_and_its_name() {
+    let contract = sized("ensures Ordered.greater(r 0i32)", &[("A", "return m")]);
+    let source = format!(
+        "{contract}fn main returns r: I32 do return Sized.size(A(1i32) 1i32) endfn\n"
+    );
+    let block = vibra_resolve::implementation_identity(
+        super::super::SOURCE_PACKAGE,
+        super::super::SOURCE_VERSION,
+        super::super::SOURCE_MODULE,
+        "A",
+        "Sized",
+    );
+    let member = format!("{}.size", block.as_str());
+    let checked = check_source(SOURCE, &source);
+    let ensures = checked
+        .obligations()
+        .iter()
+        .find(|obligation| obligation.kind() == ObligationKind::Ensures)
+        .map(|obligation| obligation.declaration().to_owned());
+    assert_eq!(ensures.as_deref(), Some(member.as_str()));
+    let document = checked.types_document().unwrap_or_default();
+    assert!(
+        document.contains(&format!("callables: [{{declaration: \"{member}\""))
+            || document.contains(&format!(" {{declaration: \"{member}\" signature:")),
+        "{document}"
     );
 }

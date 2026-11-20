@@ -488,6 +488,8 @@ pub fn closure(
             captures: types,
             defaults: Vec::new(),
             body,
+            entry_guard: None,
+            exit_guard: None,
         }),
         captures: nodes,
     })

@@ -2,18 +2,11 @@ id = "V2-TYPE-GENERIC-bound-open-choice-linked"
 rule = "V2-TYPE-GENERIC-bound-open-choice-linked"
 profile = "staticV2"
 operation = "workspaceCheck"
-description = "02-type-system.md#bounds: an associated type the evidence leaves open determines no parameter a label names, so the argument is @type.unsatisfiedBound, related to the bound"
+description = "02-type-system.md#bounds: an associated type the evidence leaves open is abstract, and it determines the parameter a label names as itself"
 
 [inputs]
 tree = "tree"
 project = "tree/project.vibon"
 
 [expect]
-verdict = "refuted"
-
-[[expect.diagnostics]]
-code = "@type.unsatisfiedBound"
-level = "@error"
-source = "src/app/main.vib"
-span = { start = 240, end = 241 }
-related = [{ source = "src/app/main.vib", span = { start = 108, end = 121 } }]
+verdict = "accepted"

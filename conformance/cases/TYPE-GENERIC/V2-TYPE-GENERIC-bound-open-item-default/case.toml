@@ -1,0 +1,12 @@
+id = "V2-TYPE-GENERIC-bound-open-item-default"
+rule = "V2-TYPE-GENERIC-bound-open-item-default"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#bounds: a default member whose own bound leaves an associated type open checks with that type abstract"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

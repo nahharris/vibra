@@ -1,0 +1,17 @@
+fn main returns r: I32 do return 1i32 endfn
+
+fn needsItem(T I)
+  takes {x: I}
+  returns r: Void
+  given {T: Ordered I: Iter(Item: T)}
+  do
+    return void
+endfn
+
+fn outer(I)
+  takes {x: I}
+  returns r: Void
+  given {I: Iter}
+  do
+    return needsItem(x)
+endfn

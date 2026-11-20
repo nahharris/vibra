@@ -1,0 +1,2 @@
+fn f takes {v: {a: I32 a: I32}} returns r: I32 do return 1i32 endfn
+fn main returns r: I32 do return 1i32 endfn

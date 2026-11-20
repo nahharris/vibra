@@ -27,11 +27,12 @@
 //! program.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
 use vibra_diagnostics::{ByteSpan, DiagnosticCode};
 use vibra_ir::{
-    Arguments, CallTarget, Constant, Construction, Expr, Library, MatchArm, Node,
-    Pattern, Type, TypeId, Value,
+    Arguments, CallTarget, ClosureBody, Constant, Construction, Expr, Library,
+    MatchArm, Node, Pattern, Type, TypeId, Value,
 };
 
 use super::super::callables::substitute;
@@ -85,9 +86,23 @@ struct Guarded<'v> {
     ensures_certified: bool,
     result_name: String,
     result_type: Type,
+    /// Whether it is an anonymous callable, whose `identity` is the
+    /// declaration it is written in.
+    anonymous: bool,
     /// For a member of an implementation whose guards are its contract
     /// member's: the module of the interface and the contract member's name.
     contract: Option<(usize, ByteSpan)>,
+}
+
+impl Guarded<'_> {
+    /// How a message names it.
+    fn shown(&self) -> String {
+        if self.anonymous {
+            "the anonymous callable".to_owned()
+        } else {
+            format!("`{}`", self.qualified)
+        }
+    }
 }
 
 /// What the discharge reads of one type with a bare or a fallible `where`.
@@ -149,6 +164,8 @@ struct Found {
 /// One exit of a body with a bare `ensures`.
 #[derive(Debug)]
 struct Exit {
+    /// The callable it leaves, by checked index.
+    function: usize,
     span: ByteSpan,
     verdict: Verdict,
     through_try: bool,
@@ -192,6 +209,8 @@ enum Decided {
 struct Walked {
     found: Vec<Found>,
     exits: Vec<Exit>,
+    /// The callables with a guard whose activation the walk went through.
+    started: Vec<usize>,
     lost: Vec<(ByteSpan, usize)>,
 }
 
@@ -213,6 +232,10 @@ struct Prover<'v> {
     /// a closed receiver, by interface, interface arguments, receiver, and
     /// member name.
     members: &'v [(TypeId, Vec<Type>, Type, String, usize)],
+    /// The entry a call of a contract member at any other receiver is
+    /// decided from, by interface and member name: the default body, or
+    /// the abstract member's own guards.
+    contracts: BTreeMap<(TypeId, String), usize>,
 }
 
 /// A step of a walk.
@@ -229,20 +252,54 @@ enum Task<'n> {
     Return(&'n Node, ByteSpan),
     Try(ByteSpan),
     Lost(ByteSpan, usize),
+    /// A node visited where it does not convert an anonymous callable.
+    Held(&'n Node),
+    /// A read that may convert an anonymous callable with a guard.
+    Read(&'n Node),
 }
 
 /// Discharges every bare-guard obligation of the local declarations.
 pub(super) fn discharge(
     context: &mut Context<'_, '_>,
-    certified: &super::Certified,
+    (certified, closure_certified, contract_certified): (
+        &super::Certified,
+        &super::ClosureCertified,
+        &super::ContractCertified,
+    ),
     members: &[(TypeId, Vec<Type>, Type, String, usize)],
     evaluator: &mut Evaluator<'_>,
 ) {
     let inputs = context.inputs;
+    let mut vocabulary = vocabulary(context);
+    let mut guarded = guarded(context, certified);
+    // Each anonymous callable with a guard is numbered after every checked
+    // entry.
+    let (anonymous, keys, defaults) =
+        closures(context, closure_certified, context.standings.len());
+    guarded.extend(anonymous);
+    // Each abstract contract member with a bare `requires` is numbered
+    // after them.
+    let base = context.standings.len() + keys.len();
+    let (abstract_members, contracts) = contracts(context, contract_certified, base);
+    for (entry, data) in &abstract_members {
+        if let Some(contract) = context
+            .inputs
+            .contracts
+            .values()
+            .find(|contract| contract.identity == data.identity)
+        {
+            vocabulary
+                .defaults
+                .insert(*entry, contract.defaults.clone());
+        }
+    }
+    guarded.extend(abstract_members);
+    vocabulary.closures = keys;
+    vocabulary.defaults.extend(defaults);
     let mut prover = Prover {
         terms: Terms::default(),
-        vocabulary: vocabulary(context),
-        guarded: guarded(context, certified),
+        vocabulary,
+        guarded,
         invariants: invariants(context),
         declarations: Vec::new(),
         owners: BTreeMap::new(),
@@ -251,6 +308,7 @@ pub(super) fn discharge(
         activations: 0,
         decided: BTreeMap::new(),
         members,
+        contracts,
     };
     let mut bodies = Vec::new();
     for (index, checked) in inputs.functions {
@@ -332,6 +390,26 @@ pub(super) fn discharge(
             }
         }
     }
+    // A `where` operand is a function value of `Fn({R} Bool)`: it converts
+    // what it names, and an anonymous one is an activation of its own.
+    for (index, checked) in inputs.invariants {
+        let key = Owner::Type(*index);
+        let Some((module, identity)) = context.owner(key) else {
+            continue;
+        };
+        if !context.local(module) {
+            continue;
+        }
+        let owner = prover.declare(key, module, identity);
+        bodies.push(Body {
+            owner,
+            function: None,
+            node: &checked.operand,
+            module,
+            copied: false,
+            exits: false,
+        });
+    }
     // The proven `ensures`, as a least fixed point.
     let ensured = prover
         .guarded
@@ -339,20 +417,34 @@ pub(super) fn discharge(
         .filter(|(_, data)| data.ensures.is_some() && data.ensures_certified)
         .map(|(entry, _)| *entry)
         .collect::<BTreeSet<_>>();
+    // A body is walked for them when its own `ensures` or that of an
+    // anonymous callable in it is one of them.
+    let anonymous = ensured
+        .iter()
+        .any(|entry| prover.guarded.get(entry).is_some_and(|data| data.anonymous));
     for _ in 0..=ensured.len() {
         let mut proven = BTreeSet::new();
-        for body in bodies.iter().filter(|body| body.exits) {
-            let Some(function) = body.function.filter(|entry| ensured.contains(entry))
-            else {
-                continue;
-            };
-            let walked = prover.walk(*body, evaluator, false);
-            if walked
-                .exits
-                .iter()
-                .all(|exit| matches!(exit.verdict, Verdict::Passed(_)))
+        for body in &bodies {
+            if !anonymous
+                && !body
+                    .exits
+                    .then_some(body.function)
+                    .flatten()
+                    .is_some_and(|entry| ensured.contains(&entry))
             {
-                proven.insert(function);
+                continue;
+            }
+            let walked = prover.walk(*body, evaluator, false);
+            for function in walked.started {
+                if ensured.contains(&function)
+                    && walked
+                        .exits
+                        .iter()
+                        .filter(|exit| exit.function == function)
+                        .all(|exit| matches!(exit.verdict, Verdict::Passed(_)))
+                {
+                    proven.insert(function);
+                }
             }
         }
         if proven == prover.proven {
@@ -367,10 +459,11 @@ pub(super) fn discharge(
         let walked = prover.walk(*body, evaluator, true);
         found.extend(walked.found);
         lost.extend(walked.lost.into_iter().map(|lost| (body.owner, lost)));
-        if body.exits
-            && let Some(function) = body.function
-        {
-            exits.entry(function).or_default().extend(walked.exits);
+        for function in walked.started {
+            exits.entry(function).or_default();
+        }
+        for exit in walked.exits {
+            exits.entry(exit.function).or_default().push(exit);
         }
     }
     prover.unwalked(context, &mut found, evaluator);
@@ -461,6 +554,36 @@ impl<'v> Prover<'v> {
                     };
                     (ObligationKind::Where, *span, Guard::Type(*ty), verdict)
                 }
+                Site::Contract {
+                    interface,
+                    member,
+                    span,
+                } => {
+                    let Some(entry) = inputs
+                        .program
+                        .interfaces
+                        .get(*interface)
+                        .and_then(|data| data.id.clone())
+                        .and_then(|id| self.contracts.get(&(id, member.clone())))
+                        .copied()
+                    else {
+                        continue;
+                    };
+                    let Some(data) = self.guarded.get(&entry) else {
+                        continue;
+                    };
+                    let verdict = if data.requires_certified {
+                        Verdict::Unknown
+                    } else {
+                        Verdict::Unsupported
+                    };
+                    (
+                        ObligationKind::Requires,
+                        *span,
+                        Guard::Function(entry),
+                        verdict,
+                    )
+                }
                 Site::Pattern { .. } => continue,
             };
             if found.iter().any(|found| {
@@ -496,40 +619,82 @@ impl<'v> Prover<'v> {
         let mut walked = Walked::default();
         let mut env = Env::new(self.activation(), true);
         let mut facts = FactSet::default();
-        if let Some(data) = body.function.and_then(|entry| self.guarded.get(&entry))
-            && let Some(guard) = data.precondition
-        {
-            let (term, _) = facts::build(
-                &mut self.terms,
-                &self.vocabulary,
-                &mut env,
-                &guard.predicate,
-            );
-            facts.assume(
-                &mut self.terms,
-                &self.vocabulary,
-                term,
-                true,
-                Evidence::of(SUBSTITUTION),
-            );
+        if let Some(function) = body.function {
+            self.precondition(&mut env, &mut facts, function);
         }
+        // The callable whose exits the `return`s of the activation walked
+        // are.
+        let mut current = body.function.filter(|_| body.exits);
+        walked.started.extend(current);
         let mut marks = Vec::new();
-        let mut closures: Vec<&'v Node> = Vec::new();
+        let mut closures: Vec<&'v ClosureBody> = Vec::new();
+        let mut guards: Vec<&'v Node> = Vec::new();
+        let mut seen = BTreeSet::new();
         let mut pending = vec![Task::Visit(body.node)];
         loop {
             let Some(task) = pending.pop() else {
-                // Each anonymous callable is an activation of its own, with
-                // no fact of the body it is written in.
+                // Each anonymous callable, and each of its guards, is an
+                // activation of its own, with no fact of the body it is
+                // written in. A generic one used in several places is
+                // walked once.
+                env = Env::new(self.activation(), true);
+                facts = FactSet::default();
+                if let Some(guard) = guards.pop() {
+                    current = None;
+                    pending.push(Task::Visit(guard));
+                    continue;
+                }
                 let Some(closure) = closures.pop() else {
                     break;
                 };
-                env = Env::new(self.activation(), true);
-                facts = FactSet::default();
-                pending.push(Task::Visit(closure));
+                let origin = &closure.body.origin;
+                let key = (Arc::from(origin.source_id()), origin.span());
+                if !seen.insert(key.clone()) {
+                    continue;
+                }
+                current = self.vocabulary.closures.get(&key).copied();
+                if let Some(function) = current {
+                    self.precondition(&mut env, &mut facts, function);
+                    walked.started.push(function);
+                    if let Some(data) = self.guarded.get(&function) {
+                        let bare = data
+                            .requires
+                            .iter()
+                            .chain(data.ensures.iter().map(|(_, guard)| guard))
+                            .map(|guard| &guard.predicate);
+                        guards.extend(bare);
+                    }
+                    let checked = closure
+                        .entry_guard
+                        .iter()
+                        .chain(closure.exit_guard.iter().map(|exit| &exit.guard));
+                    for guard in checked {
+                        guards.push(&guard.predicate);
+                        guards.push(&guard.consequence);
+                    }
+                }
+                pending.push(Task::Visit(&closure.body));
                 continue;
             };
             match task {
-                Task::Visit(node) => visit(node, &mut pending, &mut closures),
+                Task::Visit(node) => visit(node, true, &mut pending, &mut closures),
+                Task::Held(node) => visit(node, false, &mut pending, &mut closures),
+                Task::Read(node) => {
+                    if last {
+                        let (term, _) = facts::build(
+                            &mut self.terms,
+                            &self.vocabulary,
+                            &mut env,
+                            node,
+                        );
+                        if let Some(Data::Closure(closure)) =
+                            self.terms.get(term).cloned()
+                            && !self.convertible(closure)
+                        {
+                            walked.lost.push((node.origin.span(), closure));
+                        }
+                    }
+                }
                 Task::Enter => marks.push(env.mark(&facts)),
                 Task::Leave => {
                     if let Some(mark) = marks.pop() {
@@ -597,11 +762,11 @@ impl<'v> Prover<'v> {
                     }
                 }
                 Task::Return(value, span) => {
-                    if body.exits
+                    if let Some(function) = current
                         && let Some(exit) = self.exit(
                             &mut env,
                             &facts,
-                            body,
+                            (body, function),
                             Some(value),
                             span,
                             evaluator,
@@ -611,9 +776,15 @@ impl<'v> Prover<'v> {
                     }
                 }
                 Task::Try(span) => {
-                    if body.exits
-                        && let Some(exit) =
-                            self.exit(&mut env, &facts, body, None, span, evaluator)
+                    if let Some(function) = current
+                        && let Some(exit) = self.exit(
+                            &mut env,
+                            &facts,
+                            (body, function),
+                            None,
+                            span,
+                            evaluator,
+                        )
                     {
                         walked.exits.push(exit);
                     }
@@ -757,9 +928,11 @@ impl<'v> Prover<'v> {
             return None;
         };
         // A contract member called at a closed receiver is the member the
-        // receiver's implementation supplies, with the contract's guard.
+        // receiver's implementation supplies, with the contract's guard. A
+        // call of a value is known when its callee is an anonymous callable
+        // with a guard.
         let function = match target {
-            CallTarget::Direct { function, .. } => function,
+            CallTarget::Direct { function, .. } => *function,
             CallTarget::Contract(call) if call.member_arguments.is_empty() => self
                 .members
                 .iter()
@@ -769,9 +942,26 @@ impl<'v> Prover<'v> {
                         && *receiver == call.receiver
                         && *member == call.member
                 })
-                .map(|(.., entry)| entry)?,
-            CallTarget::Contract(_) | CallTarget::Value(_) => return None,
+                .map(|(.., entry)| *entry)
+                .or_else(|| {
+                    self.contracts
+                        .get(&(call.interface.clone(), call.member.clone()))
+                        .copied()
+                })?,
+            CallTarget::Contract(call) => self
+                .contracts
+                .get(&(call.interface.clone(), call.member.clone()))
+                .copied()?,
+            CallTarget::Value(_) => {
+                let (call, _) =
+                    facts::build(&mut self.terms, &self.vocabulary, env, node);
+                match self.terms.get(call) {
+                    Some(Data::Call(Callee::Function(closure, _), _)) => *closure,
+                    _ => return None,
+                }
+            }
         };
+        let function = &function;
         let data = self.guarded.get(function)?;
         let guard = data.requires?;
         let span = node.origin.span();
@@ -808,6 +998,25 @@ impl<'v> Prover<'v> {
                 continue;
             };
             slots.insert(data.positional + slot, (*term, written.origin.span()));
+        }
+        // A contract call's term holds each label it does not write as an
+        // unknown; the callee's default is the argument it passes.
+        if let CallTarget::Contract(_) = target
+            && let Some(defaults) = self.vocabulary.defaults.get(function)
+        {
+            for (label, written) in &arguments.labelled {
+                if !matches!(written.expr, Expr::Default(_)) {
+                    continue;
+                }
+                let (Some(slot), Some((_, constant))) = (
+                    data.labels.iter().position(|name| name == label),
+                    defaults.iter().find(|(name, _)| name == label),
+                ) else {
+                    continue;
+                };
+                let term = self.terms.intern(Data::Constant(constant.clone()));
+                slots.insert(data.positional + slot, (term, written.origin.span()));
+            }
         }
         let names = data.names.clone();
         let types = data.types.clone();
@@ -1024,12 +1233,12 @@ impl<'v> Prover<'v> {
         &mut self,
         env: &mut Env,
         facts: &FactSet,
-        body: Body<'v>,
+        (body, function): (Body<'v>, usize),
         value: Option<&Node>,
         span: ByteSpan,
         evaluator: &mut Evaluator<'_>,
     ) -> Option<Exit> {
-        let data = self.guarded.get(&body.function?)?;
+        let data = self.guarded.get(&function)?;
         let (slot, guard) = data.ensures?;
         if !data.ensures_certified {
             return None;
@@ -1093,10 +1302,33 @@ impl<'v> Prover<'v> {
             }
         };
         Some(Exit {
+            function,
             span,
             verdict,
             through_try: value.is_none(),
         })
+    }
+
+    /// Assumes in `facts` the `requires` of the function at checked index
+    /// `function`, whose activation `env` is: the body runs only when it
+    /// holds.
+    fn precondition(&mut self, env: &mut Env, facts: &mut FactSet, function: usize) {
+        let Some(guard) = self
+            .guarded
+            .get(&function)
+            .and_then(|data| data.precondition)
+        else {
+            return;
+        };
+        let (term, _) =
+            facts::build(&mut self.terms, &self.vocabulary, env, &guard.predicate);
+        facts.assume(
+            &mut self.terms,
+            &self.vocabulary,
+            term,
+            true,
+            Evidence::of(SUBSTITUTION),
+        );
     }
 
     /// Decides `predicate` by evaluation (`GUARD-1`) when every slot it
@@ -1310,11 +1542,11 @@ impl<'v> Prover<'v> {
                 module,
                 *span,
                 format!(
-                    "`{}` becomes a callable value here, which keeps no obligation, \
+                    "{} becomes a callable value here, which keeps no obligation, \
                      and the types of its parameters do not establish its bare \
                      `requires`; give the guard an `else`, or take a parameter of a \
                      type whose invariant states it",
-                    data.qualified
+                    data.shown()
                 ),
             );
             if let Some(guard) = data.requires {
@@ -1348,7 +1580,7 @@ impl<'v> Prover<'v> {
                     data.module,
                     guard.span,
                     data.name,
-                    format!("the bare `requires` of `{}`", data.qualified),
+                    format!("the bare `requires` of {}", data.shown()),
                 )
             }
             Guard::Type(ty) => {
@@ -1522,9 +1754,9 @@ impl<'v> Prover<'v> {
                 module,
                 guard.span,
                 format!(
-                    "the bare `ensures` of `{}` is false of the value this `return` \
+                    "the bare `ensures` of {} is false of the value this `return` \
                      returns",
-                    data.qualified
+                    data.shown()
                 ),
             );
             let diagnostic = context.program().related(
@@ -1572,9 +1804,9 @@ impl<'v> Prover<'v> {
                 module,
                 guard.span,
                 format!(
-                    "the predicate `{text}` of the bare `ensures` of `{}` is not \
+                    "the predicate `{text}` of the bare `ensures` of {} is not \
                      established at every exit of the body by the discharge rules",
-                    data.qualified
+                    data.shown()
                 ),
             );
             let mut diagnostic = context.program().related(
@@ -1886,17 +2118,22 @@ fn with_constants(node: &Node, values: &BTreeMap<usize, Constant>) -> Node {
 }
 
 /// Pushes the steps of a walk of `node`.
+///
+/// A read of a value that is an anonymous callable with a guard converts it
+/// to a callable value, unless the read is the callee of a call or the
+/// initializer of a `let`, which names it (`converts` is false).
 fn visit<'n>(
     node: &'n Node,
+    converts: bool,
     pending: &mut Vec<Task<'n>>,
-    closures: &mut Vec<&'n Node>,
+    closures: &mut Vec<&'n ClosureBody>,
 ) {
     match &node.expr {
         Expr::Let { slot, value, body } => {
             pending.push(Task::Leave);
             pending.push(Task::Visit(body));
             pending.push(Task::Bind(*slot, value));
-            pending.push(Task::Visit(value));
+            pending.push(Task::Held(value));
             pending.push(Task::Enter);
         }
         Expr::LetElse {
@@ -1949,7 +2186,7 @@ fn visit<'n>(
                 .collect::<Vec<_>>();
             pending.extend(written.into_iter().rev().map(Task::Visit));
             if let CallTarget::Value(callee) = target {
-                pending.push(Task::Visit(callee));
+                pending.push(Task::Held(callee));
             }
         }
         Expr::Construct { .. } => {
@@ -1968,9 +2205,13 @@ fn visit<'n>(
             pending.push(Task::Lost(node.origin.span(), *function));
         }
         Expr::Closure { closure, captures } => {
-            closures.push(&closure.body);
+            if converts {
+                pending.push(Task::Read(node));
+            }
+            closures.push(closure);
             pending.extend(captures.iter().rev().map(Task::Visit));
         }
+        Expr::Variable { .. } if converts => pending.push(Task::Read(node)),
         _ => pending.extend(operands(node).into_iter().rev().map(Task::Visit)),
     }
 }
@@ -2141,6 +2382,7 @@ fn guarded<'v>(
                     .map(|(name, _)| name.text().to_owned())
                     .unwrap_or_default(),
                 result_type: signature.result.clone(),
+                anonymous: false,
                 contract: data.implements.and_then(|interface| {
                     let interface = program.interfaces.get(interface)?;
                     let member =
@@ -2153,6 +2395,162 @@ fn guarded<'v>(
         );
     }
     out
+}
+
+/// What the discharge reads of each anonymous callable with a guard, by the
+/// index it is given after the `base` checked entries; that index by the
+/// source and the span of the callable's body; and its labelled defaults by
+/// that index.
+type Closures<'v> = (
+    BTreeMap<usize, Guarded<'v>>,
+    BTreeMap<(Arc<str>, ByteSpan), usize>,
+    BTreeMap<usize, Vec<(String, Constant)>>,
+);
+
+fn closures<'v>(
+    context: &Context<'v, '_>,
+    certified: &super::ClosureCertified,
+    base: usize,
+) -> Closures<'v> {
+    let mut out = BTreeMap::new();
+    let mut keys = BTreeMap::new();
+    let mut defaults = BTreeMap::new();
+    for (owner, closures) in super::owners(context.inputs) {
+        let Some((_, identity)) = context.owner(owner) else {
+            continue;
+        };
+        for closure in closures {
+            if keys.contains_key(&closure.body) {
+                continue;
+            }
+            let at = base + keys.len();
+            keys.insert(closure.body.clone(), at);
+            defaults.insert(at, closure.defaults.clone());
+            let (entry_ok, exit_ok) =
+                certified.get(&closure.body).copied().unwrap_or_default();
+            let guards = &closure.guards;
+            let entry = match &guards.entry {
+                None => Entry::None,
+                Some(guard) if guard.consequence.is_none() => Entry::Bare,
+                Some(_) => Entry::Else,
+            };
+            let signature = &closure.signature;
+            let labels = signature
+                .labels
+                .entries()
+                .iter()
+                .map(|(label, _)| label.clone())
+                .collect::<Vec<_>>();
+            let mut types = signature.parameters.clone();
+            types.extend(signature.labels.entries().iter().map(|(_, ty)| ty.clone()));
+            out.insert(
+                at,
+                Guarded {
+                    module: closure.module,
+                    identity: identity.clone(),
+                    qualified: String::new(),
+                    name: closure.span,
+                    positional: signature.parameters.len(),
+                    labels,
+                    names: closure.names.clone(),
+                    types,
+                    entry,
+                    precondition: guards.entry.as_ref(),
+                    requires: guards
+                        .entry
+                        .as_ref()
+                        .filter(|guard| guard.consequence.is_none()),
+                    requires_certified: entry_ok,
+                    ensures: guards
+                        .exit
+                        .as_ref()
+                        .filter(|(_, guard)| guard.consequence.is_none())
+                        .map(|(slot, guard)| (*slot, guard)),
+                    ensures_certified: exit_ok,
+                    result_name: closure.result_name.clone(),
+                    result_type: signature.result.clone(),
+                    anonymous: true,
+                    contract: None,
+                },
+            );
+        }
+    }
+    (out, keys, defaults)
+}
+
+/// What the discharge reads of each abstract contract member with a bare
+/// `requires`, numbered from `base`, and the entry a call of each contract
+/// member at a receiver whose implementation member is not known is decided
+/// from: that one, or the default body's.
+fn contracts<'v>(
+    context: &Context<'v, '_>,
+    certified: &super::ContractCertified,
+    base: usize,
+) -> (
+    BTreeMap<usize, Guarded<'v>>,
+    BTreeMap<(TypeId, String), usize>,
+) {
+    let inputs = context.inputs;
+    let program = inputs.program;
+    let mut out = BTreeMap::new();
+    let mut entries = BTreeMap::new();
+    for interface in &program.interfaces {
+        let Some(id) = &interface.id else { continue };
+        for member in &interface.members {
+            let entry = member.default.and_then(|function| {
+                inputs.layout.functions.get(function).copied().flatten()
+            });
+            if let Some(entry) = entry {
+                entries.insert((id.clone(), member.name.clone()), entry);
+            }
+        }
+    }
+    for (key, contract) in inputs.contracts {
+        let Some(id) = program
+            .interfaces
+            .get(key.0)
+            .and_then(|data| data.id.clone())
+        else {
+            continue;
+        };
+        let Some(requires) = contract
+            .guards
+            .entry
+            .as_ref()
+            .filter(|guard| guard.consequence.is_none())
+        else {
+            continue;
+        };
+        let at = base + out.len();
+        let signature = &contract.signature;
+        let mut types = signature.parameters.clone();
+        types.extend(signature.labels.entries().iter().map(|(_, ty)| ty.clone()));
+        out.insert(
+            at,
+            Guarded {
+                module: contract.module,
+                identity: contract.identity.clone(),
+                qualified: contract.qualified.clone(),
+                name: contract.name,
+                positional: signature.parameters.len(),
+                labels: signature.labels.names().map(str::to_owned).collect(),
+                names: contract.names.clone(),
+                types,
+                entry: Entry::Bare,
+                precondition: Some(requires),
+                requires: Some(requires),
+                requires_certified: certified.get(key).copied().unwrap_or_default(),
+                ensures: None,
+                ensures_certified: false,
+                result_name: contract.result_name.clone(),
+                result_type: signature.result.clone(),
+                anonymous: false,
+                contract: None,
+            },
+        );
+        entries.insert((id, key.1.clone()), at);
+    }
+    (out, entries)
 }
 
 /// What the discharge reads of each type with an invariant, by identity.

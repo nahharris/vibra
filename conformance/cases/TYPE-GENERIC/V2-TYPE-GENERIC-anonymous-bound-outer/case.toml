@@ -1,0 +1,12 @@
+id = "V2-TYPE-GENERIC-anonymous-bound-outer"
+rule = "V2-TYPE-GENERIC-anonymous-bound-outer"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#generics: a bounded generic anonymous callable instantiated at a type parameter of the enclosing declaration is satisfied by that parameter's own bound"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

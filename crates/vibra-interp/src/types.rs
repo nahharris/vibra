@@ -294,60 +294,6 @@ fn own_type(set: &CheckedModuleSet, expr: &Expr) -> Result<Type, Halt> {
     })
 }
 
-/// Whether two types have the same outermost form.
-fn same_head(left: &Type, right: &Type) -> bool {
-    match (left, right) {
-        (Type::AtomSingleton(left), Type::AtomSingleton(right))
-        | (Type::Associated(left), Type::Associated(right)) => left == right,
-        (Type::List(_), Type::List(_)) => true,
-        (Type::Tuple(left), Type::Tuple(right)) => left.len() == right.len(),
-        (Type::Record(left), Type::Record(right)) => left.names().eq(right.names()),
-        (Type::Fn(left), Type::Fn(right)) => {
-            left.parameters.len() == right.parameters.len()
-                && left.labels.names().eq(right.labels.names())
-        }
-        (Type::Proc(left), Type::Proc(right)) => {
-            left.parameters.len() == right.parameters.len()
-                && left.labels.names().eq(right.labels.names())
-                && left.effects == right.effects
-        }
-        (Type::Intent(left), Type::Intent(right)) => left.effects == right.effects,
-        (Type::Declared(left, a), Type::Declared(right, b)) => {
-            left == right && a.len() == b.len()
-        }
-        (Type::Interface(left, a, x), Type::Interface(right, b, y)) => {
-            left == right && a.len() == b.len() && x.names().eq(y.names())
-        }
-        (left, right) => left.components().is_empty() && left == right,
-    }
-}
-
-/// Matches the open `pattern`, whose binder references are the variables
-/// of `assignment`, against the closed `actual`, extending `assignment`.
-pub(crate) fn match_type(
-    pattern: &Type,
-    actual: &Type,
-    assignment: &mut [Option<Type>],
-) -> bool {
-    if let Type::Binder(index) = pattern
-        && let Some(slot) = assignment.get_mut(*index)
-    {
-        return match slot {
-            Some(bound) => bound == actual,
-            None => {
-                *slot = Some(actual.clone());
-                true
-            }
-        };
-    }
-    same_head(pattern, actual)
-        && pattern
-            .components()
-            .into_iter()
-            .zip(actual.components())
-            .all(|(pattern, actual)| match_type(pattern, actual, assignment))
-}
-
 /// Whether `Self` occurs in `ty`.
 pub(crate) fn mentions_self(ty: &Type) -> bool {
     let mut found = false;

@@ -1,0 +1,10 @@
+interface Sized
+  fn size takes {value: Self} labelled {n: I32 be 1i32} returns r: I32 requires Ordered.greater(n 0i32) endfn
+endinterface
+type Wrap(T) of T
+  impl Sized
+    fn size takes {value: Self} labelled {n: I32 be 1i32} returns s: I32 do return n endfn
+  endimpl
+endtype
+fn measure(T) takes {t: T} returns r: I32 given {T: Sized} do return Sized.size(t n: 0i32) endfn
+fn main returns r: I32 do return measure(Wrap(1i32)) endfn

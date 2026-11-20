@@ -1,0 +1,19 @@
+id = "V2-CONTRACT-member-requires-open-refuted"
+rule = "V2-CONTRACT-member-requires-open-refuted"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#guards-and-callable-types: a contract member's bare requires false at a call at a bounded type parameter is @contract.refuted at the contract's predicate, related to the argument"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@contract.refuted"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 89, end = 112 }
+related = [{ source = "src/app/main.vib", span = { start = 333, end = 337 } }]

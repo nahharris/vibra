@@ -1,0 +1,7 @@
+interface Pick
+  fn pick takes {value: Self} labelled {other: Option(Self) be Option.none()} returns r: I32 endfn
+endinterface
+type A of I32
+  impl Pick fn pick takes {value: Self} labelled {other: Option(Self) be Option.none()} returns r: I32 do return 5i32 endfn endimpl
+endtype
+fn main returns r: I32 do return Pick.pick(A(1i32)) endfn

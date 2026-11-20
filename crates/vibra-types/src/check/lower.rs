@@ -23,8 +23,8 @@ use vibra_syntax::Document;
 
 use super::callables::fold;
 use super::contract::{
-    self, CheckedGuard, CheckedInvariant, Fold, Inputs, Owner, Predicate, Site,
-    anonymous_entries,
+    self, CheckedGuard, CheckedInvariant, ContractGuard, Fold, Inputs, Owner,
+    Predicate, Site, anonymous_entries,
 };
 use super::cycle::initializer_cycles;
 use super::declare::{BoundData, Entity, FnData, Program, TypeKind};
@@ -54,11 +54,18 @@ struct Pass {
     contract: Vec<Diagnostic>,
     /// The checked invariant of each type, by program index.
     invariants: BTreeMap<usize, CheckedInvariant>,
+    /// The guards of each abstract contract member, by interface and name.
+    contracts: BTreeMap<(usize, String), ContractGuard>,
     /// The error type of each type's `where … else`, by program index.
     errors: BTreeMap<usize, Type>,
     /// Every site of a bare-guard obligation or of a pattern a constant
     /// construction decides, with its module.
     sites: Vec<(usize, Owner, Site)>,
+    /// Each implementation member whose contract guards did not check under
+    /// its substitution: the fault, reported unless the contract member's
+    /// own declaration, in the interface's module and at the span given,
+    /// has an error.
+    unchecked: Vec<(Diagnostic, usize, ByteSpan)>,
 }
 
 fn layout(program: &Program<'_>) -> Layout {
@@ -90,6 +97,7 @@ fn check_bodies(
     documents: &[Document],
     layout: &Layout,
 ) -> Pass {
+    let (guard_faults, contracts) = abstract_guards(program, documents, layout);
     let mut pass = Pass {
         functions: BTreeMap::new(),
         values: BTreeMap::new(),
@@ -97,14 +105,13 @@ fn check_bodies(
         faults: BTreeMap::new(),
         references: BTreeMap::new(),
         instantiations: Vec::new(),
-        contract: [
-            abstract_defaults(program, documents, layout),
-            abstract_guards(program, documents, layout),
-        ]
-        .concat(),
+        contract: [abstract_defaults(program, documents, layout), guard_faults]
+            .concat(),
         invariants: BTreeMap::new(),
+        contracts,
         errors: BTreeMap::new(),
         sites: Vec::new(),
+        unchecked: Vec::new(),
     };
     invariants(program, documents, layout, &mut pass);
     for (index, data) in program.functions.iter().enumerate() {
@@ -142,9 +149,14 @@ fn check_bodies(
         let mut contract_sites = Vec::new();
         if let Some(interface) = data.implements {
             let mark = checker.sites.len();
-            if let Some((guards, slot_count)) =
-                contract_guards(program, documents, data, interface, &mut checker)
-            {
+            if let Some((guards, slot_count)) = contract_guards(
+                program,
+                documents,
+                data,
+                interface,
+                &mut checker,
+                &mut pass.unchecked,
+            ) {
                 checked.guards = guards;
                 checked.slot_count = slot_count;
             }
@@ -287,6 +299,12 @@ fn invariants(
         if let Some(error) = found.error {
             pass.errors.insert(index, error);
         }
+        pass.sites.extend(
+            checker
+                .sites
+                .drain(..)
+                .map(|site| (data.module, Owner::Type(index), site)),
+        );
         if let Some(checked) = found.checked {
             pass.invariants.insert(index, checked);
         }
@@ -440,13 +458,15 @@ fn abstract_defaults(
 
 /// The diagnostics of the parameter patterns and the guards of every
 /// abstract member of an interface outside the embedded library, each
-/// checked once with the interface's parameters and `Self` open.
+/// checked once with the interface's parameters and `Self` open, and the
+/// checked guards of each member that has any.
 fn abstract_guards(
     program: &Program<'_>,
     documents: &[Document],
     layout: &Layout,
-) -> Vec<Diagnostic> {
+) -> (Vec<Diagnostic>, BTreeMap<(usize, String), ContractGuard>) {
     let mut diagnostics = Vec::new();
+    let mut contracts = BTreeMap::new();
     for (index, interface) in program.interfaces.iter().enumerate() {
         let module = program.modules.get(interface.module);
         if module.is_none_or(|module| module.embedded) {
@@ -484,17 +504,66 @@ fn abstract_guards(
                 self_interface: Some(index),
                 result_span: None,
             };
-            checker.abstract_guards(
+            let guards = checker.abstract_guards(
                 &member.signature,
                 &patterns,
                 &labelled,
-                scope,
+                scope.clone(),
                 &views,
             );
             diagnostics.append(&mut checker.diagnostics);
+            // The defaults' own faults are reported where they are checked
+            // for their diagnostics.
+            let defaults = checker.contract_defaults(
+                &member.signature,
+                &patterns,
+                &view.labelled(),
+                scope,
+            );
+            checker.diagnostics.clear();
+            let Some(guards) = guards.filter(|guards| guards.entry.is_some()) else {
+                continue;
+            };
+            let Some(source) = program.modules.get(interface.module) else {
+                continue;
+            };
+            let mut names = view
+                .takes()
+                .into_iter()
+                .map(|(pattern, _)| {
+                    let span = pattern.node().span();
+                    text.get(span.start()..span.end())
+                        .unwrap_or_default()
+                        .to_owned()
+                })
+                .collect::<Vec<_>>();
+            names.extend(member.signature.labels.names().map(str::to_owned));
+            contracts.insert(
+                (index, member.name.clone()),
+                ContractGuard {
+                    module: interface.module,
+                    identity: program.identity_of(
+                        &source.path,
+                        source.embedded,
+                        &interface.name,
+                        "@fn",
+                        &member.name,
+                    ),
+                    qualified: format!("{}.{}", interface.name, member.name),
+                    name: member.span,
+                    signature: member.signature.clone(),
+                    names,
+                    result_name: view
+                        .result()
+                        .map(|(name, _)| name.text().to_owned())
+                        .unwrap_or_default(),
+                    defaults,
+                    guards,
+                },
+            );
         }
     }
-    diagnostics
+    (diagnostics, contracts)
 }
 
 /// The guards of the contract member that `data`, a member of an
@@ -502,13 +571,16 @@ fn abstract_guards(
 /// checked, implements: the contract's guards checked under the
 /// implementation's substitution, and the slot count with them. `None`
 /// when the contract member has no guard. A contract guard that does not
-/// check under the substitution is `@tool.unavailable` at the member.
+/// check under the substitution is the contract's own fault, reported where
+/// the contract is declared; `unchecked` keeps `@tool.unavailable` at the
+/// member for the case where the contract has none.
 fn contract_guards<'a>(
     program: &Program<'a>,
     documents: &'a [Document],
     data: &FnData<'a>,
     interface: usize,
     checker: &mut BodyChecker<'_, 'a>,
+    unchecked: &mut Vec<(Diagnostic, usize, ByteSpan)>,
 ) -> Option<(super::contract::Guards, usize)> {
     let interface_data = program.interfaces.get(interface)?;
     let contract =
@@ -550,12 +622,27 @@ fn contract_guards<'a>(
             .view
             .name()
             .map_or_else(|| data.view.construct().span(), |name| name.span());
-        checker.diagnostics.push(Diagnostic::new(
+        let diagnostic = Diagnostic::new(
             DiagnosticCode::ToolUnavailable,
             span,
             "the contract member's guards under this implementation's substitution are \
              not supported by this checker yet",
-        ));
+        )
+        .with_source_id(
+            program
+                .modules
+                .get(data.module)
+                .map_or("", |module| module.source_id.as_ref()),
+        );
+        let local = program
+            .modules
+            .get(data.module)
+            .is_some_and(|module| !module.embedded);
+        unchecked.extend(local.then_some((
+            diagnostic,
+            interface_data.module,
+            contract.construct().span(),
+        )));
     }
     found
 }
@@ -798,6 +885,7 @@ pub(crate) fn check_program(
         values: &pass.values,
         tests: &pass.tests,
         invariants: &pass.invariants,
+        contracts: &pass.contracts,
         sites: &pass.sites,
     };
     let reviewed = contract::review(&inputs, || {
@@ -816,6 +904,21 @@ pub(crate) fn check_program(
     }
     diagnostics.extend(pass.contract.iter().cloned());
     diagnostics.extend(reviewed.diagnostics);
+    for (diagnostic, module, contract) in &pass.unchecked {
+        let source = program
+            .modules
+            .get(*module)
+            .map(|data| data.source_id.as_ref());
+        let faulty = diagnostics.iter().any(|reported| {
+            reported.is_error()
+                && reported.source_id() == source
+                && reported.primary_span().start() >= contract.start()
+                && reported.primary_span().end() <= contract.end()
+        });
+        if !faulty {
+            diagnostics.push(diagnostic.clone());
+        }
+    }
     let mut obligations = reviewed.obligations;
     obligations.sort_by(|left, right| {
         let key = |obligation: &Obligation| {
@@ -1342,8 +1445,8 @@ fn assemble(
             )?,
             defaults: closure.defaults.clone(),
             body: FunctionBody::Expr(Box::new(closure.body.clone())),
-            entry_guard: None,
-            exit_guard: None,
+            entry_guard: closure.entry_guard.clone(),
+            exit_guard: closure.exit_guard.clone(),
             slot_count: closure.slot_count,
             origin: origin(program, data.module, span),
         });
@@ -1662,10 +1765,7 @@ fn types_document(program: &Program<'_>, obligations: &[Obligation]) -> Option<S
     }
     let mut callables = Vec::new();
     for (index, data) in program.functions.iter().enumerate() {
-        if !local(data.module)
-            || !program.supported_fn(index)
-            || data.implements.is_some()
-        {
+        if !local(data.module) || !program.supported_fn(index) {
             continue;
         }
         let signature = data.signature.clone()?;

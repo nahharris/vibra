@@ -1,0 +1,19 @@
+id = "V2-CONTRACT-member-requires-open-unproved"
+rule = "V2-CONTRACT-member-requires-open-unproved"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#guards-and-callable-types: a contract member's bare requires the discharge rules do not establish at a call at a bounded type parameter is @contract.unproved at the call, related to the contract member"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "unknown"
+
+[[expect.diagnostics]]
+code = "@contract.unproved"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 327, end = 342 }
+related = [{ source = "src/app/main.vib", span = { start = 21, end = 25 } }]

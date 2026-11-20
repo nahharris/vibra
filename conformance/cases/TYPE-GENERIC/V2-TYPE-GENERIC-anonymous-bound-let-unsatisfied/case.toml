@@ -1,0 +1,19 @@
+id = "V2-TYPE-GENERIC-anonymous-bound-let-unsatisfied"
+rule = "V2-TYPE-GENERIC-anonymous-bound-let-unsatisfied"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#generics: a call of a let-bound generic anonymous callable at a type that does not satisfy its bound is @type.unsatisfiedBound at the argument that fixes it, related to the bound"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.unsatisfiedBound"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 219, end = 228 }
+related = [{ source = "src/app/main.vib", span = { start = 113, end = 120 } }]

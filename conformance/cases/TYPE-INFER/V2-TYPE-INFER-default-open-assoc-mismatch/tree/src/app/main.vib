@@ -1,0 +1,5 @@
+interface Bag
+  type Item endtype
+  fn count takes {value: Self} labelled {items: List(Item) be [1u8]} returns r: I32 do return 3i32 endfn
+endinterface
+fn main returns r: I32 do return 1i32 endfn

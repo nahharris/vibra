@@ -1,0 +1,19 @@
+id = "V2-CONTRACT-where-named-requires-lost"
+rule = "V2-CONTRACT-where-named-requires-lost"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#type-invariants: a where operand naming a fn with a bare requires converts it to Fn({R} Bool), which is @contract.obligationLost at the name, related to the guard"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@contract.obligationLost"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 22, end = 27 }
+related = [{ source = "src/app/main.vib", span = { start = 85, end = 108 } }]

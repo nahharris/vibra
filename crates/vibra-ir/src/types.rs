@@ -794,24 +794,37 @@ impl Type {
         })
     }
 
-    /// This type with every binder replaced by `Never`: the closed type of a
-    /// constant written at this type. A value of it holds nothing at a
-    /// binder's position, so it is a value of every instantiation of this
-    /// type (`docs/spec/02-type-system.md`, "Constant expressions and
-    /// constant patterns").
+    /// This type with every open form replaced by `Never`: each binder,
+    /// `Self`, and each association slot. It is the closed type of a
+    /// constant written at this type. A value of it holds nothing at an open
+    /// position, so it is a value of every instantiation of this type
+    /// (`docs/spec/02-type-system.md`, "Constant expressions and constant
+    /// patterns").
     #[must_use]
     pub fn at_never(&self) -> Self {
         let mut count = 0;
-        self.visit(&mut |ty| {
-            if let Self::Binder(index) = ty {
-                count = count.max(index.saturating_add(1));
+        let mut open_self = false;
+        let mut associated = Vec::new();
+        self.visit(&mut |ty| match ty {
+            Self::Binder(index) => count = count.max(index.saturating_add(1)),
+            Self::SelfType => open_self = true,
+            Self::Associated(name) if !associated.contains(name) => {
+                associated.push(name.clone());
             }
+            _ => {}
         });
-        if count == 0 {
-            self.clone()
-        } else {
-            self.instantiate(&vec![Self::Never; count])
+        if count == 0 && !open_self && associated.is_empty() {
+            return self.clone();
         }
+        let binders = vec![Self::Never; count];
+        let choices =
+            NamedTypes::new(associated.into_iter().map(|name| (name, Self::Never)))
+                .ok();
+        self.substitute(&Substitution {
+            binders: &binders,
+            self_type: Some(&Self::Never),
+            associated: choices.as_ref(),
+        })
     }
 }
 
