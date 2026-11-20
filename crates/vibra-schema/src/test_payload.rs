@@ -33,6 +33,10 @@ pub enum TestResult {
     /// The item needs an unsupported construct.
     #[serde(rename = "@test.unavailable")]
     Unavailable,
+    /// The test exhausted its memory budget: the host event
+    /// `@runtime.memoryExhausted` stopped it.
+    #[serde(rename = "@test.exhausted")]
+    Exhausted,
 }
 
 impl TestResult {
@@ -45,6 +49,7 @@ impl TestResult {
             Self::Trap => "@test.trap",
             Self::Invalid => "@test.invalid",
             Self::Unavailable => "@test.unavailable",
+            Self::Exhausted => "@test.exhausted",
         }
     }
 }
@@ -122,9 +127,8 @@ pub enum AuditEvent {}
 pub struct TestItem {
     /// The test's selector, such as `@tests.math::"adds"`.
     pub name: String,
-    /// The `@test.*` result; `null` when the test has none, because its
-    /// execution was stopped by a host event.
-    pub result: Option<TestResult>,
+    /// The `@test.*` result.
+    pub result: TestResult,
     /// The failed assertion, for `@test.assertionFailed`.
     pub failure: Option<TestFailure>,
     /// The defect trap, for `@test.trap`.

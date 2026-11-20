@@ -104,6 +104,37 @@ fn fmt_write_is_refused_by_a_semantic_error() {
 }
 
 #[test]
+fn fmt_of_a_file_that_is_not_utf8_plans_no_edit() {
+    let root = messy_project("fmt-encoding");
+    let bytes = b"fn f\xff returns r: I32 do return 1i32 endfn\n";
+    std::fs::write(root.path().join("src/app/main.vib"), bytes).expect("written");
+    let (code, document) = envelope_in(
+        root.path(),
+        &["--format", "json", "fmt", "src/app/main.vib", "--write"],
+    );
+    assert_eq!(code, 1, "{document}");
+    assert_eq!(document["result"], "@command.diagnostics");
+    assert_eq!(
+        document["payload"],
+        json!({"path": "src/app/main.vib", "changed": false, "written": false,
+            "text": null})
+    );
+    let diagnostics = document["diagnostics"].as_array().expect("diagnostics");
+    assert_eq!(diagnostics.len(), 1, "{document}");
+    assert_eq!(diagnostics[0]["code"], "@syntax.invalidEncoding");
+    assert_eq!(
+        diagnostics[0]["primarySpan"]["sourceId"],
+        "src/app/main.vib"
+    );
+    assert_eq!(diagnostics[0]["primarySpan"]["start"], 4);
+    assert_eq!(diagnostics[0]["primarySpan"]["end"], 5);
+    assert_eq!(
+        std::fs::read(root.path().join("src/app/main.vib")).expect("file"),
+        bytes
+    );
+}
+
+#[test]
 fn fmt_extension() {
     let root = messy_project("fmt-extension");
     root.write("README.md", "# readme\n");

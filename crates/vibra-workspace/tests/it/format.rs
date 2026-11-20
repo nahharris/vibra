@@ -73,6 +73,35 @@ fn a_recovered_file_is_kept_byte_for_byte() {
 }
 
 #[test]
+fn a_file_that_is_not_utf8_plans_no_edit() {
+    let root =
+        TempDir::project("fmt-encoding", LIBRARY, &[("src/app/main.vib", CANONICAL)]);
+    for (path, bytes) in [
+        (
+            "src/app/main.vib",
+            &b"fn f\xff returns r: I32 do return 1i32 endfn\n"[..],
+        ),
+        ("data.vibon", &b"{name: \"\xff\"}\n"[..]),
+    ] {
+        std::fs::write(root.join(path), bytes).expect("written");
+        let plan = plan(&root, path);
+        assert_eq!(
+            codes(&plan),
+            [DiagnosticCode::SyntaxInvalidEncoding],
+            "{path}"
+        );
+        assert_eq!(plan.text(), None, "{path}: no lossy decoding");
+        assert!(!plan.changed(), "{path}");
+        assert_eq!(plan.write(), Ok(false), "{path}");
+        assert_eq!(
+            std::fs::read(root.join(path)).expect("file"),
+            bytes,
+            "{path}"
+        );
+    }
+}
+
+#[test]
 fn a_file_outside_every_unit_is_formatted_by_syntax_alone() {
     let root = TempDir::project(
         "fmt-outside",

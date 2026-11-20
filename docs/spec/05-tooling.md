@@ -103,7 +103,9 @@ short, preferably one word: `edit imports` organizes imports.
   status `unsupported`, and the other targets are checked. `run` and
   `build` need the project's only binary target; with none or several and no
   selector, the command is invalid input with no source diagnostic. A missing
-  target, or a library given to `run` or `build`, is invalid input.
+  target, or a library given to `run` or `build`, is invalid input. So is a
+  `TARGET` that names no local target, as in `check @nope`: the result is
+  `@command.invalidInput`, with no diagnostic.
 - `edit fix` needs exactly one applicable safe fix. `edit rename` needs one
   resolved renameable identity, and checks collisions before planning. A
   subject that matches nothing, or several things, is invalid input. No tool
@@ -205,6 +207,9 @@ written order of entries. It previews by default; `--write` applies.
   name-case convention is a diagnostic, never a reason to rename.
 - Source the parser recovered from ambiguously is kept byte for byte. The
   formatter does not repair by guessing.
+- A file that is not valid UTF-8 is `@syntax.invalidEncoding` and plans no
+  edit: `changed` is `false` and `text` is `null`. It is never decoded
+  lossily.
 - A captured module is formatted with a semantic check of the candidate text
   in place of the captured bytes. A file that is not a module is formatted
   by syntax alone. When checking is unavailable, formatting proceeds from
@@ -238,13 +243,15 @@ input (exit 2, no diagnostics).
 | `@test.trap` | a toolchain defect trap |
 | `@test.invalid` | the selection had static errors |
 | `@test.unavailable` | the item needs an unsupported construct |
+| `@test.exhausted` | the item exhausted its memory, the host event `@runtime.memoryExhausted` |
 
-`selected` counts selected items, `passed` only `@test.passed`, and `failed`
-is their difference. An item that ended unknown or exhausted is never
-counted as passed. When items differ, the suite result follows this
-precedence: trap, operational exhaustion, unavailable, test failed, ok. A
-diagnostic appears once in the envelope and is attributed to every item it
-affects. An item keeps the audit events it completed before a later failure.
+`selected` counts selected items, `passed` only `@test.passed`, and `failed` is
+their difference. An item that ended unknown or exhausted is never counted as
+passed, and the other items keep their results. When items differ, the suite
+result follows this precedence: trap, operational exhaustion, unavailable, test
+failed, ok. A diagnostic appears once in the envelope and is attributed to every
+item it affects. An item keeps the audit events it completed before a later
+failure.
 
 ## Machine contracts
 
@@ -284,9 +291,10 @@ Every structured response is a closed object with these fields:
 - `command` is the words that select the command, joined by one space:
   `check`, `project init`, `edit imports`. An operand is never part of it,
   so `project add target` has the name `project add`.
-- `limits.profile` names the published limit profile, with its units,
-  defaults, and engine version. `reached` lists the limits reached, in
-  order. `complete` is `false` after truncation or exhaustion.
+- `limits.profile` names the published limit profile, with its units, defaults,
+  and engine version. `reached` lists the names of the limits reached, in order;
+  the memory limit is `"memory"`. `complete` is `false` after truncation or
+  exhaustion.
 - When output would exceed its limit, the tool emits a bounded, valid
   document with status `unknown`. It never emits truncated JSON and never
   silently omits facts.
@@ -347,7 +355,7 @@ in the
 | `CommandCapability` | one per line of the command surface, in its order: `command`, the command name; `operations`: string[], the operations a supported command offers, its own name for `help`; `profiles`: string[], the conformance profiles that cover it; `supported`: boolean; `schemaIds`: exact published identifiers of the documents it emits. The three lists are empty for an unsupported command |
 | `TargetSummary` | `name`; `kind`; `root`; `entry` (nullable); `bindingStatus`: `exact`, `recovered`, or `unavailable` |
 | `DependencySummary` | `alias`; `kind`; `source`; `target` (nullable); `status`: `captured`, `verified`, `unavailable`, or `refuted`; `identity` (nullable) |
-| `TestItem` | `name`; `result`; `failure` (nullable); `trap` (nullable); `auditTrace`; `diagnostics`; `status` |
+| `TestItem` | `name`, the selector; `result`, the `@test.*` atom; `failure` (nullable); `trap` (nullable); `auditTrace`: `AuditEvent[]`, the test's events; `diagnostics`: string[], the codes of the envelope's diagnostics attributed to the item; `status`, that of the command result the item's result corresponds to: `passed` for `@test.passed`, `refuted` for `@test.assertionFailed` and `@test.invalid`, `unknown` for `@test.trap` and `@test.exhausted`, and `unsupported` for `@test.unavailable` |
 | `TestItem.failure` | `kind`: `assertion` or `observation`; `assertion`, `expected`, `actual`: canonical text or null; `primarySpan`: `SpanDocument`; `observationError`: null for an assertion |
 | `TrapRecord` | `trapCode`; `origin` (nullable) |
 | `ObservationError` | `code`: `unsupportedValue`; `type` and `origin`: nullable |
@@ -633,7 +641,7 @@ resultType, dispatch}`.
 - `dispatch` is `null` or `{contract, member, receiver, selection,
   destination}`. `selection` is `static`, `default`, `dynamic`, or
   `closed`. `destination` is `true` for a member with no receiver slot that
-  was chosen by the written expected type.
+  was chosen by the expected type.
 - Applying a `proc` member builds a plan and performs nothing. An `await` is
   reported separately, with the plan's type, its complete row, and its
   witness.
@@ -699,7 +707,7 @@ and storage are not compiler services.
 | declaration | `id` (`Str`, the identity); `kind` (a declaration kind atom of the [type chapter](02-type-system.md#declared-types)); `module` (atom); `owner` (optional `Str`, the owner's identity; absent at top level); `access` (`@public` or `@private`); `source` (a span record); `text` (`Str`, the formatted source); `binding` (optional record `provider: Atom`, `wireSymbol: Str`, present for an external declaration); `facts` (optional, absent when not established) |
 | `facts` | in this order: `signature` (optional [signature record](06-runtime.md#open-signatures); absent for a module, an interface, and an associated type); `ceiling` (optional row, the written `performs`; present for a `proc` and a test); `effects` (optional row, the performed row; present with `ceiling`); `errors` (list of open type encodings, the ordinary result error types, in written order, written even when empty); `applications` (list of application facts sorted by `source`, written even when empty); `contracts` (list of `{kind: Atom predicate: Str consequence: Str}` in written order, with `consequence` optional, distinguishing bare guards from guards with a consequence; written even when empty); `claimIdentity` (`Str`, required); `witnessIdentity` (`Str`, required) |
 | application fact | in this order: `source` (a span record); `kind` (`@function`, `@procPlan`, `@constructor`, `@contract`, `@recordProjection`, or `@collectionLookup`); `callee` (optional `Str` identity, absent without one resolved declaration); `calleeType` (an open type encoding); `positional` (list of open type encodings, the operand types in written order); `labels` (dict from `Str` label to open type encoding); `resultType` (an open type encoding); `dispatch` (optional dispatch fact) |
-| dispatch fact | in this order: `contract` (`Str`, the interface's identity); `member` (`Str`, the member's identity); `receiver` (an open type encoding); `selection` (`@static`, `@default`, `@dynamic`, or `@closed`); `destination` (`Bool`, `true` for a member with no receiver slot chosen by the written expected type) |
+| dispatch fact | in this order: `contract` (`Str`, the interface's identity); `member` (`Str`, the member's identity); `receiver` (an open type encoding); `selection` (`@static`, `@default`, `@dynamic`, or `@closed`); `destination` (`Bool`, `true` for a member with no receiver slot chosen by the expected type) |
 | index implementation | in this order: `implementation` (an [implementation record](06-runtime.md#open-signatures): its binders, its positional interface key `contract`, its `receiver`, and its `choices`); `source` (a span record); `text` (`Str`); `members` (list, in written order, of `{member: Str source: S signature: G text: Str}`, where `member` is the contract member's identity, `S` a span record, and `G` a signature record over the implementation's binders) |
 | reference | `from` (`Str`, the identity of the enclosing declaration); `written` (`Str`); `source` (a span record); `to` (optional `Str`, absent when it depends on failed checking) |
 

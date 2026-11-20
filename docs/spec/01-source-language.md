@@ -76,9 +76,12 @@ part of the numeric token and never needs separation.
 
 Casing is a convention, never a parse rule. Types, interfaces, and type
 parameters are written in PascalCase; every other name, including a variant
-case, is written in camelCase. `vibra check` reports a name that departs from
-the convention as the style diagnostic `@style.casing`; the program's
-meaning does not change. No rule in any chapter depends on the case of a name.
+case, is written in camelCase. An associated type is written like a type, and an
+`as` name like its target. The convention reads the first letter only: upper
+case for PascalCase, lower case for camelCase. `vibra check` reports a name that
+departs from the convention as the style diagnostic `@style.casing`; the
+program's meaning does not change. No rule in any chapter depends on the case of
+a name.
 
 ### Reserved words
 
@@ -336,11 +339,17 @@ and its body come last; the `case` alternatives of a variant type keep
 their written order among themselves, which is the order of the variants;
 and, in a file, every `use` precedes every other top-level form. So
 `fn f returns r: I32 takes {x: I32} do return x endfn` is accepted, and
-the formatter moves `takes` before `returns`. Nested members and `impl`
-blocks may be written between sections. A section written before the name,
-or after `do`, is `@syntax.invalidForm` at that section. A `use` written
-after another top-level form is `@syntax.invalidForm` at the `use`; the
-formatter moves no top-level form, so it does not repair one.
+the formatter moves `takes` before `returns`. `takes`, `labelled`, and
+`returns` need not be adjacent: each run of them written next to each other
+is one `@signature` node, so another section between them gives two. Nested
+members and `impl` blocks may be written between sections. A section
+written before the name, or after `do`, is `@syntax.invalidForm` at that
+section. A declaration with no name is one `@syntax.invalidForm` over the
+construct; when sections stand where the name belongs, a name written after
+them would be read into their operand, so those before `do` are reported as
+sections before the name. A `use` written after another top-level form is
+`@syntax.invalidForm` at the `use`; the formatter moves no top-level form,
+so it does not repair one.
 
 Every section occurs at most once, `requires` and `ensures` included; a
 repeat is `@syntax.duplicateSection` at the keyword of the later section,
@@ -360,7 +369,7 @@ named `proc`, or `test` inside a body is `@syntax.invalidForm`.
 
 All declarations of a module share one flat scope. A declaration may be
 referenced before it is written. No declaration or binder may shadow a visible
-name.
+name, a type parameter included.
 
 Every declaration is private to its module unless it contains
 `visibility @public`. `@public` and `@private` are the only visibility values.
@@ -517,12 +526,15 @@ pattern binds are local to the callable and are not argument labels.
 `labelled` lists optional parameters as `name: Type be default`. Each has a
 real local name, which is part of the call contract, and a default that MUST
 be a constant expression; a default that is not is `@type.notConstant`. The
-type chapter defines constant expressions.
+type chapter defines constant expressions. A default sees no parameter: a
+parameter's name in it is `@name.unknownSymbol`.
 
 `returns name: Type` declares the result type and a result name. The result
 name is visible only in the `ensures` section of the same declaration, in both
 the predicate and its `else` consequence. It is not visible in `requires` or
-in the body.
+in the body. It is a binder whether or not `ensures` is written, in a scope
+of its own that sees the parameters, so `takes {r: I32} returns r: I32` is
+`@name.redeclaration`.
 
 `requires`, `ensures`, and `where` are **guards**. The
 [type chapter](02-type-system.md#guards) defines them: a guard without `else`
@@ -600,6 +612,18 @@ write `performs`. `native` names a toolchain native implementation of a `fn`
 that keeps its Vibra body. Symbol strings are registry keys and keep their
 registered spelling.
 
+A declaration binds a row owned by the declaration's owner: for a member of
+a type, the type's wire tag (`Intrinsic(@i32)` owns `i32`) or the role it
+plays (`role @str` owns `str`); for a top-level declaration, the last part
+of its module path (`@std.assert` owns `assert`). Its name is the member
+part of the symbol: `fn addChecked` binds `i32.addChecked`. A conversion row
+is bound by the `convert` member of an `impl From(S)` or `impl TryFrom(S)`
+nested in its destination type, which is then its owner: `<s>.to<T>` and
+`<t>.parse` in `T`, `<t>.toStr` in `Str`, and `dict.fromList` in `Dict`. A
+row of another owner is `@external.ownerMismatch` at the symbol, related to
+the owner. Another name, another signature, `@compiler` on a `proc`, and
+`@host` on a `fn` are `@external.signatureMismatch` at the declaration.
+
 External declarations, `native`, `role`, and `Intrinsic` are accepted only in
 the embedded standard-library modules; elsewhere each is
 `@syntax.invalidSection`. The operand of `visibility`, `representation`,
@@ -622,7 +646,12 @@ binding or a module value, each later `.name` reads a field of a record or
 declared record. Otherwise the longest prefix that names an entity is a path,
 and any remaining `.name` parts read fields of its value. Because nothing
 shadows, a name is never both. A field read of a value without that field is
-`@type.unknownRecordField`.
+`@type.unknownRecordField`. A field is not an entity, so `User.name` reaches
+no field of the type `User`: it is `@name.unknownSymbol` at `name`, related
+to the type. After a type parameter, an associated type, or the `Self` of an
+interface, the remaining parts name members that
+[dispatch](02-type-system.md#dispatch) selects, and resolution leaves them
+to it; inside a `type`, `Self` is that type and reaches its members.
 
 A module-level `fn` name or a nested member path in expression position
 denotes a function value. Constructors, field reads, and lookups are not

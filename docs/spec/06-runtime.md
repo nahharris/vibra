@@ -207,8 +207,8 @@ actual type arguments.
 - A default member runs under the substitution of the implementation
   selected for its own call, so an associated name in its body denotes that
   implementation's choice.
-- A destination-dispatched conversion uses the instantiated, written
-  destination type.
+- A destination-dispatched conversion uses the instantiated destination
+  type.
 - A type parameter bound to a choice by label, as in
   `given {T: Ordered I: Iter(Item: T)}`, is instantiated at the choice of
   the selected implementation, and its own bound's evidence comes from that
@@ -279,8 +279,8 @@ execution metadata.
 - It is not a `Result`, a validation error, or a trap.
 - It has no source location: primary span `0..0` and no source identity.
 - The tool outcome is an operational failure, exit 3.
-- A test run stopped by it MUST NOT report the tests that did not run as
-  passed.
+- A test it stops is `@test.exhausted`. The run MUST NOT report the tests
+  that did not run as passed.
 - Two runs that differ only because their memory limits differ are not a
   parity violation. A comparison MUST state the limits and compare like
   profiles.
@@ -399,7 +399,7 @@ The registry rows `<t>.equal`, `<t>.compare`, `<t>.toStr`, `<t>.parse`, and
 `<s>.to<T>`, such as `i16.equal` and `i16.toI32`, are the bodies these
 implementations bind. None of them is a member a source path can name.
 
-The destination of a conversion is its written expected type. The default
+The destination of a conversion is its expected type. The default
 members of `Ordered` call `compare` once. `min` and `max` return the left
 operand on a tie. `inRange` compares the lower bound first, and the upper
 bound only if needed. The order laws of a user's implementation are that

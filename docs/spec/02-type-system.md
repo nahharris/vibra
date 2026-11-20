@@ -100,16 +100,17 @@ toolchain defect, reported as `@runtime.invalidCheckedProgram` when the
 library is loaded, never as a fallback. Adding a role is a change to this
 table.
 
-The standard library declares `Bool` as a variant type with the cases
-`false` and `true`, `Str` as a wrapper over `List(Char)`, and `Bytes` as a
-wrapper over `List(U8)`. Their constructors and patterns are the declared
-ones: `Bool.true()`, `Str(scalars)`, `Bytes(items)`. The `Bool` module also
-declares the two public module values `true` and `false`, which are the only
-way source writes a boolean. `Dict(K V)` is a wrapper over `List({K V})`,
-sorted by the `Ordered.compare` of its keys with one entry per key; its
-representation is private, so it is built by a dict literal or by conversion
-and read by lookup and `Dict.entries`. A toolchain may represent any of these
-values directly, as the [runtime chapter](06-runtime.md) allows.
+The standard library declares `Bool` as a variant type with the cases `false`
+and `true`, `Option(T)` as one with the cases `none` and `some {value: T}`, in
+that order, `Str` as a wrapper over `List(Char)`, and `Bytes` as a wrapper over
+`List(U8)`. Their constructors and patterns are the declared ones:
+`Bool.true()`, `Str(scalars)`, `Bytes(items)`. The `Bool` module also declares
+the two public module values `true` and `false`, which are the only way source
+writes a boolean. `Dict(K V)` is a wrapper over `List({K V})`, sorted by the
+`Ordered.compare` of its keys with one entry per key; its representation is
+private, so it is built by a dict literal or by conversion and read by lookup
+and `Dict.entries`. A toolchain may represent any of these values directly, as
+the [runtime chapter](06-runtime.md) allows.
 
 Every operation over a library type is standard-library Vibra, which a
 toolchain may accelerate with a native implementation whose meaning stays its
@@ -269,8 +270,10 @@ every other type is one level more than its deepest component: an element,
 a tuple component, a field, a parameter, a result, a type argument, or the
 choice of an associated type. A written type nested deeper, and an
 expression whose type is, is `@type.depthExceeded` at the type or the
-expression. The limit is part of the language and is the same in every
-tool.
+expression. A declared callable's own type is a type of the program too, so
+a parameter or result type of depth 64 makes it 65 deep, which is
+`@type.depthExceeded` at the deepest written parameter or result type. The
+limit is part of the language and is the same in every tool.
 
 An anonymous type has no owner: it declares no members and receives no
 `impl`. It conforms to `Any` and, under the structural rule of
@@ -279,13 +282,13 @@ An anonymous type has no owner: it declares no members and receives no
 
 ### Recursive types
 
-A declared type may refer to itself and to other declared types of its
-module, by name. A reference to a type is symbolic and is not a dependency
-that must be complete first. Every declared type MUST have a finite size:
-recursion through `List`, `Dict`, or a callable type is permitted, and direct
-infinite expansion is `@type.infiniteSize` at the declaration whose
-expansion first repeats. Values are immutable and are built from values that
-already exist, so no value contains itself.
+A declared type may refer to itself and to other declared types of its module,
+by name. A reference to a type is symbolic and is not a dependency that must be
+complete first. Every declared type MUST have a finite size: recursion through
+`List`, `Dict`, or a callable type is permitted, and direct infinite expansion
+is `@type.infiniteSize` over the whole declaration, `type` to `endtype`, of the
+type whose expansion first repeats. Values are immutable and are built from
+values that already exist, so no value contains itself.
 
 ### Callable types
 
@@ -454,12 +457,14 @@ Inference is local:
   ceiling.
 
 Inference MUST NOT invent a parameter or result type, a generic bound, an
-interface implementation, a numeric conversion, an effect ceiling, or an
-error conversion, and never uses a later use to type an earlier binding.
-`Never` is never inferred. When no unique type follows for a literal, an
-empty `[]` or `[:]`, an absent `Option`, or a generic argument, the checker
-reports `@type.ambiguousInference` with one note per missing constraint and
-the places where a written type would supply it.
+interface implementation, a numeric conversion, an effect ceiling, or an error
+conversion, and never uses a later use to type an earlier binding. Inference
+never invents `Never`, but a written type that fixes a type argument to `Never`
+binds it: `Result.ok(value: void)` checked against a written `Result(Void
+Never)` is accepted. When no unique type follows for a literal, an empty `[]` or
+`[:]`, an absent `Option`, or a generic argument, the checker reports
+`@type.ambiguousInference` with one note per missing constraint and the places
+where a written type would supply it.
 
 There are no call-site type arguments. A call whose type arguments its
 operands and written expected type do not determine is rejected.
@@ -673,7 +678,9 @@ are two keys.
 For each implementation the checker MUST find every abstract contract member
 exactly once and verify that, under the implementation's
 [substitution](#substitution), the parameter and result types, labelled
-names and default values, guards, and effect row are those of the contract.
+names and default values, the member's own type parameters and their
+bounds, guards, and effect row are those of the contract, the member's
+type parameters matched in order whatever their names.
 
 | Condition | Diagnostic |
 | --- | --- |
@@ -682,7 +689,7 @@ names and default values, guards, and effect row are those of the contract.
 | a callable member supplied twice in one `impl` | `@name.memberCollision`, the later name, related to the first |
 | an associated type chosen twice in one `impl` | `@name.redeclaration`, the later choice, related to the first |
 | a default member supplied again | `@type.defaultOverride`, the member's name, related to the default |
-| a member whose signature differs from the contract under the substitution | `@type.mismatch`, the differing type, related to the contract member |
+| a member whose signature differs from the contract under the substitution | `@type.mismatch`, the differing type, default value, or written bound (the type parameter when none is written), or the member's name for a differing count of parameters or set of labels, related to the contract's counterpart |
 
 An implementation member declares no guard of its own: the contract's
 `requires` and `ensures` are its guards, as
@@ -804,15 +811,18 @@ selected.
 1. **Receiver constraint.** A member with a
    [receiver slot](#interfaces) is dispatched on that argument (receiver
    dispatch): the argument's type is the receiver. A member with no
-   receiver slot is dispatched on the written expected type at the call
-   (destination dispatch): the checker matches that type against the
+   receiver slot is dispatched on the expected type at the call
+   (destination dispatch), from whichever declaration or annotation
+   supplies it: any [written expected type](#widening), the parameter type
+   of an enclosing call and the field type of an enclosing construction
+   included. The checker matches that type against the
    member's written result type, structurally and only through the
    positions of the `Self` map, and collects the type found at every
    position where `Self` is written. All of them MUST be one type, which is
    the receiver. An expected type whose shape has no such position, or
    positions that give different types, as when `{Self Self}` meets
-   `{U8 U16}`, is `@type.mismatch` at the application. With no written
-   expected type the call is `@type.ambiguousDestination`.
+   `{U8 U16}`, is `@type.mismatch` at the application. Only a call with no
+   expected type is `@type.ambiguousDestination`.
 2. **Positional constraints.** Wherever a parameter of the interface is
    written in the member's parameter types or result type, the matching
    operand type or part of the expected type constrains it, by the ordinary
@@ -1041,12 +1051,13 @@ each type.
 
 ### Joins
 
-`if` requires a `Bool` condition. When the value of an `if` or `match` is
-used, the branches that can complete MUST have one common type, which is the
-type of the form; branches of type `Never` are skipped, and a form all of
-whose branches have type `Never` has type `Never`. This is the only join the
-checker computes. It never searches for an interface that covers two
-differing types.
+`if` requires a `Bool` condition. When the value of an `if` or `match` is used,
+the branches that can complete MUST have one common type, which is the type of
+the form; branches of type `Never` are skipped, and a form all of whose branches
+have type `Never` has type `Never`. When the form has no expected type, the
+first branch that completes with a type fixes it, and each later branch is
+checked at that type as its expected type. This is the only join the checker
+computes. It never searches for an interface that covers two differing types.
 
 ### Coverage
 
@@ -1065,12 +1076,17 @@ binding pattern is the same check with one arm.
 
 A `match` that does not cover its subject is `@pattern.nonExhaustive` at the
 `match`, with a note naming the first uncovered shape in declaration order,
-in pattern spelling with `_` for a position only a binder can cover. An arm
+in pattern spelling with `_` for a position only a binder can cover. A case
+is spelled as its constructor pattern, so `Bool`'s is `Bool.false()`; a
+record lists every field, in declaration order or, for a structural record,
+canonical order, as in `{a: _ b: Bool.false()}`; and a list is spelled at
+the shortest length no arm covers, as `[_ _]` after `[]` and `[_]`. An arm
 no value can reach is `@pattern.unreachableArm`, relating the earliest arm
 that covers it. A refutable pattern where an irrefutable one is required is
 `@pattern.refutableBinding`; an irrefutable pattern in a `let … else` is
 `@pattern.irrefutableLetElse`. When the checker cannot establish coverage
-within its limits it reports `@pattern.unsupportedCoverage`; it never
+within its limits it reports `@pattern.unsupportedCoverage`, at the
+`match` or at the `let` or parameter pattern; it never
 assumes coverage.
 
 ### Constant expressions and constant patterns
@@ -1085,7 +1101,13 @@ A name in pattern position that resolves to a constant module value is a
 constant pattern: it means the pattern of that value and binds nothing.
 Adding a module value named `x` therefore turns an existing pattern `x` from
 a binder into a value match. Coverage treats a constant pattern as its
-expanded value.
+expanded value. The pattern of a string, character, integer, or atom is its
+literal; that of a tuple, record, or list is the tuple, record, or list
+pattern of its components' patterns; and that of a construction of a case
+or a declared type is the constructor pattern of its fields' patterns. A
+float, `void`, or a dict has no pattern form, so a constant whose value is
+or holds one is `@pattern.unsupportedCoverage` at the pattern: coverage has
+no shape to expand it to.
 
 Labelled defaults are constant expressions. Two defaults are the same when
 they denote the same value. The value of a constant dict is the value its
@@ -1110,13 +1132,18 @@ innermost enclosing callable with that absence or error. Any other use is
 `@type.invalidTry`. `try` never converts an error type and is always invalid
 directly in a `test` body.
 
-When a `try` expression has a written expected type `T`, its operand is
-checked at the expected type `Option(T)` or `Result(T E)` of the enclosing
-carrier, so a destination-dispatched operand needs no extra annotation:
+When a `try` expression has an expected type `T`, whatever supplies it, a
+written type or the type an earlier branch fixed for a [join](#joins), its
+operand is checked at the expected type `Option(T)` or `Result(T E)` of the
+enclosing carrier, so a destination-dispatched operand needs no extra
+annotation:
 
 ```vibra
 let port: U16 be try TryFrom.convert(text) endlet
+let other be if quick then 80u16 else try TryFrom.convert(text) endif endlet
 ```
+
+A `try` with no expected type checks its operand with none.
 
 ### Fallible values
 
@@ -1136,7 +1163,10 @@ a call of a callable whose result type is `Never`, or an `if`, `match`, or
 `Never` is admitted at any expected type; this is not widening. It may appear
 only as a statement, including the last statement of a branch, arm, block, or
 fallback; in an operand position it is `@type.unreachableCode`. A statement
-after a statement of type `Never` is `@type.unreachableCode` as well.
+after a statement of type `Never` is `@type.unreachableCode` as well. The
+operand of `return` is the exception: `return spin(n)`, where `spin` returns
+`Never`, is a tail call and is accepted, and a later statement is reported
+only as after any `return`, never because of the call.
 
 A type is **uninhabited** when it is `Never`, a tuple, record, or wrapper
 with an uninhabited component, or a variant type all of whose cases have an
@@ -1212,6 +1242,14 @@ lists when the rule is used:
 7. **Certified results (`GUARD-7`).** After a call returns, the callee's
    proven `ensures` holds for the result, provided its `requires` was
    discharged.
+
+An obligation is formed by substituting the actual arguments into the
+predicate; that substitution is not a rule use. A fact the body's own
+`requires` supplies is that predicate substituted at the parameters, so it
+is recorded as `GUARD-4`. The negation a false branch supplies is read
+through the defining relations of the
+[integer facts](07-diagnostics-and-conformance.md#integer-facts): the
+negation of `Ordered.greater(x y)` is x ≤ y, which uses no `INT` fact.
 
 A discharged guard leaves no code. An obligation the rules refute is
 `@contract.refuted`; one they cannot establish is `@contract.unproved`, and
@@ -1330,8 +1368,8 @@ interface TryFrom(Source)
 endinterface
 ```
 
-Both members are destination-dispatched: the written expected type at the
-call fixes the destination. There is no `Into`. Each `TryFrom`
+Both members are destination-dispatched: the expected type at the call
+fixes the destination. There is no `Into`. Each `TryFrom`
 implementation chooses its `Error`. The standard library's implementations
 all choose `ConversionError`, a public variant type with the cases
 `outOfRange`, `invalidFormat`, and `unrepresentable`.
