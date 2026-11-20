@@ -24,7 +24,7 @@ use crate::frame::{Frame, TypeEnv};
 use crate::ingress::{Check, Ingress, Then, checks_of, needs_checks, refused};
 use crate::types::{mentions_self, type_of};
 use crate::value::{ClosureVal, FunctionVal, Held, Repr, Val, neutral_storage, same};
-use crate::{FailureKind, Instrumentation, TestAssertionFailure, intrinsics};
+use crate::{FailureKind, Instrumentation, Reads, TestAssertionFailure, intrinsics};
 
 /// Why the machine stopped before its work was done.
 #[derive(Debug)]
@@ -285,6 +285,9 @@ pub(crate) struct Machine<'a> {
     /// The constants already admitted, by address: each is checked once.
     admitted: HashSet<usize>,
     pub(crate) stats: Instrumentation,
+    /// What an evaluation read: the functions it entered and the module
+    /// values it read. Kept only in [`Mode::Evaluate`].
+    pub(crate) reads: Reads,
 }
 
 const FRAME_BYTES: u64 = size_of::<Frame<'static>>() as u64;
@@ -323,6 +326,7 @@ impl<'a> Machine<'a> {
             allocated_bytes: 0,
             admitted: HashSet::new(),
             stats: Instrumentation::default(),
+            reads: Reads::default(),
         }
     }
 
@@ -783,6 +787,9 @@ impl<'a> Machine<'a> {
     }
 
     fn global(&mut self, index: usize) -> Result<Step<'a>, Halt> {
+        if matches!(self.mode, Mode::Evaluate) {
+            self.reads.module_values.insert(index);
+        }
         let set = self.set;
         let global = set
             .globals()
@@ -1184,6 +1191,9 @@ impl<'a> Machine<'a> {
                 self.start_closure(body)
             }
             Target::Function(index) => {
+                if matches!(self.mode, Mode::Evaluate) {
+                    self.reads.functions.insert(index);
+                }
                 let function = self.function(index)?;
                 if matches!(function.signature.type_info(), Type::Proc(_)) {
                     return Err(unavailable_plan());

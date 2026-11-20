@@ -1,0 +1,13 @@
+id = "V2-CONTRACT-evaluation-reads-passed"
+rule = "V2-CONTRACT-evaluation-reads-passed"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "07-diagnostics-and-conformance.md#persistent-observations: the record of an obligation GUARD-1 proves lists in dependencies the declaration whose body the evaluation of the predicate read"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+types = "types.vibon"

@@ -1,0 +1,20 @@
+id = "V2-CONTRACT-evaluation-reads-refuted"
+rule = "V2-CONTRACT-evaluation-reads-refuted"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "07-diagnostics-and-conformance.md#persistent-observations: the record of an obligation GUARD-1 refutes lists in dependencies the declaration whose body the evaluation of the predicate read"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+types = "types.vibon"
+
+[[expect.diagnostics]]
+code = "@contract.refuted"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 125, end = 130 }
+related = [{ source = "src/app/main.vib", span = { start = 190, end = 194 } }]

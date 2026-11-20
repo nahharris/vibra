@@ -24,7 +24,9 @@ mod machine;
 mod types;
 mod value;
 
-pub use evaluate::{evaluate, run, run_test};
+pub use evaluate::{evaluate, evaluate_reading, run, run_test};
+
+use std::collections::BTreeSet;
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 use vibra_ir::{ObservedValue, SourceOrigin, Trap, Type, Value};
@@ -114,6 +116,16 @@ pub enum Evaluation {
     LimitReached(Limit),
     /// The evaluation trapped.
     Defect(Trap),
+}
+
+/// What one [`evaluate_reading`] read of its module set, by index: the
+/// functions whose bodies it entered and the module values it read.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Reads {
+    /// The functions entered, by their index in the module set.
+    pub functions: BTreeSet<usize>,
+    /// The module values read, by their index in the module set.
+    pub module_values: BTreeSet<usize>,
 }
 
 /// What an execution measured. None of it is observable by the program.

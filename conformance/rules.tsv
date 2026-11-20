@@ -819,3 +819,5 @@ V2-CONTRACT-read-guarded-ensures	active	02-type-system.md#guards-with-else
 V2-CONTRACT-invariant-guarded-predicate	active	02-type-system.md#bare-guards
 V2-CONTRACT-proof-budget-chain	active	05-tooling.md#limits
 V2-CONTRACT-proof-budget-exceeded	active	02-type-system.md#bare-guards
+V2-CONTRACT-evaluation-reads-passed	active	07-diagnostics-and-conformance.md#persistent-observations
+V2-CONTRACT-evaluation-reads-refuted	active	07-diagnostics-and-conformance.md#persistent-observations

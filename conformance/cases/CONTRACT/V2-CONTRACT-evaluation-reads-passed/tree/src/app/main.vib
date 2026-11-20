@@ -1,0 +1,3 @@
+fn ok takes {x: I32} returns r: Bool do return Ordered.greater(x 0i32) endfn
+fn need takes {x: I32} returns r: Void requires ok(x) do return void endfn
+fn run returns r: Void do return need(1i32) endfn
