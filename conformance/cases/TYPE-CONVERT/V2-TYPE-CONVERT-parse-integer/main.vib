@@ -1,0 +1,11 @@
+use @std.core.ConversionError enduse
+
+fn main
+  returns r: {Result(I8 ConversionError) Result(I8 ConversionError) Result(I8 ConversionError) Result(I8 ConversionError)}
+  do
+    let a: Result(I8 ConversionError) be TryFrom.convert("-12") endlet
+    let b: Result(I8 ConversionError) be TryFrom.convert("300") endlet
+    let c: Result(I8 ConversionError) be TryFrom.convert("1_0") endlet
+    let d: Result(I8 ConversionError) be TryFrom.convert("+1") endlet
+    return {a b c d}
+endfn

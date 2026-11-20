@@ -1,0 +1,6 @@
+fn main
+  returns r: {List(I32) List(I32)}
+  do
+    let xs be [1i32 2i32 3i32] endlet
+    return {Iter.collect(Iter.take(xs 2u64)) Iter.collect(Iter.skip(xs 2u64))}
+endfn

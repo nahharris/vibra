@@ -1,0 +1,1 @@
+fn main returns r: Option(Char) do return "héllo"(1u64) endfn

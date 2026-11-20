@@ -1,0 +1,12 @@
+id = "V2-TYPE-INTERFACE-iter-lazy-adapters"
+rule = "V2-TYPE-INTERFACE-iter-lazy-adapters"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#iteration: skip, map, and filter over an endless iterator pull only what take needs"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

@@ -1,0 +1,12 @@
+id = "V2-TYPE-INTERFACE-str-lookup"
+rule = "V2-TYPE-INTERFACE-str-lookup"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#language-core-and-standard-library: a Str lookup answers the scalar at a position"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

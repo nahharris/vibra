@@ -1,0 +1,1 @@
+fn f returns r: Bool do return Ordered.less(1.0f64 2.0f64) endfn

@@ -1,0 +1,8 @@
+use @std.core.ConversionError enduse
+
+fn main
+  returns r: Result(U8 ConversionError)
+  do
+    let n: Result(U8 ConversionError) be TryFrom.convert("-1") endlet
+    return n
+endfn

@@ -1,0 +1,6 @@
+fn main
+  returns r: {Str List(Char)}
+  do
+    let Str(scalars) be "hé" endlet
+    return {Str(['a' 'b']) scalars}
+endfn

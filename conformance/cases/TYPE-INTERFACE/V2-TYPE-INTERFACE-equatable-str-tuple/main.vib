@@ -1,0 +1,1 @@
+fn main returns r: Bool do return Equatable.equal({1i32 "a"} {1i32 "a"}) endfn

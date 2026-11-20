@@ -1,0 +1,1 @@
+fn main returns r: List({Str I32}) do return Iter.collect(["b": 1i32 "a": 2i32]) endfn

@@ -1,0 +1,12 @@
+id = "V2-TYPE-INTERFACE-str-trim"
+rule = "V2-TYPE-INTERFACE-str-trim"
+profile = "interpreterV2"
+operation = "interpret"
+description = "06-runtime.md#character-sequence-and-dictionary-operations: Str.trim removes only the four ASCII whitespace scalars at both ends"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

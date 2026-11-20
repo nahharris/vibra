@@ -1,0 +1,7 @@
+use @std.core.ArithmeticError enduse
+
+fn main
+  returns r: {Result(I32 ArithmeticError) Result(I32 ArithmeticError) Result(U8 ArithmeticError)}
+  do
+    return {I32.divChecked(1i32 0i32) I32.divChecked(-2147483648i32 -1i32) U8.shiftLeftChecked(1u8 8u32)}
+endfn

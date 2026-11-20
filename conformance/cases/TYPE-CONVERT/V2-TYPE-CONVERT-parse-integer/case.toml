@@ -1,0 +1,12 @@
+id = "V2-TYPE-CONVERT-parse-integer"
+rule = "V2-TYPE-CONVERT-parse-integer"
+profile = "interpreterV2"
+operation = "interpret"
+description = "06-runtime.md#integer-operations: TryFrom(Str) on an integer type accepts an optional minus and decimal digits only"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

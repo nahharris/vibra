@@ -1,0 +1,12 @@
+id = "V2-TYPE-INTERFACE-bool-eager"
+rule = "V2-TYPE-INTERFACE-bool-eager"
+profile = "interpreterV2"
+operation = "interpret"
+description = "06-runtime.md#character-sequence-and-dictionary-operations: Bool.xor is an ordinary member of Bool"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

@@ -1,0 +1,10 @@
+fn main
+  returns r: {I32 I32 Bool Bool}
+  do
+    return {
+      Ordered.min(1i32 1i32)
+      Ordered.max(2i32 1i32)
+      Ordered.inRange(5i32 1i32 5i32)
+      Ordered.lessOrEqual(2i32 1i32)
+    }
+endfn

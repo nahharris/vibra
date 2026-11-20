@@ -1,0 +1,6 @@
+fn main
+  returns r: {Option({I32 List(I32)}) Option({I32 List(I32)})}
+  do
+    let xs be [1i32 2i32] endlet
+    return {Iter.next(xs) Iter.next(xs)}
+endfn
