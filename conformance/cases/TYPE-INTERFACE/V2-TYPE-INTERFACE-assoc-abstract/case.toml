@@ -1,0 +1,18 @@
+id = "V2-TYPE-INTERFACE-assoc-abstract"
+rule = "V2-TYPE-INTERFACE-assoc-abstract"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#dispatch: an associated type the bound leaves unfixed equals only itself, so returning it as U8 is @type.mismatch at the item"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.mismatch"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 190, end = 194 }

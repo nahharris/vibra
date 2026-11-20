@@ -242,6 +242,8 @@ struct CallState<'a> {
     resolved: Vec<bool>,
     /// Where each type parameter of the callee was first fixed.
     sources: Vec<Option<ByteSpan>>,
+    /// Whether an argument checked again still lacked a type argument.
+    undetermined: bool,
     nodes: Vec<Option<Node>>,
     application: ByteSpan,
     callee_span: ByteSpan,
@@ -2427,6 +2429,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             bounds,
             bound_module,
             sources: Vec::new(),
+            undetermined: false,
             nodes: Vec::new(),
             application,
             callee_span,
@@ -2637,6 +2640,17 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                 place(&mut state.nodes, at, None);
                 return self.next_argument(state);
             }
+            // Checked again, it still only lacks a type argument of the
+            // callee: that parameter is undetermined, which is reported once,
+            // at the application.
+            if out.ty.is_none() && state.open && state.retrying && ambiguous_only {
+                self.diagnostics.truncate(diagnostics);
+                self.references.truncate(references);
+                self.instantiations.truncate(instantiations);
+                state.undetermined = true;
+                place(&mut state.nodes, at, None);
+                return self.next_argument(state);
+            }
             let node = match out.ty {
                 Some(Type::Never) => {
                     if !state.never_reported {
@@ -2758,6 +2772,11 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                 if !state.first_pass {
                     state.first_pass = true;
                     self.first_pass_done(&mut state);
+                    if state.failed {
+                        for at in std::mem::take(&mut state.retry) {
+                            place(&mut state.nodes, at, None);
+                        }
+                    }
                 }
                 if state.retry.is_empty() {
                     break;
@@ -2847,6 +2866,13 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             .collect::<Vec<_>>();
         if !missing.is_empty() && state.params.is_some() && !state.failed {
             self.ambiguous(state.application, &missing);
+            state.failed = true;
+        } else if state.undetermined && !state.failed {
+            self.report(
+                DiagnosticCode::TypeAmbiguousInference,
+                state.application,
+                "an operand of this call has a type nothing determines",
+            );
             state.failed = true;
         }
         if let Callee::Function(index) = state.callee

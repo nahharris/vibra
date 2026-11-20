@@ -1,0 +1,16 @@
+fn main returns r: I32 do return 1i32 endfn
+
+interface Sized
+  fn size
+    takes {value: Self}
+    returns n: I32
+  endfn
+  impl Never
+    fn size
+      takes {value: Self}
+      returns n: I32
+      do
+        return 2i32
+    endfn
+  endimpl
+endinterface

@@ -1,0 +1,12 @@
+id = "V2-TYPE-GENERIC-bound-satisfied"
+rule = "V2-TYPE-GENERIC-bound-satisfied"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#bounds: a call on a bounded parameter dispatches to the implementation of the actual type"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

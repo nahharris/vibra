@@ -1,0 +1,31 @@
+fn main returns r: {Str Str} do return {Printable.render(User(name: "Ada" id: UserId(1u64))) Printable.render(Celsius(21i32))} endfn
+
+interface Printable
+  fn render
+    takes {value: Self}
+    returns text: Str
+  endfn
+endinterface
+type UserId of U64 endtype
+
+type User of {name: Str id: UserId}
+  impl Printable
+    fn render
+      takes {value: Self}
+      returns text: Str
+      do
+        let User(name: name id: _) be value endlet
+        return name
+    endfn
+  endimpl
+endtype
+type Celsius of I32
+  impl Printable
+    fn render
+      takes {value: Self}
+      returns text: Str
+      do
+        return "warm"
+    endfn
+  endimpl
+endtype

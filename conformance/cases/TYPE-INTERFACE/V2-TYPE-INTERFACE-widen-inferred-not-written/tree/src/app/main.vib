@@ -1,0 +1,39 @@
+fn main returns r: I32 do return 1i32 endfn
+
+fn pick
+  takes {b: Bool user: User celsius: Celsius}
+  returns r: I32
+  do
+    let x be if b then user else celsius endif endlet
+    return 1i32
+endfn
+
+interface Printable
+  fn render
+    takes {value: Self}
+    returns text: Str
+  endfn
+endinterface
+type UserId of U64 endtype
+
+type User of {name: Str id: UserId}
+  impl Printable
+    fn render
+      takes {value: Self}
+      returns text: Str
+      do
+        let User(name: name id: _) be value endlet
+        return name
+    endfn
+  endimpl
+endtype
+type Celsius of I32
+  impl Printable
+    fn render
+      takes {value: Self}
+      returns text: Str
+      do
+        return "warm"
+    endfn
+  endimpl
+endtype

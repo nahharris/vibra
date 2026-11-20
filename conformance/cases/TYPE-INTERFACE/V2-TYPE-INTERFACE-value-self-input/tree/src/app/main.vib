@@ -1,0 +1,6 @@
+fn main
+  returns r: Bool
+  do
+    let e: Equatable be 1i32 endlet
+    return Equatable.equal(e e)
+endfn

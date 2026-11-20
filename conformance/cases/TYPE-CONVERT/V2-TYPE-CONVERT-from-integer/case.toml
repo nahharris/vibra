@@ -1,0 +1,12 @@
+id = "V2-TYPE-CONVERT-from-integer"
+rule = "V2-TYPE-CONVERT-from-integer"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#conversion: a total integer conversion is From, dispatched on the destination"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

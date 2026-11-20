@@ -1,0 +1,26 @@
+fn main
+  returns r: Str
+  do
+    let p: Printable be User(name: "Ada" id: UserId(1u64)) endlet
+    return Printable.render(p)
+endfn
+
+interface Printable
+  fn render
+    takes {value: Self}
+    returns text: Str
+  endfn
+endinterface
+type UserId of U64 endtype
+
+type User of {name: Str id: UserId}
+  impl Printable
+    fn render
+      takes {value: Self}
+      returns text: Str
+      do
+        let User(name: name id: _) be value endlet
+        return name
+    endfn
+  endimpl
+endtype

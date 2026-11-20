@@ -1,0 +1,3 @@
+type Celsius of I32
+  visibility @public
+endtype

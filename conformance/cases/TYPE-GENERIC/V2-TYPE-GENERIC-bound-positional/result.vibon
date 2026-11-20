@@ -1,0 +1,1 @@
+{format: @value.v2 typeInfo: {kind: @declared path: @app.main.Celsius seed: "sha256:f32f734875b6dbc6d1d3dbd58b0687b650806bb50adddf947323213557b3c3b3" arguments: []} value: {kind: @wrapper typeInfo: {kind: @declared path: @app.main.Celsius seed: "sha256:f32f734875b6dbc6d1d3dbd58b0687b650806bb50adddf947323213557b3c3b3" arguments: []} value: 2i32}}

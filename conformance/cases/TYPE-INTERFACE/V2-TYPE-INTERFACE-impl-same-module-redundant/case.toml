@@ -1,0 +1,18 @@
+id = "V2-TYPE-INTERFACE-impl-same-module-redundant"
+rule = "V2-TYPE-INTERFACE-impl-same-module-redundant"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#implementations: an impl in an interface for a type of the same module is @type.redundantImplementation at the impl head"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.redundantImplementation"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 162, end = 174 }

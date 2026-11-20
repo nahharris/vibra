@@ -1,0 +1,18 @@
+id = "V2-TYPE-NOMINAL-dict-key-no-ordered"
+rule = "V2-TYPE-NOMINAL-dict-key-no-ordered"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#dict-keys-equality-and-order: a declared type without Ordered is @type.invalidDictKey at the key"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.invalidDictKey"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 36, end = 45 }

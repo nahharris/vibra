@@ -1,0 +1,12 @@
+id = "V2-TYPE-INTERFACE-default-member"
+rule = "V2-TYPE-INTERFACE-default-member"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#dispatch: a default member runs under the substitution of the selected implementation"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

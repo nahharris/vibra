@@ -1,0 +1,18 @@
+id = "V2-TYPE-INTERFACE-destination-shape"
+rule = "V2-TYPE-INTERFACE-destination-shape"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#dispatch: Self positions of the expected type that give two receivers are @type.mismatch at the application"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.mismatch"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 53, end = 67 }

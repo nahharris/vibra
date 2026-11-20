@@ -1,0 +1,18 @@
+id = "V2-TYPE-GENERIC-bound-undetermined"
+rule = "V2-TYPE-GENERIC-bound-undetermined"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#bounds: a parameter undetermined when no bound is resolvable is @type.ambiguousInference at the application"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.ambiguousInference"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 52, end = 60 }

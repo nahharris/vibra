@@ -1,0 +1,14 @@
+fn main returns r: I32 do return 1i32 endfn
+
+fn head(I)
+  takes {it: I}
+  returns r: U8
+  given {I: Iter}
+  do
+    match Iter.next(it)
+      case Option.some(value: {item _})
+        return item
+      case Option.none()
+        return 0u8
+    endmatch
+endfn

@@ -1,0 +1,3 @@
+fn main returns r: I32 do let d be [Rank(1u8): 1i32] endlet return 1i32 endfn
+
+type Rank of U8 endtype

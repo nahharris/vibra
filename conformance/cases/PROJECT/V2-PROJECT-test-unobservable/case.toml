@@ -1,0 +1,13 @@
+id = "V2-PROJECT-test-unobservable"
+rule = "V2-PROJECT-test-unobservable"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "06-runtime.md#test-assertions: an assert.equal whose Any operands hold closures records an observation failure with @tool.unsupportedValue, not a trap"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+testRun = "test-run.vibon"

@@ -1036,6 +1036,15 @@ impl<'a> BodyChecker<'_, 'a> {
             return node;
         }
         match (expected, actual) {
+            (Type::Any, _) if !actual.is_interface_value() => node.map(|node| {
+                self.node(
+                    IrExpr::WidenToInterface {
+                        value: Box::new(node),
+                        value_type: Type::Any,
+                    },
+                    span,
+                )
+            }),
             (Type::Atom, Type::AtomSingleton(_)) => {
                 node.map(|node| self.node(IrExpr::WidenAtom(Box::new(node)), span))
             }

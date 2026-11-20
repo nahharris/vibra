@@ -1,0 +1,8 @@
+fn main returns r: Atom do return f(@ok) endfn
+
+fn f
+  takes {a: Atom}
+  returns r: Atom
+  do
+    return a
+endfn

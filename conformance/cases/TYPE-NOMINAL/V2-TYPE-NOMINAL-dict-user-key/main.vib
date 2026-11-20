@@ -1,0 +1,14 @@
+fn main returns r: Dict(Rank I32) do return [Rank(1u8): 1i32 Rank(2u8): 2i32] endfn
+
+type Rank of U8
+  impl Ordered
+    fn compare
+      takes {left: Self right: Self}
+      returns order: Ordering
+      do
+        let Rank(a) be left endlet
+        let Rank(b) be right endlet
+        return Ordered.compare(b a)
+    endfn
+  endimpl
+endtype

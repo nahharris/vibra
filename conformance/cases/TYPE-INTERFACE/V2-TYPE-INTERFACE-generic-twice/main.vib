@@ -1,0 +1,26 @@
+fn main
+  returns r: {Celsius Celsius}
+  do
+    let a: Celsius be From.convert(1i16) endlet
+    let b: Celsius be From.convert(2i8) endlet
+    return {a b}
+endfn
+
+type Celsius of I32
+  impl From(I16)
+    fn convert
+      takes {value: I16}
+      returns converted: Self
+      do
+        return Celsius(From.convert(value))
+    endfn
+  endimpl
+  impl From(I8)
+    fn convert
+      takes {value: I8}
+      returns converted: Self
+      do
+        return Celsius(From.convert(value))
+    endfn
+  endimpl
+endtype

@@ -876,6 +876,9 @@ impl<'a> Program<'a> {
                     .join(" ")
             )
         };
+        let choices_complete = declared_associated
+            .iter()
+            .all(|(name, _)| chosen.iter().any(|(chosen, _, _)| chosen == name));
         let mut members: Vec<(String, usize)> = Vec::new();
         let mut seen: Vec<(String, ByteSpan)> = Vec::new();
         for member in block.members() {
@@ -988,7 +991,9 @@ impl<'a> Program<'a> {
             } else {
                 Some(name.span())
             };
-            if let Some(span) = differing {
+            // With a choice missing or faulty the substitution is not known,
+            // and that fault is already reported.
+            if let Some(span) = differing.filter(|_| choices_complete) {
                 let diagnostic = Diagnostic::new(
                     DiagnosticCode::TypeMismatch,
                     span,

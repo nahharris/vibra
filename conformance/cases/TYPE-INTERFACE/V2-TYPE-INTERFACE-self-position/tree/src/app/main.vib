@@ -1,0 +1,8 @@
+fn main returns r: I32 do return 1i32 endfn
+
+interface Index
+  fn all
+    takes {v: Self}
+    returns r: Dict(Str Self)
+  endfn
+endinterface

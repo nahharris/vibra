@@ -1,0 +1,12 @@
+id = "V2-TYPE-INTERFACE-widen-atom"
+rule = "V2-TYPE-INTERFACE-widen-atom"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#widening: an atom singleton widens to Atom at a parameter type"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"
