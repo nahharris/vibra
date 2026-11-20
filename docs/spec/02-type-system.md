@@ -1108,8 +1108,7 @@ literal; that of a tuple, record, or list is the tuple, record, or list
 pattern of its components' patterns; and that of a construction of a case
 or a declared type is the constructor pattern of its fields' patterns. A
 float, `void`, or a dict has no pattern form, so a constant whose value is
-or holds one is `@pattern.unsupportedCoverage` at the pattern: coverage has
-no shape to expand it to.
+or holds one is `@pattern.invalidConstant` at the pattern.
 
 Labelled defaults are constant expressions. Two defaults are the same when
 they denote the same value. The value of a constant dict is the value its

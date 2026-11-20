@@ -545,11 +545,10 @@ impl<'a> BodyChecker<'_, 'a> {
             Ok(cover) => cover,
             Err(what) => {
                 self.report(
-                    DiagnosticCode::PatternUnsupportedCoverage,
+                    DiagnosticCode::PatternInvalidConstant,
                     span,
                     format!(
-                        "the constant `{}` holds {what}, which has no pattern form, \
-                         so coverage has no shape to expand it to",
+                        "the constant `{}` holds {what}, which has no pattern form",
                         data.name
                     ),
                 );

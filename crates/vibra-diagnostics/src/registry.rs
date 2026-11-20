@@ -372,6 +372,8 @@ diagnostic_registry! {
         "an arm is repeated, already covered, or uninhabited";
     PatternUnsupportedCoverage => "@pattern.unsupportedCoverage", Pattern, Error, None,
         "the checker cannot decide coverage for this type";
+    PatternInvalidConstant => "@pattern.invalidConstant", Pattern, Error, None,
+        "a constant pattern's value has no pattern form";
     EffectOutsideCeiling => "@effect.outsideCeiling", Effect, Error, None,
         "a body performs an interface outside its ceiling";
     EffectInvalidReference => "@effect.invalidReference", Effect, Error, None,
@@ -486,7 +488,7 @@ mod tests {
     use std::collections::BTreeSet;
 
     /// The count of the specification table.
-    const REGISTERED_CODES: usize = 118;
+    const REGISTERED_CODES: usize = 119;
 
     #[test]
     fn the_registry_has_every_code_in_the_specification_table() {

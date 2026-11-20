@@ -2,7 +2,7 @@ id = "V2-TYPE-CONTROL-match-constant-float"
 rule = "V2-TYPE-CONTROL-match-constant-float"
 profile = "staticV2"
 operation = "workspaceCheck"
-description = "02-type-system.md#constant-expressions-and-constant-patterns: a float has no pattern form, so a float constant in pattern position is @pattern.unsupportedCoverage at the pattern"
+description = "02-type-system.md#constant-expressions-and-constant-patterns: a float has no pattern form, so a float constant in pattern position is @pattern.invalidConstant at the pattern"
 
 [inputs]
 tree = "tree"
@@ -12,7 +12,7 @@ project = "tree/project.vibon"
 verdict = "refuted"
 
 [[expect.diagnostics]]
-code = "@pattern.unsupportedCoverage"
+code = "@pattern.invalidConstant"
 level = "@error"
 source = "src/app/main.vib"
 span = { start = 96, end = 100 }

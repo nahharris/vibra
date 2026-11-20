@@ -330,6 +330,7 @@ with no M1 step belongs to the milestone named.
 | `@pattern.nonExhaustive` | steps 15, 17 |
 | `@pattern.unreachableArm` | steps 15, 17 |
 | `@pattern.unsupportedCoverage` | steps 17 |
+| `@pattern.invalidConstant` | steps 17 |
 | `@effect.outsideCeiling` | M2 |
 | `@effect.invalidReference` | M2 |
 | `@effect.duplicateRoot` | M2 |
