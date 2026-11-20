@@ -134,13 +134,14 @@ fn a_generic_anonymous_fn_bound_by_let_stays_generic() {
     let source = "fn main returns r: {I32 Str} do \
                   let id be fn(T) takes {x: T} returns r: T do return x endfn endlet \
                   return {id(1i32) id(\"x\")} endfn\n";
-    let Ok(canonical) = run(source) else {
-        panic!("{:?}", run(source));
-    };
-    assert!(
-        canonical.contains("1i32") && canonical.contains("\"x\""),
-        "{canonical}"
+    let str_type = "{kind: @declared path: @std.builtin.Str seed: \
+                    \"sha256:7a82cdb199f4a619d2da02c737c85a64243099c0385ac0e4442f1cb2d6e0ad5e\" \
+                    arguments: []}";
+    let expected = format!(
+        "{{format: @value.v2 typeInfo: {{kind: @tuple arguments: [@i32 {str_type}]}} \
+         value: {{kind: @tuple values: [1i32 \"x\"]}}}}"
     );
+    assert_eq!(run(source).as_deref(), Ok(expected.as_str()));
 }
 
 #[test]
@@ -250,4 +251,15 @@ fn a_result_type_argument_comes_from_the_expected_type() {
                   endfn\n\
                   fn none(T) returns r: Option(T) do return Option.none() endfn\n";
     assert_eq!(run(source).as_deref(), Ok(value("i32", "7i32").as_str()));
+}
+
+#[test]
+fn a_never_typed_call_leaves() {
+    // A call whose result is `Never` ends its path, as a branch and as the
+    // last statement of a body.
+    let source = "fn main returns r: I32 do \
+                  if true then return 1i32 else spin(0i32) endif endfn\n\
+                  fn spin takes {n: I32} returns r: Never do spin(n) endfn\n\
+                  fn halt returns r: I32 do spin(0i32) endfn\n";
+    assert_eq!(run(source).as_deref(), Ok(value("i32", "1i32").as_str()));
 }

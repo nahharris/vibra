@@ -80,8 +80,8 @@ fn the_tail_loop_runs_at_depth_one() {
     assert_eq!(run.instrumentation.tail_transfer_count, 100_001);
 }
 
-/// `main` transfers to `count`, which transfers to itself through the
-/// function its record argument holds for each of the 100000 steps.
+/// `main` transfers to `even`; each of the 100000 steps transfers between
+/// `even` and `odd` through the functions their record argument holds.
 #[test]
 fn the_tail_call_through_a_field_runs_at_depth_one() {
     let run = execution("V2-RUNTIME-tail-through-value");
@@ -89,13 +89,13 @@ fn the_tail_call_through_a_field_runs_at_depth_one() {
     assert_eq!(run.instrumentation.tail_transfer_count, 100_001);
 }
 
-/// `main` transfers to `count`; each of the 100000 steps transfers from
-/// `count` to its closure and from the closure back to `count`.
+/// `main` transfers to its closure, which transfers to itself through the
+/// record parameter that holds it for each of the 100000 steps.
 #[test]
 fn the_tail_call_through_a_closure_runs_at_depth_one() {
     let run = execution("V2-RUNTIME-tail-through-closure");
     assert_eq!(run.instrumentation.max_activation_depth, 1);
-    assert_eq!(run.instrumentation.tail_transfer_count, 200_001);
+    assert_eq!(run.instrumentation.tail_transfer_count, 100_001);
 }
 
 /// `main` transfers to `sum(100000i32)`, which nests 100000 non-tail calls
