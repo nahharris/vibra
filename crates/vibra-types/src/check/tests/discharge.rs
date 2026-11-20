@@ -583,17 +583,32 @@ fn a_contract_guard_with_else_runs_in_every_implementation() {
     );
 }
 
+/// A call of a member whose `requires` is bare, at a closed receiver, is the
+/// obligation of the implementation the receiver selects; at an open
+/// receiver it is outside this checker.
 #[test]
-fn a_call_of_a_member_with_a_bare_requires_is_not_supported() {
+fn a_call_of_a_member_with_a_bare_requires_is_an_obligation() {
+    let contract = sized("requires Ordered.greater(n 0i32)", &[("A", "return m")]);
     let source = format!(
-        "{}fn main returns r: I32 do return Sized.size(A(1i32) 1i32) endfn\n",
-        sized("requires Ordered.greater(n 0i32)", &[("A", "return m")])
+        "{contract}fn main returns r: I32 do return Sized.size(A(1i32) 1i32) endfn\n"
+    );
+    assert_eq!(faults(&source), []);
+    let source = format!(
+        "{contract}fn main returns r: I32 do return Sized.size(A(1i32) 0i32) endfn\n"
+    );
+    assert_eq!(
+        faults(&source).first().map(|(code, _)| *code),
+        Some(DiagnosticCode::ContractRefuted)
+    );
+    let source = format!(
+        "{contract}fn f(T) takes {{v: T}} returns r: I32 given {{T: Sized}} \
+         do return Sized.size(v 1i32) endfn\n"
     );
     assert_eq!(
         faults(&source),
         [(
             DiagnosticCode::ToolUnavailable,
-            at(&source, "Sized.size(A(1i32) 1i32)", 0)
+            at(&source, "Sized.size(v 1i32)", 0)
         )]
     );
 }

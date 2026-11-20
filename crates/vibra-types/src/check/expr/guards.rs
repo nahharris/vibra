@@ -98,7 +98,9 @@ impl<'a> BodyChecker<'_, 'a> {
     /// written at `span`, states: `site` is the function called (`Ok`) or
     /// the type constructed (`Err`). A call of a function whose `requires`
     /// is bare and a construction of a type whose `where` is bare each
-    /// state one.
+    /// state one, and so does a call of a contract member whose `requires`
+    /// is bare: the guard copied into the implementation member a closed
+    /// receiver selects.
     pub(super) fn obligation(
         &mut self,
         site: Option<Result<usize, usize>>,
@@ -111,10 +113,14 @@ impl<'a> BodyChecker<'_, 'a> {
         } = &node.expr
             && self.contract_requires_bare(call)
         {
-            self.unavailable(
-                span,
-                "a call of a contract member whose `requires` is bare",
-            );
+            match self.implementation_member(call) {
+                Some(function) => self.sites.push(Site::Requires { function, span }),
+                None => self.unavailable(
+                    span,
+                    "a call of a contract member whose `requires` is bare at an open \
+                     receiver or through a generic implementation",
+                ),
+            }
         }
         match site {
             Some(Ok(function)) => {
@@ -143,6 +149,29 @@ impl<'a> BodyChecker<'_, 'a> {
             }
             None => {}
         }
+    }
+
+    /// The function supplying the member `call` calls, when a program's own
+    /// implementation without parameters supplies it at a closed receiver.
+    fn implementation_member(&self, call: &vibra_ir::ContractCall) -> Option<usize> {
+        if call.receiver.is_open() || !call.member_arguments.is_empty() {
+            return None;
+        }
+        self.program.impls.iter().find_map(|data| {
+            let interface = self.program.interfaces.get(data.interface)?;
+            (data.usable
+                && data.binders.is_empty()
+                && interface.id.as_ref() == Some(&call.interface)
+                && data.receiver == call.receiver
+                && data.arguments == call.arguments)
+                .then(|| {
+                    data.members
+                        .iter()
+                        .find(|(name, _)| *name == call.member)
+                        .map(|(_, function)| *function)
+                })
+                .flatten()
+        })
     }
 
     /// Whether the contract member `call` calls has a bare `requires`.

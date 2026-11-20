@@ -197,6 +197,10 @@ struct Prover<'v> {
     discharged: BTreeSet<Term>,
     activations: usize,
     decided: BTreeMap<(usize, ByteSpan, ObligationKind), Decided>,
+    /// The checked index of each member a program's own `impl` supplies at
+    /// a closed receiver, by interface, interface arguments, receiver, and
+    /// member name.
+    members: &'v [(TypeId, Vec<Type>, Type, String, usize)],
 }
 
 /// A step of a walk.
@@ -219,6 +223,7 @@ enum Task<'n> {
 pub(super) fn discharge(
     context: &mut Context<'_, '_>,
     certified: &super::Certified,
+    members: &[(TypeId, Vec<Type>, Type, String, usize)],
     evaluator: &mut Evaluator<'_>,
 ) {
     let inputs = context.inputs;
@@ -233,6 +238,7 @@ pub(super) fn discharge(
         discharged: BTreeSet::new(),
         activations: 0,
         decided: BTreeMap::new(),
+        members,
     };
     let mut bodies = Vec::new();
     for (index, checked) in inputs.functions {
@@ -715,8 +721,21 @@ impl<'v> Prover<'v> {
         else {
             return None;
         };
-        let CallTarget::Direct { function, .. } = target else {
-            return None;
+        // A contract member called at a closed receiver is the member the
+        // receiver's implementation supplies, with the contract's guard.
+        let function = match target {
+            CallTarget::Direct { function, .. } => function,
+            CallTarget::Contract(call) if call.member_arguments.is_empty() => self
+                .members
+                .iter()
+                .find(|(interface, arguments, receiver, member, _)| {
+                    *interface == call.interface
+                        && *arguments == call.arguments
+                        && *receiver == call.receiver
+                        && *member == call.member
+                })
+                .map(|(.., entry)| entry)?,
+            CallTarget::Contract(_) | CallTarget::Value(_) => return None,
         };
         let data = self.guarded.get(function)?;
         let guard = data.requires?;

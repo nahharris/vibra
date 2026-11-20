@@ -702,3 +702,7 @@ V2-CONTRACT-where-bare-record-unproved	active	02-type-system.md#bare-guards
 V2-CONTRACT-member-guard-pattern	active	02-type-system.md#guards-and-callable-types
 V2-CONTRACT-member-ensures-pattern	active	02-type-system.md#guards-and-callable-types
 V2-CONTRACT-member-pattern-refutable	active	02-type-system.md#guards-and-callable-types
+V2-CONTRACT-member-requires-constant	active	02-type-system.md#guards-and-callable-types
+V2-CONTRACT-member-requires-branch	active	02-type-system.md#guards-and-callable-types
+V2-CONTRACT-member-requires-refuted	active	02-type-system.md#guards-and-callable-types
+V2-CONTRACT-member-requires-unproved	active	02-type-system.md#guards-and-callable-types

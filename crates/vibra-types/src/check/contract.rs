@@ -504,7 +504,7 @@ pub(crate) fn review(
     let standings = std::mem::take(&mut context.standings);
     let mut evaluator = Evaluator::new(&facts, &standings, build);
     context.standings.clone_from(&standings);
-    prove::discharge(&mut context, &certified, &mut evaluator);
+    prove::discharge(&mut context, &certified, &facts.members, &mut evaluator);
     obligations::patterns(&mut context, &mut evaluator);
     folds(&mut context, &certified, &mut evaluator);
     context.reviewed
