@@ -808,10 +808,8 @@ impl Type {
         self.visit(&mut |ty| match ty {
             Self::Binder(index) => count = count.max(index.saturating_add(1)),
             Self::SelfType => open_self = true,
-            Self::Associated(name) => {
-                if !associated.contains(name) {
-                    associated.push(name.clone());
-                }
+            Self::Associated(name) if !associated.contains(name) => {
+                associated.push(name.clone());
             }
             _ => {}
         });
