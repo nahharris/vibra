@@ -503,3 +503,21 @@ fn a_function_value_keeps_no_obligation() {
         Ok(super::value("i32", "-1i32").as_str())
     );
 }
+
+/// A discharged guard leaves no code: the lowered program of `pos(5i32)` is
+/// the program of the same source with the `requires` written as spaces, so
+/// that every span is the same.
+#[test]
+fn a_discharged_guard_leaves_no_code() {
+    let guard = "requires Ordered.greater(x 0i32) ";
+    let main = "fn main returns r: I32 do return pos(5i32) endfn\n";
+    let guarded = format!("{POS}{main}");
+    let plain = guarded.replacen(guard, &" ".repeat(guard.len()), 1);
+    assert_ne!(guarded, plain);
+    let guarded = check_source(SOURCE, &guarded);
+    let plain = check_source(SOURCE, &plain);
+    assert_eq!(guarded.diagnostics(), []);
+    assert_eq!(plain.diagnostics(), []);
+    assert!(guarded.module_set().is_some());
+    assert_eq!(guarded.module_set(), plain.module_set());
+}
