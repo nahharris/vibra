@@ -11,7 +11,10 @@
 //! member, the one implementation whose key matches, and the structural
 //! `Equatable` and `Ordered` of atoms, tuples, and records. A contract
 //! member read as a value is the implementation's function when it supplies
-//! the member, and otherwise a closure that makes the contract call.
+//! the member, and otherwise a closure that makes the contract call. A
+//! contract call on an interface's own parameter whose bound leaves an
+//! associated type open is `@tool.unavailable`: an interface takes no extra
+//! parameter for the choice.
 
 use std::sync::Arc;
 

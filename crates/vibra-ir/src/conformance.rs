@@ -145,7 +145,7 @@ fn fix_labels(
 /// # Errors
 ///
 /// A selected implementation leaves a binder open, or the selections visit
-/// more than [`GOAL_LIMIT`] goals.
+/// more goals than one conformance question may (4096).
 pub fn select_implementation<'i>(
     implementations: &'i [Implementation],
     receiver: &Type,

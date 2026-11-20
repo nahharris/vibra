@@ -27,7 +27,10 @@
 //! each meeting its parameter's bound; and the key of a `Dict` implements
 //! `Ordered`. The bounds and an open key are decided once every
 //! implementation is known, under the bounds in scope where the type is
-//! written (a [`BoundGoal`]).
+//! written (a [`BoundGoal`]). An associated type a bound leaves open is one
+//! more type parameter of the `fn`, member, anonymous callable, or
+//! implementation the bound is on, abstract inside it and fixed at each use
+//! by the implementation the bound selects ([`Program::open_choices`]).
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
