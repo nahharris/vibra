@@ -137,13 +137,18 @@ fn check_bodies(
         let views = GuardViews::of(&data.view);
         let mut checked =
             checker.callable(signature, &patterns, &labelled, scope, &views, body);
+        // The sites a contract guard copied into an implementation states
+        // span the interface's module.
+        let mut contract_sites = Vec::new();
         if let Some(interface) = data.implements {
+            let mark = checker.sites.len();
             if let Some((guards, slot_count)) =
                 contract_guards(program, documents, data, interface, &mut checker)
             {
                 checked.guards = guards;
                 checked.slot_count = slot_count;
             }
+            contract_sites = checker.sites.split_off(mark);
             let differing = differing_defaults(
                 program,
                 documents,
@@ -160,6 +165,15 @@ fn check_bodies(
                 .sites
                 .drain(..)
                 .map(|site| (data.module, Owner::Function(index), site)),
+        );
+        let contract_module = data
+            .implements
+            .and_then(|interface| program.interfaces.get(interface))
+            .map_or(data.module, |interface| interface.module);
+        pass.sites.extend(
+            contract_sites
+                .into_iter()
+                .map(|site| (contract_module, Owner::Function(index), site)),
         );
         pass.instantiations
             .extend(checker.instantiations.drain(..).map(

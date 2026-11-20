@@ -1,0 +1,19 @@
+id = "V2-CONTRACT-member-guard-obligation-refuted"
+rule = "V2-CONTRACT-member-guard-obligation-refuted"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#guards-and-callable-types: a bare-guard obligation inside a contract member's guard that its constant arguments refute is @contract.refuted in each implementation, related to the argument and to the implementation member"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@contract.refuted"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 47, end = 70 }
+related = [{ source = "src/app/main.vib", span = { start = 193, end = 197 } }, { source = "src/app/main.vib", span = { start = 265, end = 269 } }]

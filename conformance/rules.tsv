@@ -706,3 +706,6 @@ V2-CONTRACT-member-requires-constant	active	02-type-system.md#guards-and-callabl
 V2-CONTRACT-member-requires-branch	active	02-type-system.md#guards-and-callable-types
 V2-CONTRACT-member-requires-refuted	active	02-type-system.md#guards-and-callable-types
 V2-CONTRACT-member-requires-unproved	active	02-type-system.md#guards-and-callable-types
+V2-CONTRACT-member-guard-obligation	active	02-type-system.md#guards-and-callable-types
+V2-CONTRACT-member-guard-obligation-refuted	active	02-type-system.md#guards-and-callable-types
+V2-CONTRACT-member-guard-obligation-unproved	active	02-type-system.md#guards-and-callable-types

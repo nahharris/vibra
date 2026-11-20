@@ -758,16 +758,9 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         self.slots.truncate(signature.slot_count());
         self.locals.clear();
         let _ = self.member_guards(signature, patterns, labelled, views);
-        // A contract guard is copied into each implementation, where an
-        // obligation it states would have no single site.
-        for site in std::mem::take(&mut self.sites) {
-            if let Site::Requires { span, .. } | Site::Where { span, .. } = site {
-                self.unavailable(
-                    span,
-                    "a bare-guard obligation inside a contract member's guard",
-                );
-            }
-        }
+        // A contract guard is copied into each implementation, and an
+        // obligation it states is one obligation of each implementation.
+        self.sites.clear();
     }
 
     /// The guards `views` of the contract member that the callable just
@@ -777,7 +770,8 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
     /// parameter in the same position, and each slot a guard binds comes
     /// after the body's. The guards and the slot count, or `None` when one
     /// has a fault; the faults themselves are the contract's, reported
-    /// where it is declared.
+    /// where it is declared. The obligation sites the guards state are kept,
+    /// spanning the contract's module.
     pub(crate) fn implementation_guards(
         &mut self,
         signature: &FnType,
@@ -795,7 +789,9 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         let (diagnostics, sites) = (self.diagnostics.len(), self.sites.len());
         let guards = self.member_guards(signature, patterns, labelled, views);
         self.diagnostics.truncate(diagnostics);
-        self.sites.truncate(sites);
+        if guards.is_none() {
+            self.sites.truncate(sites);
+        }
         (self.module, self.source_id, self.text) = saved;
         guards.map(|guards| (guards, self.slots.len()))
     }

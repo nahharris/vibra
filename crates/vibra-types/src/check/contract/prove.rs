@@ -136,6 +136,11 @@ enum Verdict {
 struct Found {
     kind: ObligationKind,
     owner: usize,
+    /// The module whose text `span` is in: the owner's, or for a contract
+    /// guard copied into an implementation, the interface's.
+    module: usize,
+    /// Whether the site is in a contract guard copied into the owner.
+    copied: bool,
     span: ByteSpan,
     guard: Guard,
     verdict: Verdict,
@@ -156,6 +161,10 @@ struct Body<'v> {
     owner: usize,
     function: Option<usize>,
     node: &'v Node,
+    /// The module whose text the node's spans are in.
+    module: usize,
+    /// Whether the node is a contract guard copied into an implementation.
+    copied: bool,
     /// Whether the body is the function's own, whose returns are its exits.
     exits: bool,
 }
@@ -165,6 +174,9 @@ struct Body<'v> {
 struct Declaration {
     module: usize,
     identity: String,
+    /// The name of an implementation member, which a site of the contract
+    /// guard copied into it relates.
+    implementation: Option<ByteSpan>,
 }
 
 /// What `GUARD-1` decided once, by owner, site, and kind.
@@ -250,15 +262,28 @@ pub(super) fn discharge(
         }
         let owner =
             prover.declare(Owner::Function(*index), data.module, data.identity.clone());
+        if data.implements.is_some()
+            && let Some(declaration) = prover.declarations.get_mut(owner)
+        {
+            declaration.implementation = data.view.name().map(|name| name.span());
+        }
         let entry = inputs.layout.functions.get(*index).copied().flatten();
         if let Some(node) = &checked.node {
             bodies.push(Body {
                 owner,
                 function: entry,
                 node,
+                module: data.module,
+                copied: false,
                 exits: true,
             });
         }
+        // An implementation member's guards are its contract's, written in
+        // the interface's module.
+        let guard_module = data
+            .implements
+            .and_then(|interface| inputs.program.interfaces.get(interface))
+            .map_or(data.module, |interface| interface.module);
         let guards = [
             checked.guards.entry.as_ref(),
             checked.guards.exit.as_ref().map(|(_, guard)| guard),
@@ -269,6 +294,8 @@ pub(super) fn discharge(
                     owner,
                     function: None,
                     node,
+                    module: guard_module,
+                    copied: data.implements.is_some(),
                     exits: false,
                 });
             }
@@ -298,6 +325,8 @@ pub(super) fn discharge(
                     owner,
                     function: None,
                     node,
+                    module,
+                    copied: false,
                     exits: false,
                 });
             }
@@ -350,7 +379,11 @@ pub(super) fn discharge(
 
 impl<'v> Prover<'v> {
     fn declare(&mut self, owner: Owner, module: usize, identity: String) -> usize {
-        self.declarations.push(Declaration { module, identity });
+        self.declarations.push(Declaration {
+            module,
+            identity,
+            implementation: None,
+        });
         let at = self.declarations.len() - 1;
         self.owners.insert(owner, at);
         at
@@ -365,7 +398,7 @@ impl<'v> Prover<'v> {
         evaluator: &mut Evaluator<'_>,
     ) {
         let inputs = context.inputs;
-        for (_, owner, site) in inputs.sites {
+        for (module, owner, site) in inputs.sites {
             let Some(declaration) = self.owners.get(owner).copied() else {
                 continue;
             };
@@ -438,6 +471,8 @@ impl<'v> Prover<'v> {
             found.push(Found {
                 kind,
                 owner: declaration,
+                module: *module,
+                copied: false,
                 span,
                 guard,
                 verdict,
@@ -743,6 +778,8 @@ impl<'v> Prover<'v> {
         let found = |verdict| Found {
             kind: ObligationKind::Requires,
             owner: body.owner,
+            module: body.module,
+            copied: body.copied,
             span,
             guard: Guard::Function(*function),
             verdict,
@@ -840,6 +877,8 @@ impl<'v> Prover<'v> {
         let found = |verdict| Found {
             kind: ObligationKind::Where,
             owner: body.owner,
+            module: body.module,
+            copied: body.copied,
             span,
             guard: Guard::Type(ty),
             verdict,
@@ -1295,7 +1334,7 @@ impl<'v> Prover<'v> {
         let Some(declaration) = self.declarations.get(found.owner) else {
             return;
         };
-        let module = declaration.module;
+        let module = found.module;
         let (predicate, guard_module, guard_span, name_span, what) = match found.guard {
             Guard::Function(function) => {
                 let Some(data) = self.guarded.get(&function) else {
@@ -1346,11 +1385,16 @@ impl<'v> Prover<'v> {
                          by the discharge rules"
                     ),
                 );
-                let diagnostic = unproved_notes(context.program().related(
-                    diagnostic,
-                    guard_module,
-                    name_span,
-                    "the guarded declaration",
+                let diagnostic = unproved_notes(self.implementation(
+                    context,
+                    declaration,
+                    found.copied,
+                    context.program().related(
+                        diagnostic,
+                        guard_module,
+                        name_span,
+                        "the guarded declaration",
+                    ),
                 ));
                 context.push(module, diagnostic);
             }
@@ -1367,6 +1411,8 @@ impl<'v> Prover<'v> {
                     *related,
                     "the refuting value",
                 );
+                let diagnostic =
+                    self.implementation(context, declaration, found.copied, diagnostic);
                 context.push(guard_module, diagnostic);
             }
             Verdict::Limit => context.limit(guard_module, guard_span),
@@ -1380,7 +1426,36 @@ impl<'v> Prover<'v> {
             found.span,
             &[&found.verdict],
         );
+        // A site of a contract guard spans the interface's module.
+        let record = match context.program().modules.get(module) {
+            Some(site) if module != declaration.module => Obligation {
+                source_id: site.source_id.to_string(),
+                ..record
+            },
+            _ => record,
+        };
         context.reviewed.obligations.push(record);
+    }
+
+    /// `diagnostic`, related to the implementation member `declaration` when
+    /// its site is in the contract guard `copied` into it: each
+    /// implementation has an obligation of its own.
+    fn implementation(
+        &self,
+        context: &Context<'_, '_>,
+        declaration: &Declaration,
+        copied: bool,
+        diagnostic: vibra_diagnostics::Diagnostic,
+    ) -> vibra_diagnostics::Diagnostic {
+        match declaration.implementation {
+            Some(name) if copied => context.program().related(
+                diagnostic,
+                declaration.module,
+                name,
+                "the implementation the contract guard is copied into",
+            ),
+            _ => diagnostic,
+        }
     }
 
     /// Reports the `ensures` obligation of the function at checked index
