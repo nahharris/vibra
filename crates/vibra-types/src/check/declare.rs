@@ -7,9 +7,10 @@
 //! names here are looked up without reporting: a name that does not resolve
 //! leaves an error type that reports nothing again.
 //!
-//! The checker supports `fn` declarations with parameter patterns, type
-//! parameters bounded by `Any`, and written types of every form but `Proc`,
-//! `Intent`, and interface values; module values of those types; wrappers,
+//! The checker supports `fn` declarations with parameter patterns, labelled
+//! parameters, type parameters bounded by `Any`, and written types of every
+//! form but `Proc`, `Intent`, and interface values; module values of those
+//! types; wrappers,
 //! declared tuples, declared records, and variant types, generic or not, with
 //! their members, a wrapper, declared tuple, or declared record with a bare
 //! `where` included; and, in the embedded standard library, the intrinsic
@@ -28,7 +29,7 @@ use std::sync::Arc;
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 use vibra_ir::external::compiler::CompilerIntrinsic;
-use vibra_ir::{FnType, Library, Type, TypeId};
+use vibra_ir::{FnType, Library, NamedTypes, Type, TypeId};
 use vibra_syntax::source::{
     Callable, Declaration, ExprForm, Given, Impl, InterfaceDecl, Module, ModuleLet,
     Primary, SourceOptions, Suffix, TypeBody, TypeDecl, TypeExpr, TypeForm,
@@ -914,16 +915,31 @@ impl<'a> Program<'a> {
                 Type::record(fields).map_err(|_| NoType::Unsupported)
             }
             TypeForm::Fn { inputs, result } => {
-                if !inputs.labelled().is_empty() {
-                    return Err(NoType::Unsupported);
-                }
                 let parameters = inputs
                     .positional()
                     .into_iter()
                     .map(|input| self.written_at(module, input, scope))
                     .collect::<Result<Vec<_>, _>>()?;
+                let labelled = inputs
+                    .labelled()
+                    .into_iter()
+                    .map(|(name, input)| {
+                        Ok((
+                            name.text().to_owned(),
+                            self.written_at(module, input, scope)?,
+                        ))
+                    })
+                    .collect::<Result<Vec<_>, NoType>>()?;
+                // Two inputs of one label have no rule of their own; such a
+                // type is left unsupported rather than given a meaning.
+                let labels =
+                    NamedTypes::new(labelled).map_err(|_| NoType::Unsupported)?;
                 let result = self.written_at(module, result, scope)?;
-                Ok(Type::function(FnType::new(parameters, result)))
+                Ok(Type::function(FnType {
+                    parameters,
+                    labels,
+                    result,
+                }))
             }
             TypeForm::Proc { .. } | TypeForm::Intent { .. } => Err(NoType::Unsupported),
         }
@@ -1184,7 +1200,12 @@ impl<'a> Program<'a> {
                     ));
                     continue;
                 }
-                if !plain_callable(&member) || !member.params().is_empty() {
+                // Labelled defaults of a contract member are instantiated
+                // under each implementation, which is the interfaces step's.
+                if !plain_callable(&member)
+                    || !member.params().is_empty()
+                    || !member.labelled().is_empty()
+                {
                     supported = false;
                     break;
                 }
@@ -1292,6 +1313,18 @@ impl<'a> Program<'a> {
             }
             parameters.push(ty);
         }
+        let mut labelled = Vec::new();
+        for (name, written, _) in view.labelled() {
+            let span = written.span();
+            let ty = self.written(module, written, scope)?;
+            if deepest.is_none() && ty.depth() >= Type::MAX_DEPTH {
+                deepest = Some(span);
+            }
+            labelled.push((name.text().to_owned(), ty));
+        }
+        // A label written twice is a repeated lexical binding, which
+        // resolution reports.
+        let labels = NamedTypes::new(labelled).map_err(|_| NoType::Unresolved)?;
         let (_, written) = view.result().ok_or(NoType::Unresolved)?;
         let span = written.span();
         let result = self.written(module, written, scope)?;
@@ -1303,7 +1336,11 @@ impl<'a> Program<'a> {
         if let Some(span) = deepest {
             return Err(depth_fault(span));
         }
-        Ok(FnType::new(parameters, result))
+        Ok(FnType {
+            parameters,
+            labels,
+            result,
+        })
     }
 
     /// Reads the header of every `fn`.
@@ -1466,9 +1503,11 @@ impl<'a> Program<'a> {
                     self_type: Some(&receiver),
                     binders: &[],
                 };
-                let header = (plain_callable(&member) && member.params().is_empty())
-                    .then(|| self.callable_type(module, &member, scope).ok())
-                    .flatten();
+                let header = (plain_callable(&member)
+                    && member.params().is_empty()
+                    && member.labelled().is_empty())
+                .then(|| self.callable_type(module, &member, scope).ok())
+                .flatten();
                 let declared = expected
                     .iter()
                     .find(|declared| declared.name == name.text());
@@ -1667,11 +1706,10 @@ impl<'a> Program<'a> {
 }
 
 /// Whether a callable header has only what this checker supports besides
-/// its types and type parameters: no labelled parameters, guards, row, or
+/// its types, labelled parameters, and type parameters: no guards, row, or
 /// bound other than `Any`.
-fn plain_callable(view: &Callable<'_>) -> bool {
-    view.labelled().is_empty()
-        && bounds_are_any(view.given())
+pub(crate) fn plain_callable(view: &Callable<'_>) -> bool {
+    bounds_are_any(view.given())
         && view.requires().is_none()
         && view.ensures().is_none()
         && view.performs().is_none()

@@ -13,6 +13,7 @@
 //! ([`pattern`]), runs the initializer-cycle analysis
 //! ([`cycle`]), and builds the [`CheckedModuleSet`] ([`lower`]).
 
+mod callables;
 mod cycle;
 mod declare;
 mod expr;
