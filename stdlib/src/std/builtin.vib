@@ -6,6 +6,8 @@
 
 use @std.core.ArithmeticError enduse
 
+use @std.core.ConversionError enduse
+
 type Void of Intrinsic(@void)
   visibility @public
 endtype
@@ -34,6 +36,22 @@ type Char of Intrinsic(@char)
     external @compiler
     symbol "char.fromU32"
   endfn
+  impl Equatable
+    fn equal
+      takes {left: Self right: Self}
+      returns same: Bool
+      do
+        return Equatable.equal(Char.toU32(left) Char.toU32(right))
+    endfn
+  endimpl
+  impl Ordered
+    fn compare
+      takes {left: Self right: Self}
+      returns order: Ordering
+      do
+        return Ordered.compare(Char.toU32(left) Char.toU32(right))
+    endfn
+  endimpl
 endtype
 
 type I8 of Intrinsic(@i8)
@@ -150,6 +168,69 @@ type I8 of Intrinsic(@i8)
       returns order: Ordering
       external @compiler
       symbol "i8.compare"
+    endfn
+  endimpl
+  impl TryFrom(I16)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: I16}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "i16.toI8"
+    endfn
+  endimpl
+  impl TryFrom(I32)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: I32}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "i32.toI8"
+    endfn
+  endimpl
+  impl TryFrom(I64)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: I64}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "i64.toI8"
+    endfn
+  endimpl
+  impl TryFrom(U8)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: U8}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "u8.toI8"
+    endfn
+  endimpl
+  impl TryFrom(U16)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: U16}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "u16.toI8"
+    endfn
+  endimpl
+  impl TryFrom(U32)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: U32}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "u32.toI8"
+    endfn
+  endimpl
+  impl TryFrom(U64)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: U64}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "u64.toI8"
     endfn
   endimpl
 endtype
@@ -270,6 +351,67 @@ type I16 of Intrinsic(@i16)
       symbol "i16.compare"
     endfn
   endimpl
+  impl From(I8)
+    fn convert
+      takes {value: I8}
+      returns converted: Self
+      external @compiler
+      symbol "i8.toI16"
+    endfn
+  endimpl
+  impl TryFrom(I32)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: I32}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "i32.toI16"
+    endfn
+  endimpl
+  impl TryFrom(I64)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: I64}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "i64.toI16"
+    endfn
+  endimpl
+  impl From(U8)
+    fn convert
+      takes {value: U8}
+      returns converted: Self
+      external @compiler
+      symbol "u8.toI16"
+    endfn
+  endimpl
+  impl TryFrom(U16)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: U16}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "u16.toI16"
+    endfn
+  endimpl
+  impl TryFrom(U32)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: U32}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "u32.toI16"
+    endfn
+  endimpl
+  impl TryFrom(U64)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: U64}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "u64.toI16"
+    endfn
+  endimpl
 endtype
 
 type I32 of Intrinsic(@i32)
@@ -386,6 +528,65 @@ type I32 of Intrinsic(@i32)
       returns order: Ordering
       external @compiler
       symbol "i32.compare"
+    endfn
+  endimpl
+  impl From(I8)
+    fn convert
+      takes {value: I8}
+      returns converted: Self
+      external @compiler
+      symbol "i8.toI32"
+    endfn
+  endimpl
+  impl From(I16)
+    fn convert
+      takes {value: I16}
+      returns converted: Self
+      external @compiler
+      symbol "i16.toI32"
+    endfn
+  endimpl
+  impl TryFrom(I64)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: I64}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "i64.toI32"
+    endfn
+  endimpl
+  impl From(U8)
+    fn convert
+      takes {value: U8}
+      returns converted: Self
+      external @compiler
+      symbol "u8.toI32"
+    endfn
+  endimpl
+  impl From(U16)
+    fn convert
+      takes {value: U16}
+      returns converted: Self
+      external @compiler
+      symbol "u16.toI32"
+    endfn
+  endimpl
+  impl TryFrom(U32)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: U32}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "u32.toI32"
+    endfn
+  endimpl
+  impl TryFrom(U64)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: U64}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "u64.toI32"
     endfn
   endimpl
 endtype
@@ -506,6 +707,63 @@ type I64 of Intrinsic(@i64)
       symbol "i64.compare"
     endfn
   endimpl
+  impl From(I8)
+    fn convert
+      takes {value: I8}
+      returns converted: Self
+      external @compiler
+      symbol "i8.toI64"
+    endfn
+  endimpl
+  impl From(I16)
+    fn convert
+      takes {value: I16}
+      returns converted: Self
+      external @compiler
+      symbol "i16.toI64"
+    endfn
+  endimpl
+  impl From(I32)
+    fn convert
+      takes {value: I32}
+      returns converted: Self
+      external @compiler
+      symbol "i32.toI64"
+    endfn
+  endimpl
+  impl From(U8)
+    fn convert
+      takes {value: U8}
+      returns converted: Self
+      external @compiler
+      symbol "u8.toI64"
+    endfn
+  endimpl
+  impl From(U16)
+    fn convert
+      takes {value: U16}
+      returns converted: Self
+      external @compiler
+      symbol "u16.toI64"
+    endfn
+  endimpl
+  impl From(U32)
+    fn convert
+      takes {value: U32}
+      returns converted: Self
+      external @compiler
+      symbol "u32.toI64"
+    endfn
+  endimpl
+  impl TryFrom(U64)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: U64}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "u64.toI64"
+    endfn
+  endimpl
 endtype
 
 type U8 of Intrinsic(@u8)
@@ -608,6 +866,69 @@ type U8 of Intrinsic(@u8)
       returns order: Ordering
       external @compiler
       symbol "u8.compare"
+    endfn
+  endimpl
+  impl TryFrom(I8)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: I8}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "i8.toU8"
+    endfn
+  endimpl
+  impl TryFrom(I16)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: I16}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "i16.toU8"
+    endfn
+  endimpl
+  impl TryFrom(I32)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: I32}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "i32.toU8"
+    endfn
+  endimpl
+  impl TryFrom(I64)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: I64}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "i64.toU8"
+    endfn
+  endimpl
+  impl TryFrom(U16)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: U16}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "u16.toU8"
+    endfn
+  endimpl
+  impl TryFrom(U32)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: U32}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "u32.toU8"
+    endfn
+  endimpl
+  impl TryFrom(U64)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: U64}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "u64.toU8"
     endfn
   endimpl
 endtype
@@ -714,6 +1035,68 @@ type U16 of Intrinsic(@u16)
       symbol "u16.compare"
     endfn
   endimpl
+  impl TryFrom(I8)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: I8}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "i8.toU16"
+    endfn
+  endimpl
+  impl TryFrom(I16)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: I16}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "i16.toU16"
+    endfn
+  endimpl
+  impl TryFrom(I32)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: I32}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "i32.toU16"
+    endfn
+  endimpl
+  impl TryFrom(I64)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: I64}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "i64.toU16"
+    endfn
+  endimpl
+  impl From(U8)
+    fn convert
+      takes {value: U8}
+      returns converted: Self
+      external @compiler
+      symbol "u8.toU16"
+    endfn
+  endimpl
+  impl TryFrom(U32)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: U32}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "u32.toU16"
+    endfn
+  endimpl
+  impl TryFrom(U64)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: U64}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "u64.toU16"
+    endfn
+  endimpl
 endtype
 
 type U32 of Intrinsic(@u32)
@@ -818,6 +1201,67 @@ type U32 of Intrinsic(@u32)
       symbol "u32.compare"
     endfn
   endimpl
+  impl TryFrom(I8)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: I8}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "i8.toU32"
+    endfn
+  endimpl
+  impl TryFrom(I16)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: I16}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "i16.toU32"
+    endfn
+  endimpl
+  impl TryFrom(I32)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: I32}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "i32.toU32"
+    endfn
+  endimpl
+  impl TryFrom(I64)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: I64}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "i64.toU32"
+    endfn
+  endimpl
+  impl From(U8)
+    fn convert
+      takes {value: U8}
+      returns converted: Self
+      external @compiler
+      symbol "u8.toU32"
+    endfn
+  endimpl
+  impl From(U16)
+    fn convert
+      takes {value: U16}
+      returns converted: Self
+      external @compiler
+      symbol "u16.toU32"
+    endfn
+  endimpl
+  impl TryFrom(U64)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: U64}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "u64.toU32"
+    endfn
+  endimpl
 endtype
 
 type U64 of Intrinsic(@u64)
@@ -920,6 +1364,66 @@ type U64 of Intrinsic(@u64)
       returns order: Ordering
       external @compiler
       symbol "u64.compare"
+    endfn
+  endimpl
+  impl TryFrom(I8)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: I8}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "i8.toU64"
+    endfn
+  endimpl
+  impl TryFrom(I16)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: I16}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "i16.toU64"
+    endfn
+  endimpl
+  impl TryFrom(I32)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: I32}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "i32.toU64"
+    endfn
+  endimpl
+  impl TryFrom(I64)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: I64}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "i64.toU64"
+    endfn
+  endimpl
+  impl From(U8)
+    fn convert
+      takes {value: U8}
+      returns converted: Self
+      external @compiler
+      symbol "u8.toU64"
+    endfn
+  endimpl
+  impl From(U16)
+    fn convert
+      takes {value: U16}
+      returns converted: Self
+      external @compiler
+      symbol "u16.toU64"
+    endfn
+  endimpl
+  impl From(U32)
+    fn convert
+      takes {value: U32}
+      returns converted: Self
+      external @compiler
+      symbol "u32.toU64"
     endfn
   endimpl
 endtype
