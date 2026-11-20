@@ -112,17 +112,10 @@ jobs:
       # executes the checked-in cases through the real handlers and exits
       # nonzero on a failed or unavailable case. It prints the counts by
       # profile.
-      - name: Run the v1 corpus
-        run: cargo run --locked --offline -p vibra-conformance-v1 --bin vibra-conformance-v1 -- --root conformance/v1/cases
-
       - name: Run the corpus
         run: cargo run --locked --offline -p vibra-conformance --bin vibra-conformance -- --root conformance/cases
 
       - name: Run fuzz smoke
-        if: matrix.os == 'ubuntu-latest'
-        run: cargo run --locked --offline -p vibra-conformance-v1 --bin m1-fuzz -- --profile ci-smoke
-
-      - name: Run reader fuzz smoke
         if: matrix.os == 'ubuntu-latest'
         run: cargo run --locked --offline -p vibra-conformance --bin fuzz -- --profile ci-smoke
 
