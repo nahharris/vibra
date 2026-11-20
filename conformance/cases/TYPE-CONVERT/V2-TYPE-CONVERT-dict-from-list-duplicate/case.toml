@@ -1,0 +1,12 @@
+id = "V2-TYPE-CONVERT-dict-from-list-duplicate"
+rule = "V2-TYPE-CONVERT-dict-from-list-duplicate"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#conversion: the converted dict holds its entries in key order, and a duplicate key keeps the position of its key, not of its last entry"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

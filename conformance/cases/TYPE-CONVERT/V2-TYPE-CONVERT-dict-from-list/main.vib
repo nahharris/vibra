@@ -1,0 +1,4 @@
+fn main returns d: Dict(Str I32) do
+  let d: Dict(Str I32) be From.convert([{"a" 1i32} {"a" 2i32}]) endlet
+  return d
+endfn

@@ -11,6 +11,7 @@ bytes.toList		{Bytes}	List(U8)
 char.fromU32		{U32}	Option(Char)
 char.toU32		{Char}	U32
 dict.entries	K V	{Dict(K V)}	List({K V})
+dict.fromList	K V	{List({K V})}	Dict(K V)
 dict.next	K V	{Dict(K V)}	Option({{K V} Dict(K V)})
 f32.add		{F32 F32}	F32
 f32.compareTotal		{F32 F32}	Ordering

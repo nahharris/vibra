@@ -19,7 +19,7 @@ fn the_snapshot_is_the_table() {
         .map(|intrinsic| intrinsic.row().snapshot_line() + "\n")
         .collect::<String>();
     assert_eq!(rendered, SNAPSHOT);
-    assert_eq!(SNAPSHOT.lines().count(), 239);
+    assert_eq!(SNAPSHOT.lines().count(), 240);
 }
 
 #[test]
@@ -146,6 +146,7 @@ fn the_rows_with_vectors_are_the_number_char_text_and_bytes_rows() {
                 | CompilerIntrinsic::BytesToList
                 | CompilerIntrinsic::BytesFromList
                 | CompilerIntrinsic::DictEntries
+                | CompilerIntrinsic::DictFromList
                 | CompilerIntrinsic::DictNext
                 | CompilerIntrinsic::ListLength
                 | CompilerIntrinsic::ListAppend

@@ -3,7 +3,7 @@
 //! registry").
 //!
 //! A row with vectors runs every vector through `evaluate`: the vectors are
-//! the registry's hand-written samples. The fifteen rows without vectors
+//! the registry's hand-written samples. The sixteen rows without vectors
 //! have tests written here by hand from the chapter.
 
 use vibra_diagnostics::DiagnosticCode;
@@ -314,6 +314,7 @@ const HAND_ROWS: &[&str] = &[
     "bytes.toList",
     "bytes.fromList",
     "dict.entries",
+    "dict.fromList",
     "dict.next",
     "list.length",
     "list.append",
@@ -459,6 +460,33 @@ fn dict_entries() {
     );
 }
 
+/// `dict.fromList` builds its dict in key order, and a later duplicate key
+/// replaces the earlier value, as in a dict literal.
+#[test]
+fn dict_from_list() {
+    let pair =
+        |key: &str, value: u8| Value::Tuple(vec![text_value(key), Value::U8(value)]);
+    let entries = Type::list(Type::Tuple(vec![str_type(), Type::U8]));
+    let build = |pairs: Vec<Value>| {
+        apply(
+            CompilerIntrinsic::DictFromList,
+            vec![str_type(), Type::U8],
+            vec![(entries.clone(), Value::List(pairs))],
+        )
+    };
+    assert_eq!(
+        build(vec![pair("b", 2), pair("a", 1)]),
+        Evaluation::Value(two_entries())
+    );
+    assert_eq!(
+        build(vec![pair("b", 9), pair("a", 1), pair("b", 2)]),
+        Evaluation::Value(two_entries())
+    );
+    assert_eq!(
+        build(Vec::new()),
+        Evaluation::Value(Value::Dict(Vec::new()))
+    );
+}
 #[test]
 fn dict_next() {
     assert_eq!(

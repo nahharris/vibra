@@ -589,3 +589,5 @@ V2-TYPE-INTERFACE-assoc-no-bound	active	02-type-system.md#associated-types
 V2-TYPE-INTERFACE-assoc-any-choice	active	02-type-system.md#associated-types
 V2-TYPE-GENERIC-bound-library-label	active	02-type-system.md#bounds
 V2-TYPE-GENERIC-bound-library-label-satisfied	active	02-type-system.md#bounds
+V2-TYPE-CONVERT-dict-from-list	active	02-type-system.md#conversion
+V2-TYPE-CONVERT-dict-from-list-duplicate	active	02-type-system.md#conversion

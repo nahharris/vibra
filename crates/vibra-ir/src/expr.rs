@@ -948,6 +948,26 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Checks the key of a row that builds a dict, `dict.fromList`, at
+    /// `type_arguments`: a closed key MUST implement `Ordered`, as the key
+    /// of a dict literal must. An open key is a binder of the standard
+    /// library's generic `Dict`, which the checker fixes only at a written
+    /// destination type whose key it has checked.
+    pub(crate) fn check_built_dict(
+        &self,
+        intrinsic: CompilerIntrinsic,
+        type_arguments: &[Type],
+    ) -> Result<(), IrError> {
+        match type_arguments.first() {
+            Some(key)
+                if intrinsic == CompilerIntrinsic::DictFromList && key.is_closed() =>
+            {
+                self.check_dict_key(key)
+            }
+            _ => Ok(()),
+        }
+    }
+
     /// The type of the function at `index` as a value at `type_arguments`,
     /// whose bounds hold.
     pub(crate) fn instantiated_function(

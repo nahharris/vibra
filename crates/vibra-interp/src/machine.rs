@@ -910,24 +910,6 @@ impl<'a> Machine<'a> {
                 }
                 return self.dict_build(key, entries);
             }
-            (Construction::Wrapper(_), Some(Library::Dict)) => {
-                let key = dict_key(&value_type)?;
-                let entries = single(done)?
-                    .as_list()
-                    .ok_or_else(|| {
-                        Halt::Invalid("a dict built from a non-list".to_owned())
-                    })?
-                    .iter()
-                    .map(|entry| match &entry.0 {
-                        Repr::Tuple(pair) => match pair.as_slice() {
-                            [key, value] => Ok((key.clone(), value.clone())),
-                            _ => invalid("a dict entry that is not a pair"),
-                        },
-                        _ => invalid("a dict entry that is not a pair"),
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
-                return self.dict_build(key, entries);
-            }
             (Construction::Wrapper(_), Some(Library::Str)) => {
                 intrinsics::apply(CompilerIntrinsic::StrFromChars, &[single(done)?])?
             }
@@ -1639,6 +1621,13 @@ impl<'a> Machine<'a> {
                 })?);
                 self.fold(function, items, 0, initial)
             }
+            CompilerIntrinsic::DictFromList => {
+                let [key, _] = type_arguments else {
+                    return invalid("`dict.fromList` takes two type arguments");
+                };
+                let entries = pairs(&single(args)?)?;
+                self.dict_build(key.clone(), entries)
+            }
             CompilerIntrinsic::AssertTrue | CompilerIntrinsic::AssertFalse => {
                 self.assertion_allowed(intrinsic, origin)?;
                 let holds = single(args)?.as_bool().ok_or_else(|| {
@@ -1996,6 +1985,21 @@ fn single<'a>(values: Vec<Val<'a>>) -> Result<Val<'a>, Halt> {
         .try_into()
         .map_err(|_| Halt::Invalid("an operation of one operand".to_owned()))?;
     Ok(value)
+}
+
+/// The entries of `list`, a `List({K V})`, as key and value pairs in order.
+fn pairs<'a>(list: &Val<'a>) -> Result<Vec<(Val<'a>, Val<'a>)>, Halt> {
+    list.as_list()
+        .ok_or_else(|| Halt::Invalid("a dict built from a non-list".to_owned()))?
+        .iter()
+        .map(|entry| match &entry.0 {
+            Repr::Tuple(pair) => match pair.as_slice() {
+                [key, value] => Ok((key.clone(), value.clone())),
+                _ => invalid("a dict entry that is not a pair"),
+            },
+            _ => invalid("a dict entry that is not a pair"),
+        })
+        .collect()
 }
 
 fn truth(value: &Val<'_>) -> Result<bool, Halt> {
