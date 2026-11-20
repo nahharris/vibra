@@ -1,0 +1,23 @@
+fn main returns r: I32 do return 1i32 endfn
+
+fn needsU8(S)
+  takes {x: S}
+  returns r: Void
+  given {S: Source(Item: U8)}
+  do
+    return void
+endfn
+
+interface Source
+  type Item endtype
+  fn first
+    takes {value: Self}
+    returns item: Item
+  endfn
+  fn check
+    takes {value: Self}
+    returns r: Void
+    do
+      return needsU8(value)
+  endfn
+endinterface

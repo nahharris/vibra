@@ -1,0 +1,19 @@
+id = "V2-TYPE-GENERIC-bound-choice-differs"
+rule = "V2-TYPE-GENERIC-bound-choice-differs"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#bounds: a type whose implementation chooses another type than the bound fixes does not satisfy it, at the argument, related to the bound"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.unsatisfiedBound"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 42, end = 52 }
+related = [{ source = "src/app/main.vib", span = { start = 120, end = 134 } }]

@@ -1,0 +1,19 @@
+id = "V2-TYPE-GENERIC-bound-open-choice-self"
+rule = "V2-TYPE-GENERIC-bound-open-choice-self"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#bounds: in a default member the choice of Self is abstract and equals no other type, so it does not satisfy a bound that fixes it, at the argument, related to the bound"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.unsatisfiedBound"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 336, end = 341 }
+related = [{ source = "src/app/main.vib", span = { start = 104, end = 120 } }]

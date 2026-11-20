@@ -2870,11 +2870,12 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
     /// argument set aside is checked again.
     fn first_pass_done(&mut self, state: &mut CallState<'a>) {
         self.select(state);
-        self.call_bounds(state);
+        self.call_bounds(state, false);
     }
 
-    /// Resolves the bounds of the callee of `state`.
-    fn call_bounds(&mut self, state: &mut CallState<'a>) {
+    /// Resolves the bounds of the callee of `state`; `last` once no
+    /// argument is checked again.
+    fn call_bounds(&mut self, state: &mut CallState<'a>, last: bool) {
         if state.failed || state.bounds.iter().all(Option::is_none) {
             return;
         }
@@ -2887,6 +2888,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             &mut resolved,
             &state.sources,
             state.application,
+            last,
         );
         state.bounds = bounds;
         state.resolved = resolved;
@@ -2897,7 +2899,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
 
     fn finish_call(&mut self, mut state: CallState<'a>) -> Out {
         let program = self.program;
-        self.call_bounds(&mut state);
+        self.call_bounds(&mut state, true);
         let contract = if state.dispatch.is_some() && !state.failed {
             self.contract_call(&state)
         } else {

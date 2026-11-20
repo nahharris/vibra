@@ -497,3 +497,8 @@ V2-TYPE-INTERFACE-member-bound-stronger	active	02-type-system.md#implementations
 V2-TYPE-INTERFACE-member-bound-weaker	active	02-type-system.md#implementations
 V2-TYPE-INTERFACE-member-bound-missing	active	02-type-system.md#implementations
 V2-TYPE-INTERFACE-member-bound-renamed	active	02-type-system.md#implementations
+V2-TYPE-GENERIC-bound-open-choice	active	02-type-system.md#bounds
+V2-TYPE-GENERIC-bound-fixed-choice	active	02-type-system.md#bounds
+V2-TYPE-GENERIC-bound-choice-differs	active	02-type-system.md#bounds
+V2-TYPE-GENERIC-bound-open-choice-linked	active	02-type-system.md#bounds
+V2-TYPE-GENERIC-bound-open-choice-self	active	02-type-system.md#bounds

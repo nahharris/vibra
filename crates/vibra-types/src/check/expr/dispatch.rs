@@ -141,6 +141,13 @@ pub(super) fn closed(ty: &Type, assignment: &[Option<Type>]) -> Option<Type> {
     Some(ty.instantiate(&binders))
 }
 
+/// Whether `ty` mentions a type parameter.
+fn mentions_binder(ty: &Type) -> bool {
+    let mut found = false;
+    ty.visit(&mut |inner| found |= matches!(inner, Type::Binder(_)));
+    found
+}
+
 /// Whether the known types of `arguments` equal `fixed`.
 fn agree(fixed: &[Type], arguments: &[Option<Type>]) -> bool {
     fixed.len() == arguments.len()
@@ -241,6 +248,33 @@ impl<'a> BodyChecker<'_, 'a> {
             data.module,
             related,
             "the interface",
+        );
+    }
+
+    /// Reports that `actual` does not satisfy `bound`, a bound of a callee
+    /// of `module`, at `span`, related to the bound.
+    fn unsatisfied_bound(
+        &mut self,
+        span: ByteSpan,
+        actual: &Type,
+        bound: &BoundData,
+        module: usize,
+        detail: &str,
+    ) {
+        let name = self
+            .program
+            .interfaces
+            .get(bound.interface)
+            .map(|data| data.name.clone())
+            .unwrap_or_default();
+        let message = format!("`{actual}` does not satisfy the bound `{name}`{detail}");
+        self.report_related(
+            DiagnosticCode::TypeUnsatisfiedBound,
+            span,
+            message,
+            module,
+            bound.span,
+            "the bound",
         );
     }
 
@@ -859,6 +893,7 @@ impl<'a> BodyChecker<'_, 'a> {
         resolved: &mut [bool],
         sources: &[Option<ByteSpan>],
         application: ByteSpan,
+        last: bool,
     ) -> bool {
         loop {
             let mut progress = false;
@@ -878,59 +913,80 @@ impl<'a> BodyChecker<'_, 'a> {
                 else {
                     continue;
                 };
-                if let Some(done) = resolved.get_mut(at) {
-                    *done = true;
-                }
-                progress = true;
                 let span = sources.get(at).copied().flatten().unwrap_or(application);
                 let known = arguments.iter().cloned().map(Some).collect::<Vec<_>>();
                 let evidence = match self.evidence(&actual, bound.interface, &known) {
                     Found::One(evidence) => evidence,
                     Found::None | Found::Many => {
-                        let name = self
-                            .program
-                            .interfaces
-                            .get(bound.interface)
-                            .map(|data| data.name.clone())
-                            .unwrap_or_default();
-                        let message =
-                            format!("`{actual}` does not satisfy the bound `{name}`");
-                        self.report_related(
-                            DiagnosticCode::TypeUnsatisfiedBound,
-                            span,
-                            message,
-                            module,
-                            bound.span,
-                            "the bound",
-                        );
+                        if let Some(done) = resolved.get_mut(at) {
+                            *done = true;
+                        }
+                        self.unsatisfied_bound(span, &actual, bound, module, "");
                         return false;
                     }
                 };
-                for (label, pattern) in &bound.choices {
-                    let Some(Some(chosen)) = evidence
+                let choice = |label: &str| {
+                    evidence
                         .choices
                         .iter()
                         .find(|(name, _)| name == label)
-                        .map(|(_, chosen)| chosen.clone())
-                    else {
-                        continue;
-                    };
-                    let mut trial = assignment.to_vec();
-                    if unify(pattern, &chosen, &mut trial) {
-                        assignment.clone_from_slice(&trial);
-                    } else {
-                        let wanted = closed(pattern, assignment)
-                            .map_or_else(String::new, |ty| {
-                                format!(", but the call needs `{ty}`")
-                            });
-                        self.report(
-                            DiagnosticCode::TypeMismatch,
-                            span,
-                            format!(
-                                "the implementation for `{actual}` chooses `{chosen}` for `{label}`{wanted}"
-                            ),
-                        );
-                        return false;
+                        .and_then(|(_, chosen)| chosen.clone())
+                };
+                // A choice the evidence leaves open equals no type the call
+                // can name; while the parameter it is compared with may still
+                // be fixed by an argument checked again, the bound waits.
+                let waits = !last
+                    && bound.choices.iter().any(|(label, pattern)| {
+                        choice(label).is_none() && closed(pattern, assignment).is_none()
+                    });
+                if waits {
+                    continue;
+                }
+                if let Some(done) = resolved.get_mut(at) {
+                    *done = true;
+                }
+                progress = true;
+                for (label, pattern) in &bound.choices {
+                    let linked = mentions_binder(pattern);
+                    match choice(label) {
+                        Some(chosen) if linked => {
+                            let mut trial = assignment.to_vec();
+                            if unify(pattern, &chosen, &mut trial) {
+                                assignment.clone_from_slice(&trial);
+                            } else {
+                                let wanted = closed(pattern, assignment)
+                                    .map_or_else(String::new, |ty| {
+                                        format!(", but the call needs `{ty}`")
+                                    });
+                                self.report(
+                                    DiagnosticCode::TypeMismatch,
+                                    span,
+                                    format!(
+                                        "the implementation for `{actual}` chooses `{chosen}` for `{label}`{wanted}"
+                                    ),
+                                );
+                                return false;
+                            }
+                        }
+                        Some(chosen) if chosen == *pattern => {}
+                        Some(chosen) => {
+                            let detail = format!(
+                                ": its implementation chooses `{chosen}` for `{label}`"
+                            );
+                            self.unsatisfied_bound(
+                                span, &actual, bound, module, &detail,
+                            );
+                            return false;
+                        }
+                        None => {
+                            let detail = format!(
+                                ": its evidence leaves `{label}` open, and an open choice equals no other type"
+                            );
+                            self.unsatisfied_bound(
+                                span, &actual, bound, module, &detail,
+                            );
+                            return false;
+                        }
                     }
                 }
                 if let View::Selected(index, binders) = &evidence.view
