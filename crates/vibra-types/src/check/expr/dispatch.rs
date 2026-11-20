@@ -923,7 +923,7 @@ impl<'a> BodyChecker<'_, 'a> {
             let value = choice.unwrap_or_else(|| {
                 self.gaps.push((
                     application,
-                    "a contract call on a type parameter whose bound leaves an associated type open"
+                    "a contract call on a type parameter of an interface whose bound leaves an associated type open"
                         .to_owned(),
                 ));
                 Type::Associated(name.clone())

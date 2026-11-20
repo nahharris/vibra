@@ -30,6 +30,7 @@ mod trap;
 mod types;
 mod value;
 
+pub use conformance::select_implementation;
 pub use constant::Constant;
 pub use encode::{
     CANONICAL_NAN_F32, CANONICAL_NAN_F64, EncodeError, TypeTable, encode_open_type,

@@ -1,0 +1,18 @@
+id = "V2-TYPE-GENERIC-bound-open-item-mismatch"
+rule = "V2-TYPE-GENERIC-bound-open-item-mismatch"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#bounds: an associated type a bound leaves open equals only itself, so a value of another type in its place is @type.argumentMismatch"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.argumentMismatch"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 806, end = 810 }

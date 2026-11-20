@@ -702,6 +702,16 @@ V2-TYPE-GENERIC-anonymous-bound-value-unsatisfied	active	02-type-system.md#gener
 V2-TYPE-GENERIC-anonymous-bound-outer	active	02-type-system.md#generics
 V2-TYPE-GENERIC-anonymous-bound-outer-unsatisfied	active	02-type-system.md#generics
 V2-TYPE-GENERIC-anonymous-bound-converted	active	02-type-system.md#generics
+V2-TYPE-GENERIC-bound-open-item	active	02-type-system.md#bounds
+V2-TYPE-GENERIC-bound-open-item-let	active	02-type-system.md#bounds
+V2-TYPE-GENERIC-bound-open-item-mismatch	active	02-type-system.md#bounds
+V2-TYPE-GENERIC-bound-open-item-two	active	02-type-system.md#bounds
+V2-TYPE-GENERIC-bound-open-item-anonymous	active	02-type-system.md#bounds
+V2-TYPE-GENERIC-bound-open-item-type-member	active	02-type-system.md#bounds
+V2-TYPE-GENERIC-bound-open-item-impl	active	02-type-system.md#bounds
+V2-TYPE-GENERIC-bound-open-item-default	active	02-type-system.md#bounds
+V2-TYPE-GENERIC-bound-open-item-impl-own	active	02-type-system.md#bounds
+V2-TYPE-GENERIC-bound-open-choice-linked-bound	active	02-type-system.md#bounds
 V2-SRC-CALLS-default-dict-own-order	active	02-type-system.md#constant-expressions-and-constant-patterns
 V2-CONTRACT-where-generic-else	active	02-type-system.md#type-invariants
 V2-CONTRACT-where-generic-bare	active	02-type-system.md#bare-guards

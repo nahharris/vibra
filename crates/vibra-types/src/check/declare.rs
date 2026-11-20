@@ -1562,6 +1562,52 @@ impl<'a> Program<'a> {
         })
     }
 
+    /// The type parameters `binders` of a `fn` and their bounds `bounds`,
+    /// with one more type parameter after them for each associated type a
+    /// bound leaves open: the bound's label names it, so each use takes it
+    /// from the implementation the bound selects, and inside the `fn` it
+    /// equals only itself. It is named after the bounded parameter and the
+    /// associated type, `TItem` for `T` and `Item`, with a number after a
+    /// name already taken.
+    pub(crate) fn open_choices(
+        &self,
+        binders: &[String],
+        mut bounds: Vec<Option<BoundData>>,
+    ) -> (Vec<String>, Vec<Option<BoundData>>) {
+        let mut binders = binders.to_vec();
+        bounds.resize(binders.len(), None);
+        for at in 0..binders.len() {
+            let Some(Some(bound)) = bounds.get(at).cloned() else {
+                continue;
+            };
+            let Some(interface) = self.interfaces.get(bound.interface) else {
+                continue;
+            };
+            let mut choices = bound.choices.clone();
+            for (name, _) in &interface.associated {
+                if choices.iter().any(|(chosen, _)| chosen == name) {
+                    continue;
+                }
+                let base =
+                    format!("{}{name}", binders.get(at).map_or("", String::as_str));
+                let mut fresh = base.clone();
+                let mut suffix = 2;
+                while binders.contains(&fresh) {
+                    fresh = format!("{base}{suffix}");
+                    suffix += 1;
+                }
+                choices.push((name.clone(), Type::Binder(binders.len())));
+                binders.push(fresh);
+                bounds.push(None);
+            }
+            choices.sort_by(|left, right| left.0.cmp(&right.0));
+            if let Some(Some(slot)) = bounds.get_mut(at) {
+                slot.choices = choices;
+            }
+        }
+        (binders, bounds)
+    }
+
     /// Reads the header of every `fn`.
     fn function_headers(&mut self) {
         let mut results = Vec::new();
@@ -1627,9 +1673,11 @@ impl<'a> Program<'a> {
             };
             match header {
                 Ok((signature, bounds)) => {
+                    let (binders, bounds) = self.open_choices(&data.binders, bounds);
                     if let Some(data) = self.functions.get_mut(index) {
                         data.signature = Some(signature);
                         data.external = external;
+                        data.binders = binders;
                         data.bounds = bounds;
                         data.self_type = self_type;
                     }

@@ -476,6 +476,9 @@ struct ClosureState<'a> {
     span: ByteSpan,
     mode: ClosureMode,
     stage: u8,
+    /// The names of its own type parameters, with one after them for each
+    /// associated type a bound of its own leaves open.
+    own: Vec<String>,
     signature: FnType,
     /// The type arguments it is instantiated at: the enclosing binders
     /// themselves, then one for each of its own type parameters.
@@ -1848,7 +1851,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         if view.performs().is_some() {
             return self.unavailable_primary(span, "an anonymous callable with a row");
         }
-        let own = view
+        let mut own = view
             .params()
             .iter()
             .map(|name| name.text().to_owned())
@@ -1875,7 +1878,14 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                 Ok((signature, bounds))
             });
         let (signature, bounds) = match read {
-            Ok(read) => read,
+            Ok((signature, bounds)) => {
+                // An associated type its own bound leaves open is one more
+                // parameter of its own.
+                let (all, bounds) = self.program.open_choices(&binders, bounds);
+                own.extend(all.iter().skip(binders.len()).cloned());
+                binders = all;
+                (signature, bounds)
+            }
             Err(NoType::Unsupported) => {
                 return self.unavailable_primary(span, "this callable header");
             }
@@ -1932,6 +1942,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             span,
             mode,
             stage: 0,
+            own,
             signature,
             instance,
             labelled,
@@ -2210,13 +2221,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         let records = self.instantiations.split_off(state.instantiations);
         if state.mode == ClosureMode::Generic {
             let mut binder_names = self.binders.clone();
-            binder_names.extend(
-                state
-                    .view
-                    .params()
-                    .iter()
-                    .map(|name| name.text().to_owned()),
-            );
+            binder_names.extend(state.own.iter().cloned());
             self.generic = Some(GenericClosure {
                 closure: Arc::new(closure),
                 capture_locals: locals,

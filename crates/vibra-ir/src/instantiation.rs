@@ -19,7 +19,7 @@
 //! Every walk keeps a work list, so no host stack grows with what a checker
 //! built.
 
-use crate::conformance::{Evidence, match_open};
+use crate::conformance::{Evidence, select_implementation};
 use crate::expr::{CallTarget, ContractCall, Expr, Node, Tables};
 use crate::external::CompilerIntrinsic;
 use crate::{Binder, FunctionBody, Implementation, IrError, Type, TypeId};
@@ -106,31 +106,15 @@ impl<'a> Collector<'a> {
         ) {
             return None;
         }
-        self.tables
-            .implementations
-            .iter()
-            .find_map(|implementation| {
-                let key = implementation.contract();
-                if key.interface != *interface || key.arguments.len() != arguments.len()
-                {
-                    return None;
-                }
-                let mut assignment = vec![None; implementation.binders().len()];
-                let matched =
-                    match_open(implementation.receiver(), receiver, &mut assignment)
-                        && key.arguments.iter().zip(arguments).all(
-                            |(pattern, actual)| {
-                                match_open(pattern, actual, &mut assignment)
-                            },
-                        );
-                if !matched {
-                    return None;
-                }
-                assignment
-                    .into_iter()
-                    .collect::<Option<Vec<_>>>()
-                    .map(|binders| (implementation, binders))
-            })
+        select_implementation(
+            self.tables.implementations,
+            receiver,
+            interface,
+            arguments,
+            |_, _, _| None,
+        )
+        .ok()
+        .flatten()
     }
 
     /// Every member of each implementation the goals select is instantiated

@@ -579,6 +579,15 @@ endfn
   choice. If another operand or the expected type also fixes `T`, the two
   MUST agree, or the operand is `@type.mismatch`; and `T` MUST then satisfy
   its own bound, or the application is `@type.unsatisfiedBound`.
+- A bound that leaves an associated type open names it all the same. Inside
+  the generic the associated type is abstract: it equals only itself, so it
+  satisfies no bound that fixes the label to another type, and a label of
+  another bound that names a parameter determines that parameter as it. At
+  each use it is the choice of the implementation the bound selects, as if a
+  label had bound it to a parameter. This holds for an anonymous callable,
+  a member, and an implementation in a generic type alike; an
+  implementation's parameter that a bound's label names is determined when
+  the implementation is selected.
 - A positional argument of a bound may likewise name a parameter of the same
   header: `given {T: From(S)}`. The bound's implementation is selected by
   its [key](#implementations): the interface, the actual type of the bounded

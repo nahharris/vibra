@@ -21,7 +21,9 @@
 //! checker built.
 
 use crate::expr::Tables;
-use crate::{Binder, IrError, Library, NamedTypes, Substitution, Type, TypeId};
+use crate::{
+    Binder, Implementation, IrError, Library, NamedTypes, Substitution, Type, TypeId,
+};
 
 /// The most goals one conformance question may visit.
 const GOAL_LIMIT: usize = 4096;
@@ -78,6 +80,159 @@ pub(crate) fn match_open(
         pending.extend(pattern.components().into_iter().zip(actual.components()));
     }
     true
+}
+
+/// The binder assignment by which `implementation`'s key matches the goal,
+/// with every binder the key leaves open still `None`.
+fn key_match(
+    implementation: &Implementation,
+    receiver: &Type,
+    interface: &TypeId,
+    arguments: &[Type],
+) -> Option<Vec<Option<Type>>> {
+    let key = implementation.contract();
+    if key.interface != *interface || key.arguments.len() != arguments.len() {
+        return None;
+    }
+    let mut assignment = vec![None; implementation.binders().len()];
+    let matched = match_open(implementation.receiver(), receiver, &mut assignment)
+        && key
+            .arguments
+            .iter()
+            .zip(arguments)
+            .all(|(pattern, actual)| match_open(pattern, actual, &mut assignment));
+    matched.then_some(assignment)
+}
+
+/// `ty` under `assignment`, each binder it mentions being assigned.
+fn under(ty: &Type, assignment: &[Option<Type>]) -> Type {
+    let filled = assignment
+        .iter()
+        .map(|slot| slot.clone().unwrap_or(Type::Void))
+        .collect::<Vec<_>>();
+    ty.instantiate(&filled)
+}
+
+/// Fixes the binders the labels of the bound of binder `at` name from
+/// `provided`, the choices of the evidence for that bound. `false` when a
+/// label disagrees with them.
+fn fix_labels(
+    implementation: &Implementation,
+    at: usize,
+    provided: &NamedTypes,
+    assignment: &mut [Option<Type>],
+) -> bool {
+    let Some(bound) = implementation.binders().get(at).and_then(Binder::bound) else {
+        return false;
+    };
+    bound.choices.entries().iter().all(|(name, pattern)| {
+        provided
+            .get(name)
+            .is_some_and(|actual| match_open(pattern, actual, assignment))
+    })
+}
+
+/// The implementation in `implementations` whose key matches the goal, with
+/// the type of each of its binders (`docs/spec/02-type-system.md`,
+/// "Bounds"). The key fixes some binders; a label of the bound of a fixed
+/// binder fixes the binder it names, from the choices of the evidence for
+/// that bound. `evidence` gives those choices where something other than an
+/// implementation shows the bound, such as a bound in scope; otherwise the
+/// implementation the bound's goal selects gives them, itself completed
+/// the same way. The nested selections are kept on a work list, so no host
+/// stack grows with them.
+///
+/// # Errors
+///
+/// A selected implementation leaves a binder open, or the selections visit
+/// more than [`GOAL_LIMIT`] goals.
+pub fn select_implementation<'i>(
+    implementations: &'i [Implementation],
+    receiver: &Type,
+    interface: &TypeId,
+    arguments: &[Type],
+    mut evidence: impl FnMut(&Type, &TypeId, &[Type]) -> Option<NamedTypes>,
+) -> Result<Option<(&'i Implementation, Vec<Type>)>, IrError> {
+    let find = |receiver: &Type, interface: &TypeId, arguments: &[Type]| {
+        implementations.iter().find_map(|implementation| {
+            key_match(implementation, receiver, interface, arguments)
+                .map(|assignment| (implementation, assignment))
+        })
+    };
+    let Some(first) = find(receiver, interface, arguments) else {
+        return Ok(None);
+    };
+    // Each frame: an implementation, its assignment so far, and the binder
+    // whose bound the frame above it is the evidence for.
+    let mut frames = vec![(first.0, first.1, 0_usize)];
+    let mut visited = 0_usize;
+    while let Some((implementation, assignment, waiting)) = frames.last_mut() {
+        visited = visited.saturating_add(1);
+        if visited > GOAL_LIMIT {
+            return Err(IrError::InvalidExpression(format!(
+                "selecting the implementation of `{}` for {receiver} needs more than {GOAL_LIMIT} goals",
+                interface.path()
+            )));
+        }
+        let implementation: &'i Implementation = implementation;
+        if let Some(at) = implementation.record().open_bound(assignment) {
+            let Some(bound) = implementation.binders().get(at).and_then(Binder::bound)
+            else {
+                return Ok(None);
+            };
+            let Some(bounded) = assignment.get(at).cloned().flatten() else {
+                return Ok(None);
+            };
+            let bound_arguments = bound
+                .contract
+                .arguments
+                .iter()
+                .map(|argument| under(argument, assignment))
+                .collect::<Vec<_>>();
+            if let Some(provided) =
+                evidence(&bounded, &bound.contract.interface, &bound_arguments)
+            {
+                if !fix_labels(implementation, at, &provided, assignment) {
+                    return Ok(None);
+                }
+                continue;
+            }
+            let Some(next) =
+                find(&bounded, &bound.contract.interface, &bound_arguments)
+            else {
+                return Ok(None);
+            };
+            *waiting = at;
+            frames.push((next.0, next.1, 0));
+            continue;
+        }
+        let Some((done, assignment, _)) = frames.pop() else {
+            break;
+        };
+        let binders = assignment
+            .into_iter()
+            .collect::<Option<Vec<_>>>()
+            .ok_or_else(|| {
+                IrError::InvalidType(format!(
+                    "an implementation of `{}` for {} has a binder neither its key nor a bound fixes",
+                    done.contract().interface.path(),
+                    done.receiver()
+                ))
+            })?;
+        let Some((parent, parent_assignment, at)) = frames.last_mut() else {
+            return Ok(Some((done, binders)));
+        };
+        let provided = NamedTypes::new(
+            done.choices()
+                .entries()
+                .iter()
+                .map(|(name, ty)| (name.clone(), ty.instantiate(&binders))),
+        )?;
+        if !fix_labels(parent, *at, &provided, parent_assignment) {
+            return Ok(None);
+        }
+    }
+    Ok(None)
 }
 
 /// Whether `ty` is a type that conforms to `Equatable` and `Ordered`
@@ -175,6 +330,43 @@ impl Tables<'_> {
         Ok(true)
     }
 
+    /// The choices of the evidence the scope gives for one goal: the bound
+    /// of a type parameter in scope, or `Self` inside a member of the
+    /// interface that declares it.
+    fn scoped_evidence(
+        &self,
+        evidence: Evidence<'_>,
+        receiver: &Type,
+        interface: &TypeId,
+        arguments: &[Type],
+    ) -> Option<NamedTypes> {
+        if let Type::Binder(index) = receiver
+            && let Some(bound) = evidence.binders.get(*index).and_then(Binder::bound)
+            && bound.contract.interface == *interface
+            && bound.contract.arguments == arguments
+        {
+            return Some(bound.choices.clone());
+        }
+        if *receiver == Type::SelfType
+            && evidence.self_interface == Some(interface)
+            && let Some(definition) = self.interfaces.get(interface)
+        {
+            let parameters = (0..definition.parameters().len())
+                .map(Type::Binder)
+                .collect::<Vec<_>>();
+            if parameters == arguments {
+                return NamedTypes::new(
+                    definition
+                        .associated()
+                        .iter()
+                        .map(|name| (name.clone(), Type::Associated(name.clone()))),
+                )
+                .ok();
+            }
+        }
+        None
+    }
+
     /// The evidence for one goal: the choices it gives and the goals it
     /// rests on.
     fn select_evidence(
@@ -187,58 +379,21 @@ impl Tables<'_> {
         if receiver.is_interface_value() || *receiver == Type::Never {
             return Ok(None);
         }
-        if let Type::Binder(index) = receiver
-            && let Some(bound) = evidence.binders.get(*index).and_then(Binder::bound)
-            && bound.contract.interface == *interface
-            && bound.contract.arguments == arguments
+        if let Some(choices) =
+            self.scoped_evidence(evidence, receiver, interface, arguments)
         {
-            return Ok(Some((bound.choices.clone(), Vec::new())));
+            return Ok(Some((choices, Vec::new())));
         }
-        if *receiver == Type::SelfType
-            && evidence.self_interface == Some(interface)
-            && let Some(definition) = self.interfaces.get(interface)
-        {
-            let parameters = (0..definition.parameters().len())
-                .map(Type::Binder)
-                .collect::<Vec<_>>();
-            if parameters == arguments {
-                let choices = NamedTypes::new(
-                    definition
-                        .associated()
-                        .iter()
-                        .map(|name| (name.clone(), Type::Associated(name.clone()))),
-                )?;
-                return Ok(Some((choices, Vec::new())));
-            }
-        }
-        for implementation in self.implementations {
-            let key = implementation.contract();
-            if key.interface != *interface || key.arguments.len() != arguments.len() {
-                continue;
-            }
-            let mut assignment = vec![None; implementation.binders().len()];
-            let matched =
-                match_open(implementation.receiver(), receiver, &mut assignment)
-                    && key
-                        .arguments
-                        .iter()
-                        .zip(arguments)
-                        .all(|(pattern, actual)| {
-                            match_open(pattern, actual, &mut assignment)
-                        });
-            if !matched {
-                continue;
-            }
-            let binders = assignment
-                .into_iter()
-                .collect::<Option<Vec<_>>>()
-                .ok_or_else(|| {
-                    IrError::InvalidType(format!(
-                        "an implementation of `{}` for {} has a binder its key does not fix",
-                        interface.path(),
-                        implementation.receiver()
-                    ))
-                })?;
+        let scoped = |receiver: &Type, interface: &TypeId, arguments: &[Type]| {
+            self.scoped_evidence(evidence, receiver, interface, arguments)
+        };
+        if let Some((implementation, binders)) = select_implementation(
+            self.implementations,
+            receiver,
+            interface,
+            arguments,
+            scoped,
+        )? {
             let choices = NamedTypes::new(
                 implementation
                     .choices()

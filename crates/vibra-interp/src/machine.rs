@@ -22,7 +22,7 @@ use crate::compare::{DictBuild, DictFind, Structural};
 use crate::encode::{ObserveError, encoding, from_neutral};
 use crate::frame::{Frame, TypeEnv};
 use crate::ingress::{Check, Ingress, Then, checks_of, needs_checks, refused};
-use crate::types::{match_type, mentions_self, type_of};
+use crate::types::{mentions_self, type_of};
 use crate::value::{ClosureVal, FunctionVal, Held, Repr, Val, neutral_storage, same};
 use crate::{FailureKind, Instrumentation, TestAssertionFailure, intrinsics};
 
@@ -1307,31 +1307,15 @@ impl<'a> Machine<'a> {
                 }),
             })
         };
-        for implementation in set.implementations() {
-            if implementation.contract().interface != *interface {
-                continue;
-            }
-            let mut assignment = vec![None; implementation.binders().len()];
-            let matched =
-                match_type(implementation.receiver(), receiver, &mut assignment)
-                    && implementation.contract().arguments.len() == arguments.len()
-                    && implementation
-                        .contract()
-                        .arguments
-                        .iter()
-                        .zip(arguments)
-                        .all(|(pattern, actual)| {
-                            match_type(pattern, actual, &mut assignment)
-                        });
-            if !matched {
-                continue;
-            }
-            let binders = assignment
-                .into_iter()
-                .collect::<Option<Vec<_>>>()
-                .ok_or_else(|| {
-                    Halt::Invalid("an implementation binder left open".to_owned())
-                })?;
+        let selected = vibra_ir::select_implementation(
+            set.implementations(),
+            receiver,
+            interface,
+            arguments,
+            |_, _, _| None,
+        )
+        .map_err(|error| Halt::Invalid(error.to_string()))?;
+        if let Some((implementation, binders)) = selected {
             return match implementation.member(member) {
                 Some(function) => Ok(Resolved {
                     target: Target::Function(function),

@@ -253,9 +253,91 @@ impl ImplementationRecord {
         for (_, choice) in record.choices.entries() {
             choice.validate(scope)?;
         }
+        let mut fixed = vec![false; record.binders.len()];
+        mark(&record.receiver, &mut fixed);
+        for argument in &record.contract.arguments {
+            mark(argument, &mut fixed);
+        }
+        let mut changed = true;
+        while changed {
+            changed = false;
+            for (at, binder) in record.binders.iter().enumerate() {
+                let Some(bound) = binder.bound() else {
+                    continue;
+                };
+                if !fixed.get(at).copied().unwrap_or(false)
+                    || !bound
+                        .contract
+                        .arguments
+                        .iter()
+                        .all(|argument| all_marked(argument, &fixed))
+                {
+                    continue;
+                }
+                for (_, choice) in bound.choices.entries() {
+                    if !all_marked(choice, &fixed) {
+                        mark(choice, &mut fixed);
+                        changed = true;
+                    }
+                }
+            }
+        }
+        if let Some(at) = fixed.iter().position(|fixed| !fixed) {
+            return Err(IrError::InvalidType(format!(
+                "the binder {at} of an implementation is fixed neither by its key nor by a label of the bound of a binder that is fixed"
+            )));
+        }
         Ok(record)
     }
 
+    /// The first binder whose bound can fix another binder `assignment`
+    /// leaves open: the binder is fixed, its bound's positional arguments
+    /// mention only fixed binders, and a label of the bound mentions one
+    /// that is not.
+    #[must_use]
+    pub fn open_bound(&self, assignment: &[Option<Type>]) -> Option<usize> {
+        let fixed = assignment.iter().map(Option::is_some).collect::<Vec<_>>();
+        self.binders.iter().enumerate().position(|(at, binder)| {
+            binder.bound().is_some_and(|bound| {
+                fixed.get(at).copied().unwrap_or(false)
+                    && bound
+                        .contract
+                        .arguments
+                        .iter()
+                        .all(|argument| all_marked(argument, &fixed))
+                    && bound
+                        .choices
+                        .entries()
+                        .iter()
+                        .any(|(_, choice)| !all_marked(choice, &fixed))
+            })
+        })
+    }
+}
+
+/// Marks each binder `ty` mentions.
+fn mark(ty: &Type, fixed: &mut [bool]) {
+    ty.visit(&mut |inner| {
+        if let Type::Binder(index) = inner
+            && let Some(slot) = fixed.get_mut(*index)
+        {
+            *slot = true;
+        }
+    });
+}
+
+/// Whether every binder `ty` mentions is marked.
+fn all_marked(ty: &Type, fixed: &[bool]) -> bool {
+    let mut all = true;
+    ty.visit(&mut |inner| {
+        if let Type::Binder(index) = inner {
+            all &= fixed.get(*index).copied().unwrap_or(false);
+        }
+    });
+    all
+}
+
+impl ImplementationRecord {
     /// Where open forms are valid inside this record: its binders.
     #[must_use]
     pub const fn scope(&self) -> OpenScope<'static> {
