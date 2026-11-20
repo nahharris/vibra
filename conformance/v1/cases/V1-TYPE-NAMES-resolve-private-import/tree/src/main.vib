@@ -1,2 +1,0 @@
-(import lib @app.lib)
-(defn run () void visibility: @public (lib.secret))

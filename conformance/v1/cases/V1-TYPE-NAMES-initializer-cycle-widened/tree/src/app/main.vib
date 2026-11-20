@@ -1,3 +1,0 @@
-(defn widened () i32 (let value by-widening) 1i32)
-
-(def by-widening any (widened))

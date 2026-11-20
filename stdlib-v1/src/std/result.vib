@@ -1,6 +1,0 @@
-; The standard fallible value. It plays the `@result` role, so `try` and
-; unhandled-failure checking recognize it and it needs no import.
-(deftype result (enum ok t err e)
-  where: (t any e any)
-  role: @result
-  visibility: @public)

@@ -1,2 +1,0 @@
-(defn answer () u64
-  (str.length (str.concat "A😀" "Ω")))

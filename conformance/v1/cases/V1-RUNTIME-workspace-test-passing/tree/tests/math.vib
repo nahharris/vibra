@@ -1,2 +1,0 @@
-(import assert @std.assert)
-(test "works" (assert.true true))

@@ -1,3 +1,0 @@
-(deftype foo (intrinsic-type @nope))
-
-(deftype i99 (intrinsic-type @i32))

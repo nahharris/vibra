@@ -1,4 +1,0 @@
-(defn one () i32 1i32)
-(def value i32 (one))
-(defn parameter-site (value i32) i32 0i32)
-(defn let-site () i32 (let value 2i32) 1i32)

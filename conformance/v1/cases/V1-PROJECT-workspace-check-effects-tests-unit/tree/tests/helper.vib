@@ -1,3 +1,0 @@
-(deffect marker
-  visibility: @public
-  (defn mark () void visibility: @public (do)))

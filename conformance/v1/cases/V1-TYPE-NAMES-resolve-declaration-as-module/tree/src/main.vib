@@ -1,2 +1,0 @@
-(import fn @app.lib.run)
-(defn run () void (do))

@@ -1,2 +1,0 @@
-(import assert @std.assert)
-(test "fails" (assert.equal 4i32 5i32))

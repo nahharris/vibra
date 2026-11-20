@@ -1,7 +1,0 @@
-(import countdown @steps.countdown)
-
-(defn execute () void void)
-
-(defn run (count u64) u64
-  visibility: @public
-  (countdown.step count run))

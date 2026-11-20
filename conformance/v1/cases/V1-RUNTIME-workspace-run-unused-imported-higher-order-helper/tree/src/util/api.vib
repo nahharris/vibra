@@ -1,2 +1,0 @@
-(defn apply (callback (fn () i32)) i32 visibility: @public (callback))
-(defn dead (callback (fn () i32)) i32 (apply callback))

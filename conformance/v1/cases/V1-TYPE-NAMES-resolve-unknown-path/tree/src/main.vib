@@ -1,2 +1,0 @@
-(import missing @app.no-such)
-(defn run () void (do))

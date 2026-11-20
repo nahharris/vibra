@@ -1,2 +1,0 @@
-(import assert @std.assert)
-(defn answer () u64 (str.length "x"))

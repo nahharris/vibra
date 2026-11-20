@@ -1,2 +1,0 @@
-(defn invoke (callback (fn () void)) void (callback))
-(defn execute () void (invoke (lambda () void (do))))

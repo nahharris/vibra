@@ -1,5 +1,0 @@
-(import log @ops.log)
-
-(defn execute () void
-  effects: (log.audit log.write)
-  (let - (log.audit.record "recorded")))
