@@ -7,14 +7,17 @@
 //! authority.
 //!
 //! Tests are discovered in ascending module path by UTF-8 bytes, then in
-//! declaration order. Parse errors of the parsed test modules are reported
-//! first, with no items. Every selected test is then checked with its
+//! declaration order. Without a selector every test module is parsed; with
+//! one, its module and the test modules it imports are, and no other test
+//! module is given to resolution. Parse errors of the parsed test modules
+//! are reported first, with no items. Every selected test is then checked with its
 //! module's import closure before any runs: an ordinary error makes every
 //! item `@test.invalid`, and a test whose declaration closure reaches a form
 //! this toolchain does not implement is `@test.unavailable` while the
 //! others run. Each test runs in a new interpreter, so module values start
 //! fresh and the audit trace is empty.
 
+use std::collections::BTreeSet;
 use std::fmt;
 use std::sync::Arc;
 
@@ -28,7 +31,7 @@ use vibra_syntax::source::Declaration;
 use vibra_syntax::{canonical_string, decode_string, parse_source};
 use vibra_types::{CheckResult, check_workspace};
 
-use crate::resolve::resolve_input;
+use crate::resolve::resolve_input_of;
 use crate::revision::workspace_revision;
 use crate::snapshot::{SourceFile, SourceSnapshot, UnitKind};
 
@@ -237,6 +240,29 @@ impl SuiteResult {
             Self::Trap => "@command.trap",
         }
     }
+
+    /// The suite result of tests that were checked and ran, by the
+    /// precedence trap, operational exhaustion, unavailable, test failed,
+    /// ok.
+    #[must_use]
+    pub fn by_precedence<'a>(
+        outcomes: impl IntoIterator<Item = &'a TestOutcome>,
+    ) -> Self {
+        let rank = |outcome: &TestOutcome| match outcome {
+            TestOutcome::Trap { .. } => 4,
+            TestOutcome::Exhausted => 3,
+            TestOutcome::Unavailable(_) => 2,
+            TestOutcome::AssertionFailed(_) => 1,
+            TestOutcome::Passed | TestOutcome::Invalid => 0,
+        };
+        match outcomes.into_iter().map(rank).max() {
+            Some(4) => Self::Trap,
+            Some(3) => Self::OperationalFailure,
+            Some(2) => Self::Unavailable,
+            Some(1) => Self::TestFailed,
+            _ => Self::Ok,
+        }
+    }
 }
 
 /// One run of the suite.
@@ -352,8 +378,8 @@ fn failure_record(failure: &TestAssertionFailure) -> String {
         fields.push(format!("actual: {}", canonical_string(actual)));
     }
     fields.push(format!("primarySpan: {}", span_record(&failure.origin)));
-    if let FailureKind::Observation { code, type_info } = &failure.kind {
-        let type_info = encode_type(type_info)
+    if let FailureKind::Observation { code, .. } = &failure.kind {
+        let type_info = observation_type(failure)
             .map(|encoded| format!(" typeInfo: {encoded}"))
             .unwrap_or_default();
         fields.push(format!(
@@ -362,6 +388,17 @@ fn failure_record(failure: &TestAssertionFailure) -> String {
         ));
     }
     format!("{{{}}}", fields.join(" "))
+}
+
+/// The canonical `@type.v2` text of the operand an observation failure
+/// could not observe; `None` for a false assertion, or when the type has no
+/// encoding.
+#[must_use]
+pub fn observation_type(failure: &TestAssertionFailure) -> Option<String> {
+    match &failure.kind {
+        FailureKind::Observation { type_info, .. } => encode_type(type_info).ok(),
+        FailureKind::Assertion => None,
+    }
 }
 
 fn span_record(origin: &SourceOrigin) -> String {
@@ -434,7 +471,7 @@ pub fn run_tests(
             return Err(InvalidSelection::Unknown(selector.to_string()));
         }
     }
-    let (check, diagnostics) = match check_selection(snapshot, selector) {
+    let (check, diagnostics) = match check_selection(snapshot, selector, &modules) {
         Ok(check) => {
             let diagnostics = check.diagnostics().to_vec();
             (Some(check), diagnostics)
@@ -466,7 +503,7 @@ pub fn run_tests(
     let result = if invalid {
         SuiteResult::Diagnostics
     } else {
-        suite_result(&items)
+        SuiteResult::by_precedence(items.iter().map(TestItem::outcome))
     };
     Ok(TestRun {
         result,
@@ -476,8 +513,9 @@ pub fn run_tests(
     })
 }
 
-/// The modules of `@tests`, sorted by module path bytes, or the selector's
-/// module.
+/// The test modules a run needs, sorted by module path bytes: every module
+/// of `@tests`, or the selector's module and the test modules it reaches
+/// through `use`.
 fn test_modules<'s>(
     snapshot: &'s SourceSnapshot,
     selector: Option<&TestSelector>,
@@ -489,17 +527,55 @@ fn test_modules<'s>(
         .flat_map(|unit| unit.modules())
         .collect::<Vec<_>>();
     modules.sort_by(|left, right| left.path().as_bytes().cmp(right.path().as_bytes()));
-    if let Some(selector) = selector {
-        modules.retain(|module| module.path() == selector.module);
-        if modules.is_empty() {
-            return Err(InvalidSelection::Unknown(selector.to_string()));
+    let Some(selector) = selector else {
+        return Ok(modules);
+    };
+    let Some(selected) = modules
+        .iter()
+        .copied()
+        .find(|module| module.path() == selector.module)
+    else {
+        return Err(InvalidSelection::Unknown(selector.to_string()));
+    };
+    let mut reached = BTreeSet::from([selected.path()]);
+    let mut pending = vec![selected];
+    while let Some(module) = pending.pop() {
+        let document = parse_source(Some(module.source_id()), module.bytes());
+        let Some(view) = vibra_syntax::module(&document) else {
+            continue;
+        };
+        for declaration in view.declarations() {
+            let Declaration::Use(import) = declaration else {
+                continue;
+            };
+            let Some(locator) = import.locator() else {
+                continue;
+            };
+            for &candidate in &modules {
+                if names_module(locator.text(), candidate.path())
+                    && reached.insert(candidate.path())
+                {
+                    pending.push(candidate);
+                }
+            }
         }
     }
+    modules.retain(|module| reached.contains(module.path()));
     Ok(modules)
 }
 
+/// Whether the `use` locator `locator` names the module `path` or a
+/// declaration of it.
+fn names_module(locator: &str, path: &str) -> bool {
+    locator
+        .strip_prefix(path)
+        .is_some_and(|rest| rest.is_empty() || rest.starts_with('.'))
+}
+
 /// Checks the selected test modules with their import closure: every
-/// module of `@tests`, or the selector's module.
+/// module of `@tests`, or the selector's module. Only the test modules of
+/// `modules` are given to resolution, so a test module the selection does
+/// not reach is neither parsed nor checked.
 ///
 /// # Errors
 ///
@@ -507,13 +583,27 @@ fn test_modules<'s>(
 fn check_selection(
     snapshot: &SourceSnapshot,
     selector: Option<&TestSelector>,
+    modules: &[&SourceFile],
 ) -> Result<CheckResult, Box<Diagnostic>> {
     let units = vec![
         selector
             .map_or_else(|| TESTS_UNIT.to_owned(), |selected| selected.module.clone()),
     ];
-    let input = resolve_input(snapshot)
-        .map_err(|error| Box::new(error.diagnostic().clone()))?;
+    let tests = snapshot
+        .units()
+        .iter()
+        .filter(|unit| unit.kind() == UnitKind::Tests)
+        .flat_map(|unit| unit.modules())
+        .map(SourceFile::path)
+        .collect::<BTreeSet<_>>();
+    let needed = modules
+        .iter()
+        .map(|module| module.path())
+        .collect::<BTreeSet<_>>();
+    let input = resolve_input_of(snapshot, &|module| {
+        !tests.contains(module.path()) || needed.contains(module.path())
+    })
+    .map_err(|error| Box::new(error.diagnostic().clone()))?;
     Ok(check_workspace(&input, &units))
 }
 
@@ -589,25 +679,6 @@ fn execute(
             }
         })?;
     run_test(&program, budget)
-}
-
-/// The suite result of items that were checked: trap, operational
-/// exhaustion, unavailable, test failed, ok.
-fn suite_result(items: &[TestItem]) -> SuiteResult {
-    let any = |matches: fn(&TestOutcome) -> bool| {
-        items.iter().any(|item| matches(&item.outcome))
-    };
-    if any(|outcome| matches!(outcome, TestOutcome::Trap { .. })) {
-        SuiteResult::Trap
-    } else if any(|outcome| matches!(outcome, TestOutcome::Exhausted)) {
-        SuiteResult::OperationalFailure
-    } else if any(|outcome| matches!(outcome, TestOutcome::Unavailable(_))) {
-        SuiteResult::Unavailable
-    } else if any(|outcome| matches!(outcome, TestOutcome::AssertionFailed(_))) {
-        SuiteResult::TestFailed
-    } else {
-        SuiteResult::Ok
-    }
 }
 
 #[cfg(test)]

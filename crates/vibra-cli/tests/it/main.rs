@@ -16,4 +16,5 @@ mod fmt;
 mod help;
 mod invalid_input;
 mod inventory;
+mod test_command;
 mod unavailable;

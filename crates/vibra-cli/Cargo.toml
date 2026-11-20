@@ -1,6 +1,6 @@
 [package]
 name = "vibra-cli"
-description = "The vibra command line: argument grammar, the support inventory, the version 2 envelope, fmt, and check."
+description = "The vibra command line: argument grammar, the support inventory, the version 2 envelope, fmt, check, and test."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

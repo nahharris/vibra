@@ -124,6 +124,33 @@ fn a_selector_selects_one_test() {
 }
 
 #[test]
+fn a_selector_parses_its_module_and_the_test_modules_it_imports() {
+    let helpers = "fn three\n  returns r: I32\n  visibility @public\n  do\n    return 3i32\nendfn\n";
+    let uses = "use @std.assert enduse\n\nuse @tests.helpers enduse\n\n\
+                test \"uses\" do assert.equal(3i32 helpers.three()) endtest\n";
+    let broken = "test \"x\" do endfn";
+    let files = [
+        ("tests/helpers.vib", helpers),
+        ("tests/uses.vib", uses),
+        ("tests/broken.vib", broken),
+    ];
+    let run = run(&files, Some("@tests.uses::\"uses\"")).expect("a run");
+    assert_eq!(names(&run), ["@tests.uses::\"uses\""]);
+    assert_eq!(run.result(), SuiteResult::Ok);
+    assert!(run.diagnostics().is_empty(), "{:?}", run.diagnostics());
+    // An imported test module is required: its parse errors come first.
+    let files = [("tests/helpers.vib", broken), ("tests/uses.vib", uses)];
+    let run = self::run(&files, Some("@tests.uses::\"uses\"")).expect("a run");
+    assert_eq!(run.result(), SuiteResult::Diagnostics);
+    assert!(run.items().is_empty());
+    assert!(
+        run.diagnostics()
+            .iter()
+            .all(|diagnostic| diagnostic.source_id() == Some("tests/helpers.vib"))
+    );
+}
+
+#[test]
 fn an_exhausted_test_ends_only_itself() {
     let tests = "use @std.assert enduse\n\n\
                  fn grow\n  takes {items: List(I32)}\n  returns count: U64\n  do\n    \

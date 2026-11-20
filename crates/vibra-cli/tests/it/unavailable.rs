@@ -70,8 +70,8 @@ fn unavailable_each() {
         checked += 1;
     }
     assert_eq!(
-        checked, 15,
-        "every line of the inventory but `help`, `fmt`, and `check`"
+        checked, 14,
+        "every line of the inventory but `help`, `fmt`, `check`, and `test`"
     );
 }
 
@@ -85,7 +85,7 @@ fn well_formed_lines_with_operands_and_options_are_unavailable() {
         &["project", "remove", "dependency", "@lib", "--write"],
         &["project", "sync"],
         &["lint", "@app", "--write"],
-        &["test", "@tests.math::\"adds one\""],
+        &["build"],
         &["run"],
         &["run", "@app", "--", "-x", "--", "y"],
         &["eval", "@app.main.f", "--arg", "1", "--arg", "2"],

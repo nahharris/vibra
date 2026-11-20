@@ -53,5 +53,9 @@ pub use snapshot::{SourceFile, SourceSnapshot, SourceUnit, TESTS_ROOT, UnitKind}
 pub use source_graph::{GRAPH_FORMAT, GraphDependency, SourceGraph};
 pub use test_runner::{
     InvalidSelection, SuiteResult, TEST_RUN_FORMAT, TestItem, TestOutcome, TestRun,
-    TestSelector, run_tests,
+    TestSelector, observation_type, run_tests,
 };
+// The types the runner's outcomes are made of, so that a consumer of
+// `run_tests` reads them without depending on the interpreter or the IR.
+pub use vibra_interp::{FailureKind, MemoryBudget, TestAssertionFailure};
+pub use vibra_ir::{SourceOrigin, Trap};
