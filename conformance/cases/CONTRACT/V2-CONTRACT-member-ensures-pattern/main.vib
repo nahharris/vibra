@@ -1,0 +1,16 @@
+type Positive of I32 where isPositive endtype
+fn isPositive takes {v: I32} returns r: Bool do return Ordered.greater(v 0i32) endfn
+interface Sized
+  fn size
+    takes {value: Self Positive(raw): Positive}
+    returns r: I32
+    ensures Ordered.greater(r raw) else 0i32
+  endfn
+endinterface
+type A of I32
+  impl Sized
+    fn size takes {value: Self p: Positive} returns s: I32 do let Positive(n) be p endlet return n endfn
+  endimpl
+endtype
+
+fn main returns r: I32 do return Sized.size(A(1i32) Positive(5i32)) endfn

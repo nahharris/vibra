@@ -726,10 +726,11 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         self.labelled_defaults(signature, labelled).1
     }
 
-    /// The guards `views` of an abstract contract member of type
-    /// `signature`, whose parameters are written as `patterns` and
-    /// `labelled`, checked once under `scope` with `Self` open, so that the
-    /// contract's own faults are reported where it is declared.
+    /// The parameter patterns `patterns` and the guards `views` of an
+    /// abstract contract member of type `signature`, whose labelled
+    /// parameters are written as `labelled`, checked once under `scope` with
+    /// `Self` open, so that the contract's own faults are reported where it
+    /// is declared.
     pub(crate) fn abstract_guards(
         &mut self,
         signature: &FnType,
@@ -749,7 +750,13 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         self.self_interface = scope.self_interface;
         self.result_span = scope.result_span;
         self.result = Some(signature.result.clone());
-        self.slots.extend(signature.slot_types());
+        let mark = self.diagnostics.len();
+        let (failed, _) = self.bind_parameters(signature, patterns, labelled);
+        if failed || self.diagnostics.len() != mark {
+            return;
+        }
+        self.slots.truncate(signature.slot_count());
+        self.locals.clear();
         let _ = self.member_guards(signature, patterns, labelled, views);
         // A contract guard is copied into each implementation, where an
         // obligation it states would have no single site.
@@ -797,8 +804,9 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
     /// whose parameter slots are the first of the current ones: each
     /// positional parameter written as a name in `patterns` is bound to its
     /// slot, and each labelled one in `labelled` to its label's. A pattern
-    /// that takes a parameter apart is not supported in a contract member
-    /// with a guard. The guards, or `None` when one has a fault.
+    /// that takes a parameter apart binds slots after the current ones, and
+    /// a guard that reads them is a `match` of one arm around it. The guards,
+    /// or `None` when one has a fault.
     fn member_guards(
         &mut self,
         signature: &FnType,
@@ -812,6 +820,8 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         let mark = self.diagnostics.len();
         self.locals.clear();
         let frame = self.frames.len();
+        let start = self.slots.len();
+        let mut destructured = Vec::new();
         for (index, (ty, pattern)) in
             signature.parameters.iter().zip(patterns).enumerate()
         {
@@ -827,13 +837,13 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                         }));
                 }
                 Some(IrPattern::Discard) => {}
-                _ => {
-                    self.unavailable(
-                        span,
-                        "a parameter pattern that takes a value apart in a contract member with a guard",
-                    );
-                    return None;
+                Some(lowered)
+                    if self.irrefutable(&typed.cover, ty, span) != Some(false) =>
+                {
+                    self.locals.extend(typed.bindings);
+                    destructured.push((index, ty.clone(), lowered, span));
                 }
+                _ => return None,
             }
         }
         let entries = signature.labels.entries();
@@ -850,8 +860,8 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                 generic: None,
             });
         }
-        let bound = self.slots.len()..self.slots.len();
-        let (failed, guards) = self.guards(views, signature, &[], &bound);
+        let bound = start..self.slots.len();
+        let (failed, guards) = self.guards(views, signature, &destructured, &bound);
         (!failed && self.diagnostics.len() == mark).then_some(guards)
     }
     /// Binds the parameters of a callable of type `signature`, whose slots

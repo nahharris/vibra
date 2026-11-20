@@ -424,9 +424,9 @@ fn abstract_defaults(
     diagnostics
 }
 
-/// The diagnostics of the guards of every abstract member of an interface
-/// outside the embedded library, each checked once with the interface's
-/// parameters and `Self` open.
+/// The diagnostics of the parameter patterns and the guards of every
+/// abstract member of an interface outside the embedded library, each
+/// checked once with the interface's parameters and `Self` open.
 fn abstract_guards(
     program: &Program<'_>,
     documents: &[Document],
@@ -448,9 +448,7 @@ fn abstract_guards(
                 .name()
                 .and_then(|name| interface.member(name.text()))
                 .filter(|member| member.default.is_none());
-            let Some(member) =
-                member.filter(|_| views.requires.is_some() || views.ensures.is_some())
-            else {
+            let Some(member) = member else {
                 continue;
             };
             let mut checker = BodyChecker::new(program, layout, interface.module, text);
