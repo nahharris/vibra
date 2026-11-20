@@ -3060,12 +3060,31 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                         arguments,
                     })
             }
-            Callee::Value(node, _) => {
-                node.zip(lowered(self, written))
-                    .map(|(node, arguments)| IrExpr::Call {
+            Callee::Value(node, callee_type) => {
+                let arguments = lowered(self, written);
+                node.zip(arguments).map(|(node, arguments)| {
+                    // Arguments hoisted to keep their written order run
+                    // before the call, so the callee is bound first.
+                    let node = if hoisted.is_empty() {
+                        node
+                    } else {
+                        let value_type = Type::function(callee_type.as_ref().clone());
+                        let fresh = self.new_slot(Some(&value_type));
+                        let origin = node.origin.clone();
+                        hoisted.insert(0, (fresh, *node));
+                        Box::new(Node::new(
+                            IrExpr::Variable {
+                                slot: fresh,
+                                value_type,
+                            },
+                            origin,
+                        ))
+                    };
+                    IrExpr::Call {
                         target: CallTarget::Value(node),
                         arguments,
-                    })
+                    }
+                })
             }
             Callee::Generic(generic) => {
                 let closure = if complete && complete_arguments {

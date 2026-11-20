@@ -5,8 +5,10 @@
 //! and type chapters.
 
 use vibra_diagnostics::{ByteSpan, DiagnosticCode};
+use vibra_ir::{CallTarget, Expr, FunctionBody};
 
-use super::{at, faults, run, value};
+use super::{SOURCE, at, faults, run, value};
+use crate::check::check_source;
 
 const PAD: &str = "fn pad takes {s: Str} labelled {width: U64 be 4u64} returns r: U64 \
                    do return width endfn\n";
@@ -35,6 +37,75 @@ fn a_labelled_argument_written_first_keeps_its_parameter() {
                   fn f takes {m: I32} labelled {n: I32 be 0i32} returns r: I32 \
                   do return I32.sub(m n) endfn\n";
     assert_eq!(run(source).as_deref(), Ok(value("i32", "-3i32").as_str()));
+}
+
+/// The functions `body` calls directly, in the order an execution reaches
+/// them: a `let` runs its value before its body, a sequence runs in order,
+/// and a call runs its callee, then its positional arguments, then its
+/// labelled arguments in written order, then the callee itself, in a tail
+/// position or not
+/// (`vibra-interp`'s `evaluation_order_is_callee_positional_then_labelled_as_written`).
+fn calls_in_order(body: &Expr, names: &[String], order: &mut Vec<String>) {
+    match body {
+        Expr::Let { value, body, .. } => {
+            calls_in_order(&value.expr, names, order);
+            calls_in_order(&body.expr, names, order);
+        }
+        Expr::Return(value) => calls_in_order(&value.expr, names, order),
+        Expr::Sequence(statements) => {
+            for statement in statements {
+                calls_in_order(&statement.expr, names, order);
+            }
+        }
+        Expr::Call { target, arguments } | Expr::TailCall { target, arguments } => {
+            if let CallTarget::Value(callee) = target {
+                calls_in_order(&callee.expr, names, order);
+            }
+            for argument in &arguments.positional {
+                calls_in_order(&argument.expr, names, order);
+            }
+            for (_, argument) in &arguments.labelled {
+                calls_in_order(&argument.expr, names, order);
+            }
+            if let CallTarget::Direct { function, .. } = target {
+                order.extend(names.get(*function).cloned());
+            }
+        }
+        _ => {}
+    }
+}
+
+/// A call through a computed callee whose labelled argument is written
+/// before its positional one: the callee runs first, then each operand in
+/// written order (`docs/spec/06-runtime.md`, "Evaluation"), and each still
+/// reaches its own parameter.
+#[test]
+fn a_computed_callee_runs_before_reordered_operands() {
+    let source = "fn main returns r: U8 do return make()(b: arg() pos()) endfn\n\
+                  fn make returns f: Fn({U8 b: U8} U8) do \
+                  return fn takes {a: U8} labelled {b: U8 be 0u8} returns r: U8 \
+                  do return U8.sub(a b) endfn endfn\n\
+                  fn arg returns r: U8 do return 1u8 endfn\n\
+                  fn pos returns r: U8 do return 10u8 endfn\n";
+    assert_eq!(run(source).as_deref(), Ok(value("u8", "9u8").as_str()));
+    let result = check_source(SOURCE, source);
+    let functions = result
+        .module_set
+        .as_ref()
+        .map(|set| set.functions().to_vec())
+        .unwrap_or_default();
+    let names = functions
+        .iter()
+        .map(|function| function.name.rsplit('.').next().unwrap_or("").to_owned())
+        .collect::<Vec<_>>();
+    let main = functions
+        .iter()
+        .find(|function| function.name.ends_with(".main"));
+    let mut order = Vec::new();
+    if let Some(FunctionBody::Expr(body)) = main.map(|main| &main.body) {
+        calls_in_order(&body.expr, &names, &mut order);
+    }
+    assert_eq!(order, ["make", "arg", "pos"]);
 }
 
 #[test]
