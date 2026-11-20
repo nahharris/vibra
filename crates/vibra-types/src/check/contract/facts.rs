@@ -1379,9 +1379,202 @@ fn compare(
     }
 }
 
-/// Reads a call of a certified function whose body takes its value apart
-/// by a `match` on one parameter whose case a fact or the argument fixes:
-/// the `Bool` the selected arm returns, with its evidence.
+/// What is known of a pattern over a subject.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ArmOutcome {
+    /// The pattern cannot match the subject.
+    Disjoint,
+    /// The pattern matches the subject.
+    Matches,
+    /// Neither is known.
+    Possible,
+}
+
+/// Whether `pattern` matches `subject` under `facts`, with the evidence of
+/// each case fact used added to `evidence`. A part of the subject known to
+/// be of another case, or a constant other than a literal, makes the
+/// pattern disjoint; a part nothing decides makes it possible.
+fn arm_outcome(
+    terms: &mut Terms,
+    facts: &FactSet,
+    pattern: &Pattern,
+    subject: Term,
+    evidence: &mut Evidence,
+) -> ArmOutcome {
+    let mut outcome = ArmOutcome::Matches;
+    let mut used = Evidence::default();
+    let mut pending = vec![(pattern, subject)];
+    while let Some((pattern, term)) = pending.pop() {
+        if let Some(constant) = terms.constant(term) {
+            match value_outcome(pattern, constant.value()) {
+                ArmOutcome::Disjoint => return ArmOutcome::Disjoint,
+                ArmOutcome::Possible => outcome = ArmOutcome::Possible,
+                ArmOutcome::Matches => {}
+            }
+            continue;
+        }
+        match pattern {
+            Pattern::Discard | Pattern::Bind(_) => {}
+            Pattern::Wrapper(inner) => {
+                let repr = terms.intern(Data::Repr(term));
+                pending.push((inner, repr));
+            }
+            Pattern::Record(fields) => {
+                for (name, inner) in fields {
+                    let field = terms.intern(Data::Field(term, name.clone()));
+                    pending.push((inner, field));
+                }
+            }
+            Pattern::Tuple(items) => {
+                for (at, inner) in items.iter().enumerate() {
+                    let item = terms.intern(Data::Item(term, at));
+                    pending.push((inner, item));
+                }
+            }
+            Pattern::Case { case, fields } => {
+                match known_case(terms, facts, term, case) {
+                    Some((true, found)) => {
+                        used = used.and(&found);
+                        for (name, inner) in fields {
+                            let field = terms.intern(Data::CaseField(
+                                term,
+                                case.clone(),
+                                name.clone(),
+                            ));
+                            pending.push((inner, field));
+                        }
+                    }
+                    Some((false, found)) => {
+                        *evidence = std::mem::take(evidence).and(&found);
+                        return ArmOutcome::Disjoint;
+                    }
+                    None => outcome = ArmOutcome::Possible,
+                }
+            }
+            Pattern::Literal(constant) => {
+                let disjoint = match constant.value() {
+                    Value::Variant { case, .. } => {
+                        known_case(terms, facts, term, case).filter(|(is, _)| !is)
+                    }
+                    _ => None,
+                };
+                if let Some((_, found)) = disjoint {
+                    *evidence = std::mem::take(evidence).and(&found);
+                    return ArmOutcome::Disjoint;
+                }
+                outcome = ArmOutcome::Possible;
+            }
+            Pattern::List(_) => outcome = ArmOutcome::Possible,
+        }
+    }
+    if outcome == ArmOutcome::Matches {
+        *evidence = std::mem::take(evidence).and(&used);
+    }
+    outcome
+}
+
+/// Whether `term` is of the case `case` (`true`) or of another (`false`),
+/// when its construction or a case fact tells, with that fact's evidence.
+fn known_case(
+    terms: &Terms,
+    facts: &FactSet,
+    term: Term,
+    case: &str,
+) -> Option<(bool, Evidence)> {
+    if let Some(known) = terms.case_of(term) {
+        return Some((known == case, Evidence::default()));
+    }
+    facts
+        .facts
+        .iter()
+        .find_map(|fact| match terms.get(fact.term) {
+            Some(Data::IsCase(of, known)) if *of == term => {
+                if fact.holds {
+                    Some((known == case, fact.evidence.clone()))
+                } else if known == case {
+                    Some((false, fact.evidence.clone()))
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        })
+}
+
+/// Whether `pattern` matches the constant `value`. A shape the pattern
+/// does not take apart is not decided.
+fn value_outcome(pattern: &Pattern, value: &Value) -> ArmOutcome {
+    let mut outcome = ArmOutcome::Matches;
+    let mut pending = vec![(pattern, value)];
+    while let Some((pattern, value)) = pending.pop() {
+        let decided = match (pattern, value) {
+            (Pattern::Discard | Pattern::Bind(_), _) => true,
+            (Pattern::Literal(constant), _) => {
+                if constant.value() != value {
+                    return ArmOutcome::Disjoint;
+                }
+                true
+            }
+            (Pattern::Wrapper(inner), Value::Wrapper(held)) => {
+                pending.push((inner, held));
+                true
+            }
+            (Pattern::Tuple(items), Value::Tuple(values))
+            | (Pattern::List(items), Value::List(values)) => {
+                if items.len() != values.len() {
+                    if matches!(pattern, Pattern::List(_)) {
+                        return ArmOutcome::Disjoint;
+                    }
+                    false
+                } else {
+                    pending.extend(items.iter().zip(values));
+                    true
+                }
+            }
+            (Pattern::Record(fields), Value::Record(values)) => {
+                named_parts(fields, values, &mut pending)
+            }
+            (
+                Pattern::Case { case, fields },
+                Value::Variant {
+                    case: held,
+                    fields: values,
+                },
+            ) => {
+                if case != held {
+                    return ArmOutcome::Disjoint;
+                }
+                named_parts(fields, values, &mut pending)
+            }
+            _ => false,
+        };
+        if !decided {
+            outcome = ArmOutcome::Possible;
+        }
+    }
+    outcome
+}
+
+/// Pairs each field pattern of `fields` with the value of that name in
+/// `values`; `false` when a name is missing.
+fn named_parts<'p>(
+    fields: &'p [(String, Pattern)],
+    values: &'p [(String, Value)],
+    pending: &mut Vec<(&'p Pattern, &'p Value)>,
+) -> bool {
+    for (name, inner) in fields {
+        let Some((_, value)) = values.iter().find(|(held, _)| held == name) else {
+            return false;
+        };
+        pending.push((inner, value));
+    }
+    true
+}
+
+/// Reads a call of a certified function with no guard whose body takes its
+/// value apart by a `match` on one parameter: the `Bool` the first arm that
+/// runs returns, with its evidence, when every earlier arm is known not to
+/// match and that arm is known to match.
 fn read_through(
     terms: &mut Terms,
     vocabulary: &Vocabulary<'_>,
@@ -1409,38 +1602,21 @@ fn read_through(
         return None;
     };
     let argument = *operands.get(slot)?;
-    let (case, evidence) = match terms.case_of(argument) {
-        Some(case) => (case.to_owned(), Evidence::default()),
-        None => {
-            let (case, evidence) =
-                facts
-                    .facts
-                    .iter()
-                    .find_map(|fact| match terms.get(fact.term) {
-                        Some(Data::IsCase(of, case))
-                            if *of == argument && fact.holds =>
-                        {
-                            Some((case.clone(), fact.evidence.clone()))
-                        }
-                        _ => None,
-                    })?;
-            (case, evidence)
+    // The first arm that runs: every earlier arm is known not to match it,
+    // and it is known to match. An arm that may match stops the reading.
+    let mut evidence = Evidence::default();
+    let mut selected = None;
+    for arm in arms {
+        match arm_outcome(terms, facts, &arm.pattern, argument, &mut evidence) {
+            ArmOutcome::Disjoint => {}
+            ArmOutcome::Matches => {
+                selected = Some(arm);
+                break;
+            }
+            ArmOutcome::Possible => return None,
         }
-    };
-    let arm = arms.iter().find(|arm| match &arm.pattern {
-        Pattern::Discard | Pattern::Bind(_) => true,
-        Pattern::Case {
-            case: written,
-            fields,
-        } => {
-            *written == case
-                && fields
-                    .iter()
-                    .all(|(_, p)| matches!(p, Pattern::Discard | Pattern::Bind(_)))
-        }
-        _ => false,
-    })?;
-    let mut value = &arm.body;
+    }
+    let mut value = &selected?.body;
     loop {
         match &value.expr {
             Expr::Return(inner) => value = inner,

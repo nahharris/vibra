@@ -2281,7 +2281,12 @@ fn vocabulary<'v>(context: &Context<'v, '_>) -> Vocabulary<'v> {
         if !checked.defaults.is_empty() {
             vocabulary.defaults.insert(at, checked.defaults.clone());
         }
+        // A callable with a guard is never read through: its result is
+        // not its body's when a guard with `else` fails, and its facts
+        // come only from its proven `ensures` (`GUARD-7`).
         if context.standings.get(at) == Some(&Standing::Certified)
+            && checked.guards.entry.is_none()
+            && checked.guards.exit.is_none()
             && let (Some(body), Some(data)) =
                 (checked.node.as_ref(), program.functions.get(*index))
         {
@@ -2569,12 +2574,21 @@ fn invariants<'v>(
             continue;
         };
         let Some(id) = data.id.clone() else { continue };
+        // A predicate with a guard is not unfolded: when a guard with
+        // `else` fails its result is not its body's.
         let (body, named) = match &invariant.predicate {
-            Predicate::Anonymous(closure) => (Some((&closure.body, None)), None),
+            Predicate::Anonymous(closure) => (
+                (closure.entry_guard.is_none() && closure.exit_guard.is_none())
+                    .then_some((&closure.body, None)),
+                None,
+            ),
             Predicate::Named(function) => {
                 let body = inputs
                     .functions
                     .get(function)
+                    .filter(|checked| {
+                        checked.guards.entry.is_none() && checked.guards.exit.is_none()
+                    })
                     .and_then(|checked| checked.node.as_ref());
                 let function_data = program.functions.get(*function);
                 let name = function_data.and_then(|data| {

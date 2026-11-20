@@ -1,0 +1,18 @@
+id = "V2-CONTRACT-read-arm-tuple-literal"
+rule = "V2-CONTRACT-read-arm-tuple-literal"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#bare-guards: GUARD-3: an earlier arm with a literal inside a tuple may match, so it stops the reading of ok(x)"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "unknown"
+[[expect.diagnostics]]
+code = "@contract.unproved"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 441, end = 448 }
+related = [{ source = "src/app/main.vib", span = { start = 270, end = 274 } }]

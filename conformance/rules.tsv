@@ -810,3 +810,10 @@ V2-CONTRACT-label-default-same	active	02-type-system.md#bare-guards
 V2-CONTRACT-label-default-different	active	02-type-system.md#bare-guards
 V2-CONTRACT-label-order-result	active	02-type-system.md#bare-guards
 V2-CONTRACT-label-order-result-unproved	active	02-type-system.md#bare-guards
+V2-CONTRACT-read-arm-possible	active	02-type-system.md#bare-guards
+V2-CONTRACT-read-arm-selected	active	02-type-system.md#bare-guards
+V2-CONTRACT-read-arm-tuple-literal	active	02-type-system.md#bare-guards
+V2-CONTRACT-read-arm-list-literal	active	02-type-system.md#bare-guards
+V2-CONTRACT-read-guarded-requires	active	02-type-system.md#guards-with-else
+V2-CONTRACT-read-guarded-ensures	active	02-type-system.md#guards-with-else
+V2-CONTRACT-invariant-guarded-predicate	active	02-type-system.md#bare-guards

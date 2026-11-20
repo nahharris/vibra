@@ -1,0 +1,18 @@
+id = "V2-CONTRACT-read-guarded-ensures"
+rule = "V2-CONTRACT-read-guarded-ensures"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#guards-with-else: a call of ok, whose ensures Bool.not(r) else false replaces a true candidate by false, is not read through its body"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "unknown"
+[[expect.diagnostics]]
+code = "@contract.unproved"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 417, end = 424 }
+related = [{ source = "src/app/main.vib", span = { start = 246, end = 250 } }]

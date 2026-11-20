@@ -1,0 +1,12 @@
+id = "V2-CONTRACT-read-arm-selected"
+rule = "V2-CONTRACT-read-arm-selected"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#bare-guards: GUARD-3: with no arm before it that may match, the pick case selects the arm of ok that returns true"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
