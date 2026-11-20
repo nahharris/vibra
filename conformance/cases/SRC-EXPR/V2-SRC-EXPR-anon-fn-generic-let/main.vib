@@ -1,0 +1,1 @@
+fn main returns r: {I32 Str} do let id be fn(T) takes {x: T} returns r: T do return x endfn endlet return {id(1i32) id("x")} endfn

@@ -1,0 +1,13 @@
+id = "V2-PROJECT-test-equal-typed-from-actual"
+rule = "V2-PROJECT-test-equal-typed-from-actual"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "02-type-system.md#inference-and-checking: an assertion operand whose own type arguments are open takes them from the other operand"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

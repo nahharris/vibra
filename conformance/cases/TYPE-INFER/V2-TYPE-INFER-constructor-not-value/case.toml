@@ -1,0 +1,18 @@
+id = "V2-TYPE-INFER-constructor-not-value"
+rule = "V2-TYPE-INFER-constructor-not-value"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#functions-as-values: a constructor is not a function value"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.mismatch"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 79, end = 86 }

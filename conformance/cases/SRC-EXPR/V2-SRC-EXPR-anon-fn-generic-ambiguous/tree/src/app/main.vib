@@ -1,0 +1,1 @@
+fn g returns r: I32 do let _ be fn(T) takes {x: T} returns r: T do return x endfn endlet return 1i32 endfn

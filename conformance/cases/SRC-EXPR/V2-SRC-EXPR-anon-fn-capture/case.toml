@@ -1,0 +1,12 @@
+id = "V2-SRC-EXPR-anon-fn-capture"
+rule = "V2-SRC-EXPR-anon-fn-capture"
+profile = "interpreterV2"
+operation = "interpret"
+description = "01-source-language.md#fn-and-proc: an anonymous fn reads a local of its enclosing body"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

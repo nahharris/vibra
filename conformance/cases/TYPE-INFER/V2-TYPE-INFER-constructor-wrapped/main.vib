@@ -1,0 +1,2 @@
+type Celsius of F64 endtype
+fn main returns r: Celsius do let f: Fn({F64} Celsius) be fn takes {v: F64} returns c: Celsius do return Celsius(v) endfn endlet return f(1.0f64) endfn

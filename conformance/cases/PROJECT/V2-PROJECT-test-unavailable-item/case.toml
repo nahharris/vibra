@@ -2,7 +2,7 @@ id = "V2-PROJECT-test-unavailable-item"
 rule = "V2-PROJECT-test-unavailable-item"
 profile = "interpreterV2"
 operation = "workspaceTest"
-description = "05-tooling.md#tests-and-selection: a test whose declarations reach an unsupported form is unavailable and the other test runs"
+description = "05-tooling.md#tests-and-selection: a test that performs operations is unavailable and the other test runs"
 
 [inputs]
 tree = "tree"
@@ -15,5 +15,5 @@ testRun = "test-run.vibon"
 [[expect.diagnostics]]
 code = "@tool.unavailable"
 level = "@error"
-source = "src/app/math.vib"
-span = { start = 202, end = 252 }
+source = "tests/math.vib"
+span = { start = 46, end = 101 }

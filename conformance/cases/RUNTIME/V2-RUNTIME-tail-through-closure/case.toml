@@ -1,0 +1,12 @@
+id = "V2-RUNTIME-tail-through-closure"
+rule = "V2-RUNTIME-tail-through-closure"
+profile = "interpreterV2"
+operation = "interpret"
+description = "06-runtime.md#tail-calls: a closure calling itself through its parameter replaces the activation at each return of a call"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

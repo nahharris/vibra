@@ -1,0 +1,2 @@
+fn pick(T) takes {a: T b: T} returns r: T do return a endfn
+fn f returns r: I32 do return pick(1i32 "x") endfn

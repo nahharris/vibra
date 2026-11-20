@@ -13,24 +13,28 @@
 
 mod patterns;
 
+use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::sync::Arc;
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 use vibra_ir::external::compiler::{CompilerIntrinsic, is_assertion};
 use vibra_ir::{
-    Arguments, CallTarget, Constant, Construction, ContractCall, Expr as IrExpr,
-    FnType, Library, MatchArm, NamedTypes, Node, Pattern as IrPattern, SourceOrigin,
-    Type, Value,
+    Arguments, CallTarget, ClosureBody, Constant, Construction, ContractCall,
+    Expr as IrExpr, FnType, Library, MatchArm, NamedTypes, Node, Pattern as IrPattern,
+    SourceOrigin, Type, Value,
 };
 use vibra_syntax::source::{
-    Argument, Body, Expr, ExprForm, If, Match, MatchArm as ArmView, Pattern, Postfix,
-    Primary, Statement, Suffix, TypeExpr,
+    Argument, Body, Callable, CallableKind, Expr, ExprForm, Ident, If, Let as LetView,
+    Match, MatchArm as ArmView, Pattern, PatternForm, Postfix, Primary, Statement,
+    Suffix, TypeExpr,
 };
 use vibra_syntax::{CstNode, SyntaxKind};
 
+use super::callables::{NotConstant, fold, mark_tail, substitute};
 use super::declare::{
-    Entity, NoType, Program, Scope, TypeKind, key_diagnostic, substitute_self,
+    Entity, NoType, Program, Scope, TypeKind, key_diagnostic, plain_callable,
+    substitute_self,
 };
 use super::literal::{self, LiteralFault};
 use super::pattern::{Coverage, LimitReached, Pat};
@@ -43,6 +47,12 @@ pub(crate) struct Layout {
     pub(crate) globals: Vec<Option<usize>>,
     /// The function index of each function of the program.
     pub(crate) functions: Vec<Option<usize>>,
+    /// The value of each module value, by global index, whose initializer
+    /// is a constant expression.
+    pub(crate) constants: BTreeMap<usize, Value>,
+    /// Whether `constants` is complete; before it is, a default that names a
+    /// module value is left unchecked rather than called not constant.
+    pub(crate) constants_known: bool,
 }
 
 /// A declaration a body refers to.
@@ -125,6 +135,8 @@ enum Head {
     Type(usize),
     /// An interface or a module.
     Static,
+    /// A generic anonymous callable bound by `let`, not yet instantiated.
+    Generic(Rc<GenericClosure>),
     /// Already reported.
     Error,
 }
@@ -134,6 +146,9 @@ enum Head {
 enum Callee {
     Function(usize),
     Value(Option<Box<Node>>, Box<FnType>),
+    /// A generic anonymous callable bound by `let`, instantiated at the
+    /// call's type arguments.
+    Generic(Rc<GenericClosure>),
     /// A case of a variant type.
     Case(usize, String),
     /// A wrapper, declared tuple, or declared record.
@@ -183,9 +198,26 @@ struct CallState<'a> {
     callee: Callee,
     args: Vec<Argument<'a>>,
     next: usize,
+    /// The written argument being checked.
+    current: usize,
+    /// Whether its parameter type was still open when it was started, and
+    /// the lengths of the diagnostics, references, and instantiations then.
+    open: bool,
+    marks: (usize, usize, usize),
+    /// Arguments set aside to be checked again once the other operands
+    /// have fixed more type arguments, and whether they are being checked
+    /// again now.
+    retry: Vec<usize>,
+    retrying: bool,
     /// The parameter types, in which a type parameter of the callee is a
-    /// [`Type::Binder`] into `assignment`.
+    /// [`Type::Binder`] into `assignment`: the positional ones, then the
+    /// labelled ones in canonical label order.
     params: Option<Vec<Type>>,
+    /// The number of positional parameters of a function, a function
+    /// value, or a generic anonymous callable.
+    positional: Option<usize>,
+    /// The labels of its labelled parameters, in canonical order.
+    named: Vec<String>,
     /// The field names of a shape with labels, in declaration order.
     labels: Option<Vec<String>>,
     /// The parameter each written argument binds.
@@ -274,11 +306,18 @@ enum Piece {
     Destructure(Box<(IrPattern, Node)>),
     /// A `let … else`: the pattern, the initializer, and the fallback.
     LetElse(Box<(IrPattern, Node, Node)>),
+    /// A `let` that binds a generic anonymous callable, which leaves no
+    /// node: each use is a closure of its own.
+    Skip,
 }
 
 #[derive(Debug)]
 enum Pending<'a> {
     Nothing,
+    /// A `let` binding a generic anonymous callable to `name`.
+    GenericLet {
+        name: String,
+    },
     Let {
         pattern: Option<Pattern<'a>>,
         pattern_span: ByteSpan,
@@ -320,6 +359,9 @@ enum Task<'a> {
     If(Box<IfState<'a>>),
     Match(Box<MatchState<'a>>),
     Body(Box<BodyState<'a>>),
+    /// An anonymous callable to start, at its span, in its context.
+    Anon(Callable<'a>, ByteSpan, Ctx, ClosureMode),
+    Closure(Box<ClosureState<'a>>),
 }
 
 enum Step<'a> {
@@ -333,6 +375,92 @@ struct Local {
     name: String,
     slot: usize,
     ty: Option<Type>,
+    /// The callable activation it belongs to: 0 for the checked callable or
+    /// initializer, one more for each anonymous callable around it.
+    frame: usize,
+    /// The generic anonymous callable a `let` binds to it; such a local has
+    /// no slot.
+    generic: Option<Rc<GenericClosure>>,
+}
+
+/// A generic anonymous callable bound by `let`, checked once over its own
+/// type parameters.
+#[derive(Debug)]
+struct GenericClosure {
+    /// Its body, in which its own type parameters are the binders after the
+    /// enclosing ones.
+    closure: Arc<ClosureBody>,
+    /// The index among the locals of each local it captures, in
+    /// environment order.
+    capture_locals: Vec<usize>,
+    /// Its type, over the same binders.
+    signature: FnType,
+    /// The names of the enclosing type parameters, then of its own.
+    binder_names: Vec<String>,
+    /// The number of enclosing type parameters.
+    outer: usize,
+    /// The instantiations of generic functions in its body.
+    instantiations: Vec<(usize, Vec<Type>, ByteSpan)>,
+}
+
+/// What an anonymous callable is checked as.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ClosureMode {
+    /// A value, instantiated from the expected type of its position when it
+    /// is generic.
+    Value,
+    /// The initializer of a `let` that binds it to a name, so it stays
+    /// generic.
+    Generic,
+}
+
+/// The activation enclosing an anonymous callable being checked: what the
+/// checker restores when the callable is done, and what it captures.
+#[derive(Debug)]
+struct Frame {
+    /// The length of the locals when the callable started.
+    locals: usize,
+    /// The slots of the enclosing activation.
+    slots: Vec<Type>,
+    /// The result of the enclosing callable.
+    result: Option<Type>,
+    /// The number of type parameters in scope around the callable.
+    binders: usize,
+    /// The callable's captures, in environment order.
+    captures: Vec<Capture>,
+}
+
+/// One captured local: its index among the locals, its type, and the node
+/// that reads it in the enclosing activation.
+#[derive(Debug)]
+struct Capture {
+    local: usize,
+    ty: Option<Type>,
+    operand: Option<Node>,
+}
+
+/// One parameter that a pattern takes apart: its slot, its type, the
+/// pattern, and the pattern's span.
+type Destructure = (usize, Type, IrPattern, ByteSpan);
+
+struct ClosureState<'a> {
+    view: Callable<'a>,
+    span: ByteSpan,
+    mode: ClosureMode,
+    stage: u8,
+    signature: FnType,
+    /// The type arguments it is instantiated at: the enclosing binders
+    /// themselves, then one for each of its own type parameters.
+    instance: Option<Vec<Type>>,
+    labelled: Vec<(Ident<'a>, TypeExpr<'a>, Expr<'a>)>,
+    next: usize,
+    defaults: Vec<(String, Constant)>,
+    destructured: Vec<Destructure>,
+    /// The length of the instantiations when it started.
+    instantiations: usize,
+    /// The argument span the enclosing checker had.
+    argument: Option<ByteSpan>,
+    failed: bool,
 }
 
 /// Checks and lowers the bodies of one module.
@@ -364,6 +492,11 @@ pub(crate) struct BodyChecker<'p, 'a> {
     unfixed: Option<ByteSpan>,
     /// The number of patterns coverage does not take apart so far.
     opaque: usize,
+    /// The activations enclosing the anonymous callable being checked,
+    /// innermost last.
+    frames: Vec<Frame>,
+    /// The generic anonymous callable a `let` initializer just produced.
+    generic: Option<GenericClosure>,
 }
 
 /// The value of one checked callable body or initializer.
@@ -372,6 +505,8 @@ pub(crate) struct Checked {
     pub(crate) node: Option<Node>,
     /// The number of slots its activation has.
     pub(crate) slot_count: usize,
+    /// The constant default of each labelled parameter, in written order.
+    pub(crate) defaults: Vec<(String, Constant)>,
 }
 
 impl<'p, 'a> BodyChecker<'p, 'a> {
@@ -403,33 +538,86 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             argument: None,
             unfixed: None,
             opaque: 0,
+            frames: Vec::new(),
+            generic: None,
         }
     }
 
-    /// Checks the body of a callable of type `params -> result` whose
-    /// parameters are written as `patterns`, with the type parameters
-    /// `binders` and `self_type` for `Self` in scope. Each parameter is
-    /// bound to its slot, and a pattern that takes it apart is a `match` of
-    /// one arm around the body.
+    /// Checks the body of a callable of type `signature` whose parameters
+    /// are written as `patterns` and whose labelled parameters are written
+    /// as `labelled`, with the type parameters `binders` and `self_type`
+    /// for `Self` in scope. Each parameter is bound to its slot, a pattern
+    /// that takes it apart is a `match` of one arm around the body, and each
+    /// labelled default is checked as a constant of its label's type.
     pub(crate) fn callable(
         &mut self,
         signature: &FnType,
         patterns: &[Pattern<'a>],
+        labelled: &[(Ident<'a>, TypeExpr<'a>, Expr<'a>)],
         binders: &[String],
         self_type: Option<Type>,
         body: Body<'a>,
     ) -> Checked {
-        let params = &signature.parameters;
-        let result = &signature.result;
         self.locals.clear();
         self.slots.clear();
+        self.frames.clear();
         self.binders = binders.to_vec();
         self.self_type = self_type;
-        self.result = Some(result.clone());
-        self.slots.extend(params.iter().cloned());
+        let names = labelled
+            .iter()
+            .map(|(name, _, _)| *name)
+            .collect::<Vec<_>>();
+        let (mut failed, destructured) =
+            self.bind_parameters(signature, patterns, &names);
+        // A default is checked where nothing can leave a callable.
+        self.result = None;
+        let mut defaults = Vec::new();
+        for (name, _, default) in labelled {
+            let Some(ty) = signature.labels.get(name.text()).cloned() else {
+                failed = true;
+                continue;
+            };
+            let span = expr_span(default);
+            let out =
+                self.run(Task::Expr(default.clone(), Ctx::Value(Some(ty.clone()))));
+            match self.default_value(out, &ty, span) {
+                Some(constant) => defaults.push((name.text().to_owned(), constant)),
+                None => failed = true,
+            }
+        }
+        self.result = Some(signature.result.clone());
+        let out = self.run(Task::Body(Box::new(
+            self.body_state(body, BodyMode::Callable),
+        )));
+        let node = out
+            .node
+            .filter(|_| !failed)
+            .map(|body| self.wrap_destructured(body, destructured));
+        Checked {
+            node,
+            slot_count: self.slots.len(),
+            defaults,
+        }
+    }
+
+    /// Binds the parameters of a callable of type `signature`, whose slots
+    /// start at the current slot count: each positional one through its
+    /// pattern, each labelled one written as `labelled` to its slot. Whether
+    /// a pattern had a fault, and the parameters patterns take apart.
+    fn bind_parameters(
+        &mut self,
+        signature: &FnType,
+        patterns: &[Pattern<'a>],
+        labelled: &[Ident<'a>],
+    ) -> (bool, Vec<Destructure>) {
+        let base = self.slots.len();
+        let params = &signature.parameters;
+        self.slots.extend(signature.slot_types());
+        let frame = self.frames.len();
         let mut failed = false;
         let mut destructured = Vec::new();
-        for (slot, (ty, pattern)) in params.iter().zip(patterns).enumerate() {
+        for (index, (ty, pattern)) in params.iter().zip(patterns).enumerate() {
+            let slot = base + index;
             let span = pattern_span(*pattern, self.text);
             let typed = self.type_pattern(*pattern, span, Some(ty));
             if typed.lowered.is_some()
@@ -464,29 +652,89 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                 }
             }
         }
-        let out = self.run(Task::Body(Box::new(
-            self.body_state(body, BodyMode::Callable),
-        )));
-        let node = out.node.filter(|_| !failed).map(|body| {
-            destructured.into_iter().rev().fold(
-                body,
-                |body, (slot, value_type, pattern, span)| {
-                    let subject =
-                        self.node(IrExpr::Variable { slot, value_type }, span);
-                    self.node(
-                        IrExpr::Match {
-                            subject: Box::new(subject),
-                            arms: vec![MatchArm { pattern, body }],
-                            value_type: Type::Never,
-                        },
-                        span,
-                    )
-                },
-            )
-        });
-        Checked {
-            node,
-            slot_count: self.slots.len(),
+        for name in labelled {
+            let entries = signature.labels.entries();
+            let Some(at) = entries.iter().position(|(label, _)| label == name.text())
+            else {
+                continue;
+            };
+            self.locals.push(Local {
+                name: name.text().to_owned(),
+                slot: base + params.len() + at,
+                ty: entries.get(at).map(|(_, ty)| ty.clone()),
+                frame,
+                generic: None,
+            });
+        }
+        (failed, destructured)
+    }
+
+    /// `body` inside a `match` of one arm for each parameter a pattern takes
+    /// apart, the first parameter outermost.
+    fn wrap_destructured(&self, body: Node, destructured: Vec<Destructure>) -> Node {
+        destructured.into_iter().rev().fold(
+            body,
+            |body, (slot, value_type, pattern, span)| {
+                let subject = self.node(IrExpr::Variable { slot, value_type }, span);
+                self.node(
+                    IrExpr::Match {
+                        subject: Box::new(subject),
+                        arms: vec![MatchArm { pattern, body }],
+                        value_type: Type::Never,
+                    },
+                    span,
+                )
+            },
+        )
+    }
+
+    /// The constant a labelled default of type `ty`, written at `span`,
+    /// denotes, once its value `out` arrived; reports a default that does
+    /// not fit its type or is not a constant expression.
+    fn default_value(
+        &mut self,
+        out: Out,
+        ty: &Type,
+        span: ByteSpan,
+    ) -> Option<Constant> {
+        let node = match out.ty {
+            Some(Type::Never) => {
+                self.report(
+                    DiagnosticCode::TypeUnreachableCode,
+                    span,
+                    "this default never completes, so it has no value",
+                );
+                None
+            }
+            Some(actual) => {
+                self.conform(ty, &actual, out.node, span, DiagnosticCode::TypeMismatch)
+            }
+            None => None,
+        }?;
+        match fold(&node, &self.layout.constants) {
+            Ok(value) => {
+                if let Ok(constant) = Constant::new(ty.clone(), value) {
+                    Some(constant)
+                } else {
+                    self.unavailable(span, "a labelled default of an open type");
+                    None
+                }
+            }
+            Err(NotConstant::Dict) => {
+                self.unavailable(span, "a dict as a labelled default");
+                None
+            }
+            Err(NotConstant::Pending) if !self.layout.constants_known => None,
+            Err(NotConstant::Pending | NotConstant::Expression) => {
+                self.report(
+                    DiagnosticCode::TypeNotConstant,
+                    span,
+                    "a labelled default must be a constant expression: a literal, an \
+                     atom, `void`, a construction, tuple, record, or list of constants, \
+                     or the name of a constant module value",
+                );
+                None
+            }
         }
     }
 
@@ -495,6 +743,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
     pub(crate) fn test_body(&mut self, body: Body<'a>) -> Checked {
         self.locals.clear();
         self.slots.clear();
+        self.frames.clear();
         self.binders.clear();
         self.self_type = None;
         self.result = None;
@@ -504,6 +753,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         Checked {
             node: out.node,
             slot_count: self.slots.len(),
+            defaults: Vec::new(),
         }
     }
 
@@ -511,6 +761,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
     pub(crate) fn initializer(&mut self, ty: &Type, value: Expr<'a>) -> Checked {
         self.locals.clear();
         self.slots.clear();
+        self.frames.clear();
         self.binders.clear();
         self.self_type = None;
         self.result = None;
@@ -533,6 +784,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         Checked {
             node,
             slot_count: self.slots.len(),
+            defaults: Vec::new(),
         }
     }
 
@@ -616,8 +868,55 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         slot
     }
 
-    fn local(&self, name: &str) -> Option<&Local> {
-        self.locals.iter().rev().find(|local| local.name == name)
+    /// The index of the innermost local named `name`.
+    fn local_index(&self, name: &str) -> Option<usize> {
+        self.locals.iter().rposition(|local| local.name == name)
+    }
+
+    /// A read of the local at `index` at `span`: of its slot in its own
+    /// activation, or of a capture of each anonymous callable between that
+    /// activation and the current one, which captures it if it does not yet.
+    fn read_local(&mut self, index: usize, span: ByteSpan) -> Out {
+        let Some(local) = self.locals.get(index) else {
+            return Out::error();
+        };
+        let (slot, ty, frame) = (local.slot, local.ty.clone(), local.frame);
+        let origin = self.origin(span);
+        let mut node = ty.clone().map(|value_type| {
+            Node::new(IrExpr::Variable { slot, value_type }, origin.clone())
+        });
+        for level in frame.saturating_add(1)..=self.frames.len() {
+            let Some(enclosing) =
+                level.checked_sub(1).and_then(|at| self.frames.get_mut(at))
+            else {
+                return Out::error();
+            };
+            let at = match enclosing
+                .captures
+                .iter()
+                .position(|capture| capture.local == index)
+            {
+                Some(at) => at,
+                None => {
+                    enclosing.captures.push(Capture {
+                        local: index,
+                        ty: ty.clone(),
+                        operand: node.take(),
+                    });
+                    enclosing.captures.len() - 1
+                }
+            };
+            node = ty.clone().map(|value_type| {
+                Node::new(
+                    IrExpr::Captured {
+                        slot: at,
+                        value_type,
+                    },
+                    origin.clone(),
+                )
+            });
+        }
+        Out { ty, node }
     }
 
     fn run(&mut self, root: Task<'a>) -> Out {
@@ -636,6 +935,10 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                 Task::If(state) => self.step_if(state, input.take()),
                 Task::Match(state) => self.step_match(state, input.take()),
                 Task::Body(state) => self.step_body(state, input.take()),
+                Task::Anon(view, span, ctx, mode) => {
+                    self.start_closure(view, span, &ctx, mode)
+                }
+                Task::Closure(state) => self.step_closure(state, input.take()),
             };
             match step {
                 Step::Done(out) => input = Some(out),
@@ -745,12 +1048,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             None => None,
         };
         let node = node.map(|mut operand| {
-            if let IrExpr::Call { .. } = &operand.expr {
-                let call = std::mem::replace(&mut operand.expr, IrExpr::Global(0));
-                if let IrExpr::Call { target, arguments } = call {
-                    operand.expr = IrExpr::TailCall { target, arguments };
-                }
-            }
+            mark_tail(&mut operand);
             self.node(IrExpr::Return(Box::new(operand)), span)
         });
         Step::Done(Out {
@@ -944,9 +1242,10 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                     primary_span,
                 )
             }
-            Primary::Callable(_) => {
-                self.unavailable_primary(primary_span, "an anonymous callable")
-            }
+            Primary::Callable(view) => Step::Child(
+                Task::Postfix(state),
+                Task::Anon(view, primary_span, inner_ctx, ClosureMode::Value),
+            ),
         }
     }
 
@@ -963,23 +1262,15 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         span: ByteSpan,
         suffixes: &[(Suffix<'a>, ByteSpan)],
     ) -> (Head, usize) {
-        if let Some(local) = self.local(name) {
-            let node = local.ty.clone().map(|value_type| {
-                self.node(
-                    IrExpr::Variable {
-                        slot: local.slot,
-                        value_type,
-                    },
-                    span,
-                )
-            });
-            return (
-                Head::Value(Box::new(Out {
-                    ty: local.ty.clone(),
-                    node,
-                })),
-                0,
-            );
+        if let Some(index) = self.local_index(name) {
+            if let Some(generic) = self
+                .locals
+                .get(index)
+                .and_then(|local| local.generic.clone())
+            {
+                return (Head::Generic(generic), 0);
+            }
+            return (Head::Value(Box::new(self.read_local(index, span))), 0);
         }
         let program = self.program;
         let Some(mut entity) = program.lookup(self.module, name) else {
@@ -1113,6 +1404,9 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                         Head::Function(index) => {
                             Some(self.function_value(index, callee_span, None))
                         }
+                        Head::Generic(generic) => {
+                            Some(self.generic_value(&generic, callee_span, None))
+                        }
                         _ => None,
                     };
                     if let Some(value) = value {
@@ -1129,6 +1423,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                     };
                     let callee = match head {
                         Head::Function(index) => Some(Callee::Function(index)),
+                        Head::Generic(generic) => Some(Callee::Generic(generic)),
                         Head::Case(ty, case) => Some(Callee::Case(ty, case)),
                         Head::Contract(interface, member) => {
                             Some(Callee::Contract(interface, member))
@@ -1160,6 +1455,14 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                 let expected = state.ctx.expected().cloned();
                 self.function_value(index, whole, expected.as_ref())
             }
+            Head::Generic(generic) => {
+                let expected = state.ctx.expected().cloned();
+                self.generic_value(&generic, whole, expected.as_ref())
+            }
+            Head::Case(..) | Head::Type(_) if is_callable(state.ctx.expected()) => {
+                self.not_a_function(whole, state.ctx.expected());
+                Out::error()
+            }
             Head::Case(..) => {
                 self.unavailable(whole, "a constructor used as a value");
                 Out::error()
@@ -1175,6 +1478,389 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             Head::Pending | Head::Error => Out::error(),
         };
         Step::Done(out)
+    }
+
+    /// Reports a constructor written at `span` where a function value of
+    /// `expected` is: a constructor is not a function value.
+    fn not_a_function(&mut self, span: ByteSpan, expected: Option<&Type>) {
+        let code = if self.argument == Some(span) {
+            DiagnosticCode::TypeArgumentMismatch
+        } else {
+            DiagnosticCode::TypeMismatch
+        };
+        let expected = expected.map(ToString::to_string).unwrap_or_default();
+        self.report(
+            code,
+            span,
+            format!(
+                "expected `{expected}`, found a constructor, which is not a function \
+                 value; an anonymous `fn` wraps one"
+            ),
+        );
+    }
+
+    /// Starts the anonymous callable `view` written at `span`: reads its
+    /// header, opens its activation, and binds its parameters.
+    fn start_closure(
+        &mut self,
+        view: Callable<'a>,
+        span: ByteSpan,
+        ctx: &Ctx,
+        mode: ClosureMode,
+    ) -> Step<'a> {
+        if view.kind() != CallableKind::Fn {
+            return self.unavailable_primary(span, "an anonymous `proc`");
+        }
+        if !plain_callable(&view) {
+            return self.unavailable_primary(
+                span,
+                "an anonymous callable with a guard, a row, or a bound other than `Any`",
+            );
+        }
+        let own = view
+            .params()
+            .iter()
+            .map(|name| name.text().to_owned())
+            .collect::<Vec<_>>();
+        let outer = self.binders.len();
+        let mut binders = self.binders.clone();
+        binders.extend(own.iter().cloned());
+        let scope = Scope {
+            self_type: self.self_type.as_ref(),
+            binders: &binders,
+        };
+        let signature = match self.program.callable_type(self.module, &view, scope) {
+            Ok(signature) => signature,
+            Err(NoType::Unsupported) => {
+                return self.unavailable_primary(span, "this callable header");
+            }
+            Err(NoType::Unresolved) => return Step::Done(Out::error()),
+            Err(NoType::Fault(diagnostic)) => {
+                self.diagnostics
+                    .push(diagnostic.with_source_id(self.source_id.as_ref()));
+                return Step::Done(Out::error());
+            }
+        };
+        let instance = if own.is_empty() || mode == ClosureMode::Generic {
+            None
+        } else {
+            match self.closure_instance(&signature, outer, &own, ctx.expected(), span) {
+                Some(instance) => Some(instance),
+                None => return Step::Done(Out::error()),
+            }
+        };
+        let argument = self.argument.take();
+        self.frames.push(Frame {
+            locals: self.locals.len(),
+            slots: std::mem::take(&mut self.slots),
+            result: self.result.take(),
+            binders: outer,
+            captures: Vec::new(),
+        });
+        self.binders = binders;
+        let patterns = view
+            .takes()
+            .into_iter()
+            .map(|(pattern, _)| pattern)
+            .collect::<Vec<_>>();
+        let labelled = view.labelled();
+        let names = labelled
+            .iter()
+            .map(|(name, _, _)| *name)
+            .collect::<Vec<_>>();
+        let (failed, destructured) =
+            self.bind_parameters(&signature, &patterns, &names);
+        let state = Box::new(ClosureState {
+            view,
+            span,
+            mode,
+            stage: 0,
+            signature,
+            instance,
+            labelled,
+            next: 0,
+            defaults: Vec::new(),
+            destructured,
+            instantiations: self.instantiations.len(),
+            argument,
+            failed,
+        });
+        self.step_closure(state, None)
+    }
+
+    /// The type arguments a generic anonymous callable of type `signature`,
+    /// written at `span` where `expected` is, is instantiated at: the
+    /// `outer` enclosing binders themselves, then what `expected` fixes each
+    /// of its own type parameters `own` to. Reports one it cannot fix.
+    fn closure_instance(
+        &mut self,
+        signature: &FnType,
+        outer: usize,
+        own: &[String],
+        expected: Option<&Type>,
+        span: ByteSpan,
+    ) -> Option<Vec<Type>> {
+        let pattern = Type::function(signature.clone());
+        let base = (0..outer)
+            .map(|at| Some(Type::Binder(at)))
+            .chain(own.iter().map(|_| None))
+            .collect::<Vec<_>>();
+        let mut assignment = base.clone();
+        let fits =
+            expected.is_some_and(|expected| unify(&pattern, expected, &mut assignment));
+        if let Some(expected) = expected
+            && !fits
+        {
+            let code = if self.argument == Some(span) {
+                DiagnosticCode::TypeArgumentMismatch
+            } else {
+                DiagnosticCode::TypeMismatch
+            };
+            self.report(
+                code,
+                span,
+                format!(
+                    "expected `{expected}`, found the generic callable `{pattern}`"
+                ),
+            );
+            return None;
+        }
+        let missing = own
+            .iter()
+            .zip(assignment.iter().skip(outer))
+            .filter(|(_, bound)| bound.is_none())
+            .map(|(name, _)| name.clone())
+            .collect::<Vec<_>>();
+        if !missing.is_empty() {
+            self.ambiguous(span, &missing);
+            return None;
+        }
+        Some(assignment.into_iter().flatten().collect())
+    }
+
+    fn step_closure(
+        &mut self,
+        mut state: Box<ClosureState<'a>>,
+        input: Option<Out>,
+    ) -> Step<'a> {
+        let mut input = input;
+        if state.stage == 0 {
+            if let Some(out) = input.take()
+                && let Some((name, _, default)) = state
+                    .next
+                    .checked_sub(1)
+                    .and_then(|at| state.labelled.get(at))
+            {
+                let (name, span) = (name.text().to_owned(), expr_span(default));
+                let constant = match state.signature.labels.get(&name).cloned() {
+                    Some(ty) => self.default_value(out, &ty, span),
+                    None => None,
+                };
+                match constant {
+                    Some(constant) => state.defaults.push((name, constant)),
+                    None => state.failed = true,
+                }
+            }
+            if let Some((name, _, default)) = state.labelled.get(state.next).cloned() {
+                state.next += 1;
+                let ty = state.signature.labels.get(name.text()).cloned();
+                // A default is checked where nothing can leave a callable.
+                self.result = None;
+                return Step::Child(
+                    Task::Closure(state),
+                    Task::Expr(default, Ctx::Value(ty)),
+                );
+            }
+            state.stage = 1;
+            self.result = Some(state.signature.result.clone());
+            if let Some(body) = state.view.body() {
+                let body =
+                    Task::Body(Box::new(self.body_state(body, BodyMode::Callable)));
+                return Step::Child(Task::Closure(state), body);
+            }
+            state.failed = true;
+        }
+        Step::Done(self.finish_closure(*state, input))
+    }
+
+    /// Closes the activation of an anonymous callable whose body arrived as
+    /// `input`, and builds its closure.
+    fn finish_closure(&mut self, state: ClosureState<'a>, input: Option<Out>) -> Out {
+        let body = input.and_then(|out| out.node);
+        let Some(frame) = self.frames.pop() else {
+            return Out::error();
+        };
+        let slot_count = self.slots.len();
+        self.slots = frame.slots;
+        self.result = frame.result;
+        self.binders.truncate(frame.binders);
+        self.locals.truncate(frame.locals);
+        self.argument = state.argument;
+        let value_type = Type::function(state.signature.clone());
+        let ty = match &state.instance {
+            Some(instance) => value_type.instantiate(instance),
+            None => value_type.clone(),
+        };
+        let mut failed = state.failed;
+        let mut capture_types = Vec::new();
+        let mut operands = Vec::new();
+        let mut locals = Vec::new();
+        for capture in frame.captures {
+            match (capture.ty, capture.operand) {
+                (Some(ty), Some(operand)) => {
+                    capture_types.push(ty);
+                    operands.push(operand);
+                }
+                _ => failed = true,
+            }
+            locals.push(capture.local);
+        }
+        let body = match body {
+            Some(body) if !failed => body,
+            _ => {
+                let ty = (state.mode == ClosureMode::Value).then_some(ty);
+                return Out { ty, node: None };
+            }
+        };
+        let body = self.wrap_destructured(body, state.destructured);
+        let closure = ClosureBody {
+            value_type,
+            slot_count,
+            captures: capture_types,
+            defaults: state.defaults,
+            body,
+        };
+        let records = self.instantiations.split_off(state.instantiations);
+        if state.mode == ClosureMode::Generic {
+            let mut binder_names = self.binders.clone();
+            binder_names.extend(
+                state
+                    .view
+                    .params()
+                    .iter()
+                    .map(|name| name.text().to_owned()),
+            );
+            self.generic = Some(GenericClosure {
+                closure: Arc::new(closure),
+                capture_locals: locals,
+                signature: state.signature,
+                binder_names,
+                outer: frame.binders,
+                instantiations: records,
+            });
+            return Out::error();
+        }
+        let mut node = self.node(
+            IrExpr::Closure {
+                closure: Arc::new(closure),
+                captures: Vec::new(),
+            },
+            state.span,
+        );
+        match &state.instance {
+            Some(instance) => {
+                substitute(&mut node, instance);
+                self.instantiations.extend(records.into_iter().map(
+                    |(function, arguments, span)| {
+                        let arguments = arguments
+                            .iter()
+                            .map(|ty| ty.instantiate(instance))
+                            .collect();
+                        (function, arguments, span)
+                    },
+                ));
+            }
+            None => self.instantiations.extend(records),
+        }
+        if let IrExpr::Closure { captures, .. } = &mut node.expr {
+            *captures = operands;
+        }
+        Out {
+            ty: Some(ty),
+            node: Some(node),
+        }
+    }
+
+    /// A use at `span`, where `expected` is, of a generic anonymous callable
+    /// bound by `let`, as a value: instantiated at what `expected` fixes.
+    fn generic_value(
+        &mut self,
+        generic: &GenericClosure,
+        span: ByteSpan,
+        expected: Option<&Type>,
+    ) -> Out {
+        let pattern = Type::function(generic.signature.clone());
+        let mut assignment = self.generic_assignment(generic);
+        if let Some(expected) = expected {
+            let mut trial = assignment.clone();
+            if unify(&pattern, expected, &mut trial) {
+                assignment = trial;
+            }
+        }
+        let missing = generic
+            .binder_names
+            .iter()
+            .zip(&assignment)
+            .filter(|(_, bound)| bound.is_none())
+            .map(|(name, _)| name.clone())
+            .collect::<Vec<_>>();
+        if !missing.is_empty() {
+            self.ambiguous(span, &missing);
+            return Out::error();
+        }
+        let arguments = assignment.into_iter().flatten().collect::<Vec<_>>();
+        let node = self.instantiate_generic(generic, &arguments, span);
+        Out {
+            ty: Some(pattern.instantiate(&arguments)),
+            node,
+        }
+    }
+
+    /// What a use of `generic` starts from: each enclosing binder is itself,
+    /// and each of its own type parameters is still open.
+    fn generic_assignment(&self, generic: &GenericClosure) -> Vec<Option<Type>> {
+        (0..generic.binder_names.len())
+            .map(|at| (at < generic.outer).then_some(Type::Binder(at)))
+            .collect()
+    }
+
+    /// The closure of `generic` at the type arguments `arguments`, at
+    /// `span`, capturing what it captures from where it is used.
+    fn instantiate_generic(
+        &mut self,
+        generic: &GenericClosure,
+        arguments: &[Type],
+        span: ByteSpan,
+    ) -> Option<Node> {
+        self.instantiations
+            .extend(
+                generic
+                    .instantiations
+                    .iter()
+                    .map(|(function, records, at)| {
+                        let records = records
+                            .iter()
+                            .map(|ty| ty.instantiate(arguments))
+                            .collect();
+                        (*function, records, *at)
+                    }),
+            );
+        let mut node = self.node(
+            IrExpr::Closure {
+                closure: Arc::clone(&generic.closure),
+                captures: Vec::new(),
+            },
+            span,
+        );
+        substitute(&mut node, arguments);
+        let mut operands = Vec::new();
+        for &local in &generic.capture_locals {
+            operands.push(self.read_local(local, span).node?);
+        }
+        if let IrExpr::Closure { captures, .. } = &mut node.expr {
+            *captures = operands;
+        }
+        Some(node)
     }
 
     /// The constructor a type applied as a callee denotes, reporting a type
@@ -1532,6 +2218,14 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         let program = self.program;
         let mut labels = None;
         let mut binder_names = Vec::new();
+        let mut positional = None;
+        let mut named = Vec::new();
+        let mut flatten = |signature: &FnType| {
+            positional = Some(signature.parameters.len());
+            named = signature.labels.names().map(str::to_owned).collect();
+            (Some(signature.slot_types()), Some(signature.result.clone()))
+        };
+        let mut preset = 0;
         let (params, result) = match &callee {
             Callee::Function(index) => {
                 match program.functions.get(*index).and_then(|data| {
@@ -1539,15 +2233,17 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                 }) {
                     Some((data, signature)) => {
                         binder_names.clone_from(&data.binders);
-                        (Some(signature.parameters), Some(signature.result))
+                        flatten(&signature)
                     }
                     None => (None, None),
                 }
             }
-            Callee::Value(_, signature) => (
-                Some(signature.parameters.clone()),
-                Some(signature.result.clone()),
-            ),
+            Callee::Value(_, signature) => flatten(signature),
+            Callee::Generic(generic) => {
+                binder_names.clone_from(&generic.binder_names);
+                preset = generic.outer;
+                flatten(&generic.signature)
+            }
             Callee::Case(ty, case) => {
                 match program
                     .types
@@ -1605,15 +2301,25 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                 None => (None, None),
             },
         };
+        let assignment = (0..binder_names.len())
+            .map(|at| (at < preset).then_some(Type::Binder(at)))
+            .collect();
         let mut state = Box::new(CallState {
             callee,
             args,
             next: 0,
+            current: 0,
+            open: false,
+            marks: (0, 0, 0),
+            retry: Vec::new(),
+            retrying: false,
             params,
+            positional,
+            named,
             labels,
             binding: Vec::new(),
             result,
-            assignment: vec![None; binder_names.len()],
+            assignment,
             binder_names,
             deferred: Vec::new(),
             receiver: None,
@@ -1718,23 +2424,45 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                 }
             }
             None => {
+                // Positional arguments bind in order, labelled ones by name
+                // in any position.
                 let mut next = 0;
+                let mut used = vec![false; state.named.len()];
+                let count = state.positional.unwrap_or(usize::MAX);
                 for arg in &state.args {
-                    if let Some(label) = arg.label {
-                        self.report(
-                            DiagnosticCode::TypeArgumentMismatch,
-                            span_of(arg),
-                            format!(
-                                "the callee takes no labelled argument `{}`",
-                                label.text()
-                            ),
-                        );
-                        state.failed = true;
-                        binding.push(None);
-                    } else {
-                        binding.push(Some(next));
-                        next += 1;
-                    }
+                    let Some(label) = arg.label else {
+                        binding.push((next < count).then_some(next));
+                        next = next.saturating_add(1);
+                        continue;
+                    };
+                    let at = state.named.iter().position(|name| name == label.text());
+                    let message = match at {
+                        Some(at) if used.get(at) == Some(&false) => {
+                            if let Some(slot) = used.get_mut(at) {
+                                *slot = true;
+                            }
+                            binding.push(Some(count.saturating_add(at)));
+                            continue;
+                        }
+                        Some(_) => {
+                            format!("the label `{}` is bound twice", label.text())
+                        }
+                        None if state.named.is_empty() => format!(
+                            "the callee takes no labelled argument `{}`",
+                            label.text()
+                        ),
+                        None => format!(
+                            "the callee has no labelled parameter `{}`",
+                            label.text()
+                        ),
+                    };
+                    self.report(
+                        DiagnosticCode::TypeArgumentMismatch,
+                        span_of(arg),
+                        message,
+                    );
+                    state.failed = true;
+                    binding.push(None);
                 }
             }
         }
@@ -1745,16 +2473,22 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         if state.labels.is_some() {
             return;
         }
-        // A labelled argument to a callee without field names is reported
-        // where it is written, and still counts here, so that it is not
-        // reported again as a wrong arity.
-        let positional = state.args.len();
-        if let Some(params) = &state.params
-            && params.len() != positional
+        // A labelled argument to a callee without labelled parameters is
+        // reported where it is written, and still counts here, so that it is
+        // not reported again as a wrong arity.
+        let written = if state.named.is_empty() {
+            state.args.len()
+        } else {
+            state.args.iter().filter(|arg| arg.label.is_none()).count()
+        };
+        let takes = state
+            .positional
+            .or_else(|| state.params.as_ref().map(Vec::len));
+        if let Some(takes) = takes
+            && takes != written
         {
             let message = format!(
-                "the callee takes {} argument(s), but {positional} are written",
-                params.len(),
+                "the callee takes {takes} argument(s), but {written} are written"
             );
             self.report(
                 DiagnosticCode::TypeArgumentMismatch,
@@ -1771,11 +2505,30 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         input: Option<Out>,
     ) -> Step<'a> {
         if let Some(out) = input {
-            let at = state.next.saturating_sub(1);
+            let at = state.current;
             let span = state
                 .args
                 .get(at)
                 .map_or(state.application, |arg| expr_span(&arg.value));
+            // An argument whose parameter type was open and that only lacked
+            // a type argument is checked again once the other operands have
+            // fixed what they can: inference is joint over every operand.
+            let (diagnostics, references, instantiations) = state.marks;
+            let ambiguous_only =
+                self.diagnostics.get(diagnostics..).is_some_and(|added| {
+                    !added.is_empty()
+                        && added.iter().all(|diagnostic| {
+                            diagnostic.code() == DiagnosticCode::TypeAmbiguousInference
+                        })
+                });
+            if out.ty.is_none() && state.open && !state.retrying && ambiguous_only {
+                self.diagnostics.truncate(diagnostics);
+                self.references.truncate(references);
+                self.instantiations.truncate(instantiations);
+                state.retry.push(at);
+                place(&mut state.nodes, at, None);
+                return self.next_argument(state);
+            }
             let node = match out.ty {
                 Some(Type::Never) => {
                     if !state.never_reported {
@@ -1846,21 +2599,42 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             if node.is_none() {
                 state.failed = true;
             }
-            state.nodes.push(node);
+            place(&mut state.nodes, at, node);
         }
-        if let Some(arg) = state.args.get(state.next) {
+        self.next_argument(state)
+    }
+
+    /// Starts the next argument of a call, an argument set aside once all
+    /// were checked, or finishes the call.
+    fn next_argument(&mut self, mut state: Box<CallState<'a>>) -> Step<'a> {
+        loop {
+            let at = if state.next < state.args.len() {
+                state.next += 1;
+                state.next - 1
+            } else if state.retry.is_empty() {
+                break;
+            } else {
+                state.retrying = true;
+                state.retry.remove(0)
+            };
+            let Some(arg) = state.args.get(at) else { break };
             let value = arg.value.clone();
-            let at = state.next;
-            state.next += 1;
             let expected = state.slot(at).and_then(|pattern| state.instance(pattern));
             let skip_rest = matches!(state.callee, Callee::Contract(..))
                 && at > 0
                 && state.receiver.is_none();
             if skip_rest {
                 state.failed = true;
-                state.nodes.push(None);
-                return self.step_call(state, None);
+                place(&mut state.nodes, at, None);
+                continue;
             }
+            state.current = at;
+            state.open = expected.is_none() && state.slot(at).is_some();
+            state.marks = (
+                self.diagnostics.len(),
+                self.references.len(),
+                self.instantiations.len(),
+            );
             self.argument = Some(expr_span(&value));
             return Step::Child(
                 Task::Call(state),
@@ -1990,6 +2764,23 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             .cloned()
             .collect::<Vec<_>>();
         let complete_arguments = type_arguments.len() == state.assignment.len();
+        let slot_types = (0..state.args.len())
+            .map(|at| state.slot(at).and_then(|pattern| state.instance(pattern)))
+            .collect::<Vec<_>>();
+        let positional = state.positional.unwrap_or(usize::MAX);
+        let named = state
+            .named
+            .iter()
+            .enumerate()
+            .map(|(at, name)| {
+                let ty = state
+                    .params
+                    .as_ref()
+                    .and_then(|params| params.get(positional.saturating_add(at)))
+                    .and_then(|pattern| state.instance(pattern));
+                (name.clone(), ty)
+            })
+            .collect::<Vec<_>>();
         let CallState {
             callee,
             nodes,
@@ -2009,6 +2800,20 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                 None => complete = false,
             }
         }
+        let mut hoisted = Vec::new();
+        let mut lowered = |this: &mut Self, written: Vec<Node>| {
+            if !complete {
+                return None;
+            }
+            let shape = Shape {
+                binding: &binding,
+                positional,
+                named: &named,
+                types: &slot_types,
+                span: application,
+            };
+            this.lower_arguments(&shape, written, &mut hoisted)
+        };
         let named = |written: Vec<Node>| {
             let names = labels.clone().unwrap_or_default();
             binding
@@ -2033,29 +2838,37 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                         application,
                     ));
                 }
-                self.layout
-                    .functions
-                    .get(index)
-                    .copied()
-                    .flatten()
-                    .map(|function| IrExpr::Call {
+                let function = self.layout.functions.get(index).copied().flatten();
+                function
+                    .zip(lowered(self, written))
+                    .map(|(function, arguments)| IrExpr::Call {
                         target: CallTarget::Direct {
                             function,
                             type_arguments,
                         },
-                        arguments: Arguments {
-                            positional: written,
-                            labelled: Vec::new(),
-                        },
+                        arguments,
                     })
             }
-            Callee::Value(node, _) => node.map(|node| IrExpr::Call {
-                target: CallTarget::Value(node),
-                arguments: Arguments {
-                    positional: written,
-                    labelled: Vec::new(),
-                },
-            }),
+            Callee::Value(node, _) => {
+                node.zip(lowered(self, written))
+                    .map(|(node, arguments)| IrExpr::Call {
+                        target: CallTarget::Value(node),
+                        arguments,
+                    })
+            }
+            Callee::Generic(generic) => {
+                let closure = if complete && complete_arguments {
+                    self.instantiate_generic(&generic, &type_arguments, callee_span)
+                } else {
+                    None
+                };
+                closure
+                    .zip(lowered(self, written))
+                    .map(|(closure, arguments)| IrExpr::Call {
+                        target: CallTarget::Value(Box::new(closure)),
+                        arguments,
+                    })
+            }
             Callee::Case(_, case) => {
                 result.clone().map(|value_type| IrExpr::Construct {
                     value_type,
@@ -2133,7 +2946,79 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         } else {
             None
         };
+        // Arguments hoisted to keep their written order bind around the
+        // call, the first outermost.
+        let node = node.map(|call| {
+            hoisted.into_iter().rev().fold(call, |body, (slot, value)| {
+                self.node(
+                    IrExpr::Let {
+                        slot: Some(slot),
+                        value: Box::new(value),
+                        body: Box::new(body),
+                    },
+                    application,
+                )
+            })
+        });
         Out { ty: result, node }
+    }
+
+    /// The arguments of a call to a callable with labelled parameters, as
+    /// `shape` describes it, from its written argument nodes `written`:
+    /// the positional ones in order, the labelled ones in written order, and
+    /// a placeholder for the default of each label not written. When a
+    /// labelled argument is written before a positional one, each argument
+    /// is bound to a fresh slot first, in `hoisted`, so that they are
+    /// evaluated in written order.
+    fn lower_arguments(
+        &mut self,
+        shape: &Shape<'_>,
+        written: Vec<Node>,
+        hoisted: &mut Vec<(usize, Node)>,
+    ) -> Option<Arguments> {
+        let mut labelled_seen = false;
+        let mut reorder = false;
+        for slot in shape.binding.iter().flatten() {
+            if *slot >= shape.positional {
+                labelled_seen = true;
+            } else if labelled_seen {
+                reorder = true;
+            }
+        }
+        let mut positional = Vec::new();
+        let mut labelled: Vec<(String, Node)> = Vec::new();
+        for ((slot, node), ty) in shape.binding.iter().zip(written).zip(shape.types) {
+            let slot = (*slot)?;
+            let node = if reorder {
+                let value_type = ty.clone()?;
+                let fresh = self.new_slot(Some(&value_type));
+                let origin = node.origin.clone();
+                hoisted.push((fresh, node));
+                Node::new(
+                    IrExpr::Variable {
+                        slot: fresh,
+                        value_type,
+                    },
+                    origin,
+                )
+            } else {
+                node
+            };
+            match slot.checked_sub(shape.positional) {
+                None => positional.push(node),
+                Some(at) => labelled.push((shape.named.get(at)?.0.clone(), node)),
+            }
+        }
+        for (name, ty) in shape.named {
+            if !labelled.iter().any(|(label, _)| label == name) {
+                let placeholder = self.node(IrExpr::Default(ty.clone()?), shape.span);
+                labelled.push((name.clone(), placeholder));
+            }
+        }
+        Some(Arguments {
+            positional,
+            labelled,
+        })
     }
 
     fn start_product(
@@ -2861,6 +3746,20 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             }
             match statement {
                 Statement::Let(view) => {
+                    if let Some((name, callable, callable_span)) =
+                        self.generic_let(&view)
+                    {
+                        state.pending = Pending::GenericLet { name };
+                        return Step::Child(
+                            Task::Body(state),
+                            Task::Anon(
+                                callable,
+                                callable_span,
+                                Ctx::Value(None),
+                                ClosureMode::Generic,
+                            ),
+                        );
+                    }
                     let pattern = view.pattern();
                     let pattern_span = pattern
                         .map_or(span, |pattern| pattern_span(pattern, self.text));
@@ -2908,11 +3807,68 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         }
     }
 
+    /// The name, the callable, and its span, of a `let` that binds a generic
+    /// anonymous callable to a bare name, which keeps it generic: one with
+    /// no written type and no `else`, whose initializer is the callable
+    /// alone.
+    fn generic_let(
+        &self,
+        view: &LetView<'a>,
+    ) -> Option<(String, Callable<'a>, ByteSpan)> {
+        if view.written_type().is_some() || view.fallback().is_some() {
+            return None;
+        }
+        let PatternForm::Path(path) = view.pattern()?.form() else {
+            return None;
+        };
+        let segments = path.segments();
+        let [name] = segments.as_slice() else {
+            return None;
+        };
+        // A name of a module value is a constant pattern, not a binding.
+        let binds = self.local_index(name.text()).is_some()
+            || !matches!(
+                self.program.lookup(self.module, name.text()),
+                Some(Entity::Value(_) | Entity::Fn(_) | Entity::Other(..))
+            );
+        let value = view.value()?;
+        let ExprForm::Postfix(postfix) = value.form() else {
+            return None;
+        };
+        if !binds || !suffix_spans(postfix, self.text).is_empty() {
+            return None;
+        }
+        let Primary::Callable(callable) = postfix.primary()? else {
+            return None;
+        };
+        if callable.params().is_empty() {
+            return None;
+        }
+        let span = primary_node(postfix).map_or(postfix.node().span(), CstNode::span);
+        Some((name.text().to_owned(), callable, span))
+    }
+
     /// Takes the value of the statement or fallback that `state` waits for,
     /// returning the fallback of a `let … else` to check next.
     fn arrive(&mut self, state: &mut BodyState<'a>, out: Out) -> Option<Task<'a>> {
         match std::mem::replace(&mut state.pending, Pending::Nothing) {
             Pending::Nothing => {}
+            Pending::GenericLet { name } => {
+                state.last_type = None;
+                let generic = self.generic.take().map(Rc::new);
+                if generic.is_none() {
+                    state.failed = true;
+                }
+                // The name has no slot: each use is a closure of its own.
+                self.locals.push(Local {
+                    name,
+                    slot: 0,
+                    ty: None,
+                    frame: self.frames.len(),
+                    generic: generic.clone(),
+                });
+                state.pieces.push(generic.map(|_| Piece::Skip));
+            }
             Pending::Let {
                 pattern,
                 pattern_span,
@@ -3160,13 +4116,17 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
     fn sequence(&self, pieces: Vec<Piece>, span: ByteSpan, value_type: &Type) -> Node {
         let mut tail: Vec<Node> = Vec::new();
         for piece in pieces.into_iter().rev() {
-            if let Piece::Expr(node) = piece {
-                tail.push(node);
-                continue;
+            match piece {
+                Piece::Expr(node) => {
+                    tail.push(node);
+                    continue;
+                }
+                Piece::Skip => continue,
+                _ => {}
             }
             let body = Box::new(self.close(std::mem::take(&mut tail), span));
             let (expr, let_span) = match piece {
-                Piece::Expr(_) => continue,
+                Piece::Expr(_) | Piece::Skip => continue,
                 Piece::Let(slot, value) => {
                     let let_span = value.origin.span();
                     let value = Box::new(value);
@@ -3219,6 +4179,33 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         }
         self.node(IrExpr::Sequence(reversed), span)
     }
+}
+
+/// How the written arguments of a call bind a callable with labelled
+/// parameters: the parameter each binds, the number of positional ones, each
+/// label and its type, the type each argument has, and the call's span.
+struct Shape<'s> {
+    binding: &'s [Option<usize>],
+    positional: usize,
+    named: &'s [(String, Option<Type>)],
+    types: &'s [Option<Type>],
+    span: ByteSpan,
+}
+
+/// Puts `node` at position `at` of `nodes`, filling any gap before it.
+fn place(nodes: &mut Vec<Option<Node>>, at: usize, node: Option<Node>) {
+    while nodes.len() < at {
+        nodes.push(None);
+    }
+    match nodes.get_mut(at) {
+        Some(slot) => *slot = node,
+        None => nodes.push(node),
+    }
+}
+
+/// Whether `expected` is a callable type.
+const fn is_callable(expected: Option<&Type>) -> bool {
+    matches!(expected, Some(Type::Fn(_)))
 }
 
 /// Matches `pattern`, in which a [`Type::Binder`] below `assignment.len()`

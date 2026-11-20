@@ -1,0 +1,2 @@
+fn main returns r: I64 do let n: I64 be pick(1 2i64) endlet return n endfn
+fn pick(T) takes {a: T b: T} returns r: T do return a endfn

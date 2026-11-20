@@ -1,0 +1,2 @@
+fn main returns r: I32 do let step be fn takes {l: Loop n: I32 acc: I32} returns r: I32 do if Equatable.equal(n 0i32) then return acc else return l.run(l I32.sub(n 1i32) I32.add(acc 1i32)) endif endfn endlet return step(Loop(run: step) 100000i32 0i32) endfn
+type Loop of {run: Fn({Loop I32 I32} I32)} endtype

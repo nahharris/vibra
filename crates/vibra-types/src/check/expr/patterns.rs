@@ -400,7 +400,7 @@ impl<'a> BodyChecker<'_, 'a> {
         span: ByteSpan,
         bindings: &mut Vec<Local>,
     ) -> Kind {
-        if self.local(name.text()).is_none() {
+        if self.local_index(name.text()).is_none() {
             match self.program.lookup(self.module, name.text()) {
                 Some(Entity::Value(index)) => {
                     return self.constant_pattern(index, ty.as_ref(), span);
@@ -414,6 +414,8 @@ impl<'a> BodyChecker<'_, 'a> {
             name: name.text().to_owned(),
             slot,
             ty,
+            frame: self.frames.len(),
+            generic: None,
         });
         Kind::Bind(slot)
     }

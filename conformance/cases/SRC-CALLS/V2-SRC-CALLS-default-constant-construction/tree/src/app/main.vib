@@ -1,0 +1,2 @@
+type Shape case empty case dot {x: I32} endtype
+fn size labelled {mode: Shape be Shape.empty()} returns r: I32 do return 0i32 endfn

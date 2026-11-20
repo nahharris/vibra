@@ -15,11 +15,12 @@ use vibra_ir::{
     Binder, Case, CheckedFunction, CheckedGlobal, CheckedModuleSet, FnType,
     FunctionBody, Implementation, ImplementationRecord, InterfaceDefinition,
     InterfaceKey, InterfaceMember, LibraryTypes, ModuleSetParts, NamedTypes,
-    SignatureRecord, SourceOrigin, Type, TypeBody, TypeDefinition, Visibility,
+    SignatureRecord, SourceOrigin, Type, TypeBody, TypeDefinition, Value, Visibility,
     encode_type,
 };
 use vibra_syntax::Document;
 
+use super::callables::fold;
 use super::cycle::initializer_cycles;
 use super::declare::{Entity, Program, TypeData, TypeKind};
 use super::expr::{BodyChecker, Checked, Layout, Reference, Target};
@@ -99,8 +100,15 @@ fn check_bodies(
             .into_iter()
             .map(|(pattern, _)| pattern)
             .collect::<Vec<_>>();
-        let checked =
-            checker.callable(signature, &patterns, &data.binders, self_type, body);
+        let labelled = data.view.labelled();
+        let checked = checker.callable(
+            signature,
+            &patterns,
+            &labelled,
+            &data.binders,
+            self_type,
+            body,
+        );
         pass.functions.insert(index, checked);
         pass.instantiations
             .extend(checker.instantiations.drain(..).map(
@@ -257,6 +265,51 @@ fn skip_faulty_stdlib(program: &mut Program<'_>, pass: &Pass) {
     }
 }
 
+/// The value of each module value whose initializer, checked in `first`
+/// under the layout `provisional`, is a constant expression, by its global
+/// index in `layout`. An initializer that names another module value is
+/// constant when that one is, so the values are folded in rounds until no
+/// more are found.
+fn constants(
+    provisional: &Layout,
+    first: &Pass,
+    layout: &Layout,
+) -> BTreeMap<usize, Value> {
+    let mut known: BTreeMap<usize, Value> = BTreeMap::new();
+    loop {
+        let mut grew = false;
+        for (index, checked) in &first.values {
+            let Some(global) = provisional.globals.get(*index).copied().flatten()
+            else {
+                continue;
+            };
+            if known.contains_key(&global) {
+                continue;
+            }
+            if let Some(value) = checked
+                .node
+                .as_ref()
+                .and_then(|node| fold(node, &known).ok())
+            {
+                known.insert(global, value);
+                grew = true;
+            }
+        }
+        if !grew {
+            break;
+        }
+    }
+    first
+        .values
+        .keys()
+        .filter_map(|index| {
+            let before = provisional.globals.get(*index).copied().flatten()?;
+            let after = layout.globals.get(*index).copied().flatten()?;
+            Some((after, known.get(&before)?.clone()))
+        })
+        .collect()
+}
+
 /// Checks `program`, whose modules are parsed as `documents`, and lowers it.
 pub(crate) fn check_program(
     mut program: Program<'_>,
@@ -265,8 +318,10 @@ pub(crate) fn check_program(
     let provisional = layout(&program);
     let first = check_bodies(&program, documents, &provisional);
     skip_faulty_stdlib(&mut program, &first);
+    let mut layout = layout(&program);
+    layout.constants = constants(&provisional, &first, &layout);
+    layout.constants_known = true;
     drop(first);
-    let layout = layout(&program);
     let pass = check_bodies(&program, documents, &layout);
     let test_faults = testing::declaration_faults(&program);
     let reported = std::mem::take(&mut program.diagnostics);
@@ -635,7 +690,7 @@ fn assemble(
                 CheckedFunction {
                     name: data.qualified.clone(),
                     signature: record,
-                    defaults: Vec::new(),
+                    defaults: checked.defaults,
                     body: FunctionBody::Expr(Box::new(body)),
                     entry_guard: None,
                     exit_guard: None,

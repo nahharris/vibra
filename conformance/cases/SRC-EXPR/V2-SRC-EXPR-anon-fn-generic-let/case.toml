@@ -1,0 +1,12 @@
+id = "V2-SRC-EXPR-anon-fn-generic-let"
+rule = "V2-SRC-EXPR-anon-fn-generic-let"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#generics: a generic anonymous fn bound by let stays generic and is used at two types"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

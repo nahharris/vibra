@@ -1,0 +1,2 @@
+fn compute returns r: U64 do return 4u64 endfn
+fn pad takes {s: Str} labelled {width: U64 be compute()} returns r: U64 do return width endfn
