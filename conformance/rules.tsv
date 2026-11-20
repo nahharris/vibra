@@ -419,3 +419,5 @@ V2-PROJECT-test-unavailable-item	active	05-tooling.md#tests-and-selection
 V2-PROJECT-test-function-not-equatable	active	04-programs-and-packages.md#assertions
 V2-PROJECT-test-empty-suite	active	05-tooling.md#tests-and-selection
 V2-PROJECT-test-exhaustion-isolated	active	04-programs-and-packages.md#tests
+V2-PROJECT-test-equal-typed-from-actual	active	02-type-system.md#inference-and-checking
+V2-PROJECT-test-return-in-anon-fn	active	01-source-language.md#test

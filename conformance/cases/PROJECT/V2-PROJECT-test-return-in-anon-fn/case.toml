@@ -1,0 +1,12 @@
+id = "V2-PROJECT-test-return-in-anon-fn"
+rule = "V2-PROJECT-test-return-in-anon-fn"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "01-source-language.md#test: a return inside an anonymous fn in a test body leaves that callable"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

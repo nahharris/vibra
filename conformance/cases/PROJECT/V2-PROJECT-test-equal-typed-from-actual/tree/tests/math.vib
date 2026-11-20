@@ -1,0 +1,5 @@
+use @std.assert enduse
+
+use @app.math enduse
+
+test "typed" do assert.equal(Result.ok(value: 2u64) math.count()) endtest
