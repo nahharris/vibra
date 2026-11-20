@@ -1,0 +1,18 @@
+id = "V2-TYPE-GENERIC-expanding-contract"
+rule = "V2-TYPE-GENERIC-expanding-contract"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#generics: an implementation member whose contract call selects its own implementation at a larger receiver expands without end, at the call"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.expandingInstantiation"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 247, end = 268 }
