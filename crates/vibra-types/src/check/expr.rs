@@ -2431,6 +2431,12 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                     Some((names, signature, found)) => {
                         binder_names = names;
                         dispatch = Some(Box::new(found));
+                        if let Some((found, module)) =
+                            self.contract_bounds(*interface, member)
+                        {
+                            bounds = found;
+                            bound_module = module;
+                        }
                         flatten(&signature)
                     }
                     None => (None, None),

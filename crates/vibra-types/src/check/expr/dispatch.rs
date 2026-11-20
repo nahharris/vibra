@@ -632,6 +632,58 @@ impl<'a> BodyChecker<'_, 'a> {
         Some((names, signature, dispatch))
     }
 
+    /// The bounds of a call of `member` of `interface` over its type
+    /// parameters numbered as the module docs say: the interface's, then the
+    /// member's own, written in the interface's module; `Self` and the
+    /// associated types have none.
+    pub(super) fn contract_bounds(
+        &self,
+        interface: usize,
+        member: &str,
+    ) -> Option<(Vec<Option<BoundData>>, usize)> {
+        let data = self.program.interfaces.get(interface)?;
+        let declared = data.member(member)?;
+        let self_var = declared.binders.len();
+        let choices = NamedTypes::new(data.associated.iter().enumerate().map(
+            |(at, (name, _))| {
+                (
+                    name.clone(),
+                    Type::Binder(self_var.saturating_add(1).saturating_add(at)),
+                )
+            },
+        ))
+        .ok()?;
+        let substitution = Substitution {
+            binders: &[],
+            self_type: Some(&Type::Binder(self_var)),
+            associated: Some(&choices),
+        };
+        let bounds = declared
+            .bounds
+            .iter()
+            .map(|bound| {
+                bound.clone().map(|bound| BoundData {
+                    arguments: bound
+                        .arguments
+                        .iter()
+                        .map(|ty| ty.substitute(&substitution))
+                        .collect(),
+                    choices: bound
+                        .choices
+                        .iter()
+                        .map(|(name, ty)| (name.clone(), ty.substitute(&substitution)))
+                        .collect(),
+                    ..bound
+                })
+            })
+            .chain(std::iter::repeat_n(
+                None,
+                data.associated.len().saturating_add(1),
+            ))
+            .collect();
+        Some((bounds, data.module))
+    }
+
     /// Starts the dispatch of a contract call once its arguments are bound:
     /// its receiver operand is checked first, or the written expected type
     /// fixes the receiver (destination dispatch).
@@ -870,6 +922,13 @@ impl<'a> BodyChecker<'_, 'a> {
         if let (Some(result), Some(expected)) = (&state.result, &dispatch.expected) {
             let mut trial = state.assignment.clone();
             if unify(result, expected, &mut trial) {
+                let source = self.written_span(application).unwrap_or(application);
+                super::note_sources(
+                    &state.assignment,
+                    &trial,
+                    &mut state.sources,
+                    source,
+                );
                 state.assignment = trial;
             }
         }
