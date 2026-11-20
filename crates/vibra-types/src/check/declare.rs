@@ -31,8 +31,9 @@ use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 use vibra_ir::external::compiler::CompilerIntrinsic;
 use vibra_ir::{FnType, Library, NamedTypes, Type, TypeId};
 use vibra_syntax::source::{
-    Callable, Declaration, ExprForm, Given, Impl, InterfaceDecl, Module, ModuleLet,
-    Primary, SourceOptions, Suffix, Test, TypeBody, TypeDecl, TypeExpr, TypeForm,
+    Callable, Declaration, ExprForm, Given, Impl, Inputs, InterfaceDecl, Module,
+    ModuleLet, Primary, SourceOptions, Suffix, Test, TypeBody, TypeDecl, TypeExpr,
+    TypeForm,
 };
 use vibra_syntax::{CstNode, Document, parse_source, parse_source_with};
 
@@ -1080,6 +1081,9 @@ impl<'a> Program<'a> {
                 Type::record(fields).map_err(|_| NoType::Unsupported)
             }
             TypeForm::Fn { inputs, result } => {
+                if let Some(fault) = repeated_label(&inputs) {
+                    return Err(fault);
+                }
                 let parameters = inputs
                     .positional()
                     .into_iter()
@@ -1095,10 +1099,8 @@ impl<'a> Program<'a> {
                         ))
                     })
                     .collect::<Result<Vec<_>, NoType>>()?;
-                // Two inputs of one label have no rule of their own; such a
-                // type is left unsupported rather than given a meaning.
                 let labels =
-                    NamedTypes::new(labelled).map_err(|_| NoType::Unsupported)?;
+                    NamedTypes::new(labelled).map_err(|_| NoType::Unresolved)?;
                 let result = self.written_at(module, result, scope)?;
                 Ok(Type::function(FnType {
                     parameters,
@@ -1106,7 +1108,10 @@ impl<'a> Program<'a> {
                     result,
                 }))
             }
-            TypeForm::Proc { .. } | TypeForm::Intent { .. } => Err(NoType::Unsupported),
+            TypeForm::Proc { inputs, .. } => {
+                Err(repeated_label(&inputs).unwrap_or(NoType::Unsupported))
+            }
+            TypeForm::Intent { .. } => Err(NoType::Unsupported),
         }
     }
 
@@ -1729,6 +1734,26 @@ pub(crate) fn depth_fault(span: ByteSpan) -> NoType {
         span,
         format!("this type nests more than {} levels", Type::MAX_DEPTH),
     )))
+}
+
+/// The fault of a written `Fn` or `Proc` type whose inputs repeat a label:
+/// `@type.typeArgumentMismatch` at the second occurrence
+/// (`docs/spec/02-type-system.md`, "Callable types").
+fn repeated_label(inputs: &Inputs<'_>) -> Option<NoType> {
+    let labelled = inputs.labelled();
+    let mut seen = BTreeSet::new();
+    let (name, _) = labelled
+        .iter()
+        .find(|(name, _)| !seen.insert(name.text()))?;
+    Some(NoType::Fault(Box::new(Diagnostic::new(
+        DiagnosticCode::TypeTypeArgumentMismatch,
+        name.span(),
+        format!(
+            "the label `{}` is written twice; each label of a callable type names \
+             one input",
+            name.text()
+        ),
+    ))))
 }
 
 /// The diagnostic `code` of [`Program::key_fault`] for `key` at `span`.

@@ -311,6 +311,40 @@ fn a_fn_type_has_its_labels() {
     );
 }
 
+/// Each label of a callable type names one input: a repeated one is
+/// `@type.typeArgumentMismatch` at the second (`docs/spec/02-type-system.md`,
+/// "Callable types").
+#[test]
+fn a_callable_type_names_each_label_once() {
+    let source = format!(
+        "fn main returns r: U64 do let f: Fn({{Str width: U64 width: U64}} U64) be pad \
+         endlet return f(\"x\") endfn\n{PAD}"
+    );
+    assert_eq!(
+        faults(&source),
+        [(
+            DiagnosticCode::TypeTypeArgumentMismatch,
+            at(&source, "width", 1)
+        )]
+    );
+    let source = "fn run takes {p: Proc({I32 n: U8 n: U8} Void)} returns r: I32 \
+                  do return 1i32 endfn\n";
+    let second = at(source, "n: U8", 1).start();
+    assert_eq!(
+        faults(source),
+        [(
+            DiagnosticCode::TypeTypeArgumentMismatch,
+            ByteSpan::new(second, second + 1)
+        )]
+    );
+    // Two labels, each once, are an ordinary callable type.
+    let source = "fn main returns r: U64 do let f: Fn({Str depth: U64 width: U64} U64) \
+                  be two endlet return f(\"x\") endfn\n\
+                  fn two takes {s: Str} labelled {width: U64 be 4u64 depth: U64 be 1u64} \
+                  returns r: U64 do return U64.add(width depth) endfn\n";
+    assert_eq!(run(source).as_deref(), Ok(value("u64", "5u64").as_str()));
+}
+
 #[test]
 fn an_anonymous_fn_captures_by_value() {
     let source = "fn main returns r: I32 do let base be 10i32 endlet \

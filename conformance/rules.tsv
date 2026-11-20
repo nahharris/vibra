@@ -556,3 +556,6 @@ V2-SRC-CALLS-default-dict	active	02-type-system.md#constant-expressions-and-cons
 V2-SRC-CALLS-default-dict-not-constant	active	02-type-system.md#constant-expressions-and-constant-patterns
 V2-SRC-CALLS-default-generic	active	02-type-system.md#constant-expressions-and-constant-patterns
 V2-SRC-CALLS-default-generic-value	active	02-type-system.md#constant-expressions-and-constant-patterns
+V2-TYPE-NOMINAL-fn-type-repeated-label	active	02-type-system.md#callable-types
+V2-TYPE-NOMINAL-proc-type-repeated-label	active	02-type-system.md#callable-types
+V2-TYPE-NOMINAL-fn-type-distinct-labels	active	02-type-system.md#callable-types

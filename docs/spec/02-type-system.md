@@ -292,7 +292,9 @@ already exist, so no value contains itself.
 `Fn({A B} R)` is the type of a pure function with required positional types
 `A` and `B` and result `R`. Labelled parameters follow the positional ones in
 the input vector: `Fn({I32 verbose: Bool} Bool)`. Defaults belong to the
-function value and are not part of its type.
+function value and are not part of its type. Each label names one input: a
+label written twice in the input vector of a `Fn` or `Proc` type is
+`@type.typeArgumentMismatch` at the second.
 
 `Proc({A} R {Row})` is the type of a procedure, and `Intent(R {Row})` the
 type of a plan; the [effects chapter](03-effects.md) defines both. A row is a

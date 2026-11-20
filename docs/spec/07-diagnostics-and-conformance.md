@@ -269,7 +269,7 @@ Resolution reads only the captured source graph.
 | Condition | Code and primary span |
 | --- | --- |
 | an argument that does not fit its slot, a wrong arity, an unknown, duplicate, or missing label; a constructor pattern of the wrong shape; an argument for a `Self` parameter outside the receiver slot that does not have the receiver's type, or that is supplied through an interface value | `@type.argumentMismatch`, the argument, the application, or the pattern |
-| a wrong type-argument count, an unknown or repeated label, a label in an `impl` target, or an interface value type with an open associated type | `@type.typeArgumentMismatch`, the label or the type application |
+| a wrong type-argument count, an unknown or repeated label, a label repeated in the inputs of a `Fn` or `Proc` type, a label in an `impl` target, or an interface value type with an open associated type | `@type.typeArgumentMismatch`, the label or the type application |
 | application of a value that is not applicable | `@type.notApplicable`, the callee |
 | a field read of a value without that field | `@type.unknownRecordField`, the field name |
 | a literal that does not fit its type | `@type.numericOutOfRange`, the literal |
