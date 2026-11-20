@@ -110,9 +110,11 @@ rather than a rename of everything that survives.
    moves the native track to them and re-homes the native host tests out
    of `vibra-conformance-v1`; in the same PR the v1 runner loses the
    executor columns of the crates that moved. If X2-01 has not landed
-   when every other prerequisite of step 28 has, step 28 does the
-   mechanical re-pointing itself and records the tests it had to drop as
-   X2-01's remaining list; it never deletes the native crates.
+   when every other prerequisite of step 28 has, step 28 keeps the five
+   `-v1` crates the native track is compiled against (`vibra-diagnostics-v1`,
+   `vibra-syntax-v1`, `vibra-ir-v1`, `vibra-host-v1`, `vibra-native-v1`) and
+   deletes the other eight; X2-01 deletes the five when it moves the native
+   track. Step 28 never deletes the native crates.
 6. **`vibra-native` and `vibra-host` exist twice until the cutover.** The
    `-v1` crates serve the v1 pipeline and, until X2-01, the native track.
    Step 27 creates the crates of the final names on the new `vibra-ir`
@@ -173,7 +175,7 @@ that implements v0.0.1:
 | `vibra-native` | recreated on the new IR (step 27; old → `-v1`, deleted in 28) | The same routines against the new registry rows. The M1 interpreter runs Vibra bodies and intrinsics and uses no native implementation; the native track calls these routines. |
 | `vibra-fs-scope` | kept, unrenamed, untouched by M1 | The Windows file-scope adapter. It depends on no workspace crate and none depends on it until package N9 puts it behind the filesystem provider in M2. |
 | `vibra-exec`, `vibra-lower`, `vibra-nexus`, `vibra-nexus-eval`, `vibra-nexus-bridge`, `vibra-codegen`, `vibra-build`, `vibra-actors` | kept, unrenamed | Moved to the new `vibra-ir`, `vibra-native`, and `vibra-host` by package X2-01, not by M1. |
-| every `-v1` crate | deleted (step 28) | With `stdlib-v1/`, `examples-v1/`, `fuzz-v1/`, `conformance/v1/`. |
+| every `-v1` crate | deleted (step 28) | With `stdlib-v1/`, `examples-v1/`, `fuzz-v1/`, `conformance/v1/`. The five the native track is compiled against are deleted by X2-01 (decision 5). |
 
 ### Native contract packages
 

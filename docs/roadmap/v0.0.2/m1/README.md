@@ -46,7 +46,12 @@ The decisions and their reasons are in [architecture.md](architecture.md).
 In one line each:
 
 - New crates under the final names beside the old crates, which step 01
-  renames with a `-v1` suffix and step 28 deletes.
+  renames with a `-v1` suffix and step 28 deletes. The five `-v1` crates the
+  native track is compiled against, `vibra-diagnostics-v1`,
+  `vibra-syntax-v1`, `vibra-ir-v1`, `vibra-host-v1`, and `vibra-native-v1`,
+  stay after step 28: the native track lowers the v1 checked IR, which does
+  not map mechanically onto the new one. Package X2-01 moves the native
+  track to `vibra-ir`, `vibra-native`, and `vibra-host` and deletes them.
 - The checked IR is closed in step 12 for the whole of M1, with a migration
   table for the native track; package X2-01 moves the native track to it.
 - The packages N1 to N12 of the native contract are each assigned once:
@@ -102,7 +107,7 @@ the vertical-slice rule.
 | 25 | [cli-fmt-check](steps/25-cli-fmt-check.md) | vertical | 08, 15, 24 | 16 to 23, 27 | `vibra-cli`, `vibra-schema`, `vibra-workspace`, `vibra-conformance`, `conformance/cases` | landed |
 | 26 | [cli-test](steps/26-cli-test.md) | vertical | 23, 25 | 18 to 22, 27 | `vibra-cli`, `vibra-schema`, `vibra-workspace` | landed |
 | 27 | [runtime-crate-port](steps/27-runtime-crate-port.md) | infrastructure | 03, 13 | 04 to 11, 14 to 26 | `vibra-host`, `vibra-native` (new), `vibra-ir` | landed |
-| 28 | [cutover](steps/28-cutover.md) | infrastructure | 08, 20, 22, 23, 26, 27; X2-01 (Nexus plan) | — | every `-v1` crate (deleted), `Cargo.toml`, CI, `README.md`, `examples/`, `docs/roadmap` | planned |
+| 28 | [cutover](steps/28-cutover.md) | infrastructure | 08, 20, 22, 23, 26, 27; X2-01 (Nexus plan) | — | eight `-v1` crates and the four v0.0.1 trees (deleted), `Cargo.toml`, CI, `vibra-conformance`, `vibra-cli` (tests), `README.md`, `examples/`, `plugins/`, `docs/roadmap` | landed |
 | 29 | [m1-exit](steps/29-m1-exit.md) | evidence | 28 | — | `examples/`, `conformance/cases`, this directory | planned |
 
 After 01 and 02 land, steps 03, 12, and 24 are in flight at once; after 03,

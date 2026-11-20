@@ -1,2 +1,0 @@
-(def true bool (bool.true))
-(defn false () bool (bool.false))

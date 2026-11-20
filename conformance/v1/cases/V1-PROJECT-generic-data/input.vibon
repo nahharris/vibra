@@ -1,1 +1,0 @@
-(record name: "hello" items: (array @a 1) coords: (tuple \a false) metadata: (dict @z 2 @a 1))

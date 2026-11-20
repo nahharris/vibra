@@ -23,10 +23,6 @@ const PROVIDER_CRATES: &[&str] = &["vibra-host", "vibra-host-v1"];
 /// inputs to the crates that do.
 const TOOLING_EXCEPTIONS: &[(&str, &str)] = &[
     (
-        "vibra-cli-v1",
-        "reads the command line and the process environment of the `vibra` binary",
-    ),
-    (
         "vibra-cli",
         "reads the command line, the working directory, and the standard streams of the `vibra` binary, in `main.rs`",
     ),
@@ -35,16 +31,8 @@ const TOOLING_EXCEPTIONS: &[(&str, &str)] = &[
         "acquires a project's files: discovery and the source snapshot",
     ),
     (
-        "vibra-workspace-v1",
-        "acquires a project's files through the confined filesystem",
-    ),
-    (
         "vibra-conformance",
         "reads the conformance corpus, its rule index, and its fixtures, and its binary reads the command line",
-    ),
-    (
-        "vibra-conformance-v1",
-        "reads the conformance corpus and its fixtures",
     ),
     (
         "vibra-build",
@@ -227,14 +215,17 @@ fn the_build_driver_reads_the_machine_in_one_module() {
 fn the_emitter_the_checker_and_the_interpreter_are_scanned() {
     let scanned_crates = scanned_crates(&workspace_root());
     for scanned in [
+        "vibra-syntax",
+        "vibra-fmt",
+        "vibra-resolve",
+        "vibra-types",
+        "vibra-ir",
+        "vibra-interp",
+        "vibra-native",
+        "vibra-schema",
         "vibra-syntax-v1",
-        "vibra-resolve-v1",
-        "vibra-types-v1",
         "vibra-ir-v1",
-        "vibra-interp-v1",
         "vibra-native-v1",
-        "vibra-fmt-v1",
-        "vibra-schema-v1",
     ] {
         assert!(
             scanned_crates.contains(scanned),
@@ -272,30 +263,25 @@ fn an_ambient_read_is_reported_and_comments_and_test_modules_are_not() {
     );
 }
 
-/// The v1 runner starts the executables of the `windows` column in one module,
-/// `native_exe`, and starts no other process.
+/// The runner judges every case through an in-process handler and starts no
+/// process.
 #[test]
-fn the_runner_launches_executables_in_one_module() {
+fn the_runner_launches_no_process() {
     let mut users = Vec::new();
     let mut sources = Vec::new();
     rust_sources(
         &workspace_root()
             .join("crates")
-            .join("vibra-conformance-v1")
+            .join("vibra-conformance")
             .join("src"),
         &mut sources,
     );
+    assert!(!sources.is_empty(), "vibra-conformance has no sources");
     for path in sources {
         let source = std::fs::read_to_string(&path).expect("readable source");
         if source.contains("Command::new") {
-            users.push(
-                path.file_name()
-                    .expect("a file name")
-                    .to_string_lossy()
-                    .into_owned(),
-            );
+            users.push(path.display().to_string());
         }
     }
-    users.sort();
-    assert_eq!(users, ["native_exe.rs"]);
+    assert!(users.is_empty(), "the runner starts a process in {users:?}");
 }

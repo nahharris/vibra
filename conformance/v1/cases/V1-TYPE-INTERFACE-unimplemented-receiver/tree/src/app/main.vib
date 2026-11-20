@@ -1,5 +1,0 @@
-(defint shape
-  (defn name (value self) str))
-
-(defn use () str
-  (shape.name "circle"))

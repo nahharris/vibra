@@ -1,99 +1,113 @@
 # `vibra` CLI machine contract (pre-alpha)
 
-The normative text is `docs/spec/05-tooling.md` in the Vibra repository. This
-page summarizes what an agent needs in order to parse results.
+The normative text is `docs/spec/05-tooling.md` in the Vibra repository, and
+the schemas are `crates/vibra-schema/schemas/v2/`. This page summarizes what
+an agent needs in order to read results.
 
 ## JSON envelope
 
-`vibra --format json <command>` writes exactly one JSON document to stdout.
-Diagnostics are also written to stderr in human form.
+`vibra --format json <command>` writes exactly one JSON document to stdout,
+for every command and every outcome. Diagnostics are also written to stderr
+in human form.
 
 ```json
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
+  "toolVersion": "0.0.1",
   "command": "check",
+  "workspaceRevision": "sha256:…",
+  "status": "passed",
   "result": "@command.ok",
   "diagnostics": [],
-  "payload": {"accepted": true}
+  "limits": {"profile": "m1Default", "reached": [], "complete": true},
+  "payload": {"accepted": true, "obligations": []}
 }
 ```
 
-`result` is one of `@command.ok`, `@command.diagnostics`,
-`@command.test-failed`, `@command.invalid-input`,
-`@command.operational-failure`, `@command.trap`, `@command.unavailable`, or
-`@command.program-failed`. Invalid input, such as a bad flag or an unknown
-target or selector, has an empty `diagnostics` array and exits with code 2.
+- `result` is one of `@command.ok`, `@command.diagnostics`,
+  `@command.testFailed`, `@command.invalidInput`,
+  `@command.operationalFailure`, `@command.unavailable`, `@command.trap`, or
+  `@command.programFailed`. It fixes the exit code.
+- `status` is `passed`, `refuted`, `unknown`, or `unsupported`. The result
+  fixes it: `passed` for `@command.ok`, `refuted` for diagnostics and failed
+  tests, `unsupported` for `@command.unavailable`, and `unknown` for the rest.
+  A reached limit makes it `unknown`.
+- `workspaceRevision` identifies the snapshot the command read. It is `null`
+  for `help`, for invalid input, and when no project was found.
+- Invalid input (a bad flag, an unknown target, an unknown or malformed test
+  selector) has no diagnostics, a `null` revision, and the payload `{}`.
+- `limits.reached` lists the limits a command hit, such as `"memory"`, and
+  `complete` is then `false`.
 
 ## Diagnostic document
 
 ```json
 {
-  "schemaVersion": 1,
-  "code": "@effect.outside-ceiling",
+  "schemaVersion": 2,
+  "code": "@type.mismatch",
   "level": "@error",
-  "message": "this body performs @std.io.stdout, which its written ceiling does not contain",
+  "message": "expected `Str`, found `I32`",
   "primarySpan": {
-    "sourceId": "src/app/main.vib",
-    "start": 379, "end": 411,
-    "startPosition": {"line": 10, "column": 3},
-    "endPosition": {"line": 10, "column": 35}
+    "sourceId": "src/hello/greeting.vib",
+    "start": 230, "end": 235,
+    "startPosition": {"line": 14, "column": 9},
+    "endPosition": {"line": 14, "column": 14}
   },
-  "related": [{"span": {"sourceId": "...", "...": "..."}, "message": "performs @std.io.stdout via @std.io.stdout.text"}],
+  "related": [],
   "notes": [],
   "fixes": []
 }
 ```
 
-`level` is `@error` or `@warning`. Only errors block `check`, `run`, and
-`test`. `start` and `end` are byte offsets. Lines and columns are 1-based.
-`sourceId` is `project.vibon` for project-file problems. `related` usually
-explains *why*: for an effect error, it points at the call that performs the
-effect. For a `@tool.unavailable` diagnostic, the form is valid Vibra that
-the pre-alpha cannot run yet. Rewrite the code to avoid it instead of hunting
-for a syntax error.
+`level` is `@error` or `@warning`; only errors block `check` and `test`.
+`start` and `end` are byte offsets; lines and columns are 1-based.
+`sourceId` is `project.vibon` for a problem in the project file. `related`
+spans usually explain *why*. Codes are camelCase atoms in the closed
+registry of `docs/spec/07-diagnostics-and-conformance.md`.
 
 ## Payloads
 
 | Command | `payload` |
 | --- | --- |
-| `help` | `{"usage": string}` |
-| `project init` | `{"workspace": string, "created": string[]}` |
-| `fmt` | `{"path": string, "changed": bool, "written": bool, "text": string \| null}`. The preview carries `text`. A successful `--write` has `text: null` |
-| `check` | `{"accepted": bool}` |
-| `run` | `{"target": "@app", "programResult": string \| null, "stdout": string, "stderr": string, "auditTrace": AuditEvent[], "trap": {"trapCode": string, "origin": Span \| null} \| null}` |
+| `help` | `{"usage": string, "capabilities": [{"command", "supported", "operations", "profiles", "schemaIds"}]}` |
+| `fmt` | `{"path": string, "changed": bool, "written": bool, "text": string \| null}`. A preview carries the canonical `text`; a successful `--write` has `text: null` |
+| `check` | `{"accepted": bool, "obligations": [ObligationRecord]}` |
 | `test` | `{"selected": int, "passed": int, "failed": int, "tests": [TestItem]}` |
 
-`TestItem` has these fields:
-`{"name": "@tests.mod::\"test name\"", "result": "@test.passed", "failure": {"assertion", "expected", "actual", "primarySpan"} | null, "trap": {...} | null, "auditTrace": [...], "diagnostics": [...]}`.
+`TestItem`:
 
-The test results are `@test.passed`, `@test.assertion-failed`,
-`@test.invalid` (static errors blocked the suite, so nothing ran),
-`@test.unavailable`, and `@test.trap`.
+```json
+{
+  "name": "@tests.greeting::\"greets by name\"",
+  "result": "@test.assertionFailed",
+  "status": "refuted",
+  "failure": {
+    "kind": "assertion",
+    "assertion": "assert.equal",
+    "expected": "\"Hi, Ada!\"",
+    "actual": "\"Hello, Ada!\"",
+    "primarySpan": {"sourceId": "tests/greeting.vib", "…": "…"},
+    "observationError": null
+  },
+  "trap": null,
+  "auditTrace": [],
+  "diagnostics": []
+}
+```
 
-`AuditEvent` is `{"kind": string, "op": string, "args": string[], "result": string}`.
-It records one completed host call, such as `io.stdout-text`, in call order.
-For `run` and `test`, the audit trace shows exactly which effects happened.
-
-## `run` specifics
-
-- In human mode, the program's stdout passes straight through, and command
-  messages go to stderr.
-- In JSON mode, the program's stdout and stderr are captured into the payload,
-  so the process stdout stays one JSON document.
-- If `main` returns `err`, the result is `@command.program-failed` (exit 6).
-  `programResult` holds the canonical encoding of the returned `result`, and
-  human mode prints that encoding to stderr. This outcome is neither a trap nor
-  a diagnostic.
-- A trap is `@command.trap` (exit 5), with `trapCode`, for example
-  `@runtime.division-by-zero` for an unchecked integer `div` or `rem` by zero,
-  or `@runtime.invalid-checked-program`.
-- `vibra run` uses the real host: the files, environment, arguments, and
-  clock of the machine. `vibra test` never does.
+The test results are `@test.passed`, `@test.assertionFailed`,
+`@test.invalid` (a static error in the selection, so nothing ran),
+`@test.unavailable` (the test uses a form this build cannot run),
+`@test.trap`, and `@test.exhausted` (the test ran out of memory, which makes
+the command `@command.operationalFailure`). An item's `status` is that of the
+corresponding command result, and its `diagnostics` lists the codes of the
+envelope's diagnostics that concern the item.
 
 ## Selectors and targets
 
-- `TARGET` is an atom equal to a target `name`, for example `@app`. It is
+- `TARGET` is an atom equal to a target `name`, for example `@hello`. It is
   never a path.
-- `TEST` is `@tests.<module.path>::"<exact name>"`, written as a canonical
-  string literal (escape `"` and `\`), with no surrounding whitespace.
-- An unknown target or test is `@command.invalid-input` (exit 2).
+- `TEST` is `@tests.<module.path>::"<exact name>"`: the test module's atom,
+  `::`, and the test's name as one canonical string literal (escape `"` and
+  `\`), with no other whitespace.
+- An unknown target or test is `@command.invalidInput` (exit 2).

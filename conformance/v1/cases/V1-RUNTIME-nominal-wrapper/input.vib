@@ -1,3 +1,0 @@
-(defn main () celsius (celsius 21.5f64))
-
-(deftype celsius f64)

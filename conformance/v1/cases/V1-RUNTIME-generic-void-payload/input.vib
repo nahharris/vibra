@@ -1,4 +1,0 @@
-(defn main () (maybe void) (maybe.some))
-
-(deftype maybe (enum some t none void)
-  where: (t any))

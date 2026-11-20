@@ -12,6 +12,9 @@
 //! each with the exact codes it produces. A row that names no fence, or
 //! whose fence no longer produces its codes, fails the test, so no fence is
 //! skipped silently.
+//!
+//! The fences of the toolchain skill under `plugins/` are read the same way,
+//! and every one of them reads clean.
 
 use vibra_diagnostics::DiagnosticCode;
 use vibra_fmt::format_document;
@@ -309,4 +312,43 @@ fn an_unclosed_fence_runs_to_the_end_of_the_file() {
     assert_eq!(numbered.len(), 1);
     assert_eq!(numbered[0].0, 1);
     assert_eq!(numbered[0].1, Language::Data);
+}
+
+/// The skill files of the toolchain plugin whose fences show Vibra source and
+/// data.
+const SKILL_FILES: &[&str] = &[
+    "plugins/vibra/skills/vibra-toolchain/SKILL.md",
+    "plugins/vibra/skills/vibra-toolchain/references/cli.md",
+];
+
+#[test]
+fn every_fenced_block_of_the_toolchain_skill_is_read() {
+    let mut failures = Vec::new();
+    let mut read_count = 0;
+    for file in SKILL_FILES {
+        let markdown = std::fs::read_to_string(workspace_root().join(file))
+            .expect("a readable skill file");
+        for (ordinal, language, fence) in read_fences(file, &markdown) {
+            read_count += 1;
+            let at = format!("{file} fence {ordinal} (line {})", fence.line);
+            let document = read(language, &fence.text, false);
+            if leaf_text(&document).as_deref() != Some(fence.text.as_str()) {
+                failures
+                    .push(format!("{at}: the leaves do not concatenate to the fence"));
+            }
+            let observed = codes(&document);
+            if !observed.is_empty() {
+                failures.push(format!("{at}: unexpected diagnostics {observed:?}"));
+            }
+            let formatted = format_document(&document);
+            if formatted.as_deref() != Some(fence.text.as_str()) {
+                failures.push(format!(
+                    "{at}: not in the canonical format; formatted:\n{}",
+                    formatted.unwrap_or_default()
+                ));
+            }
+        }
+    }
+    assert!(read_count > 0, "the toolchain skill has fences");
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }

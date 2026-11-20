@@ -1,1 +1,0 @@
-(record type: (record type: @app.main.either arguments: (array @app.main.walker)) value: (record kind: @union type: @app.main.either member: (record type: @array arguments: (array @app.main.walker)) value: (record kind: @array values: (array (record kind: @record type: @app.main.ticker fields: (record n: 4u32))))))

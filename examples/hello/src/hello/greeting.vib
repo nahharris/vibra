@@ -1,0 +1,18 @@
+type Greeting
+  case world
+  case named {name: Str}
+  visibility @public
+endtype
+
+fn message
+  takes {greeting: Greeting}
+  returns text: Str
+  visibility @public
+  do
+    return match greeting
+      case Greeting.world()
+        "Hello, world!"
+      case Greeting.named(name: name)
+        Str.concat("Hello, " Str.concat(name "!"))
+    endmatch
+endfn

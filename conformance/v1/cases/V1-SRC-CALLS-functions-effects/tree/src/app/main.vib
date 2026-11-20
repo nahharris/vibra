@@ -1,3 +1,0 @@
-(defn answer () i32
-  effects: (io.stdout)
-  1i32)

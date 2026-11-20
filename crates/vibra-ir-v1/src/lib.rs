@@ -3494,7 +3494,7 @@ impl CheckedProgram {
         &self.set.functions[self.entry]
     }
 
-    /// Canonical typed-program observation used by static-v1: the observation
+    /// Canonical typed-program observation of the static profile: the observation
     /// of the module set the entry selects from, which does not depend on the
     /// entry.
     #[must_use]

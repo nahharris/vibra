@@ -1,1 +1,0 @@
-(defn greet () void visibility: @public (do))
