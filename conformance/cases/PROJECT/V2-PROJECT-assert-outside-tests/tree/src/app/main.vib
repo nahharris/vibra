@@ -1,0 +1,9 @@
+use @std.assert enduse
+
+fn check
+  takes {}
+  returns done: Void
+  do
+    assert.true(true)
+    return void
+endfn

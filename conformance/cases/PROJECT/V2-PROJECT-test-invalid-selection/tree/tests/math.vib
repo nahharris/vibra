@@ -1,0 +1,5 @@
+use @std.assert enduse
+
+test "bad" do assert.true(1i32) endtest
+
+test "good" do assert.true(true) endtest

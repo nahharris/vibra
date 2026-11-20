@@ -1,0 +1,5 @@
+use @std.assert enduse
+
+test "zeta" do assert.true(true) endtest
+
+test "alpha" do assert.true(true) endtest

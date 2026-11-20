@@ -1,0 +1,13 @@
+id = "V2-PROJECT-test-empty-suite"
+rule = "V2-PROJECT-test-empty-suite"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "05-tooling.md#tests-and-selection: a project without a test root is an empty passing suite"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

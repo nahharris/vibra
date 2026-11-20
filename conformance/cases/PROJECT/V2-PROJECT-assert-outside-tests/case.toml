@@ -1,0 +1,18 @@
+id = "V2-PROJECT-assert-outside-tests"
+rule = "V2-PROJECT-assert-outside-tests"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "04-programs-and-packages.md#assertions: a call of an assertion outside @tests is rejected at the callee"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@module.assertionOutsideTests"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 74, end = 85 }

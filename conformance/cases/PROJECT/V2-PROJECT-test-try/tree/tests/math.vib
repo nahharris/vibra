@@ -1,0 +1,10 @@
+use @std.assert enduse
+
+fn half
+  takes {}
+  returns r: Option(I32)
+  do
+    return Option.some(value: 1i32)
+endfn
+
+test "tries" do let v be try half() endlet endtest
