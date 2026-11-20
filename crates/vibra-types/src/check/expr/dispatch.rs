@@ -141,6 +141,45 @@ pub(super) fn closed(ty: &Type, assignment: &[Option<Type>]) -> Option<Type> {
     Some(ty.instantiate(&binders))
 }
 
+/// The one type `expected` holds at every position of `pattern` written as
+/// each of the binders `0..params`, walking every position where the two
+/// have the same form; `None` for a binder with no such position or with
+/// two that disagree.
+fn positional_parts(
+    pattern: &Type,
+    expected: &Type,
+    params: usize,
+) -> Vec<Option<Type>> {
+    let mut found: Vec<Option<Type>> = vec![None; params];
+    let mut conflict = vec![false; params];
+    let mut pending = vec![(pattern, expected)];
+    while let Some((pattern, expected)) = pending.pop() {
+        if *expected == Type::Never {
+            continue;
+        }
+        if let Type::Binder(at) = pattern {
+            if let (Some(slot), Some(clash)) =
+                (found.get_mut(*at), conflict.get_mut(*at))
+            {
+                match slot {
+                    Some(seen) if seen != expected => *clash = true,
+                    Some(_) => {}
+                    None => *slot = Some(expected.clone()),
+                }
+            }
+            continue;
+        }
+        if same_head(pattern, expected) {
+            pending.extend(pattern.components().into_iter().zip(expected.components()));
+        }
+    }
+    found
+        .into_iter()
+        .zip(conflict)
+        .map(|(found, clash)| found.filter(|_| !clash))
+        .collect()
+}
+
 /// Fixes the binders of `pattern` from `actual` wherever the two have the
 /// same form, and leaves the rest as they are.
 fn match_part(pattern: &Type, actual: &Type, assignment: &mut [Option<Type>]) {
@@ -752,6 +791,21 @@ impl<'a> BodyChecker<'_, 'a> {
         let Some(Some(receiver)) = state.assignment.get(var).cloned() else {
             return;
         };
+        // Step 2: the expected type constrains each parameter of the
+        // interface written in the result type before selection; the
+        // associated and member-local positions wait for step 5.
+        if let (Some(result), Some(expected)) = (&state.result, &dispatch.expected) {
+            for (at, found) in positional_parts(result, expected, params)
+                .into_iter()
+                .enumerate()
+            {
+                if let (Some(found), Some(slot @ None)) =
+                    (found, state.assignment.get_mut(at))
+                {
+                    *slot = Some(found);
+                }
+            }
+        }
         let arguments = (0..params)
             .map(|at| state.instance(&Type::Binder(at)))
             .collect::<Vec<_>>();
