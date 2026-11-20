@@ -22,8 +22,9 @@ use std::sync::Arc;
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 use vibra_ir::external::compiler::{CompilerIntrinsic, is_assertion};
 use vibra_ir::{
-    Arguments, CallTarget, ClosureBody, Constant, Construction, Expr as IrExpr, FnType,
-    Library, MatchArm, Node, Pattern as IrPattern, SourceOrigin, Type, Value,
+    Arguments, CallTarget, ClosureBody, Constant, Construction, ExitGuard,
+    Expr as IrExpr, FnType, Library, MatchArm, Node, Pattern as IrPattern,
+    SourceOrigin, Type, Value,
 };
 use vibra_syntax::source::{
     Argument, Body, Callable, CallableKind, Expr, ExprForm, Ident, If, Let as LetView,
@@ -33,9 +34,9 @@ use vibra_syntax::source::{
 use vibra_syntax::{CstNode, SyntaxKind};
 
 use super::callables::{NotConstant, fold, mark_tail, substitute};
-use super::contract::{Guards, Site, constant_operands};
+use super::contract::{CheckedGuard, ClosureContract, Guards, Site, constant_operands};
 use super::declare::{
-    BoundData, Entity, NoType, Program, Scope, TypeKind, key_diagnostic, plain_callable,
+    BoundData, Entity, NoType, Program, Scope, TypeKind, bounds_are_any, key_diagnostic,
 };
 use super::literal::{self, LiteralFault};
 use super::pattern::{Coverage, LimitReached, Pat};
@@ -484,6 +485,12 @@ struct ClosureState<'a> {
     instantiations: usize,
     /// The argument span the enclosing checker had.
     argument: Option<ByteSpan>,
+    /// Its guards, while they are checked.
+    guards: guards::ClosureGuards<'a>,
+    /// Its checked guards.
+    checked: Guards,
+    /// The slots the patterns of its parameters bind.
+    bound: std::ops::Range<usize>,
     failed: bool,
 }
 
@@ -538,6 +545,8 @@ pub(crate) struct BodyChecker<'p, 'a> {
     /// Every place a checked body states a bare-guard obligation or a
     /// pattern a constant construction decides.
     pub(crate) sites: Vec<Site>,
+    /// The guards of each anonymous callable checked since the body began.
+    closures: Vec<ClosureContract>,
 }
 
 /// What a callable body sees besides its parameters: its type parameters
@@ -563,6 +572,8 @@ pub(crate) struct Checked {
     pub(crate) defaults: Vec<(String, Constant)>,
     /// The guards of a callable.
     pub(crate) guards: Guards,
+    /// The guards of each anonymous callable in it that has one.
+    pub(crate) closures: Vec<ClosureContract>,
 }
 
 impl<'p, 'a> BodyChecker<'p, 'a> {
@@ -603,6 +614,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             result_span: None,
             gaps: Vec::new(),
             sites: Vec::new(),
+            closures: Vec::new(),
         }
     }
 
@@ -626,6 +638,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         self.slots.clear();
         self.frames.clear();
         self.gaps.clear();
+        self.closures.clear();
         let mark = self.diagnostics.len();
         self.binders = scope.binders;
         self.self_type = scope.self_type;
@@ -666,6 +679,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             slot_count: self.slots.len(),
             defaults,
             guards,
+            closures: std::mem::take(&mut self.closures),
         }
     }
 
@@ -1036,6 +1050,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             slot_count: self.slots.len(),
             defaults: Vec::new(),
             guards: Guards::default(),
+            closures: std::mem::take(&mut self.closures),
         }
     }
 
@@ -1077,6 +1092,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             slot_count: self.slots.len(),
             defaults: Vec::new(),
             guards: Guards::default(),
+            closures: std::mem::take(&mut self.closures),
         }
     }
 
@@ -1092,6 +1108,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         self.self_interface = None;
         self.result_span = None;
         self.gaps.clear();
+        self.closures.clear();
     }
 
     fn node(&self, expr: IrExpr, span: ByteSpan) -> Node {
@@ -1819,10 +1836,13 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         if view.kind() != CallableKind::Fn {
             return self.unavailable_primary(span, "an anonymous `proc`");
         }
-        if !plain_callable(&view) {
+        if view.performs().is_some() {
+            return self.unavailable_primary(span, "an anonymous callable with a row");
+        }
+        if !bounds_are_any(view.given()) {
             return self.unavailable_primary(
                 span,
-                "an anonymous callable with a guard, a row, or a bound other than `Any`",
+                "an anonymous callable with a bound other than `Any`",
             );
         }
         let own = view
@@ -1879,6 +1899,8 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             .collect::<Vec<_>>();
         let (failed, destructured) =
             self.bind_parameters(&signature, &patterns, &names);
+        let bound = signature.slot_count()..self.slots.len();
+        let guards = self.closure_guards(&GuardViews::of(&view));
         let state = Box::new(ClosureState {
             view,
             span,
@@ -1892,9 +1914,37 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             destructured,
             instantiations: self.instantiations.len(),
             argument,
+            guards,
+            checked: Guards::default(),
+            bound,
             failed,
         });
         self.step_closure(state, None)
+    }
+
+    /// The name of each argument slot of the callable `view` of type
+    /// `signature`: each positional parameter's pattern as written, then
+    /// the labels in canonical order.
+    fn parameter_names(&self, view: &Callable<'a>, signature: &FnType) -> Vec<String> {
+        let mut names = view
+            .takes()
+            .into_iter()
+            .map(|(pattern, _)| {
+                let span = pattern.node().span();
+                self.text
+                    .get(span.start()..span.end())
+                    .unwrap_or_default()
+                    .to_owned()
+            })
+            .collect::<Vec<_>>();
+        names.extend(
+            signature
+                .labels
+                .entries()
+                .iter()
+                .map(|(label, _)| label.clone()),
+        );
+        names
     }
 
     /// The type arguments a generic anonymous callable of type `signature`,
@@ -1982,6 +2032,26 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                 );
             }
             state.stage = 1;
+            // Nothing leaves a callable from a guard.
+            self.result = None;
+        }
+        if state.stage == 1 {
+            if let Some(task) = self.next_closure_guard(
+                &mut state.guards,
+                &state.signature,
+                input.take(),
+            ) {
+                return Step::Child(Task::Closure(state), task);
+            }
+            let (failed, checked) = self.finish_closure_guards(
+                &mut state.guards,
+                &state.signature,
+                &state.destructured,
+                &state.bound,
+            );
+            state.failed |= failed;
+            state.checked = checked;
+            state.stage = 2;
             self.result = Some(state.signature.result.clone());
             if let Some(body) = state.view.body() {
                 let body =
@@ -2033,12 +2103,63 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             }
         };
         let body = self.wrap_destructured(body, state.destructured);
+        // A guard with `else` runs on every call; a bare one leaves no code
+        // and is the review's.
+        let with_else = |guard: &CheckedGuard| {
+            Some(vibra_ir::Guard {
+                predicate: guard.predicate.clone(),
+                consequence: guard.consequence.clone()?,
+            })
+        };
+        let entry_guard = state.checked.entry.as_ref().and_then(with_else);
+        let exit_guard = state.checked.exit.as_ref().and_then(|(slot, guard)| {
+            Some(ExitGuard {
+                candidate: *slot,
+                guard: with_else(guard)?,
+            })
+        });
+        if state.checked.entry.is_some() || state.checked.exit.is_some() {
+            let mut guards = state.checked.clone();
+            if let Some(instance) = &state.instance {
+                let nodes = guards
+                    .entry
+                    .iter_mut()
+                    .chain(guards.exit.iter_mut().map(|(_, guard)| guard));
+                for guard in nodes {
+                    substitute(&mut guard.predicate, instance);
+                    if let Some(consequence) = &mut guard.consequence {
+                        substitute(consequence, instance);
+                    }
+                }
+            }
+            let signature = match &ty {
+                Type::Fn(signature) => (**signature).clone(),
+                _ => state.signature.clone(),
+            };
+            let names = self.parameter_names(&state.view, &signature);
+            self.closures.push(ClosureContract {
+                body: (Arc::clone(&self.source_id), body.origin.span()),
+                module: self.module,
+                span: state.span,
+                signature,
+                names,
+                result_name: state
+                    .view
+                    .result()
+                    .map(|(name, _)| name.text().to_owned())
+                    .unwrap_or_default(),
+                defaults: state.defaults.clone(),
+                guards,
+            });
+        }
         let closure = ClosureBody {
             value_type,
             slot_count,
             captures: capture_types,
             defaults: state.defaults,
             body,
+            entry_guard,
+            exit_guard,
         };
         let records = self.instantiations.split_off(state.instantiations);
         if state.mode == ClosureMode::Generic {

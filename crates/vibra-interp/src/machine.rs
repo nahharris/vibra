@@ -192,6 +192,10 @@ pub(crate) enum Kont<'a> {
         function: &'a CheckedFunction,
         guard: &'a Guard,
     },
+    ClosureRequires {
+        body: &'a ClosureBody,
+        guard: &'a Guard,
+    },
     Ensures {
         candidate: Val<'a>,
         guard: &'a Guard,
@@ -1173,7 +1177,11 @@ impl<'a> Machine<'a> {
                 }
                 frame.closure = Some(closure);
                 self.push_frame(frame, tail)?;
-                Ok(Step::Eval(&body.body))
+                if let Some(guard) = &body.entry_guard {
+                    self.konts.push(Kont::ClosureRequires { body, guard });
+                    return Ok(Step::Eval(&guard.predicate));
+                }
+                self.start_closure(body)
             }
             Target::Function(index) => {
                 let function = self.function(index)?;
@@ -1203,6 +1211,12 @@ impl<'a> Machine<'a> {
                 self.start_body(function)
             }
         }
+    }
+
+    /// Runs a closure's body in its activation, arming its `ensures`.
+    fn start_closure(&mut self, body: &'a ClosureBody) -> Result<Step<'a>, Halt> {
+        self.frame_mut()?.exit = body.exit_guard.as_ref();
+        Ok(Step::Eval(&body.body))
     }
 
     /// Runs a function's body in its activation, arming its `ensures`.
@@ -1821,6 +1835,13 @@ impl<'a> Machine<'a> {
             Kont::Requires { function, guard } => {
                 if truth(&value)? {
                     self.start_body(function)?
+                } else {
+                    Step::Eval(&guard.consequence)
+                }
+            }
+            Kont::ClosureRequires { body, guard } => {
+                if truth(&value)? {
+                    self.start_closure(body)?
                 } else {
                     Step::Eval(&guard.consequence)
                 }

@@ -1,0 +1,12 @@
+id = "V2-CONTRACT-anonymous-ensures-else"
+rule = "V2-CONTRACT-anonymous-ensures-else"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#guards-and-callable-types: an ensures with else of an anonymous callable runs on each return and gives its consequence where the predicate is false"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

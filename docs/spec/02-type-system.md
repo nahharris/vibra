@@ -218,7 +218,10 @@ invariant. Its operand is a predicate: a pure function value of type
 `Fn({R} Bool)`, where `R` is the representation type. A `where` on a variant
 type is `@type.invalidInvariant`. The operand is an expression like any
 other function value: an anonymous `fn`, or the name of a `fn`, which
-resolves in the flat module scope and so may be declared after the type.
+resolves in the flat module scope and so may be declared after the type. It
+converts to `Fn({R} Bool)` under
+[Guards and callable types](#guards-and-callable-types), and an anonymous
+operand's guards and calls state their obligations for the type.
 
 ```vibra
 type Percent of U8
@@ -1307,6 +1310,14 @@ A callable type has no place for a caller obligation. A callable with a bare
 establish that `requires`; otherwise the conversion is
 `@contract.obligationLost`. A callable whose `requires` has an `else`
 converts freely, and the resulting value keeps its entry and exit checks.
+
+An anonymous callable's guards are those of any callable. Its bare
+`requires` states an obligation at each call whose callee is statically that
+callable: the anonymous callable written as the callee, or a name a `let` of
+the same activation binds to it, directly or through another such name.
+Every other use of it, a capture of that name included, converts it to its
+callable type under the rule above. A call through any other function value
+states no obligation, since no value of a callable type carries one.
 
 A bare `requires` on a `proc` is discharged where the plan is built, from the
 arguments the plan captures. A `requires … else` and an `ensures … else` on a

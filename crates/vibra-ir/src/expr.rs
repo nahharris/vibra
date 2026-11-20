@@ -91,7 +91,7 @@ impl Expr {
                     types.extend(&closure.captures);
                     types.extend(closure.defaults.iter().map(|(_, c)| c.value_type()));
                     nodes.extend(captures);
-                    nodes.push(&closure.body);
+                    nodes.extend(closure.nodes());
                 }
                 Self::Let { value, body, .. } => nodes.extend([&**value, &**body]),
                 Self::LetElse {
@@ -206,7 +206,7 @@ impl Expr {
             Self::Sequence(statements) => nodes.extend(statements),
             Self::Closure { closure, captures } => {
                 nodes.extend(captures);
-                nodes.push(&closure.body);
+                nodes.extend(closure.nodes());
             }
             Self::Let { value, body, .. } => nodes.extend([&**value, &**body]),
             Self::LetElse {
@@ -280,7 +280,7 @@ impl Expr {
             Self::Closure { closure, captures } => {
                 captures.iter_mut().for_each(&mut take);
                 if let Some(closure) = Arc::get_mut(closure) {
-                    take(&mut closure.body);
+                    closure.nodes_mut().into_iter().for_each(&mut take);
                 }
             }
             Self::Let { value, body, .. } => {
@@ -583,6 +583,41 @@ pub struct ClosureBody {
     pub defaults: Vec<(String, Constant)>,
     /// The body.
     pub body: Node,
+    /// `requires C else V`, when the closure has one.
+    pub entry_guard: Option<Guard>,
+    /// `ensures C else V`, when the closure has one.
+    pub exit_guard: Option<ExitGuard>,
+}
+
+impl ClosureBody {
+    /// The body, then the predicate and the consequence of each guard.
+    #[must_use]
+    pub fn nodes(&self) -> Vec<&Node> {
+        let mut nodes = vec![&self.body];
+        let guards = self
+            .entry_guard
+            .iter()
+            .chain(self.exit_guard.iter().map(|exit| &exit.guard));
+        for guard in guards {
+            nodes.push(&guard.predicate);
+            nodes.push(&guard.consequence);
+        }
+        nodes
+    }
+
+    /// [`Self::nodes`], mutably.
+    pub fn nodes_mut(&mut self) -> Vec<&mut Node> {
+        let mut nodes = vec![&mut self.body];
+        let guards = self
+            .entry_guard
+            .iter_mut()
+            .chain(self.exit_guard.iter_mut().map(|exit| &mut exit.guard));
+        for guard in guards {
+            nodes.push(&mut guard.predicate);
+            nodes.push(&mut guard.consequence);
+        }
+        nodes
+    }
 }
 
 /// A guard with a consequence: `requires C else V`, or the `C else V` of an

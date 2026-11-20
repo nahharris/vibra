@@ -330,7 +330,7 @@ pub(crate) fn substitute(node: &mut Node, binders: &[Type]) {
                 let body = Arc::make_mut(closure);
                 replace(&mut body.value_type);
                 body.captures.iter_mut().for_each(replace);
-                pending.push(&mut body.body);
+                pending.extend(body.nodes_mut());
                 pending.extend(captures.iter_mut());
             }
             IrExpr::Let { value, body, .. } => {

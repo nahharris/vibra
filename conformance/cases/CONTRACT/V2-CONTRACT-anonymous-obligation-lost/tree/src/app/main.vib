@@ -1,0 +1,5 @@
+fn apply takes {f: Fn({I32} I32)} returns r: I32 do return f(1i32) endfn
+fn main returns r: I32 do
+  let c be fn takes {x: I32} returns s: I32 requires Ordered.greater(x 0i32) do return x endfn endlet
+  return apply(c)
+endfn

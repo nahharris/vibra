@@ -487,6 +487,8 @@ mod tests {
             captures: Vec::new(),
             defaults: Vec::new(),
             body: leaf(),
+            entry_guard: None,
+            exit_guard: None,
         });
         let admitted = vec![
             ("literal", node(Expr::Literal(constant))),

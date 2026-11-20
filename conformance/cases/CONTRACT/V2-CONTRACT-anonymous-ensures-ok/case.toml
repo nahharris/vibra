@@ -1,0 +1,12 @@
+id = "V2-CONTRACT-anonymous-ensures-ok"
+rule = "V2-CONTRACT-anonymous-ensures-ok"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#guards-and-callable-types: a bare ensures of an anonymous callable is proved at its returns and establishes a bare requires at a call it feeds"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

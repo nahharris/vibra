@@ -71,6 +71,8 @@ fn labelled_call(
             captures: Vec::new(),
             defaults: vec![zero("a"), zero("b")],
             body,
+            entry_guard: None,
+            exit_guard: None,
         }),
         captures: Vec::new(),
     });
@@ -689,6 +691,8 @@ fn v9_a_call_through_a_closure_value_binds_its_defaults() {
                 IntegerOp::Add,
                 vec![var(0, Type::I32), var(1, Type::I32)],
             ),
+            entry_guard: None,
+            exit_guard: None,
         }),
         captures: Vec::new(),
     });

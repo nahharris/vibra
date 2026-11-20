@@ -34,7 +34,14 @@ struct Activation {
     slots: Slots,
     captures: Vec<Type>,
     result: Option<Type>,
+    in_guard: bool,
 }
+
+/// Where a closure's check is, once its captures are checked: its body,
+/// its `requires`, or its `ensures`.
+const CLOSURE_BODY: usize = 1;
+const CLOSURE_ENTRY: usize = 2;
+const CLOSURE_EXIT: usize = 3;
 
 /// One node whose operands are being checked.
 struct Frame<'n> {
@@ -244,6 +251,7 @@ impl Checker<'_> {
         self.slots = outer.slots;
         self.captures = outer.captures;
         self.result = outer.result;
+        self.in_guard = outer.in_guard;
     }
 
     fn enclosing_result(&self, what: &'static str) -> Result<Type, IrError> {
@@ -653,6 +661,7 @@ impl Checker<'_> {
         closure: &'n ClosureBody,
         captures: &'n [Node],
     ) -> Result<Next<'n>, IrError> {
+        let mut input = input;
         let not_callable = || {
             IrError::InvalidExpression(format!(
                 "a closure of {}, which is not callable",
@@ -685,9 +694,51 @@ impl Checker<'_> {
             if let Some(capture) = frame.next_operand(input)? {
                 return Ok(Next::Operand(capture));
             }
+            frame.index = CLOSURE_BODY;
             return self.enter_closure(frame, sink, closure, result());
         }
-        expect(&result(), &arrived(input)?)?;
+        if frame.index == CLOSURE_BODY {
+            // The body is checked: its guards follow, where nothing leaves
+            // the activation.
+            expect(&result(), &arrived(input)?)?;
+            self.in_guard = true;
+            frame.index = CLOSURE_ENTRY;
+            let truth = self
+                .tables
+                .table
+                .library()
+                .declared(Library::Bool, Vec::new());
+            if let Some(guard) = &closure.entry_guard {
+                frame.queue(vec![
+                    (&guard.predicate, truth?),
+                    (&guard.consequence, result()),
+                ]);
+            }
+            input = None;
+        }
+        if let Some(operand) = frame.next_operand(input.take())? {
+            return Ok(Next::Operand(operand));
+        }
+        if frame.index == CLOSURE_ENTRY {
+            frame.index = CLOSURE_EXIT;
+            if let Some(exit) = &closure.exit_guard {
+                let truth = self
+                    .tables
+                    .table
+                    .library()
+                    .declared(Library::Bool, Vec::new());
+                let held = self.bind(exit.candidate, result())?;
+                frame.bound.push((exit.candidate, held));
+                frame.queue(vec![
+                    (&exit.guard.predicate, truth?),
+                    (&exit.guard.consequence, result()),
+                ]);
+                if let Some(operand) = frame.next_operand(None)? {
+                    return Ok(Next::Operand(operand));
+                }
+            }
+        }
+        self.restore(mem::take(&mut frame.bound));
         if let Some(outer) = frame.outer.take() {
             self.leave(*outer);
             sink.leave_closure(&closure.value_type);
@@ -724,6 +775,7 @@ impl Checker<'_> {
             slots: mem::replace(&mut self.slots, Slots::new(closure.slot_count)),
             captures: mem::replace(&mut self.captures, closure.captures.clone()),
             result: self.result.replace(result),
+            in_guard: mem::replace(&mut self.in_guard, false),
         };
         frame.outer = Some(Box::new(outer));
         sink.enter_closure();

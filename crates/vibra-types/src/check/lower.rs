@@ -287,6 +287,12 @@ fn invariants(
         if let Some(error) = found.error {
             pass.errors.insert(index, error);
         }
+        pass.sites.extend(
+            checker
+                .sites
+                .drain(..)
+                .map(|site| (data.module, Owner::Type(index), site)),
+        );
         if let Some(checked) = found.checked {
             pass.invariants.insert(index, checked);
         }
@@ -1342,8 +1348,8 @@ fn assemble(
             )?,
             defaults: closure.defaults.clone(),
             body: FunctionBody::Expr(Box::new(closure.body.clone())),
-            entry_guard: None,
-            exit_guard: None,
+            entry_guard: closure.entry_guard.clone(),
+            exit_guard: closure.exit_guard.clone(),
             slot_count: closure.slot_count,
             origin: origin(program, data.module, span),
         });

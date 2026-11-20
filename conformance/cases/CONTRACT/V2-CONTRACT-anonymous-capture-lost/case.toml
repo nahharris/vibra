@@ -1,0 +1,19 @@
+id = "V2-CONTRACT-anonymous-capture-lost"
+rule = "V2-CONTRACT-anonymous-capture-lost"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#guards-and-callable-types: a capture of the name of an anonymous callable with a bare requires converts it, so a call through the capture is @contract.obligationLost at the capture"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@contract.obligationLost"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 167, end = 168 }
+related = [{ source = "src/app/main.vib", span = { start = 79, end = 102 } }]

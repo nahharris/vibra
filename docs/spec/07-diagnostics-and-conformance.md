@@ -747,7 +747,9 @@ for an `ensures`, its result name, such as `{kind: @record fields: {x: 0i32}}`;
 an anonymous `where` predicate gives the refuting value itself. For the
 `ensures` of a contract member, `declaration` is the implementation member and
 `span` is the contract's predicate, in the interface's module; its
-`@contract.unproved` is at the implementation's `return`. A module value is
+`@contract.unproved` is at the implementation's `return`. An anonymous
+callable is no declaration: for its guards, `declaration` and `predicate`
+are both the declaration it is written in. A module value is
 never generic, so its `typeInfo` is a closed type encoding.
 
 The document is produced whenever every type is known: when the check has

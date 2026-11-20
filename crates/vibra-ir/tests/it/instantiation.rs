@@ -164,6 +164,8 @@ fn a_function_value_and_a_closure_body_are_instantiations() {
                     type_arguments: vec![Type::list(binder())],
                 },
             }),
+            entry_guard: None,
+            exit_guard: None,
         }),
         captures: Vec::new(),
     });

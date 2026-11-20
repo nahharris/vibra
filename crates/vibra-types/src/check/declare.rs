@@ -1802,13 +1802,6 @@ impl<'a> Program<'a> {
     }
 }
 
-/// Whether a callable header has only what this checker supports besides
-/// its types, labelled parameters, and type parameters: no guards, row, or
-/// bound other than `Any`.
-pub(crate) fn plain_callable(view: &Callable<'_>) -> bool {
-    bounds_are_any(view.given()) && unguarded(view)
-}
-
 /// Whether a callable header has no guard and no row.
 pub(crate) fn unguarded(view: &Callable<'_>) -> bool {
     view.requires().is_none() && view.ensures().is_none() && view.performs().is_none()
@@ -1832,7 +1825,7 @@ pub(crate) fn where_span(section: Where<'_>) -> ByteSpan {
 }
 
 /// Whether every entry of a `given` section, if any, is the bound `Any`.
-fn bounds_are_any(given: Option<Given<'_>>) -> bool {
+pub(crate) fn bounds_are_any(given: Option<Given<'_>>) -> bool {
     given.is_none_or(|given| {
         given.entries().iter().all(|(_, bound)| {
             matches!(

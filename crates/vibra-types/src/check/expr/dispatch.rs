@@ -1729,6 +1729,8 @@ impl<'a> BodyChecker<'_, 'a> {
             captures: Vec::new(),
             defaults,
             body,
+            entry_guard: None,
+            exit_guard: None,
         };
         Some(self.node(
             IrExpr::Closure {
