@@ -1,0 +1,12 @@
+id = "V2-CONTRACT-label-order-result"
+rule = "V2-CONTRACT-label-order-result"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#bare-guards: GUARD-7: the ensures of mk(lo: x hi: y) binds lo to x, so its result is greater than x"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

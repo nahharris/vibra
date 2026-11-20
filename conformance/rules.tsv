@@ -804,3 +804,9 @@ V2-CONTRACT-member-requires-open-default	active	02-type-system.md#guards-and-cal
 V2-CONTRACT-member-requires-open-label-refuted	active	02-type-system.md#guards-and-callable-types
 V2-CONTRACT-member-guard-faulty-generic	active	02-type-system.md#guards-and-callable-types
 V2-CONTRACT-member-ensures-generic-impl	active	02-type-system.md#guards-and-callable-types
+V2-CONTRACT-label-order-unproved	active	02-type-system.md#bare-guards
+V2-CONTRACT-label-order-matching	active	02-type-system.md#bare-guards
+V2-CONTRACT-label-default-same	active	02-type-system.md#bare-guards
+V2-CONTRACT-label-default-different	active	02-type-system.md#bare-guards
+V2-CONTRACT-label-order-result	active	02-type-system.md#bare-guards
+V2-CONTRACT-label-order-result-unproved	active	02-type-system.md#bare-guards

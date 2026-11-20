@@ -1,0 +1,18 @@
+id = "V2-CONTRACT-label-order-result-unproved"
+rule = "V2-CONTRACT-label-order-result-unproved"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#bare-guards: GUARD-7: the ensures of mk(lo: x hi: y) binds lo to x, not to y, so it does not establish that its result is greater than y"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "unknown"
+[[expect.diagnostics]]
+code = "@contract.unproved"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 332, end = 356 }
+related = [{ source = "src/app/main.vib", span = { start = 151, end = 156 } }]

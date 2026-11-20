@@ -1,0 +1,14 @@
+fn mk labelled {lo: I32 be 0i32 hi: I32 be 0i32} returns r: I32
+  requires Ordered.less(lo hi)
+  ensures Ordered.greater(r lo)
+  do return hi
+endfn
+fn above takes {v: I32 w: I32} returns r: I32
+  requires Ordered.greater(v w)
+  do return v
+endfn
+fn run takes {x: I32 y: I32} returns r: I32
+  do
+    if Ordered.less(x y) then return above(mk(lo: x hi: y) y) endif
+    return 0i32
+endfn

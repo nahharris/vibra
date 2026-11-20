@@ -20,8 +20,8 @@ use std::sync::Arc;
 
 use vibra_diagnostics::ByteSpan;
 use vibra_ir::{
-    CallTarget, Constant, Construction, ContractCall, Expr, NamedTypes, Node, Pattern,
-    Type, TypeId, Value,
+    Arguments, CallTarget, Constant, Construction, ContractCall, Expr, NamedTypes,
+    Node, Pattern, Type, TypeId, Value,
 };
 
 /// A discharge rule or an integer fact, as an obligation record lists it.
@@ -146,8 +146,9 @@ pub(crate) enum Data {
     Slot(usize, usize),
     /// A constant.
     Constant(Constant),
-    /// A call and its arguments: the positional ones, then the labelled
-    /// ones in the callee's order.
+    /// A call and its arguments in the callee's parameter-slot order: the
+    /// positional ones, then one for each label in the callee's order, an
+    /// omitted label holding its default.
     Call(Callee, Vec<Term>),
     /// A construction of the type, with its shape (`case:` and the case
     /// name for a case, `wrapper` for a wrapper, then the field names) and
@@ -882,60 +883,46 @@ fn make(
         Expr::Call { target, arguments } | Expr::TailCall { target, arguments } => {
             let count = arguments.positional.len() + arguments.labelled.len();
             let mut operands = take(count, stack);
-            let callee = match target {
+            // A label not written holds the callee's default: a function's
+            // or a closure's. A contract call's default depends on the
+            // implementation the receiver selects, so it stays unknown here.
+            let (callee, defaults) = match target {
                 CallTarget::Direct {
                     function,
                     type_arguments,
-                } => {
-                    // A label not written holds the callee's default.
-                    let defaults = vocabulary.defaults.get(function);
-                    for (at, (label, written)) in arguments.labelled.iter().enumerate()
-                    {
-                        if !matches!(written.expr, Expr::Default(_)) {
-                            continue;
-                        }
-                        let default = defaults
-                            .and_then(|defaults| {
-                                defaults.iter().find(|(name, _)| name == label)
-                            })
-                            .map(|(_, constant)| constant.clone());
-                        if let (Some(default), Some(slot)) =
-                            (default, operands.get_mut(arguments.positional.len() + at))
-                        {
-                            *slot = terms.intern(Data::Constant(default));
-                        }
-                    }
-                    Callee::Function(*function, type_arguments.clone())
-                }
-                CallTarget::Contract(call) => Callee::Contract(call.clone()),
+                } => (
+                    Callee::Function(*function, type_arguments.clone()),
+                    vocabulary.defaults.get(function),
+                ),
+                CallTarget::Contract(call) => (Callee::Contract(call.clone()), None),
                 CallTarget::Value(_) => {
                     let callee = stack.pop().unwrap_or_else(|| terms.opaque());
                     let Some(Data::Closure(closure)) = terms.get(callee).cloned()
                     else {
                         return terms.opaque();
                     };
-                    // A label not written holds the closure's default.
-                    let defaults = vocabulary.defaults.get(&closure);
-                    for (at, (label, written)) in arguments.labelled.iter().enumerate()
-                    {
-                        if !matches!(written.expr, Expr::Default(_)) {
-                            continue;
-                        }
-                        let default = defaults
-                            .and_then(|defaults| {
-                                defaults.iter().find(|(name, _)| name == label)
-                            })
-                            .map(|(_, constant)| constant.clone());
-                        if let (Some(default), Some(slot)) =
-                            (default, operands.get_mut(arguments.positional.len() + at))
-                        {
-                            *slot = terms.intern(Data::Constant(default));
-                        }
-                    }
-                    Callee::Function(closure, Vec::new())
+                    (
+                        Callee::Function(closure, Vec::new()),
+                        vocabulary.defaults.get(&closure),
+                    )
                 }
             };
-            terms.intern(Data::Call(callee, operands))
+            for (at, (label, written)) in arguments.labelled.iter().enumerate() {
+                if !matches!(written.expr, Expr::Default(_)) {
+                    continue;
+                }
+                let default = defaults
+                    .and_then(|defaults| {
+                        defaults.iter().find(|(name, _)| name == label)
+                    })
+                    .map(|(_, constant)| constant.clone());
+                if let (Some(default), Some(slot)) =
+                    (default, operands.get_mut(arguments.positional.len() + at))
+                {
+                    *slot = terms.intern(Data::Constant(default));
+                }
+            }
+            terms.intern(Data::Call(callee, in_slot_order(arguments, operands)))
         }
         Expr::Closure { closure, .. } => {
             let origin = &closure.body.origin;
@@ -993,6 +980,41 @@ fn make(
         }
         _ => terms.opaque(),
     }
+}
+
+/// The written place of each labelled argument of `arguments`, in the
+/// callee's parameter-slot order: the labels sorted by their UTF-8 bytes,
+/// as the callee's signature and every activation order them.
+pub(crate) fn label_order(arguments: &Arguments) -> Vec<usize> {
+    let mut order = (0..arguments.labelled.len()).collect::<Vec<_>>();
+    order.sort_by(|left, right| {
+        let label = |at: &usize| {
+            arguments
+                .labelled
+                .get(*at)
+                .map_or(&[][..], |(label, _)| label.as_bytes())
+        };
+        label(left).cmp(label(right))
+    });
+    order
+}
+
+/// `written`, the operands of a call in written order (the positional
+/// ones, then the labelled ones as written), in the callee's parameter-slot
+/// order: one layout serves the matching of predicates, the keys of calls,
+/// the reading of a body, and the facts of a callee's `ensures`.
+fn in_slot_order(arguments: &Arguments, mut written: Vec<Term>) -> Vec<Term> {
+    let positional = arguments.positional.len();
+    if written.len() != positional + arguments.labelled.len() {
+        return written;
+    }
+    let labelled = written.split_off(positional);
+    written.extend(
+        label_order(arguments)
+            .into_iter()
+            .filter_map(|at| labelled.get(at).copied()),
+    );
+    written
 }
 
 /// The constant a construction of constants is, when its type states no

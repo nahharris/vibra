@@ -1,0 +1,18 @@
+id = "V2-CONTRACT-label-default-different"
+rule = "V2-CONTRACT-label-default-different"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#bare-guards: GUARD-4: an omitted label holds its default, so lt(b: x) does not establish lt(a: 1i32 b: x)"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "unknown"
+[[expect.diagnostics]]
+code = "@contract.unproved"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 274, end = 283 }
+related = [{ source = "src/app/main.vib", span = { start = 102, end = 106 } }]

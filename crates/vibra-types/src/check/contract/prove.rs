@@ -990,10 +990,14 @@ impl<'v> Prover<'v> {
                 slots.insert(at, (*term, written.origin.span()));
             }
         }
-        for (at, (label, written)) in arguments.labelled.iter().enumerate() {
+        // The term's labelled operands are in the callee's slot order.
+        for (place, at) in facts::label_order(arguments).into_iter().enumerate() {
+            let Some((label, written)) = arguments.labelled.get(at) else {
+                continue;
+            };
             let (Some(slot), Some(term)) = (
                 data.labels.iter().position(|name| name == label),
-                operands.get(arguments.positional.len() + at),
+                operands.get(arguments.positional.len() + place),
             ) else {
                 continue;
             };
