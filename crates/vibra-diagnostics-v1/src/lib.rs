@@ -14,8 +14,8 @@
 //!
 //! This is the workspace's leaf crate: it depends on no other Vibra crate.
 //! Nothing here may know about the CLI, MCP, JSON, or the filesystem. The
-//! JSON contract for these types lives in `vibra-schema-v1`, which depends on
-//! this crate and is never depended upon by it.
+//! JSON contract for these types lives in a wire crate, which depends on this
+//! crate and is never depended upon by it.
 //!
 //! # Status
 //!

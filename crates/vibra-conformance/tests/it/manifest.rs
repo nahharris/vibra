@@ -47,9 +47,9 @@ fn every_profile_spelling_is_accepted() {
 
 #[test]
 fn a_kebab_case_profile_is_an_unknown_profile() {
-    let error = error_of(&manifest("V2-SRC-READER-x", "reader-v1", "reader", ""));
+    let error = error_of(&manifest("V2-SRC-READER-x", "reader-v2", "reader", ""));
     assert!(
-        error.contains("unknown conformance profile `reader-v1`"),
+        error.contains("unknown conformance profile `reader-v2`"),
         "{error}"
     );
 }

@@ -34,8 +34,7 @@ use crate::error::EmitError;
 use crate::services::Services;
 
 /// The `nexus_op` code of `op`: the generator's one mapping, with no wildcard.
-/// The generator's tests hold it to the bridge's decoding, and `vibra-conformance-v1`
-/// holds the stepper's mapping to the same names. A floating-point type has no integer operation, so
+/// The generator's tests hold it to the bridge's decoding. A floating-point type has no integer operation, so
 /// its code names no operation (the verifier refuses the program first).
 #[must_use]
 pub const fn op_code(op: ScalarOp) -> u32 {

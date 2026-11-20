@@ -48,6 +48,9 @@ and §6.
    compiled against are deleted: `vibra-diagnostics-v1`, `vibra-syntax-v1`,
    `vibra-ir-v1`, `vibra-host-v1`, and `vibra-native-v1`, with their rows of
    the architecture test and `NATIVE_TRACK_V1_CRATES`.
+6. A successor, or the reason there is none, for each test of the
+   [remainder list](x2-01-remainder.md), which left the workspace with the
+   v0.0.1 harness that hosted it.
 
 **Validation:**
 

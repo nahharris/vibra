@@ -281,7 +281,8 @@ fn hello_example() -> std::path::PathBuf {
 
 #[test]
 fn examples_check() {
-    let (code, document) = envelope_in(&hello_example(), &["--format", "json", "check"]);
+    let (code, document) =
+        envelope_in(&hello_example(), &["--format", "json", "check"]);
     assert_eq!(code, 0, "{document}");
     assert_eq!(document["status"], "passed");
     assert_eq!(document["result"], "@command.ok");
@@ -295,7 +296,11 @@ fn examples_check() {
 fn the_readme_shows_the_checked_example() {
     let readme = std::fs::read_to_string(hello_example().join("../../README.md"))
         .expect("the repository README");
-    for file in ["src/hello/greeting.vib", "tests/greeting.vib", "project.vibon"] {
+    for file in [
+        "src/hello/greeting.vib",
+        "tests/greeting.vib",
+        "project.vibon",
+    ] {
         let text = std::fs::read_to_string(hello_example().join(file))
             .expect("an example file");
         assert!(
