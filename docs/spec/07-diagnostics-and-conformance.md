@@ -332,7 +332,7 @@ Every row is an error with no automatic fix.
 | Condition | Code and primary span |
 | --- | --- |
 | a bare guard is disproved | `@contract.refuted`, the predicate, related to the argument or return that refutes it |
-| a bare guard is not established by the rules | `@contract.unproved`, the predicate or the failing application, with the declaration |
+| a bare guard is not established by the rules | `@contract.unproved`, the predicate or the failing application, related to the name of the guarded declaration |
 | a predicate outside the certified fragment | `@contract.unsupportedPredicate`, the predicate |
 | a predicate of the wrong type or shape | `@contract.invalidPredicate`, the predicate |
 | a consequence of the wrong type, not constant where required, or not pure | `@contract.invalidConsequence`, the consequence |
@@ -698,16 +698,30 @@ resolution failed).
 | `implementations` | list of [implementation records](06-runtime.md#open-signatures) sorted by the canonical bytes of `contract`, then of `receiver` | every implementation, with its positional key and its choices |
 | `obligations` | list of obligation records sorted by `declaration`, then `span` | every bare guard obligation |
 
-An obligation record has `declaration` (`Str`); `kind` (`@requires`,
-`@ensures`, or `@where`); `span` (the predicate's span record); `status`
-(`@passed`, `@refuted`, `@unknown`, or `@unsupported`); `rules` (list of
-`Str`, the identifiers of the discharge rules used, in order: `GUARD-1` to
-`GUARD-7` of [Bare guards](02-type-system.md#bare-guards), and after a
-`GUARD-6` the `INT` identifiers of the [integer facts](#integer-facts) it
-used); `dependencies` (list
-of `Str` declaration identities, sorted); and `counterexample` (optional
-`Str`, the canonical VIBON text of the refuting values). A module value is
-never generic, so its `typeInfo` is a closed type encoding.
+There is one obligation for each site where a bare guard must be
+discharged: each call of a callable with a bare `requires`, each
+construction of a type with a bare `where`, and the bare `ensures` of each
+callable, one for its predicate. An obligation record has `declaration`
+(`Str`, the identity of the declaration that contains the site: the caller,
+the constructing declaration, or, for an `ensures`, the callable itself);
+`predicate` (`Str`, the identity of the guarded declaration); `kind`
+(`@requires`, `@ensures`, or `@where`); `span` (the span record of the
+site: the call or the construction, and for an `ensures` its predicate);
+`status` (`@passed`, `@refuted`, `@unknown`, or `@unsupported`); `rules`
+(list of `Str`, the identifiers of the discharge rules used, in order:
+`GUARD-1` to `GUARD-7` of [Bare guards](02-type-system.md#bare-guards), and
+after a `GUARD-6` the `INT` identifiers of the
+[integer facts](#integer-facts) it used); `dependencies` (list of `Str`,
+sorted: the identity of the guarded declaration and of every declaration
+whose checked body or value the discharge read, without `declaration`
+itself); and `counterexample` (optional `Str`, the canonical VIBON text of
+the refuting values). `declaration` then `span` orders the obligations
+totally. A module value is never generic, so its `typeInfo` is a closed
+type encoding.
+
+The document is produced whenever every type is known: when the check has
+no error, or when every error is a contract diagnostic (`@contract.*`),
+`@tool.unavailable`, or `@tool.limitExceeded`.
 
 The example is shape only; the identity of `ExitCode` is a placeholder:
 

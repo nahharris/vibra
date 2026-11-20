@@ -1131,7 +1131,12 @@ expressions: built only from parameters and constants, constructions, field
 reads, `if` and `match` with full coverage, the primitive comparison and
 `Bool` operations, and calls of certified functions. A certified function is
 a `fn` whose body is certified and that is not recursive, directly or
-through other functions. A recursive `fn` is outside the fragment, and a
+through other functions. The primitive comparison is a call of a member of
+the interfaces playing `@equatable` and `@ordered`, at a closed receiver,
+whose selected implementation is declared in the embedded library. A call
+whose selected implementation is a program's own `impl` is an ordinary call
+of the member it selects, certified only when that member is. A recursive
+`fn` is outside the fragment, and a
 predicate that calls one is `@contract.unsupportedPredicate` at the call. A
 certified expression cannot fault. A predicate that is
 not of type `Bool`, or a `where` operand that is not a `Fn({R} Bool)`, is

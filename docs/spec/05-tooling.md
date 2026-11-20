@@ -146,7 +146,10 @@ limit is an **unknown** outcome. It MUST NOT be reported as a pass, as a
 false guard, or as an error value of the program. A scheduler quota only
 suspends and resumes; it is never a program result. The compiler's own
 constant evaluation uses the same interface: a required constant or
-obligation that is not established within the limits fails its check.
+obligation that is not established within the limits fails its check. The
+published limit profile is `m1Default`. It allows one compile-time
+evaluation 10,000,000 reductions, a reduction being the evaluation of one
+checked node.
 
 ### Initialization and project operations
 
@@ -642,12 +645,19 @@ of identities and types, and `constructor` is the resolved identity or
 `null`.
 
 **Obligation record:** `{kind, declaration, predicateIdentity, source,
-status, ruleIds, dependencies, counterexample}`. `kind` is `requires`,
-`ensures`, or `where`. `status` is `passed`, `refuted`, `unknown`, or
-`unsupported`. `dependencies` pins the checked inputs. `counterexample` is
-data or `null`. A guard with `else` is recorded in the declaration's
-metadata with its consequence; having a consequence never makes its
-predicate `passed`.
+status, ruleIds, dependencies, counterexample}`, the JSON projection of the
+[obligation record](07-diagnostics-and-conformance.md#persistent-observations)
+of `@types.v2`, field for field. `kind` is `requires`, `ensures`, or
+`where`. `declaration` is the identity of the declaration that contains the
+site and `predicateIdentity` the identity of the guarded declaration (the
+record's `predicate`). `source` is the span document of the site (the
+record's `span`). `status` is `passed`, `refuted`, `unknown`, or
+`unsupported`. `ruleIds` is the record's `rules`, and `dependencies` its
+sorted identities of the guarded declaration and of every declaration whose
+checked body or value the discharge read. `counterexample` is the canonical
+VIBON text of the refuting values or `null`. A guard with `else` is
+recorded in the declaration's metadata with its consequence; having a
+consequence never makes its predicate `passed`.
 
 ### Effect and authority projections
 
