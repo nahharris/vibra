@@ -171,7 +171,20 @@ fn an_exhausted_test_ends_only_itself() {
     assert_eq!(outcomes, [TestOutcome::Exhausted, TestOutcome::Passed]);
     assert_eq!(run.result(), SuiteResult::OperationalFailure);
     assert_eq!((run.selected(), run.passed(), run.failed()), (2, 1, 1));
-    assert_eq!(run.document(), None);
+    let document = run.document();
+    assert!(
+        document.starts_with(
+            "{format: @testRun.v2 result: @command.operationalFailure tests: \
+             [{name: \"@tests.memory::\\\"a exhausts\\\"\" result: @test.exhausted auditTrace:"
+        ),
+        "{document}"
+    );
+    assert!(
+        document.contains(
+            "{name: \"@tests.memory::\\\"b passes\\\"\" result: @test.passed auditTrace:"
+        ),
+        "{document}"
+    );
 }
 
 #[test]
@@ -204,7 +217,7 @@ fn a_project_without_tests_is_an_empty_passing_suite() {
     assert_eq!(run.result(), SuiteResult::Ok);
     assert!(run.items().is_empty());
     assert_eq!(
-        run.document().as_deref(),
-        Some("{format: @testRun.v2 result: @command.ok tests: []}")
+        run.document(),
+        "{format: @testRun.v2 result: @command.ok tests: []}"
     );
 }

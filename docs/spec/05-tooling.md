@@ -240,13 +240,15 @@ input (exit 2, no diagnostics).
 | `@test.trap` | a toolchain defect trap |
 | `@test.invalid` | the selection had static errors |
 | `@test.unavailable` | the item needs an unsupported construct |
+| `@test.exhausted` | the item exhausted its memory, the host event `@runtime.memoryExhausted` |
 
-`selected` counts selected items, `passed` only `@test.passed`, and `failed`
-is their difference. An item that ended unknown or exhausted is never
-counted as passed. When items differ, the suite result follows this
-precedence: trap, operational exhaustion, unavailable, test failed, ok. A
-diagnostic appears once in the envelope and is attributed to every item it
-affects. An item keeps the audit events it completed before a later failure.
+`selected` counts selected items, `passed` only `@test.passed`, and `failed` is
+their difference. An item that ended unknown or exhausted is never counted as
+passed, and the other items keep their results. When items differ, the suite
+result follows this precedence: trap, operational exhaustion, unavailable, test
+failed, ok. A diagnostic appears once in the envelope and is attributed to every
+item it affects. An item keeps the audit events it completed before a later
+failure.
 
 ## Machine contracts
 
@@ -350,7 +352,7 @@ in the
 | `CommandCapability` | one per line of the command surface, in its order: `command`, the command name; `operations`: string[], the operations a supported command offers, its own name for `help`; `profiles`: string[], the conformance profiles that cover it; `supported`: boolean; `schemaIds`: exact published identifiers of the documents it emits. The three lists are empty for an unsupported command |
 | `TargetSummary` | `name`; `kind`; `root`; `entry` (nullable); `bindingStatus`: `exact`, `recovered`, or `unavailable` |
 | `DependencySummary` | `alias`; `kind`; `source`; `target` (nullable); `status`: `captured`, `verified`, `unavailable`, or `refuted`; `identity` (nullable) |
-| `TestItem` | `name`, the selector; `result`, the `@test.*` atom; `failure` (nullable); `trap` (nullable); `auditTrace`: `AuditEvent[]`, the test's events; `diagnostics`: string[], the codes of the envelope's diagnostics attributed to the item; `status`, that of the command result the item's result corresponds to: `passed` for `@test.passed`, `refuted` for `@test.assertionFailed` and `@test.invalid`, `unknown` for `@test.trap`, and `unsupported` for `@test.unavailable` |
+| `TestItem` | `name`, the selector; `result`, the `@test.*` atom; `failure` (nullable); `trap` (nullable); `auditTrace`: `AuditEvent[]`, the test's events; `diagnostics`: string[], the codes of the envelope's diagnostics attributed to the item; `status`, that of the command result the item's result corresponds to: `passed` for `@test.passed`, `refuted` for `@test.assertionFailed` and `@test.invalid`, `unknown` for `@test.trap` and `@test.exhausted`, and `unsupported` for `@test.unavailable` |
 | `TestItem.failure` | `kind`: `assertion` or `observation`; `assertion`, `expected`, `actual`: canonical text or null; `primarySpan`: `SpanDocument`; `observationError`: null for an assertion |
 | `TrapRecord` | `trapCode`; `origin` (nullable) |
 | `ObservationError` | `code`: `unsupportedValue`; `type` and `origin`: nullable |

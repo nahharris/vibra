@@ -411,11 +411,11 @@
       "required": ["result"]
     },
     "itemExhausted": {
-      "properties": { "result": { "const": null } },
+      "properties": { "result": { "const": "@test.exhausted" } },
       "required": ["result"]
     },
     "testItem": {
-      "description": "TestItem: the JSON projection of a test record of @testRun.v2. result is null when a host event stopped the test, because no @test.* result describes it; failure is present exactly for @test.assertionFailed and trap exactly for @test.trap.",
+      "description": "TestItem: the JSON projection of a test record of @testRun.v2. failure is present exactly for @test.assertionFailed and trap exactly for @test.trap.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -440,7 +440,7 @@
             "@test.trap",
             "@test.invalid",
             "@test.unavailable",
-            null
+            "@test.exhausted"
           ]
         },
         "failure": {

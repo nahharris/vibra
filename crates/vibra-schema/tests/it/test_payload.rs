@@ -18,7 +18,7 @@ fn diagnostic(code: DiagnosticCode) -> DiagnosticDocument {
     DiagnosticDocument::render(&diagnostic, &LineIndex::new("x")).expect("renders")
 }
 
-fn item(result: Option<TestResult>, status: Status) -> TestItem {
+fn item(result: TestResult, status: Status) -> TestItem {
     TestItem {
         name: "@tests.math::\"adds\"".to_owned(),
         result,
@@ -31,7 +31,7 @@ fn item(result: Option<TestResult>, status: Status) -> TestItem {
 }
 
 fn passed() -> TestItem {
-    item(Some(TestResult::Passed), Status::Passed)
+    item(TestResult::Passed, Status::Passed)
 }
 
 fn failure(kind: TestFailureKind) -> TestFailure {
@@ -56,13 +56,13 @@ fn failure(kind: TestFailureKind) -> TestFailure {
 }
 
 fn failed() -> TestItem {
-    let mut failed = item(Some(TestResult::AssertionFailed), Status::Refuted);
+    let mut failed = item(TestResult::AssertionFailed, Status::Refuted);
     failed.failure = Some(failure(TestFailureKind::Assertion));
     failed
 }
 
 fn trapped() -> TestItem {
-    let mut trapped = item(Some(TestResult::Trap), Status::Unknown);
+    let mut trapped = item(TestResult::Trap, Status::Unknown);
     trapped.trap = Some(TrapRecord {
         trap_code: "@runtime.invalidCheckedProgram".to_owned(),
         origin: None,
@@ -72,19 +72,19 @@ fn trapped() -> TestItem {
 }
 
 fn unavailable() -> TestItem {
-    let mut unavailable = item(Some(TestResult::Unavailable), Status::Unsupported);
+    let mut unavailable = item(TestResult::Unavailable, Status::Unsupported);
     unavailable.diagnostics = vec!["@tool.unavailable".to_owned()];
     unavailable
 }
 
 fn exhausted() -> TestItem {
-    let mut exhausted = item(None, Status::Unknown);
+    let mut exhausted = item(TestResult::Exhausted, Status::Unknown);
     exhausted.diagnostics = vec!["@runtime.memoryExhausted".to_owned()];
     exhausted
 }
 
 fn invalid() -> TestItem {
-    let mut invalid = item(Some(TestResult::Invalid), Status::Refuted);
+    let mut invalid = item(TestResult::Invalid, Status::Refuted);
     invalid.diagnostics = vec!["@type.mismatch".to_owned()];
     invalid
 }
@@ -117,7 +117,7 @@ fn run(result: CommandOutcome, status: Status, items: Vec<TestItem>) -> Value {
     let selected = items.len() as u64;
     let good = items
         .iter()
-        .filter(|item| item.result == Some(TestResult::Passed))
+        .filter(|item| item.result == TestResult::Passed)
         .count() as u64;
     envelope.payload = Payload::Test(TestPayload {
         selected,
@@ -225,7 +225,7 @@ fn a_test_item_projects_the_test_record() {
 fn a_test_item_relates_its_result_to_its_fields() {
     let good = run(CommandOutcome::TestFailed, Status::Refuted, vec![failed()]);
     validate_command_result(&good).expect("validates");
-    let edits: [(&str, Value); 8] = [
+    let edits: [(&str, Value); 9] = [
         ("/payload/tests/0/failure", Value::Null),
         ("/payload/tests/0/status", json!("passed")),
         (
@@ -235,7 +235,8 @@ fn a_test_item_relates_its_result_to_its_fields() {
         ("/payload/tests/0/failure/kind", json!("@assertion")),
         ("/payload/tests/0/auditTrace", json!([{"kind": "@host"}])),
         ("/payload/tests/0/name", json!("@app.math::\"adds\"")),
-        ("/payload/tests/0/result", json!("@test.exhausted")),
+        ("/payload/tests/0/result", json!("@test.skipped")),
+        ("/payload/tests/0/result", Value::Null),
         (
             "/payload/tests/0/trap",
             json!({"trapCode": "@runtime.divisionByZero", "origin": null}),

@@ -162,11 +162,8 @@ fn write_diagnostics<E: Write>(response: &Response, stderr: &mut E) {
 /// its trap; and the passed, failed, and selected counts on the last line.
 fn write_test_report<W: Write>(test: &TestPayload, stdout: &mut W) {
     for item in &test.tests {
-        let result = item
-            .result
-            .map_or("(stopped by a host event)", TestResult::as_atom);
-        let _ = writeln!(stdout, "{} {result}", item.name);
-        if item.result == Some(TestResult::Passed) {
+        let _ = writeln!(stdout, "{} {}", item.name, item.result.as_atom());
+        if item.result == TestResult::Passed {
             continue;
         }
         for code in &item.diagnostics {

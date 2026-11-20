@@ -841,8 +841,8 @@ A false assertion records one structured failure, with the assertion's name,
 the canonical encodings of the expected and actual values, and the call's
 span, and stops that test's body. It is not a trap, a `Result`, or a host
 event. Each test ends as exactly one of `@test.passed`,
-`@test.assertionFailed`, `@test.invalid`, `@test.unavailable`, or
-`@test.trap`.
+`@test.assertionFailed`, `@test.invalid`, `@test.unavailable`,
+`@test.trap`, or `@test.exhausted`.
 
 Before any selected test runs, the runner checks every selected test module
 and its import closure. An error there makes every selected test

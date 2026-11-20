@@ -279,8 +279,8 @@ execution metadata.
 - It is not a `Result`, a validation error, or a trap.
 - It has no source location: primary span `0..0` and no source identity.
 - The tool outcome is an operational failure, exit 3.
-- A test run stopped by it MUST NOT report the tests that did not run as
-  passed.
+- A test it stops is `@test.exhausted`. The run MUST NOT report the tests
+  that did not run as passed.
 - Two runs that differ only because their memory limits differ are not a
   parity violation. A comparison MUST state the limits and compare like
   profiles.

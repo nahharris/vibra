@@ -160,23 +160,22 @@ pub enum TestOutcome {
     /// `@test.unavailable`: the test's declaration closure reaches a form
     /// this toolchain does not implement, the `@tool.unavailable` at it.
     Unavailable(Diagnostic),
-    /// The test exceeded its memory budget: the host event
-    /// `@runtime.memoryExhausted`. It is never counted as passed, and it
-    /// has no `@test.*` result.
+    /// `@test.exhausted`: the test exceeded its memory budget, the host
+    /// event `@runtime.memoryExhausted`. It is never counted as passed.
     Exhausted,
 }
 
 impl TestOutcome {
-    /// The `@test.*` result atom, when the outcome has one.
+    /// The `@test.*` result atom.
     #[must_use]
-    pub const fn result(&self) -> Option<&'static str> {
+    pub const fn result(&self) -> &'static str {
         match self {
-            Self::Passed => Some("@test.passed"),
-            Self::AssertionFailed(_) => Some("@test.assertionFailed"),
-            Self::Trap { .. } => Some("@test.trap"),
-            Self::Invalid => Some("@test.invalid"),
-            Self::Unavailable(_) => Some("@test.unavailable"),
-            Self::Exhausted => None,
+            Self::Passed => "@test.passed",
+            Self::AssertionFailed(_) => "@test.assertionFailed",
+            Self::Trap { .. } => "@test.trap",
+            Self::Invalid => "@test.invalid",
+            Self::Unavailable(_) => "@test.unavailable",
+            Self::Exhausted => "@test.exhausted",
         }
     }
 }
@@ -322,25 +321,26 @@ impl TestRun {
         &self.revision
     }
 
-    /// The canonical text of the `@testRun.v2` observation. An exhausted
-    /// item has no `@test.*` result, so a run with one has no observation.
+    /// The canonical text of the `@testRun.v2` observation, with every item,
+    /// an exhausted one included.
     #[must_use]
-    pub fn document(&self) -> Option<String> {
-        let mut tests = Vec::new();
-        for item in &self.items {
-            tests.push(self.record(item)?);
-        }
-        Some(format!(
+    pub fn document(&self) -> String {
+        let tests = self
+            .items
+            .iter()
+            .map(|item| self.record(item))
+            .collect::<Vec<_>>();
+        format!(
             "{{format: {TEST_RUN_FORMAT} result: {} tests: [{}]}}",
             self.result.as_atom(),
             tests.join(" ")
-        ))
+        )
     }
 
-    fn record(&self, item: &TestItem) -> Option<String> {
+    fn record(&self, item: &TestItem) -> String {
         let mut fields = vec![
             format!("name: {}", canonical_string(&item.selector.to_string())),
-            format!("result: {}", item.outcome.result()?),
+            format!("result: {}", item.outcome.result()),
         ];
         match &item.outcome {
             TestOutcome::AssertionFailed(failure) => {
@@ -358,7 +358,7 @@ impl TestRun {
             canonical_string(&self.revision),
             canonical_string(WORLD_DRIVER_VERSION)
         ));
-        Some(format!("{{{}}}", fields.join(" ")))
+        format!("{{{}}}", fields.join(" "))
     }
 }
 

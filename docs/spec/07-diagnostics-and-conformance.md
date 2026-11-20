@@ -825,9 +825,10 @@ could not be shown); `trap` (optional record
   invalid or unavailable test has an empty one. Diagnostics are not copied
   into test observations.
 - An empty suite has result `@command.ok` and no tests.
-- A host event is expected with `expect.hostEvent` and the event's atom. A
-  case MUST NOT depend on the exact allocation at which memory runs out. A
-  tool limit is expected as unknown, with the limit profile.
+- A host event is expected with `expect.hostEvent` and the event's atom. A test
+  that exhausts its memory is `@test.exhausted`, and the run's observation keeps
+  every other record. A case MUST NOT depend on the exact allocation at which
+  memory runs out. A tool limit is expected as unknown, with the limit profile.
 - An execution that traps records the code and origin and no value. Its
   completed events are kept. The absence of an event is never evidence that
   nothing external happened.
