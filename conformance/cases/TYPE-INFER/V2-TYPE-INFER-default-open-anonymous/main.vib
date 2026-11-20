@@ -1,0 +1,4 @@
+fn main returns r: I32 do
+  let f be fn(T) takes {x: T} labelled {opt: Option(T) be Option.none()} returns r: I32 do match opt case Option.none() return 4i32 case Option.some(value: v) return 2i32 endmatch endfn endlet
+  return f(1i32)
+endfn

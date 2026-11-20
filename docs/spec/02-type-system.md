@@ -1141,13 +1141,16 @@ literal evaluates to: its entries in canonical key order, where a later
 duplicate key replaces the earlier value.
 
 A default is checked at its label's type with the callable's type parameters
-in it, so a default whose type mentions a type parameter is valid exactly
-when it checks at that type for every instantiation, as `[]` at `List(T)`
-and `Option.none()` at `Option(T)` do. Such a value holds nothing of the
-parameter's type, and at each instantiation of the callable the default is
+in it, and in a member of an interface with `Self` and the interface's
+associated types in it, so a default whose type mentions one is valid
+exactly when it checks at that type for every instantiation, as `[]` at
+`List(T)` or `List(Item)` and `Option.none()` at `Option(T)` or
+`Option(Self)` do. Such a value holds nothing of that type, and at each
+instantiation of the callable, an anonymous one included, the default is
 that value at the instantiated label type. A default that holds a value
-where the parameter's type is required, such as `[1i32]` at `List(T)`, is
-`@type.mismatch` at that value.
+where such a type is required, such as `[1i32]` at `List(T)`, is
+`@type.mismatch` at that value. A guard's consequence is checked with no
+expected type, so a constant consequence never has an open type.
 
 ### `try`
 

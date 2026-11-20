@@ -1,0 +1,12 @@
+id = "V2-TYPE-INFER-default-open-self"
+rule = "V2-TYPE-INFER-default-open-self"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#constant-expressions-and-constant-patterns: a labelled default of a type that mentions Self checks in a default member and runs at the receiver's type"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

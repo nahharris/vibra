@@ -1013,6 +1013,9 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                 // The default checked at `ty`, binders included, so it holds
                 // nothing at a binder's position; the checked IR keeps a
                 // constant closed, at `ty` with every binder `Never`.
+                // Unreachable: the default checked at `ty`, so its value is
+                // one of `ty`, and no value has an open type; kept as a
+                // defect net.
                 if let Ok(constant) = Constant::new(ty.at_never(), value) {
                     Some(constant)
                 } else {

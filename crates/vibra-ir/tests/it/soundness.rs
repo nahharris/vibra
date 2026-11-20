@@ -1084,6 +1084,29 @@ fn a_generic_default_is_closed_at_never() {
     assert!(empty(Type::Binder(0)).is_err());
 }
 
+/// In a member of an interface a default's type may hold `Self` and the
+/// association slots too; its closed type has `Never` at each, and at no
+/// other position.
+#[test]
+fn a_default_is_closed_at_never_at_every_open_form() {
+    let open = Type::Tuple(vec![
+        Type::list(Type::SelfType),
+        Type::list(Type::Associated("Item".to_owned())),
+        Type::list(Type::Binder(1)),
+        Type::I32,
+    ]);
+    assert_eq!(
+        open.at_never(),
+        Type::Tuple(vec![
+            Type::list(Type::Never),
+            Type::list(Type::Never),
+            Type::list(Type::Never),
+            Type::I32,
+        ])
+    );
+    assert_eq!(Type::list(Type::U8).at_never(), Type::list(Type::U8));
+}
+
 /// `dict.fromList` keys its dict as a literal does: a closed key without
 /// `Ordered` is rejected, and an atom, which is ordered structurally, keys
 /// it.

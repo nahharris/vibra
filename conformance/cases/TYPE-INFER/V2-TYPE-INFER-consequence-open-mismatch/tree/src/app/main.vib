@@ -1,0 +1,2 @@
+fn first(T) takes {x: T n: I32} returns r: Option(T) requires Ordered.greater(n 0i32) else Option.some(value: 1i32) do return Option.some(value: x) endfn
+fn main returns r: I32 do return 1i32 endfn

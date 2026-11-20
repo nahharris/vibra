@@ -737,6 +737,16 @@ V2-CONTRACT-member-guard-obligation-refuted	active	02-type-system.md#guards-and-
 V2-CONTRACT-member-guard-obligation-unproved	active	02-type-system.md#guards-and-callable-types
 V2-TYPE-INFER-written-never-binds	active	02-type-system.md#inference-and-checking
 V2-TYPE-INFER-never-not-invented	active	02-type-system.md#inference-and-checking
+V2-TYPE-INFER-default-open-self	active	02-type-system.md#constant-expressions-and-constant-patterns
+V2-TYPE-INFER-default-open-assoc	active	02-type-system.md#constant-expressions-and-constant-patterns
+V2-TYPE-INFER-default-open-self-abstract	active	02-type-system.md#constant-expressions-and-constant-patterns
+V2-TYPE-INFER-default-open-assoc-abstract	active	02-type-system.md#constant-expressions-and-constant-patterns
+V2-TYPE-INFER-default-open-anonymous	active	02-type-system.md#constant-expressions-and-constant-patterns
+V2-TYPE-INFER-default-open-self-mismatch	active	02-type-system.md#constant-expressions-and-constant-patterns
+V2-TYPE-INFER-default-open-assoc-mismatch	active	02-type-system.md#constant-expressions-and-constant-patterns
+V2-TYPE-INFER-consequence-open-result	active	02-type-system.md#constant-expressions-and-constant-patterns
+V2-TYPE-INFER-consequence-open-assoc	active	02-type-system.md#constant-expressions-and-constant-patterns
+V2-TYPE-INFER-consequence-open-mismatch	active	02-type-system.md#constant-expressions-and-constant-patterns
 V2-TYPE-CONTROL-return-never-call	active	02-type-system.md#return-and-never
 V2-TYPE-CONTROL-return-never-call-after	active	02-type-system.md#return-and-never
 V2-TYPE-CONTROL-return-never-if	active	02-type-system.md#return-and-never

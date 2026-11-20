@@ -759,6 +759,9 @@ impl<'a> BodyChecker<'_, 'a> {
         };
         match folded {
             Ok(value) => {
+                // Unreachable: a consequence is checked with no expected
+                // type, so a constant one has the closed type of its
+                // operands; kept as a defect net.
                 let constant = Constant::new(ty, value).ok();
                 if constant.is_none() {
                     self.unavailable(span, "a consequence of an open type");
