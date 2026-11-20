@@ -502,3 +502,7 @@ V2-TYPE-GENERIC-bound-fixed-choice	active	02-type-system.md#bounds
 V2-TYPE-GENERIC-bound-choice-differs	active	02-type-system.md#bounds
 V2-TYPE-GENERIC-bound-open-choice-linked	active	02-type-system.md#bounds
 V2-TYPE-GENERIC-bound-open-choice-self	active	02-type-system.md#bounds
+V2-TYPE-GENERIC-expanding-default	active	02-type-system.md#generics
+V2-TYPE-GENERIC-expanding-default-same-instance	active	02-type-system.md#generics
+V2-TYPE-GENERIC-expanding-evidence	active	02-type-system.md#generics
+V2-TYPE-GENERIC-expanding-interface-value	active	02-type-system.md#generics

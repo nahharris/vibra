@@ -141,6 +141,63 @@ pub(super) fn closed(ty: &Type, assignment: &[Option<Type>]) -> Option<Type> {
     Some(ty.instantiate(&binders))
 }
 
+/// Fixes the binders of `pattern` from `actual` wherever the two have the
+/// same form, and leaves the rest as they are.
+fn match_part(pattern: &Type, actual: &Type, assignment: &mut [Option<Type>]) {
+    let mut pending = vec![(pattern, actual)];
+    while let Some((pattern, actual)) = pending.pop() {
+        if let Type::Binder(index) = pattern {
+            if let Some(slot @ None) = assignment.get_mut(*index) {
+                *slot = Some(actual.clone());
+            }
+            continue;
+        }
+        if same_head(pattern, actual) {
+            pending.extend(pattern.components().into_iter().zip(actual.components()));
+        }
+    }
+}
+
+/// Whether an implementation whose key has the positional `arguments`, open
+/// in `count` binders, may be the one chosen at activation for a call at
+/// `actual`, which is open in the `open` type parameters of the body, in
+/// `Self`, and in associated types.
+fn may_select(arguments: &[Type], count: usize, actual: &[Type], open: usize) -> bool {
+    let mut names = Vec::new();
+    for ty in actual {
+        ty.visit(&mut |inner| {
+            if let Type::Associated(name) = inner
+                && !names.contains(name)
+            {
+                names.push(name.clone());
+            }
+        });
+    }
+    let self_var = Type::Binder(open);
+    let choices = NamedTypes::new(names.into_iter().enumerate().map(|(at, name)| {
+        (
+            name,
+            Type::Binder(open.saturating_add(1).saturating_add(at)),
+        )
+    }));
+    let Ok(choices) = choices else {
+        return true;
+    };
+    let substitution = Substitution {
+        binders: &[],
+        self_type: Some(&self_var),
+        associated: Some(&choices),
+    };
+    let actual = actual
+        .iter()
+        .map(|ty| ty.substitute(&substitution))
+        .collect::<Vec<_>>();
+    let variables = open
+        .saturating_add(1)
+        .saturating_add(choices.entries().len());
+    crate::check::interfaces::unifiable(&actual, variables, arguments, count)
+}
+
 /// Whether `ty` mentions a type parameter.
 fn mentions_binder(ty: &Type) -> bool {
     let mut found = false;
@@ -865,9 +922,56 @@ impl<'a> BodyChecker<'_, 'a> {
                 target: Target::Function(function),
                 span: state.callee_span,
             });
-            if matches!(dispatch.view, Some(View::Selected(..))) && !binders.is_empty()
+            if !binders.is_empty()
+                && matches!(
+                    dispatch.view,
+                    Some(View::Selected(..) | View::Evidence | View::Public)
+                )
             {
                 self.instantiations.push((function, binders, application));
+            }
+        }
+        // Through scoped evidence or an interface value the implementation
+        // is chosen at activation: the call instantiates the member of every
+        // implementation that can be chosen there.
+        if matches!(dispatch.view, Some(View::Evidence | View::Public)) {
+            let open = self.binders.len();
+            for implementation in &program.impls {
+                if implementation.interface != dispatch.interface
+                    || !implementation.usable
+                    || !may_select(
+                        &implementation.arguments,
+                        implementation.binders.len(),
+                        &arguments,
+                        open,
+                    )
+                {
+                    continue;
+                }
+                let Some(function) = implementation
+                    .members
+                    .iter()
+                    .find(|(name, _)| *name == dispatch.member)
+                    .map(|(_, function)| *function)
+                else {
+                    continue;
+                };
+                let mut binders = vec![None; implementation.binders.len()];
+                for (pattern, actual) in implementation.arguments.iter().zip(&arguments)
+                {
+                    match_part(pattern, actual, &mut binders);
+                }
+                // A parameter of the implementation that no interface
+                // argument gives is fixed by the receiver alone, which
+                // carries no type parameter of this body to it.
+                let mut binders = binders
+                    .into_iter()
+                    .map(|bound| bound.unwrap_or(Type::Never))
+                    .collect::<Vec<_>>();
+                binders.extend(member_arguments.iter().cloned());
+                if !binders.is_empty() {
+                    self.instantiations.push((function, binders, application));
+                }
             }
         }
         Some(ContractCall {
