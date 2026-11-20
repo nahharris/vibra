@@ -1,0 +1,1 @@
+fn f takes {x: I32} returns r: I32 ensures Ordered.greater(r 0i32) else 1i32 do return x endfn

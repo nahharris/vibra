@@ -1,0 +1,12 @@
+id = "V2-CONTRACT-constant-construction-ok"
+rule = "V2-CONTRACT-constant-construction-ok"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#guards-with-else: a let pattern Result.ok over a constant construction the checker evaluates to ok needs no else"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

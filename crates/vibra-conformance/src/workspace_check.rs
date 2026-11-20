@@ -4,8 +4,9 @@
 //! inputs": a `workspaceCheck` case has one confined tree with its
 //! `project.vibon` and observes the diagnostics of the check of every local
 //! target and the `@tests` unit, and the `@types.v2` document. A case whose
-//! only errors are `@tool.unavailable` is `unsupported`; any other error
-//! refutes it.
+//! only errors are `@tool.unavailable` is `unsupported`; one with a bare
+//! guard that is not established or a reached tool limit is `unknown`; any
+//! other error refutes it.
 
 use vibra_workspace::{SourceSnapshot, check_snapshot, discover_project_at};
 
@@ -43,10 +44,7 @@ impl ProfileHandler for WorkspaceCheckHandler {
                 }
             };
         let check = check_snapshot(&snapshot, None);
-        let mut observation = CaseObservation::new(check_verdict(
-            check.has_errors(),
-            check.only_unavailable(),
-        ));
+        let mut observation = CaseObservation::new(check_verdict(check.diagnostics()));
         observation.diagnostics = check.diagnostics().to_vec();
         observation.types = check.types_document().map(str::to_owned);
         Ok(observation)

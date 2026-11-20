@@ -1,0 +1,12 @@
+id = "V2-CONTRACT-requires-certified-fn"
+rule = "V2-CONTRACT-requires-certified-fn"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#predicates: a call of a certified function is a predicate"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

@@ -1,0 +1,12 @@
+id = "V2-CONTRACT-constant-construction-err-matched"
+rule = "V2-CONTRACT-constant-construction-err-matched"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#guards-with-else: a constant construction known to fail is a legal Result.err value"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

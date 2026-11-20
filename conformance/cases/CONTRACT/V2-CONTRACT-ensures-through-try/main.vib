@@ -1,0 +1,3 @@
+fn main returns r: I32 do match f(Result.err(error: 3i32)) case Result.ok(value: v) return v case Result.err(error: e) return e endmatch endfn
+fn f takes {x: Result(I32 I32)} returns r: Result(I32 I32) ensures isOk(r) else Result.err(error: 99i32) do let v be try x endlet return Result.ok(value: v) endfn
+fn isOk takes {r: Result(I32 I32)} returns b: Bool do match r case Result.ok(value: _) return true case Result.err(error: _) return false endmatch endfn

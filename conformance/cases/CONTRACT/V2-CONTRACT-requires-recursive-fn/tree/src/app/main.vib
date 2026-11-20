@@ -1,0 +1,3 @@
+fn f takes {x: I32} returns r: I32 requires even(x) else 0i32 do return x endfn
+fn even takes {x: I32} returns r: Bool do match x case 0i32 return true case _ return odd(I32.sub(x 1i32)) endmatch endfn
+fn odd takes {x: I32} returns r: Bool do match x case 0i32 return false case _ return even(I32.sub(x 1i32)) endmatch endfn

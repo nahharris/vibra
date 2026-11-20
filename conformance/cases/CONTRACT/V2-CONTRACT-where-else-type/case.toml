@@ -1,0 +1,12 @@
+id = "V2-CONTRACT-where-else-type"
+rule = "V2-CONTRACT-where-else-type"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#guards-with-else: the constructor of a type whose where has an else returns a Result"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
