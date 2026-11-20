@@ -1,0 +1,55 @@
+fn main returns r: I32 do
+  let d be build([{2i32 20i32} {1i32 10i32}]) endlet
+  let e be one(3i32 300i32) endlet
+  return I32.add(I32.add(lookup(d 1i32 0i32) total(d)) lookup(e 3i32 0i32))
+endfn
+
+fn one(K V)
+  takes {key: K value: V}
+  returns single: Dict(K V)
+  given {K: Ordered}
+  do
+    let single be [key: value] endlet
+    return single
+endfn
+
+fn build(K V)
+  takes {pairs: List({K V})}
+
+  returns built: Dict(K V)
+  given {K: Ordered}
+  do
+    let converted: Dict(K V) be From.convert(pairs) endlet
+    return converted
+endfn
+
+fn lookup(K V)
+  takes {dict: Dict(K V) key: K fallback: V}
+  returns found: V
+  given {K: Ordered}
+  do
+    match dict(key)
+      case Option.some(value: v)
+        return v
+      case Option.none()
+        return fallback
+    endmatch
+endfn
+
+fn total(K)
+  takes {dict: Dict(K I32)}
+  returns sum: I32
+  given {K: Ordered}
+  do
+    return Iter.fold(
+      dict
+      0i32
+      fn
+        takes {acc: I32 entry: {K I32}}
+        returns next: I32
+        do
+          let {_ v} be entry endlet
+          return I32.add(acc v)
+      endfn
+    )
+endfn

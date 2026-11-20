@@ -1,0 +1,13 @@
+let both: {Bool Bool} be {Bool.true() Bool.false()} endlet
+
+fn main returns r: I32 do
+  return f({Bool.true() Bool.false()})
+endfn
+
+fn f takes {p: {Bool Bool}} returns r: I32 do
+  return match p
+    case both 1i32
+    case {Bool.true() Bool.true()} 2i32
+    case {Bool.false() _} 3i32
+  endmatch
+endfn

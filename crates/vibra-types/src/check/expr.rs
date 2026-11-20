@@ -187,6 +187,9 @@ struct ProductState<'a> {
     types: Vec<Option<Type>>,
     nodes: Vec<Option<Node>>,
     span: ByteSpan,
+    /// Whether a list or dict literal is an argument, so that an element
+    /// that does not fit is an argument that does not fit its slot.
+    argument: bool,
     failed: bool,
 }
 
@@ -726,10 +729,11 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         self.labelled_defaults(signature, labelled).1
     }
 
-    /// The guards `views` of an abstract contract member of type
-    /// `signature`, whose parameters are written as `patterns` and
-    /// `labelled`, checked once under `scope` with `Self` open, so that the
-    /// contract's own faults are reported where it is declared.
+    /// The parameter patterns `patterns` and the guards `views` of an
+    /// abstract contract member of type `signature`, whose labelled
+    /// parameters are written as `labelled`, checked once under `scope` with
+    /// `Self` open, so that the contract's own faults are reported where it
+    /// is declared.
     pub(crate) fn abstract_guards(
         &mut self,
         signature: &FnType,
@@ -749,18 +753,17 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         self.self_interface = scope.self_interface;
         self.result_span = scope.result_span;
         self.result = Some(signature.result.clone());
-        self.slots.extend(signature.slot_types());
-        let _ = self.member_guards(signature, patterns, labelled, views);
-        // A contract guard is copied into each implementation, where an
-        // obligation it states would have no single site.
-        for site in std::mem::take(&mut self.sites) {
-            if let Site::Requires { span, .. } | Site::Where { span, .. } = site {
-                self.unavailable(
-                    span,
-                    "a bare-guard obligation inside a contract member's guard",
-                );
-            }
+        let mark = self.diagnostics.len();
+        let (failed, _) = self.bind_parameters(signature, patterns, labelled);
+        if failed || self.diagnostics.len() != mark {
+            return;
         }
+        self.slots.truncate(signature.slot_count());
+        self.locals.clear();
+        let _ = self.member_guards(signature, patterns, labelled, views);
+        // A contract guard is copied into each implementation, and an
+        // obligation it states is one obligation of each implementation.
+        self.sites.clear();
     }
 
     /// The guards `views` of the contract member that the callable just
@@ -770,7 +773,8 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
     /// parameter in the same position, and each slot a guard binds comes
     /// after the body's. The guards and the slot count, or `None` when one
     /// has a fault; the faults themselves are the contract's, reported
-    /// where it is declared.
+    /// where it is declared. The obligation sites the guards state are kept,
+    /// spanning the contract's module.
     pub(crate) fn implementation_guards(
         &mut self,
         signature: &FnType,
@@ -788,7 +792,9 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         let (diagnostics, sites) = (self.diagnostics.len(), self.sites.len());
         let guards = self.member_guards(signature, patterns, labelled, views);
         self.diagnostics.truncate(diagnostics);
-        self.sites.truncate(sites);
+        if guards.is_none() {
+            self.sites.truncate(sites);
+        }
         (self.module, self.source_id, self.text) = saved;
         guards.map(|guards| (guards, self.slots.len()))
     }
@@ -797,8 +803,9 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
     /// whose parameter slots are the first of the current ones: each
     /// positional parameter written as a name in `patterns` is bound to its
     /// slot, and each labelled one in `labelled` to its label's. A pattern
-    /// that takes a parameter apart is not supported in a contract member
-    /// with a guard. The guards, or `None` when one has a fault.
+    /// that takes a parameter apart binds slots after the current ones, and
+    /// a guard that reads them is a `match` of one arm around it. The guards,
+    /// or `None` when one has a fault.
     fn member_guards(
         &mut self,
         signature: &FnType,
@@ -812,6 +819,8 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         let mark = self.diagnostics.len();
         self.locals.clear();
         let frame = self.frames.len();
+        let start = self.slots.len();
+        let mut destructured = Vec::new();
         for (index, (ty, pattern)) in
             signature.parameters.iter().zip(patterns).enumerate()
         {
@@ -827,13 +836,13 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                         }));
                 }
                 Some(IrPattern::Discard) => {}
-                _ => {
-                    self.unavailable(
-                        span,
-                        "a parameter pattern that takes a value apart in a contract member with a guard",
-                    );
-                    return None;
+                Some(lowered)
+                    if self.irrefutable(&typed.cover, ty, span) != Some(false) =>
+                {
+                    self.locals.extend(typed.bindings);
+                    destructured.push((index, ty.clone(), lowered, span));
                 }
+                _ => return None,
             }
         }
         let entries = signature.labels.entries();
@@ -850,8 +859,8 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                 generic: None,
             });
         }
-        let bound = self.slots.len()..self.slots.len();
-        let (failed, guards) = self.guards(views, signature, &[], &bound);
+        let bound = start..self.slots.len();
+        let (failed, guards) = self.guards(views, signature, &destructured, &bound);
         (!failed && self.diagnostics.len() == mark).then_some(guards)
     }
     /// Binds the parameters of a callable of type `signature`, whose slots
@@ -986,9 +995,12 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                 }
             }
             Err(NotConstant::Dict) => {
-                self.unavailable(
+                self.report(
+                    DiagnosticCode::TypeNotConstant,
                     span,
-                    "a dict default keyed by a type ordered by its own implementation",
+                    "a dict keyed by a type ordered by its own `Ordered` implementation \
+                     is no constant expression: ordering its entries would run that \
+                     implementation",
                 );
                 None
             }
@@ -1323,6 +1335,10 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             ByteSpan::new(span.start().saturating_add("return".len()), span.end());
         let operand_span = trim_start(self.text, operand_span);
         let node = match out.ty {
+            // `return spin(n)`, where `spin` returns `Never`, is a tail call.
+            Some(Type::Never) if out.node.as_ref().is_some_and(ends_in_call) => {
+                out.node
+            }
             Some(Type::Never) => {
                 self.report(
                     DiagnosticCode::TypeUnreachableCode,
@@ -1899,8 +1915,9 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             .chain(own.iter().map(|_| None))
             .collect::<Vec<_>>();
         let mut assignment = base.clone();
-        let fits =
-            expected.is_some_and(|expected| unify(&pattern, expected, &mut assignment));
+        let fits = expected.is_some_and(|expected| {
+            unify_expected(&pattern, expected, &mut assignment)
+        });
         if let Some(expected) = expected
             && !fits
         {
@@ -2086,7 +2103,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         let mut assignment = self.generic_assignment(generic);
         if let Some(expected) = expected {
             let mut trial = assignment.clone();
-            if unify(&pattern, expected, &mut trial) {
+            if unify_expected(&pattern, expected, &mut trial) {
                 assignment = trial;
             }
         }
@@ -2162,15 +2179,6 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         let program = self.program;
         let data = program.types.get(index)?;
         match data.kind {
-            TypeKind::Wrapper(_) | TypeKind::Tuple(_) | TypeKind::Record(_)
-                if data.invariant && !data.params.is_empty() =>
-            {
-                self.unavailable(
-                    callee_span,
-                    "constructing a value of a generic type with an invariant",
-                );
-                None
-            }
             TypeKind::Wrapper(_) | TypeKind::Tuple(_) | TypeKind::Record(_)
                 if data.id.is_some() =>
             {
@@ -2403,7 +2411,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             let mut assignment = vec![None; data.binders.len()];
             if let Some(expected) = expected {
                 let mut trial = assignment.clone();
-                if unify(&pattern, expected, &mut trial) {
+                if unify_expected(&pattern, expected, &mut trial) {
                     assignment = trial;
                 }
             }
@@ -2566,6 +2574,8 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                 {
                     Some((data, case)) => {
                         binder_names.clone_from(&data.params);
+                        bounds.clone_from(&data.bounds);
+                        bound_module = data.module;
                         let params = match &case.fields {
                             Some(fields) => {
                                 labels = Some(
@@ -2586,6 +2596,8 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             Callee::Construct(ty) => match program.types.get(*ty) {
                 Some(data) => {
                     binder_names.clone_from(&data.params);
+                    bounds.clone_from(&data.bounds);
+                    bound_module = data.module;
                     let params = match &data.kind {
                         TypeKind::Record(fields) => {
                             labels = Some(
@@ -2675,7 +2687,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             && let (Some(result), Some(expected)) = (&state.result, &expected)
         {
             let mut trial = state.assignment.clone();
-            if unify(result, expected, &mut trial) {
+            if unify_expected(result, expected, &mut trial) {
                 let source = self.written_span(application).unwrap_or(application);
                 note_sources(&state.assignment, &trial, &mut state.sources, source);
                 state.assignment = trial;
@@ -3300,7 +3312,9 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                 // The constructor of a `where … else` returns a `Result`; the
                 // construction itself is of the type.
                 let value_type = match program.types.get(ty) {
-                    Some(data) if data.fallible => data.self_type(),
+                    Some(data) if data.fallible => {
+                        data.self_type().map(|own| own.instantiate(&type_arguments))
+                    }
                     _ => result.clone(),
                 };
                 let construction = match program.types.get(ty).map(|data| &data.kind) {
@@ -3438,6 +3452,8 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             },
             _ => (None, None),
         };
+        let argument = matches!(product, Product::List | Product::Dict)
+            && self.argument == Some(span);
         let child = Task::Product(Box::new(ProductState {
             product,
             operands,
@@ -3448,6 +3464,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             types: Vec::new(),
             nodes: Vec::new(),
             span,
+            argument,
             failed: false,
         }));
         Step::Child(Task::Postfix(state), child)
@@ -3482,13 +3499,13 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                     match slot {
                         Some(Some(expected)) => {
                             let expected = expected.clone();
-                            let node = self.conform(
-                                &expected,
-                                &actual,
-                                out.node,
-                                span,
-                                DiagnosticCode::TypeMismatch,
-                            );
+                            let code = if state.argument {
+                                DiagnosticCode::TypeArgumentMismatch
+                            } else {
+                                DiagnosticCode::TypeMismatch
+                            };
+                            let node =
+                                self.conform(&expected, &actual, out.node, span, code);
                             (Some(actual), node)
                         }
                         Some(slot) => {
@@ -3528,10 +3545,18 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                 Product::Dict if at.is_multiple_of(2) => state.element.clone(),
                 Product::Dict => state.value.clone(),
             };
+            // An element of a list or dict literal argument is in argument
+            // position too.
+            if state.argument {
+                self.argument = Some(expr_span(&operand));
+            }
             return Step::Child(
                 Task::Product(state),
                 Task::Expr(operand, Ctx::Value(expected)),
             );
+        }
+        if state.argument {
+            self.argument = Some(state.span);
         }
         Step::Done(self.finish_product(*state))
     }
@@ -3576,10 +3601,14 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                         .as_ref()
                         .and_then(|expected| self.dict_arguments(expected))
                         .is_none();
-                    let key_fault = if inferred {
-                        self.program.key_fault(&key)
-                    } else {
-                        None
+                    let key_fault = match self.program.key_fault(&key) {
+                        Some(DiagnosticCode::TypeInvalidDictKey)
+                            if key.is_open() && !self.open_key_fault(&key) =>
+                        {
+                            None
+                        }
+                        fault if inferred => fault,
+                        _ => None,
                     };
                     match key_fault {
                         Some(code) => {
@@ -4613,16 +4642,48 @@ fn place(nodes: &mut Vec<Option<Node>>, at: usize, node: Option<Node>) {
     }
 }
 
+/// Whether `node` is a call, after the `let`s that hoist its arguments.
+fn ends_in_call(node: &Node) -> bool {
+    let mut node = node;
+    loop {
+        match &node.expr {
+            IrExpr::Call { .. } | IrExpr::TailCall { .. } => return true,
+            IrExpr::Let { body, .. } => node = body,
+            _ => return false,
+        }
+    }
+}
+
 /// Matches `pattern`, in which a [`Type::Binder`] below `assignment.len()`
-/// is a type parameter of a callee, against `actual`, recording what each
-/// parameter it meets must be. `Never` is never inferred. Whether every
+/// is a type parameter of a callee, against the type `actual` of an
+/// operand, recording what each parameter it meets must be. `Never` is
+/// never inferred: an operand of type `Never` fixes nothing. Whether every
 /// part matched.
 fn unify(pattern: &Type, actual: &Type, assignment: &mut [Option<Type>]) -> bool {
+    unify_at(pattern, actual, assignment, false)
+}
+
+/// [`unify`] against an expected type, which a written type supplies: a
+/// `Never` it fixes a parameter to binds that parameter.
+fn unify_expected(
+    pattern: &Type,
+    expected: &Type,
+    assignment: &mut [Option<Type>],
+) -> bool {
+    unify_at(pattern, expected, assignment, true)
+}
+
+fn unify_at(
+    pattern: &Type,
+    actual: &Type,
+    assignment: &mut [Option<Type>],
+    binds_never: bool,
+) -> bool {
     let mut pending = vec![(pattern, actual)];
     while let Some((pattern, actual)) = pending.pop() {
         match (pattern, actual) {
             (Type::Binder(at), _) if *at < assignment.len() => {
-                if *actual == Type::Never {
+                if *actual == Type::Never && !binds_never {
                     continue;
                 }
                 match assignment.get_mut(*at) {

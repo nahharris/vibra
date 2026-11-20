@@ -105,28 +105,40 @@ fn a_written_interface_type_meets_its_bounds_in_every_position() {
 }
 
 #[test]
-fn a_bounded_declared_type_is_unavailable_whatever_its_argument() {
-    // The checked IR gives a declared type's parameters no bound, so a type
-    // with a bounded parameter is outside this checker, and no application
-    // of it reaches the IR.
-    for argument in ["U8", "Plain"] {
-        let source = format!(
-            "{FEED}type Pair(T) of T given {{T: Ordered}} endtype\n\
-             fn f takes {{p: Pair({argument})}} returns r: U8 do return 1u8 endfn\n"
-        );
-        let codes = faults(&source)
-            .into_iter()
-            .map(|(code, _)| code)
-            .collect::<Vec<_>>();
-        assert_eq!(
-            codes,
-            vec![
-                DiagnosticCode::ToolUnavailable,
-                DiagnosticCode::ToolUnavailable
-            ],
-            "{source}"
-        );
+fn a_bounded_declared_type_meets_its_bound_in_every_position() {
+    let pair =
+        "type Pair(T) of T given {T: Ordered} endtype\ntype Plain of U8 endtype\n";
+    for body in [
+        "fn f takes {p: Pair(Plain)} returns r: U8 do return 1u8 endfn\n",
+        "fn f returns r: Option(Pair(Plain)) do return Option.none() endfn\n",
+        "fn f returns r: U8 do let p: List(Pair(Plain)) be [] endlet return 1u8 endfn\n",
+        "type Holder of {p: Pair(Plain)} endtype\n",
+        "type Holder of Pair(Plain) endtype\n",
+        "fn f takes {g: Fn({Pair(Plain)} U8)} returns r: U8 do return 1u8 endfn\n",
+    ] {
+        breach(&format!("{pair}{body}"), "Plain", 1);
     }
+    // An inferred application is the fault of the operand that fixes it.
+    let source = format!(
+        "{pair}fn f returns r: U8 do let p be Pair(Plain(1u8)) endlet return 1u8 endfn\n"
+    );
+    breach(&source, "Plain(1u8)", 0);
+    // A type parameter meets the bound only through its own bound.
+    let source = format!(
+        "{pair}fn f(T) takes {{p: Pair(T)}} returns r: U8 do return 1u8 endfn\n"
+    );
+    breach_at(&source, first(&source, "T)}", 0));
+    let source = format!(
+        "{pair}fn f(T) takes {{p: Pair(T)}} returns r: U8 given {{T: Ordered}} \
+         do return 1u8 endfn\nfn g takes {{p: Pair(U8)}} returns r: U8 do return 1u8 endfn\n"
+    );
+    assert_eq!(faults(&source), Vec::new());
+    // Inside the type, its parameter has the members of its bound.
+    let source = "fn main returns r: U8 do return Pair.larger(Pair(3u8) 5u8) endfn\n\
+                  type Pair(T) of T given {T: Ordered} \
+                  fn larger takes {p: Self other: T} returns r: T \
+                  do let Pair(v) be p endlet return Ordered.max(v other) endfn endtype\n";
+    assert_eq!(run(source).as_deref(), Ok(value("u8", "5u8").as_str()));
 }
 
 #[test]

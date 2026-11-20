@@ -1,0 +1,12 @@
+id = "V2-TYPE-CONTROL-match-constant-expanded"
+rule = "V2-TYPE-CONTROL-match-constant-expanded"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#constant-expressions-and-constant-patterns: a constant pattern of a tuple, record, case, or list means the pattern of its value and matches the values equal to it"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

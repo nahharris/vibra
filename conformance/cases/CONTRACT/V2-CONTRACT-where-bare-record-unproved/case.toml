@@ -1,0 +1,19 @@
+id = "V2-CONTRACT-where-bare-record-unproved"
+rule = "V2-CONTRACT-where-bare-record-unproved"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#bare-guards: GUARD-2 reads the invariant of a value that exists, never of the construction whose own where is the obligation"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "unknown"
+
+[[expect.diagnostics]]
+code = "@contract.unproved"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 257, end = 284 }
+related = [{ source = "src/app/main.vib", span = { start = 5, end = 9 } }]

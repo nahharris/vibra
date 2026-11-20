@@ -1,0 +1,12 @@
+id = "V2-CONTRACT-member-guard-obligation"
+rule = "V2-CONTRACT-member-guard-obligation"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#guards-and-callable-types: a bare-guard obligation inside a contract member's guard is an obligation of each implementation the guard is copied into, discharged there"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

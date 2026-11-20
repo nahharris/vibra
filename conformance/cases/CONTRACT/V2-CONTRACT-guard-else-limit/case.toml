@@ -1,0 +1,18 @@
+id = "V2-CONTRACT-guard-else-limit"
+rule = "V2-CONTRACT-guard-else-limit"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "07-diagnostics-and-conformance.md#runtime-and-tool-failures: a limit that stops folding a guard with else whose predicate reads no slot is @tool.limitExceeded at the predicate, as for an obligation (limit profile m1Default)"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "unknown"
+
+[[expect.diagnostics]]
+code = "@tool.limitExceeded"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 50, end = 59 }

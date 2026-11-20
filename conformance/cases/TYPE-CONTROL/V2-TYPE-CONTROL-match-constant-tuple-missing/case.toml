@@ -1,0 +1,19 @@
+id = "V2-TYPE-CONTROL-match-constant-tuple-missing"
+rule = "V2-TYPE-CONTROL-match-constant-tuple-missing"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#constant-expressions-and-constant-patterns: coverage sees a tuple constant pattern's expansion, so the shape it leaves uncovered is named"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@pattern.nonExhaustive"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 115, end = 192 }
+notes = ["{Bool.false() Bool.false()}"]

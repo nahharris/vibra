@@ -98,7 +98,10 @@ pub fn library() -> LibraryTypes {
 fn variant(library: Library, parameters: &[&str], cases: Vec<Case>) -> TypeDefinition {
     TypeDefinition::new(
         id(path(library)),
-        parameters.iter().map(|name| (*name).to_owned()).collect(),
+        parameters
+            .iter()
+            .map(|name| vibra_ir::Binder::new(*name, None).unwrap())
+            .collect(),
         TypeBody::Variant(cases),
         None,
         Visibility::Public,
@@ -120,7 +123,10 @@ fn wrapper(
 ) -> TypeDefinition {
     TypeDefinition::new(
         id(path(library)),
-        parameters.iter().map(|name| (*name).to_owned()).collect(),
+        parameters
+            .iter()
+            .map(|name| vibra_ir::Binder::new(*name, None).unwrap())
+            .collect(),
         TypeBody::Wrapper(representation),
         None,
         Visibility::Private,

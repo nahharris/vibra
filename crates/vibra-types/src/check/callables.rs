@@ -36,8 +36,9 @@ use vibra_ir::{
 pub(crate) enum NotConstant {
     /// The expression is not a constant expression.
     Expression,
-    /// It is one, but holds a dict whose key type is ordered by its own
-    /// `Ordered` implementation, which only an evaluation can apply.
+    /// It holds a dict whose canonical key order is a declared type's own
+    /// `Ordered` implementation, which only running that implementation
+    /// could apply: no constant expression.
     Dict,
     /// It names a module value whose constant is not known yet.
     Pending,
@@ -131,6 +132,9 @@ pub(crate) fn fold(
                     Construction::Dict(_) => {
                         let key = dict_key(value_type, library)
                             .ok_or(NotConstant::Expression)?;
+                        if ordered_by_implementation(key, library) {
+                            return Err(NotConstant::Dict);
+                        }
                         Value::Dict(dict_entries(operands, key, library)?)
                     }
                 });
@@ -138,6 +142,25 @@ pub(crate) fn fold(
         }
     }
     values.pop().ok_or(NotConstant::Expression)
+}
+
+/// Whether the canonical order of `key` uses a declared type's own `Ordered`
+/// implementation: it is, or holds, a declared type other than the library's
+/// `Bool`, `Str`, and `Bytes`, whose orders the type chapter fixes.
+fn ordered_by_implementation(
+    key: &Type,
+    library: &dyn Fn(&TypeId) -> Option<Library>,
+) -> bool {
+    let mut found = false;
+    key.visit(&mut |ty| {
+        if let Type::Declared(id, _) = ty {
+            found |= !matches!(
+                library(id),
+                Some(Library::Bool | Library::Str | Library::Bytes)
+            );
+        }
+    });
+    found
 }
 
 /// The key type of `ty`, a `Dict(K V)`.

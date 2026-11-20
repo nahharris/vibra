@@ -1,0 +1,5 @@
+fn spin takes {n: I32} returns r: Never do return spin(n) endfn
+
+fn f takes {n: I32} returns r: I32 do
+  return if Ordered.greater(n 0i32) then spin(n) else spin(n) endif
+endfn

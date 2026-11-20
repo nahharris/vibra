@@ -137,13 +137,18 @@ fn check_bodies(
         let views = GuardViews::of(&data.view);
         let mut checked =
             checker.callable(signature, &patterns, &labelled, scope, &views, body);
+        // The sites a contract guard copied into an implementation states
+        // span the interface's module.
+        let mut contract_sites = Vec::new();
         if let Some(interface) = data.implements {
+            let mark = checker.sites.len();
             if let Some((guards, slot_count)) =
                 contract_guards(program, documents, data, interface, &mut checker)
             {
                 checked.guards = guards;
                 checked.slot_count = slot_count;
             }
+            contract_sites = checker.sites.split_off(mark);
             let differing = differing_defaults(
                 program,
                 documents,
@@ -160,6 +165,15 @@ fn check_bodies(
                 .sites
                 .drain(..)
                 .map(|site| (data.module, Owner::Function(index), site)),
+        );
+        let contract_module = data
+            .implements
+            .and_then(|interface| program.interfaces.get(interface))
+            .map_or(data.module, |interface| interface.module);
+        pass.sites.extend(
+            contract_sites
+                .into_iter()
+                .map(|site| (contract_module, Owner::Function(index), site)),
         );
         pass.instantiations
             .extend(checker.instantiations.drain(..).map(
@@ -249,7 +263,8 @@ fn representation(kind: &TypeKind) -> Option<Type> {
     }
 }
 
-/// Checks the `where` of every type without parameters that states one.
+/// Checks the `where` of every type that states one, with the type's
+/// parameters and their bounds in scope.
 fn invariants(
     program: &Program<'_>,
     documents: &[Document],
@@ -257,7 +272,7 @@ fn invariants(
     pass: &mut Pass,
 ) {
     for (index, data) in program.types.iter().enumerate() {
-        if !data.invariant || !data.params.is_empty() {
+        if !data.invariant {
             continue;
         }
         let (Some(representation), Some(section), Some(text)) = (
@@ -268,7 +283,7 @@ fn invariants(
             continue;
         };
         let mut checker = BodyChecker::new(program, layout, data.module, text);
-        let found = checker.invariant(section, &representation);
+        let found = checker.invariant(section, &representation, data);
         if let Some(error) = found.error {
             pass.errors.insert(index, error);
         }
@@ -367,7 +382,7 @@ fn scope_at(program: &Program<'_>, module: usize, span: ByteSpan) -> CallableSco
     match owner {
         Some(data) => CallableScope {
             binders: data.params.clone(),
-            bounds: vec![None; data.params.len()],
+            bounds: data.bounds.clone(),
             self_type: data.self_type(),
             ..CallableScope::default()
         },
@@ -423,9 +438,9 @@ fn abstract_defaults(
     diagnostics
 }
 
-/// The diagnostics of the guards of every abstract member of an interface
-/// outside the embedded library, each checked once with the interface's
-/// parameters and `Self` open.
+/// The diagnostics of the parameter patterns and the guards of every
+/// abstract member of an interface outside the embedded library, each
+/// checked once with the interface's parameters and `Self` open.
 fn abstract_guards(
     program: &Program<'_>,
     documents: &[Document],
@@ -447,9 +462,7 @@ fn abstract_guards(
                 .name()
                 .and_then(|name| interface.member(name.text()))
                 .filter(|member| member.default.is_none());
-            let Some(member) =
-                member.filter(|_| views.requires.is_some() || views.ensures.is_some())
-            else {
+            let Some(member) = member else {
                 continue;
             };
             let mut checker = BodyChecker::new(program, layout, interface.module, text);
@@ -1114,9 +1127,9 @@ fn assemble(
             }
             None => None,
         };
-        let definition =
-            TypeDefinition::new(id, data.params.clone(), body, invariant, visibility)
-                .map_err(|error| error.to_string())?;
+        let binders = binders_of(program, &data.params, &data.bounds)?;
+        let definition = TypeDefinition::new(id, binders, body, invariant, visibility)
+            .map_err(|error| error.to_string())?;
         types.push(definition);
     }
     let mut interfaces = Vec::new();
@@ -1321,7 +1334,12 @@ fn assemble(
             .map_or(data.view.construct().span(), |checked| checked.span);
         functions.push(CheckedFunction {
             name: format!("{}.where", data.name),
-            signature: signature_record(program, &[], &[], (**signature).clone())?,
+            signature: signature_record(
+                program,
+                &data.params,
+                &data.bounds,
+                (**signature).clone(),
+            )?,
             defaults: closure.defaults.clone(),
             body: FunctionBody::Expr(Box::new(closure.body.clone())),
             entry_guard: None,

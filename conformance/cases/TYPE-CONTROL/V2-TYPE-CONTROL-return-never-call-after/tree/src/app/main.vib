@@ -1,0 +1,6 @@
+fn spin takes {n: I32} returns r: Never do return spin(n) endfn
+
+fn f takes {n: I32} returns r: I32 do
+  return spin(n)
+  return 1i32
+endfn

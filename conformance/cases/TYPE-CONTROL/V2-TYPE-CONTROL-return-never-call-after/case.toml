@@ -1,0 +1,19 @@
+id = "V2-TYPE-CONTROL-return-never-call-after"
+rule = "V2-TYPE-CONTROL-return-never-call-after"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#return-and-never: a statement after return spin(n) is @type.unreachableCode only as after a return, the call itself no fault"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.unreachableCode"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 122, end = 133 }
+related = [{ source = "src/app/main.vib", span = { start = 105, end = 119 } }]

@@ -601,8 +601,13 @@ impl CheckedModuleSet {
                     .flat_map(|case| case.fields.iter().map(|(_, ty)| ty))
                     .collect(),
             };
+            let evidence = Evidence {
+                binders: definition.parameters(),
+                self_interface: None,
+            };
             for component in components {
                 tables.check_type(component, scope)?;
+                tables.check_applications(evidence, component)?;
             }
             if let Some(invariant) = definition.invariant() {
                 let function = tables.function(invariant.predicate)?;
@@ -636,6 +641,13 @@ impl CheckedModuleSet {
                     member.signature.type_info(),
                     member.signature.scope(),
                 )?;
+                tables.check_applications(
+                    Evidence {
+                        binders: member.signature.binders(),
+                        self_interface: Some(interface.id()),
+                    },
+                    member.signature.type_info(),
+                )?;
                 if !self_map_result(member.signature.type_info(), self.table.library())
                 {
                     return Err(IrError::InvalidType(format!(
@@ -662,6 +674,7 @@ impl CheckedModuleSet {
         let mut flow = Flow::default();
         for global in &self.globals {
             tables.check_type(&global.value_type, OpenScope::Closed)?;
+            tables.check_applications(Evidence::default(), &global.value_type)?;
             let mut checker =
                 Checker::new(tables, OpenScope::Closed, global.slot_count);
             let mut gathered = Gathered::default();
@@ -710,6 +723,13 @@ impl CheckedModuleSet {
                 .chain(implementation.choices().entries().iter().map(|(_, ty)| ty))
             {
                 tables.check_type(ty, scope)?;
+                tables.check_applications(
+                    Evidence {
+                        binders: implementation.binders(),
+                        self_interface: None,
+                    },
+                    ty,
+                )?;
             }
             if interface.associated().len() != implementation.choices().len()
                 || !interface
@@ -782,6 +802,13 @@ impl CheckedModuleSet {
         let signature = &function.signature;
         let scope = signature.scope();
         tables.check_type(signature.type_info(), scope)?;
+        tables.check_applications(
+            Evidence {
+                binders: signature.binders(),
+                self_interface,
+            },
+            signature.type_info(),
+        )?;
         let (slot_types, labels, result) = match signature.type_info() {
             Type::Fn(callable) => (
                 callable.slot_types(),

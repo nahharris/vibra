@@ -1,0 +1,10 @@
+let empty: List(I32) be [] endlet
+let one: List(I32) be [1i32] endlet
+
+fn f takes {p: List(I32)} returns r: I32 do
+  return match p
+    case empty 0i32
+    case one 1i32
+    case [_] 2i32
+  endmatch
+endfn

@@ -1,0 +1,4 @@
+fn f returns r: I32 do
+  let x: I32 be "a" endlet
+  return x
+endfn

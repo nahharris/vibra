@@ -1,0 +1,19 @@
+id = "V2-CONTRACT-member-requires-unproved"
+rule = "V2-CONTRACT-member-requires-unproved"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#guards-and-callable-types: a call of a contract member whose bare requires no rule establishes is @contract.unproved at the call"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "unknown"
+
+[[expect.diagnostics]]
+code = "@contract.unproved"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 297, end = 318 }
+related = [{ source = "src/app/main.vib", span = { start = 169, end = 173 } }]

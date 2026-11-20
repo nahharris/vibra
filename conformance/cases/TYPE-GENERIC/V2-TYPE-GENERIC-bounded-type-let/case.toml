@@ -1,0 +1,19 @@
+id = "V2-TYPE-GENERIC-bounded-type-let"
+rule = "V2-TYPE-GENERIC-bounded-type-let"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#generics: an application of a bounded declared type in the written type of a let is @type.unsatisfiedBound at the argument, related to the bound"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.unsatisfiedBound"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 125, end = 130 }
+related = [{ source = "src/app/main.vib", span = { start = 38, end = 45 } }]

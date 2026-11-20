@@ -1,0 +1,8 @@
+let table: Dict(Str I32) be ["a": 1i32] endlet
+
+fn f takes {p: Dict(Str I32)} returns r: I32 do
+  return match p
+    case table 1i32
+    case _ 0i32
+  endmatch
+endfn

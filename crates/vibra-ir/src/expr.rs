@@ -885,7 +885,8 @@ impl<'a> Checker<'a> {
     }
 
     pub(crate) fn check_type(&self, ty: &Type) -> Result<(), IrError> {
-        self.tables.check_type(ty, self.scope)
+        self.tables.check_type(ty, self.scope)?;
+        self.tables.check_applications(self.evidence, ty)
     }
 
     /// Checks that a constant's value fits its type, as its encoding does.

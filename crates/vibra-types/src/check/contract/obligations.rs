@@ -94,22 +94,48 @@ pub(super) fn predicate_call(
     node: &Node,
 ) -> Option<Node> {
     let entry = context.predicate_entry(ty)?;
-    let Expr::Construct { construction, .. } = &node.expr else {
+    let Expr::Construct {
+        construction,
+        value_type,
+    } = &node.expr
+    else {
         return None;
+    };
+    // A generic type's predicate is applied at the construction's type
+    // arguments.
+    let arguments = match value_type {
+        Type::Declared(_, arguments) => arguments.clone(),
+        _ => Vec::new(),
+    };
+    let at = |types: &[Type]| {
+        types
+            .iter()
+            .map(|ty| ty.instantiate(&arguments))
+            .collect::<Vec<_>>()
     };
     let kind = &context.program().types.get(ty)?.kind;
     let representation = match (construction, kind) {
         (Construction::Wrapper(inner), TypeKind::Wrapper(_)) => (**inner).clone(),
         (Construction::Tuple(components), TypeKind::Tuple(types)) => Node::new(
             Expr::Construct {
-                value_type: Type::Tuple(types.clone()),
+                value_type: Type::Tuple(at(types)),
                 construction: Construction::Tuple(components.clone()),
             },
             node.origin.clone(),
         ),
         (Construction::Record(fields), TypeKind::Record(types)) => Node::new(
             Expr::Construct {
-                value_type: Type::Record(NamedTypes::new(types.clone()).ok()?),
+                value_type: Type::Record(
+                    NamedTypes::new(
+                        types
+                            .iter()
+                            .map(|(name, ty)| {
+                                (name.clone(), ty.instantiate(&arguments))
+                            })
+                            .collect::<Vec<_>>(),
+                    )
+                    .ok()?,
+                ),
                 construction: Construction::Record(fields.clone()),
             },
             node.origin.clone(),
@@ -120,7 +146,7 @@ pub(super) fn predicate_call(
         Expr::Call {
             target: CallTarget::Direct {
                 function: entry,
-                type_arguments: Vec::new(),
+                type_arguments: arguments,
             },
             arguments: Arguments {
                 positional: vec![representation],

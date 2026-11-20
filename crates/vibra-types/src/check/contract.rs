@@ -265,8 +265,14 @@ impl Context<'_, '_> {
     }
 
     /// Reports `@tool.limitExceeded` at the predicate at `span` of the
-    /// module `module`, once.
+    /// module `module` of an obligation, once.
     fn limit(&mut self, module: usize, span: ByteSpan) {
+        self.limit_reached(module, span, "the obligation's status is unknown");
+    }
+
+    /// Reports `@tool.limitExceeded` at the predicate at `span` of the
+    /// module `module`, once, with what follows from it, `outcome`.
+    fn limit_reached(&mut self, module: usize, span: ByteSpan, outcome: &str) {
         if self.limited.contains(&(module, span)) {
             return;
         }
@@ -278,7 +284,7 @@ impl Context<'_, '_> {
             format!(
                 "evaluating this predicate over constant operands reached the \
                  reduction limit of the limit profile `{}` ({} \
-                 reductions); the obligation's status is unknown",
+                 reductions); {outcome}",
                 super::ctfe::PROFILE.name,
                 super::ctfe::PROFILE.compile_time.reductions
             ),
@@ -504,7 +510,7 @@ pub(crate) fn review(
     let standings = std::mem::take(&mut context.standings);
     let mut evaluator = Evaluator::new(&facts, &standings, build);
     context.standings.clone_from(&standings);
-    prove::discharge(&mut context, &certified, &mut evaluator);
+    prove::discharge(&mut context, &certified, &facts.members, &mut evaluator);
     obligations::patterns(&mut context, &mut evaluator);
     folds(&mut context, &certified, &mut evaluator);
     context.reviewed
@@ -582,6 +588,8 @@ fn invariants(context: &mut Context<'_, '_>, facts: &Facts) {
 }
 
 /// Folds every certified guard with `else` whose predicate reads no slot.
+/// A predicate whose evaluation reaches the limit is `@tool.limitExceeded`,
+/// as an obligation's is, and stays a check when the guard runs.
 fn folds(
     context: &mut Context<'_, '_>,
     certified: &Certified,
@@ -591,10 +599,15 @@ fn folds(
     for (index, checked) in inputs.functions {
         let (entry_ok, exit_ok) = certified.get(index).copied().unwrap_or_default();
         let mut fold = Fold::default();
+        let mut limited = Vec::new();
         let mut decide = |guard: Option<&CheckedGuard>, ok: bool| {
             let guard = guard.filter(|guard| ok && guard.consequence.is_some())?;
             match evaluator.evaluate(&guard.predicate) {
                 Outcome::Value(Value::Variant { ref case, .. }) => Some(case == "true"),
+                Outcome::LimitReached => {
+                    limited.push(guard.predicate.origin.span());
+                    None
+                }
                 _ => None,
             }
         };
@@ -605,6 +618,22 @@ fn folds(
         );
         if fold != Fold::default() {
             context.reviewed.folds.insert(*index, fold);
+        }
+        // An implementation member's guards are its contract's, written in
+        // the interface's module.
+        let module = inputs.program.functions.get(*index).map(|data| {
+            data.implements
+                .and_then(|interface| inputs.program.interfaces.get(interface))
+                .map_or(data.module, |interface| interface.module)
+        });
+        if let Some(module) = module {
+            for span in limited {
+                context.limit_reached(
+                    module,
+                    span,
+                    "the guard is checked when it runs",
+                );
+            }
         }
     }
 }

@@ -1,0 +1,12 @@
+id = "V2-TYPE-CONTROL-return-never-call"
+rule = "V2-TYPE-CONTROL-return-never-call"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#return-and-never: return spin(n), where spin returns Never, is a tail call and is accepted"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

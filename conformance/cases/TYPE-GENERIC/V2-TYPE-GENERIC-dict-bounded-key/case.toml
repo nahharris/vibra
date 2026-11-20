@@ -1,0 +1,12 @@
+id = "V2-TYPE-GENERIC-dict-bounded-key"
+rule = "V2-TYPE-GENERIC-dict-bounded-key"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#dict-keys-equality-and-order: a type parameter whose bound is Ordered keys a dict, so a generic function builds one by conversion and by literal, looks a key up, and iterates it"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

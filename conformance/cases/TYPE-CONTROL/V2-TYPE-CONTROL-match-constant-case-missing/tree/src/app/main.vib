@@ -1,0 +1,13 @@
+type Shape
+  case circle {r: I32}
+  case dot
+endtype
+
+let unit: Shape be Shape.circle(r: 1i32) endlet
+
+fn f takes {s: Shape} returns r: I32 do
+  return match s
+    case unit 1i32
+    case Shape.dot() 0i32
+  endmatch
+endfn

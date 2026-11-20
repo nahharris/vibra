@@ -1,0 +1,1 @@
+type Index(K) of Dict(K I32) endtype

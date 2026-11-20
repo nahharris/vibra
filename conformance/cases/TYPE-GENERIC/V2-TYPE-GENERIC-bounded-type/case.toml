@@ -1,0 +1,12 @@
+id = "V2-TYPE-GENERIC-bounded-type"
+rule = "V2-TYPE-GENERIC-bounded-type"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#bounds: a declared type with a bounded parameter is declared, applied, constructed, and matched, and inside its members the parameter has the members of its bound"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

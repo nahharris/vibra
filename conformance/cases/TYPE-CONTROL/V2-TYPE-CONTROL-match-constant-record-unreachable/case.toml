@@ -1,0 +1,19 @@
+id = "V2-TYPE-CONTROL-match-constant-record-unreachable"
+rule = "V2-TYPE-CONTROL-match-constant-record-unreachable"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#constant-expressions-and-constant-patterns: an arm a record constant pattern's expansion already covers is @pattern.unreachableArm, related to the constant's arm"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@pattern.unreachableArm"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 163, end = 187 }
+related = [{ source = "src/app/main.vib", span = { start = 142, end = 148 } }]

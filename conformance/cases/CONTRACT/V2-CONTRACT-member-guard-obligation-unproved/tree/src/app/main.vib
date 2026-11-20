@@ -1,0 +1,15 @@
+fn pos takes {x: I32} returns r: Bool requires Ordered.greater(x 0i32) do return Bool.true() endfn
+
+interface Sized
+  fn size
+    takes {value: Self n: I32}
+    returns r: I32
+    requires pos(n) else 0i32
+  endfn
+endinterface
+
+type A of I32
+  impl Sized
+    fn size takes {value: Self m: I32} returns s: I32 do return m endfn
+  endimpl
+endtype

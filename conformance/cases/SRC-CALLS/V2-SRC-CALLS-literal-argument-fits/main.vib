@@ -1,0 +1,5 @@
+fn main returns r: I32 do return I32.add(g(5) k([1 1])) endfn
+
+fn g takes {x: I32} returns r: I32 do return x endfn
+
+fn k takes {l: List(I32)} returns r: I32 do return 2i32 endfn

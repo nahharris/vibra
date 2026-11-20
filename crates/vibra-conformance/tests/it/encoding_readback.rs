@@ -72,7 +72,10 @@ fn definition(
 ) -> TypeDefinition {
     TypeDefinition::new(
         id(path),
-        parameters.iter().map(|name| (*name).to_owned()).collect(),
+        parameters
+            .iter()
+            .map(|name| vibra_ir::Binder::new(*name, None).unwrap())
+            .collect(),
         body,
         None,
         visibility,

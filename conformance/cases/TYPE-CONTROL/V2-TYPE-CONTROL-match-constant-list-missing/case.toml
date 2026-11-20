@@ -1,0 +1,19 @@
+id = "V2-TYPE-CONTROL-match-constant-list-missing"
+rule = "V2-TYPE-CONTROL-match-constant-list-missing"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#constant-expressions-and-constant-patterns: a list constant pattern expands to a list pattern of its length, so longer lists stay uncovered"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@pattern.nonExhaustive"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 124, end = 198 }
+notes = ["[_ _]"]

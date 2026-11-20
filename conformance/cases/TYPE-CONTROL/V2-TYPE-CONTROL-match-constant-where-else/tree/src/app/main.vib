@@ -1,0 +1,14 @@
+fn positive takes {x: I32} returns ok: Bool do return Ordered.greater(x 0i32) endfn
+
+type Pos of I32
+  where positive else @negative
+endtype
+
+let three: Result(Pos @negative) be Pos(3i32) endlet
+
+fn f takes {x: Result(Pos @negative)} returns r: I32 do
+  return match x
+    case three 1i32
+    case _ 0i32
+  endmatch
+endfn

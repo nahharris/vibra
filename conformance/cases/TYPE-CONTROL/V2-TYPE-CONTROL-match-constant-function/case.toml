@@ -1,0 +1,19 @@
+id = "V2-TYPE-CONTROL-match-constant-function"
+rule = "V2-TYPE-CONTROL-match-constant-function"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#constant-expressions-and-constant-patterns: a function is never a constant expression, so a pattern name that resolves to one is @name.redeclaration, related to it"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@name.redeclaration"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 106, end = 107 }
+related = [{ source = "src/app/main.vib", span = { start = 3, end = 4 } }]

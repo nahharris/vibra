@@ -1,0 +1,3 @@
+fn k takes {l: List(I32)} returns r: I32 do return 0i32 endfn
+
+fn f returns r: I32 do return k([1i32 "a"]) endfn

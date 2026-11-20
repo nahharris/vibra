@@ -1,0 +1,5 @@
+type Sorted(T) of List(T)
+  given {T: Ordered}
+endtype
+type Plain of I32 endtype
+type Holder of {s: Sorted(Plain)} endtype

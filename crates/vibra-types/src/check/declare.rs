@@ -11,19 +11,23 @@
 //! parameters, bounded type parameters, `requires` and `ensures`, and written
 //! types of every form but `Proc` and `Intent`; module values of those types;
 //! wrappers, declared tuples, declared records, and variant types, generic or
-//! not, with their members, a wrapper, declared tuple, or declared record with
-//! a `where` included; interfaces with their parameters, associated types,
+//! not and with bounded parameters, with their members, a wrapper, declared
+//! tuple, or declared record with a `where` included; interfaces with their
+//! parameters, associated types,
 //! abstract and default members, and their implementations in a type or in
 //! the interface;
 //! and, in the embedded standard library, the intrinsic scalar types and
-//! `List(T)` with their external members. A guarded member of an interface
-//! or an implementation is `@tool.unavailable`, as is any other declaration
+//! `List(T)` with their external members. A procedure or a member that
+//! performs operations is `@tool.unavailable`, as is any other declaration
 //! of a local module, over the declaration; one of the standard library is
 //! skipped with a note.
 //!
 //! A written type nests at most [`Type::MAX_DEPTH`] levels, measured before
-//! it is converted; an applied type supplies exactly its head's parameters;
-//! and the key of a `Dict` implements `Ordered`.
+//! it is converted; an applied type supplies exactly its head's parameters,
+//! each meeting its parameter's bound; and the key of a `Dict` implements
+//! `Ordered`. The bounds and an open key are decided once every
+//! implementation is known, under the bounds in scope where the type is
+//! written (a [`BoundGoal`]).
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
@@ -159,6 +163,8 @@ pub(crate) struct TypeData<'a> {
     pub(crate) id: Option<TypeId>,
     /// The type parameters, in written order.
     pub(crate) params: Vec<String>,
+    /// The bound of each parameter, `None` for `Any`.
+    pub(crate) bounds: Vec<Option<BoundData>>,
     /// Whether the representation is visible in every module that sees the
     /// type: the `representation` section, or else the type's own
     /// visibility.
@@ -370,15 +376,30 @@ pub(crate) struct ImplData {
     pub(crate) usable: bool,
 }
 
-/// A written application of the interface `interface` at `arguments`, in
-/// `module`: an interface type, an interface value type, a bound, or an
-/// `impl` target. Each argument MUST satisfy the bound of its interface
-/// parameter (`docs/spec/02-type-system.md`, "Generics"), which is decided
-/// once every implementation is known.
+/// What a written application applies: an interface, a declared type, or
+/// the standard library's `Dict` at a key that mentions a type parameter.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum GoalHead {
+    /// An interface type, an interface value type, a bound, or an `impl`
+    /// target.
+    Interface(usize),
+    /// A declared type with parameters.
+    Type(usize),
+    /// `Dict` at an open key, whose one argument is the key: it MUST
+    /// implement `Ordered` under the bounds in scope.
+    DictKey,
+}
+
+/// A written application of `head` at `arguments`, in `module`. Each
+/// argument MUST satisfy the bound of its parameter
+/// (`docs/spec/02-type-system.md`, "Generics"), and an open dict key MUST
+/// implement `Ordered` ("Dict keys, equality, and order"); both are decided
+/// once every implementation is known, with the bounds in scope where the
+/// application is written.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct BoundGoal {
     pub(crate) module: usize,
-    pub(crate) interface: usize,
+    pub(crate) head: GoalHead,
     pub(crate) arguments: Vec<Type>,
     /// Where each argument is written.
     pub(crate) spans: Vec<ByteSpan>,
@@ -508,6 +529,7 @@ impl<'a> Program<'a> {
             .collect();
         program.interface_shapes();
         program.type_kinds(&pending_impls);
+        program.type_bounds();
         program.interface_headers();
         program.function_headers();
         program.value_headers();
@@ -604,6 +626,7 @@ impl<'a> Program<'a> {
                         identity: identity("", "@type", name.text()),
                         kind: TypeKind::Unsupported,
                         id: None,
+                        bounds: vec![None; params.len()],
                         params: params.clone(),
                         representation_public,
                         invariant: false,
@@ -949,6 +972,12 @@ impl<'a> Program<'a> {
             match ty {
                 Type::Atom | Type::AtomSingleton(_) => {}
                 Type::Tuple(_) | Type::Record(_) => pending.extend(ty.components()),
+                // An implementation in a generic type covers every
+                // application of it, each of which meets the type's bounds.
+                Type::Declared(id, _)
+                    if self.ordered.iter().any(|receiver| {
+                        matches!(receiver, Type::Declared(ordered, _) if ordered == id)
+                    }) => {}
                 other if self.ordered.contains(other) => {}
                 _ => return Some(DiagnosticCode::TypeInvalidDictKey),
             }
@@ -1073,14 +1102,42 @@ impl<'a> Program<'a> {
                 if self.library_index(Library::Dict) == Some(index)
                     && let (Some(key), Some(key_written)) =
                         (arguments.first(), positional.first())
-                    && let Some(code) = self.key_fault(key)
                 {
-                    return Err(NoType::Fault(Box::new(key_diagnostic(
-                        code,
-                        key_written.span(),
-                        key,
-                    ))));
+                    // A key that mentions a type parameter implements
+                    // `Ordered` exactly when the bounds in scope show it, which
+                    // is decided where the type is written, once every
+                    // implementation is known.
+                    let code = if !key.is_open() {
+                        self.key_fault(key)
+                    } else {
+                        self.key_fault(key).filter(|code| {
+                            *code == DiagnosticCode::TypeFunctionNotEquatable
+                        })
+                    };
+                    if let Some(code) = code {
+                        return Err(NoType::Fault(Box::new(key_diagnostic(
+                            code,
+                            key_written.span(),
+                            key,
+                        ))));
+                    }
+                    if key.is_open() {
+                        self.record_goal(
+                            module,
+                            GoalHead::DictKey,
+                            std::slice::from_ref(key),
+                            vec![key_written.span()],
+                            written.span(),
+                        );
+                    }
                 }
+                self.record_goal(
+                    module,
+                    GoalHead::Type(index),
+                    &arguments,
+                    positional.iter().map(TypeExpr::span).collect(),
+                    written.span(),
+                );
                 data.applied(arguments).ok_or(NoType::Unsupported)
             }
             TypeForm::Atom(atom) => Ok(Type::AtomSingleton(
@@ -1188,9 +1245,7 @@ impl<'a> Program<'a> {
                         TypeKind::Unsupported
                     }
                 }
-                Some(TypeBody::Cases(_) | TypeBody::Of(_)) if plain => {
-                    TypeKind::Pending
-                }
+                Some(TypeBody::Cases(_) | TypeBody::Of(_)) => TypeKind::Pending,
                 _ => TypeKind::Unsupported,
             };
             let id = if kind == TypeKind::Pending {
@@ -1282,8 +1337,55 @@ impl<'a> Program<'a> {
         }
     }
 
-    /// The receiver of every `impl Ordered` written in a type without
-    /// parameters.
+    /// Reads the bound of every parameter of every type this checker reads,
+    /// in the type's own scope. A bound that does not read is reported once
+    /// and left `Any`, so the fault does not cascade.
+    fn type_bounds(&mut self) {
+        let mut read = Vec::new();
+        for (index, data) in self.types.iter().enumerate() {
+            if data.view.given().is_none()
+                || matches!(data.kind, TypeKind::Unsupported | TypeKind::Faulty)
+            {
+                continue;
+            }
+            let self_type = data.self_type();
+            let scope = Scope {
+                self_type: self_type.as_ref(),
+                binders: &data.params,
+                associated: &[],
+            };
+            let bounds = self.read_bounds(
+                data.module,
+                data.view.given(),
+                &data.params,
+                0,
+                scope,
+            );
+            read.push((index, bounds));
+        }
+        for (index, bounds) in read {
+            let Some(data) = self.types.get(index) else {
+                continue;
+            };
+            match bounds {
+                Ok(bounds) => {
+                    if let Some(data) = self.types.get_mut(index) {
+                        data.bounds = bounds;
+                    }
+                }
+                Err(why) => {
+                    let module = data.module;
+                    let span = data.view.construct().span();
+                    let what = format!("the bounds of `{}`", data.name);
+                    self.no_type(module, span, &what, why);
+                }
+            }
+        }
+    }
+
+    /// The receiver of every `impl Ordered` written in a type: the type
+    /// applied to its own parameters, which the implementation passes
+    /// through with the type's bounds.
     fn ordered_receivers(&self, pending_impls: &[(Host, Impl<'a>)]) -> Vec<Type> {
         let Some(ordered) = self.library.iter().find_map(|(binding, entity)| {
             (*binding == Library::Ordered).then_some(*entity)
@@ -1296,9 +1398,6 @@ impl<'a> Program<'a> {
             let Some(data) = self.types.get(*owner) else {
                 continue;
             };
-            if !data.params.is_empty() {
-                continue;
-            }
             let target = block.target().and_then(|target| match target.form() {
                 Some(TypeForm::Path {
                     path,
@@ -1504,7 +1603,13 @@ impl<'a> Program<'a> {
                     data.binders.len().saturating_sub(own),
                     scope,
                 )
-                .and_then(|bounds| {
+                .and_then(|mut bounds| {
+                    // A member sees its owner's parameters with their bounds.
+                    if let Some(owner) = owner {
+                        for (slot, bound) in bounds.iter_mut().zip(&owner.bounds) {
+                            slot.clone_from(bound);
+                        }
+                    }
                     Ok((self.callable_type(data.module, &data.view, scope)?, bounds))
                 })
             };

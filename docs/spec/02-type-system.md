@@ -1095,7 +1095,9 @@ A **constant expression** is a literal, an atom, or `void`; a construction,
 tuple, record, list, or dict whose operands are all constant expressions and
 whose type has no `where … else`; or the name of a module value whose
 initializer is a constant expression. A function call is never a constant
-expression, so the property is decidable without evaluation.
+expression, so the property is decidable without evaluation. Neither is a
+dict whose canonical key order uses a declared type's own `Ordered`
+implementation, since ordering its entries would run that implementation.
 
 A name in pattern position that resolves to a constant module value is a
 constant pattern: it means the pattern of that value and binds nothing.
@@ -1106,8 +1108,7 @@ literal; that of a tuple, record, or list is the tuple, record, or list
 pattern of its components' patterns; and that of a construction of a case
 or a declared type is the constructor pattern of its fields' patterns. A
 float, `void`, or a dict has no pattern form, so a constant whose value is
-or holds one is `@pattern.unsupportedCoverage` at the pattern: coverage has
-no shape to expand it to.
+or holds one is `@pattern.invalidConstant` at the pattern.
 
 Labelled defaults are constant expressions. Two defaults are the same when
 they denote the same value. The value of a constant dict is the value its

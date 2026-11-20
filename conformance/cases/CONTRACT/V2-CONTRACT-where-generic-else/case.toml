@@ -1,0 +1,12 @@
+id = "V2-CONTRACT-where-generic-else"
+rule = "V2-CONTRACT-where-generic-else"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#type-invariants: a generic type states a where … else over its parameters, and each construction applies the predicate at its type arguments"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

@@ -1,0 +1,28 @@
+type Present(T) of Option(T)
+  where fn
+    takes {o: Option(T)}
+    returns ok: Bool
+    do
+      return match o
+        case Option.some(value: _) Bool.true()
+        case Option.none() Bool.false()
+      endmatch
+  endfn else @absent
+endtype
+
+fn count(T)
+  takes {o: Option(T)}
+  returns n: I32
+  do
+    match Present(o)
+      case Result.ok(value: _)
+        return 1i32
+      case Result.err(error: _)
+        return 0i32
+    endmatch
+endfn
+
+fn main returns r: I32 do
+  let none: Option(Atom) be Option.none() endlet
+  return I32.add(I32.mul(count(Option.some(value: @a)) 10i32) count(none))
+endfn
