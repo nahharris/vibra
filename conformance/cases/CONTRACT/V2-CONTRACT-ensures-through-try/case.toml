@@ -1,0 +1,12 @@
+id = "V2-CONTRACT-ensures-through-try"
+rule = "V2-CONTRACT-ensures-through-try"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#guards-with-else: the candidate is the err that try propagates, and the predicate runs on it"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

@@ -1,0 +1,3 @@
+fn main returns r: I32 do return f(4i32) endfn
+fn f takes {x: I32} returns r: I32 ensures small(r) else 0i32 do return x endfn
+fn small takes {r: I32} returns b: Bool do return Ordered.less(r 100i32) endfn

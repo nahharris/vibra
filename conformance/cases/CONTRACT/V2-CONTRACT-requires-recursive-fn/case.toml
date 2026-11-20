@@ -1,0 +1,18 @@
+id = "V2-CONTRACT-requires-recursive-fn"
+rule = "V2-CONTRACT-requires-recursive-fn"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#predicates: a call of a function recursive through another is @contract.unsupportedPredicate at the call"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@contract.unsupportedPredicate"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 44, end = 51 }

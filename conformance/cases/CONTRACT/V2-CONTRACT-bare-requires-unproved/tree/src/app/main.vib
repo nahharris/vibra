@@ -1,0 +1,2 @@
+fn f takes {x: I32} returns r: I32 requires Ordered.greater(x 0i32) do return x endfn
+fn g takes {y: I32} returns r: I32 do return f(y) endfn

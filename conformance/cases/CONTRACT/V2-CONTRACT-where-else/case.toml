@@ -1,0 +1,12 @@
+id = "V2-CONTRACT-where-else"
+rule = "V2-CONTRACT-where-else"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#type-invariants: a construction of a type whose where has an else is a Result: ok when the predicate holds, err with the consequence otherwise"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

@@ -1,0 +1,19 @@
+id = "V2-CONTRACT-bare-requires-unproved"
+rule = "V2-CONTRACT-bare-requires-unproved"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#bare-guards: a bare requires the discharge rules do not establish at a call is @contract.unproved at the application, with the declaration, and the outcome unknown"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "unknown"
+
+[[expect.diagnostics]]
+code = "@contract.unproved"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 131, end = 135 }
+related = [{ source = "src/app/main.vib", span = { start = 3, end = 4 } }]

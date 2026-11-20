@@ -1,0 +1,1 @@
+fn f takes {xs: List(I32)} returns r: I32 requires match Iter.collect(xs) case [] true case _ false endmatch do return 1i32 endfn

@@ -1,0 +1,12 @@
+id = "V2-CONTRACT-requires-else-false"
+rule = "V2-CONTRACT-requires-else-false"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#guards-with-else: a requires with else whose predicate is false returns the consequence and skips the body"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

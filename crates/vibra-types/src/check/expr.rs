@@ -12,6 +12,7 @@
 //! depth of the program.
 
 mod dispatch;
+mod guards;
 mod patterns;
 
 use std::collections::BTreeMap;
@@ -32,12 +33,14 @@ use vibra_syntax::source::{
 use vibra_syntax::{CstNode, SyntaxKind};
 
 use super::callables::{NotConstant, fold, mark_tail, substitute};
+use super::contract::{Guards, Site, constant_operands};
 use super::declare::{
     BoundData, Entity, NoType, Program, Scope, TypeKind, key_diagnostic, plain_callable,
 };
 use super::literal::{self, LiteralFault};
 use super::pattern::{Coverage, LimitReached, Pat};
 use dispatch::Dispatch;
+pub(crate) use guards::{GuardViews, fallible_construction};
 use patterns::pattern_span;
 
 /// Where each supported declaration lands in the checked module set.
@@ -53,6 +56,9 @@ pub(crate) struct Layout {
     /// Whether `constants` is complete; before it is, a default that names a
     /// module value is left unchecked rather than called not constant.
     pub(crate) constants_known: bool,
+    /// The static type of the `else` consequence of each type's `where …
+    /// else`, by the type's program index, once the invariants are checked.
+    pub(crate) errors: BTreeMap<usize, Type>,
 }
 
 /// A declaration a body refers to.
@@ -526,6 +532,9 @@ pub(crate) struct BodyChecker<'p, 'a> {
     /// Forms the checked IR cannot hold, reported only when the body has no
     /// other fault.
     gaps: Vec<(ByteSpan, String)>,
+    /// Every place a checked body states a bare-guard obligation or a
+    /// pattern a constant construction decides.
+    pub(crate) sites: Vec<Site>,
 }
 
 /// What a callable body sees besides its parameters: its type parameters
@@ -549,6 +558,8 @@ pub(crate) struct Checked {
     pub(crate) slot_count: usize,
     /// The constant default of each labelled parameter, in written order.
     pub(crate) defaults: Vec<(String, Constant)>,
+    /// The guards of a callable.
+    pub(crate) guards: Guards,
 }
 
 impl<'p, 'a> BodyChecker<'p, 'a> {
@@ -588,6 +599,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             destinations: Vec::new(),
             result_span: None,
             gaps: Vec::new(),
+            sites: Vec::new(),
         }
     }
 
@@ -596,13 +608,15 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
     /// as `labelled`, with the type parameters `binders` and `self_type`
     /// for `Self` in scope. Each parameter is bound to its slot, a pattern
     /// that takes it apart is a `match` of one arm around the body, and each
-    /// labelled default is checked as a constant of its label's type.
+    /// labelled default is checked as a constant of its label's type. The
+    /// guards `views` are checked once the parameters are bound.
     pub(crate) fn callable(
         &mut self,
         signature: &FnType,
         patterns: &[Pattern<'a>],
         labelled: &[(Ident<'a>, TypeExpr<'a>, Expr<'a>)],
         scope: CallableScope,
+        views: &GuardViews<'a>,
         body: Body<'a>,
     ) -> Checked {
         self.locals.clear();
@@ -622,7 +636,10 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             .collect::<Vec<_>>();
         let (mut failed, destructured) =
             self.bind_parameters(signature, patterns, &names);
+        let bound = signature.slot_count()..self.slots.len();
         let (faulty, defaults) = self.labelled_defaults(signature, labelled);
+        failed |= faulty;
+        let (faulty, guards) = self.guards(views, signature, &destructured, &bound);
         failed |= faulty;
         self.result = Some(signature.result.clone());
         let out = self.run(Task::Body(Box::new(
@@ -645,6 +662,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             node,
             slot_count: self.slots.len(),
             defaults,
+            guards,
         }
     }
 
@@ -819,7 +837,14 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             }
             None => None,
         }?;
-        match fold(&node, &self.layout.constants) {
+        // A construction of a type whose `where` has an `else` is no
+        // constant expression.
+        let folded = if fallible_construction(self.program, &node) {
+            Err(NotConstant::Expression)
+        } else {
+            fold(&node, &self.layout.constants)
+        };
+        match folded {
             Ok(value) => {
                 if let Ok(constant) = Constant::new(ty.clone(), value) {
                     Some(constant)
@@ -863,6 +888,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             node: out.node,
             slot_count: self.slots.len(),
             defaults: Vec::new(),
+            guards: Guards::default(),
         }
     }
 
@@ -903,6 +929,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             node,
             slot_count: self.slots.len(),
             defaults: Vec::new(),
+            guards: Guards::default(),
         }
     }
 
@@ -2002,11 +2029,11 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         let data = program.types.get(index)?;
         match data.kind {
             TypeKind::Wrapper(_) | TypeKind::Tuple(_) | TypeKind::Record(_)
-                if data.invariant =>
+                if data.invariant && !data.params.is_empty() =>
             {
                 self.unavailable(
                     callee_span,
-                    "constructing a value of a type with an invariant",
+                    "constructing a value of a generic type with an invariant",
                 );
                 None
             }
@@ -2422,7 +2449,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                         }
                         _ => None,
                     };
-                    (params, data.self_type())
+                    (params, self.constructed(*ty))
                 }
                 None => (None, None),
             },
@@ -3042,6 +3069,11 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                 })
                 .collect::<Vec<_>>()
         };
+        let site = match &callee {
+            Callee::Function(index) => Some(Ok(*index)),
+            Callee::Construct(ty) => Some(Err(*ty)),
+            _ => None,
+        };
         let expr = match callee {
             Callee::Function(index) => {
                 self.references.push(Reference {
@@ -3115,6 +3147,12 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                 })
             }
             Callee::Construct(ty) => {
+                // The constructor of a `where … else` returns a `Result`; the
+                // construction itself is of the type.
+                let value_type = match program.types.get(ty) {
+                    Some(data) if data.fallible => data.self_type(),
+                    _ => result.clone(),
+                };
                 let construction = match program.types.get(ty).map(|data| &data.kind) {
                     Some(TypeKind::Record(_)) => {
                         Some(Construction::Record(named(written)))
@@ -3126,8 +3164,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                         .map(|node| Construction::Wrapper(Box::new(node))),
                     _ => None,
                 };
-                result
-                    .clone()
+                value_type
                     .zip(construction)
                     .map(|(value_type, construction)| IrExpr::Construct {
                         value_type,
@@ -3154,6 +3191,9 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         } else {
             None
         };
+        if let Some(node) = &node {
+            self.obligation(site, node, application);
+        }
         // Arguments hoisted to keep their written order bind around the
         // call, the first outermost.
         let node = node.map(|call| {
@@ -4145,7 +4185,13 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                         self.body_state(fallback, BodyMode::Fallback),
                     )));
                 }
-                if irrefutable == Some(false) {
+                if irrefutable == Some(false)
+                    && !self.construction_pattern(
+                        typed.lowered.as_ref(),
+                        pattern_span,
+                        node.as_ref(),
+                    )
+                {
                     self.report(
                         DiagnosticCode::PatternRefutableBinding,
                         pattern_span,

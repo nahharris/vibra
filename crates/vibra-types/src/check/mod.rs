@@ -10,10 +10,14 @@
 //! reported as resolution reports it and is not type-checked. It then reads
 //! every declaration's header ([`declare`]), checks and lowers the bodies of
 //! the modules in scope ([`expr`]), deciding the coverage of their patterns
-//! ([`pattern`]), runs the initializer-cycle analysis
-//! ([`cycle`]), and builds the [`CheckedModuleSet`] ([`lower`]).
+//! ([`pattern`]), runs the initializer-cycle analysis ([`cycle`]), reviews
+//! the guards and invariants against the certified fragment, evaluating
+//! constants through the interpreter ([`contract`], [`ctfe`]), and builds the
+//! [`CheckedModuleSet`] ([`lower`]).
 
 mod callables;
+mod contract;
+mod ctfe;
 mod cycle;
 mod declare;
 mod expr;

@@ -1,0 +1,2 @@
+fn f takes {x: I32} returns r: I32 requires positive(x) else 0i32 do return x endfn
+fn positive takes {x: I32} returns r: Bool do return Ordered.greater(x 0i32) endfn

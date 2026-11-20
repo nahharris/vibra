@@ -9,6 +9,7 @@
 //! establishes no result: its verdict is `unknown`, and it observes the
 //! event and its diagnostic.
 
+use vibra_diagnostics::{Diagnostic, DiagnosticCode};
 use vibra_interp::MemoryBudget;
 use vibra_types::interpret;
 
@@ -21,15 +22,32 @@ use crate::profile::{
 /// The memory budget every `interpret` case runs under.
 pub const INTERPRET_BUDGET: MemoryBudget = MemoryBudget::DEFAULT;
 
-/// The verdict of a check: `unsupported` when every error is
-/// `@tool.unavailable`, `refuted` for any other error, `accepted` otherwise.
-pub(crate) const fn check_verdict(has_errors: bool, only_unavailable: bool) -> Verdict {
-    if only_unavailable {
-        Verdict::Unsupported
-    } else if has_errors {
-        Verdict::Refuted
-    } else {
+/// The verdict of a check with the diagnostics `diagnostics`: `unsupported`
+/// when every error is `@tool.unavailable`; otherwise `unknown` when a bare`
+/// guard is not established or a tool limit was reached, which
+/// `docs/spec/05-tooling.md`, "Versioned envelope and results", makes the
+/// status `unknown`; `refuted` for any other error; `accepted` otherwise.
+pub(crate) fn check_verdict(diagnostics: &[Diagnostic]) -> Verdict {
+    let errors = diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.is_error())
+        .collect::<Vec<_>>();
+    if errors.is_empty() {
         Verdict::Accepted
+    } else if errors
+        .iter()
+        .all(|diagnostic| diagnostic.code() == DiagnosticCode::ToolUnavailable)
+    {
+        Verdict::Unsupported
+    } else if errors.iter().any(|diagnostic| {
+        matches!(
+            diagnostic.code(),
+            DiagnosticCode::ContractUnproved | DiagnosticCode::ToolLimitExceeded
+        )
+    }) {
+        Verdict::Unknown
+    } else {
+        Verdict::Refuted
     }
 }
 
@@ -51,10 +69,7 @@ impl ProfileHandler for InterpretHandler {
             .map_err(|error| HandlerError::new(error.to_string()))?;
         let outcome = interpret(source_id, &source, INTERPRET_BUDGET);
         let check = &outcome.check;
-        let mut observation = CaseObservation::new(check_verdict(
-            check.has_errors(),
-            check.only_unavailable(),
-        ));
+        let mut observation = CaseObservation::new(check_verdict(check.diagnostics()));
         observation.diagnostics = check.diagnostics().to_vec();
         match outcome.run {
             None => {}

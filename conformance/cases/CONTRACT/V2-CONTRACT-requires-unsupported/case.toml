@@ -1,0 +1,18 @@
+id = "V2-CONTRACT-requires-unsupported"
+rule = "V2-CONTRACT-requires-unsupported"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#predicates: a call of a member that is not a certified function is @contract.unsupportedPredicate at the call"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@contract.unsupportedPredicate"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 57, end = 73 }
