@@ -1,0 +1,19 @@
+id = "V2-TYPE-GENERIC-anonymous-bound-value-unsatisfied"
+rule = "V2-TYPE-GENERIC-anonymous-bound-value-unsatisfied"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#generics: a generic anonymous callable with a bound instantiated from its expected type at a type that does not satisfy the bound is @type.unsatisfiedBound at the callable, related to the bound"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.unsatisfiedBound"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 180, end = 253 }
+related = [{ source = "src/app/main.vib", span = { start = 227, end = 234 } }]

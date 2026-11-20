@@ -1825,7 +1825,7 @@ pub(crate) fn where_span(section: Where<'_>) -> ByteSpan {
 }
 
 /// Whether every entry of a `given` section, if any, is the bound `Any`.
-pub(crate) fn bounds_are_any(given: Option<Given<'_>>) -> bool {
+fn bounds_are_any(given: Option<Given<'_>>) -> bool {
     given.is_none_or(|given| {
         given.entries().iter().all(|(_, bound)| {
             matches!(

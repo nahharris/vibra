@@ -1,0 +1,5 @@
+fn pick(U) takes {a: U b: U} returns m: U given {U: Ordered} do
+  let larger be fn(T) takes {x: T y: T} returns z: T given {T: Ordered} do if Ordered.greater(x y) then return x else return y endif endfn endlet
+  return larger(a b)
+endfn
+fn main returns r: I32 do return pick(5i32 2i32) endfn

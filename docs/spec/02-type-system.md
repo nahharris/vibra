@@ -604,9 +604,11 @@ additional ones; redeclaring an inherited name is
 `@name.genericRedeclaration`. An `impl` block declares none: inside a `type`
 it passes the type's parameters through, and inside an `interface` its target
 MUST be a closed type expression. An anonymous callable sees the parameters
-of every enclosing declaration and may declare its own; a generic anonymous
-callable bound by `let` stays generic, and anywhere else it is instantiated
-from its written expected type.
+of every enclosing declaration and may declare its own, with bounds in
+`given` as any generic declaration's; a generic anonymous callable bound by
+`let` stays generic, and anywhere else it is instantiated from its written
+expected type. Each instantiation satisfies its bounds, as a call of a
+generic `fn` does; a breach is `@type.unsatisfiedBound`.
 
 Specialization strategy is not observable.
 

@@ -36,7 +36,7 @@ use vibra_syntax::{CstNode, SyntaxKind};
 use super::callables::{NotConstant, fold, mark_tail, substitute};
 use super::contract::{CheckedGuard, ClosureContract, Guards, Site, constant_operands};
 use super::declare::{
-    BoundData, Entity, NoType, Program, Scope, TypeKind, bounds_are_any, key_diagnostic,
+    BoundData, Entity, NoType, Program, Scope, TypeKind, key_diagnostic,
 };
 use super::literal::{self, LiteralFault};
 use super::pattern::{Coverage, LimitReached, Pat};
@@ -424,6 +424,9 @@ struct GenericClosure {
     binder_names: Vec<String>,
     /// The number of enclosing type parameters.
     outer: usize,
+    /// The bound of each of its own type parameters, after `None` for each
+    /// enclosing one.
+    bounds: Vec<Option<BoundData>>,
     /// The instantiations of generic functions in its body.
     instantiations: Vec<(usize, Vec<Type>, ByteSpan)>,
 }
@@ -491,6 +494,9 @@ struct ClosureState<'a> {
     checked: Guards,
     /// The slots the patterns of its parameters bind.
     bound: std::ops::Range<usize>,
+    /// The bound of each of its own type parameters, after `None` for each
+    /// enclosing one.
+    bounds: Vec<Option<BoundData>>,
     failed: bool,
 }
 
@@ -1839,12 +1845,6 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         if view.performs().is_some() {
             return self.unavailable_primary(span, "an anonymous callable with a row");
         }
-        if !bounds_are_any(view.given()) {
-            return self.unavailable_primary(
-                span,
-                "an anonymous callable with a bound other than `Any`",
-            );
-        }
         let own = view
             .params()
             .iter()
@@ -1858,8 +1858,21 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             binders: &binders,
             associated: &self.associated,
         };
-        let signature = match self.program.callable_type(self.module, &view, scope) {
-            Ok(signature) => signature,
+        let read = self
+            .program
+            .callable_type(self.module, &view, scope)
+            .and_then(|signature| {
+                let bounds = self.program.read_bounds(
+                    self.module,
+                    view.given(),
+                    &binders,
+                    outer,
+                    scope,
+                )?;
+                Ok((signature, bounds))
+            });
+        let (signature, bounds) = match read {
+            Ok(read) => read,
             Err(NoType::Unsupported) => {
                 return self.unavailable_primary(span, "this callable header");
             }
@@ -1873,7 +1886,14 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         let instance = if own.is_empty() || mode == ClosureMode::Generic {
             None
         } else {
-            match self.closure_instance(&signature, outer, &own, ctx.expected(), span) {
+            match self.closure_instance(
+                &signature,
+                outer,
+                &own,
+                &bounds,
+                ctx.expected(),
+                span,
+            ) {
                 Some(instance) => Some(instance),
                 None => return Step::Done(Out::error()),
             }
@@ -1887,6 +1907,9 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             captures: Vec::new(),
         });
         self.binders = binders;
+        // Its body sees its own bounds after those around it.
+        self.bounds.resize(outer, None);
+        self.bounds.extend(bounds.iter().skip(outer).cloned());
         let patterns = view
             .takes()
             .into_iter()
@@ -1917,6 +1940,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             guards,
             checked: Guards::default(),
             bound,
+            bounds,
             failed,
         });
         self.step_closure(state, None)
@@ -1956,6 +1980,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         signature: &FnType,
         outer: usize,
         own: &[String],
+        bounds: &[Option<BoundData>],
         expected: Option<&Type>,
         span: ByteSpan,
     ) -> Option<Vec<Type>> {
@@ -1983,6 +2008,23 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                     "expected `{expected}`, found the generic callable `{pattern}`"
                 ),
             );
+            return None;
+        }
+        // The expected type fixes the type arguments, so a breach of a bound
+        // is reported where that type is written.
+        let source = self.written_span(span).unwrap_or(span);
+        let mut resolved = vec![false; assignment.len()];
+        let sources = vec![Some(source); assignment.len()];
+        let module = self.module;
+        if !self.resolve_bounds(
+            bounds,
+            module,
+            &mut assignment,
+            &mut resolved,
+            &sources,
+            span,
+            true,
+        ) {
             return None;
         }
         let missing = own
@@ -2074,6 +2116,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         self.slots = frame.slots;
         self.result = frame.result;
         self.binders.truncate(frame.binders);
+        self.bounds.truncate(frame.binders);
         self.locals.truncate(frame.locals);
         self.argument = state.argument;
         let value_type = Type::function(state.signature.clone());
@@ -2177,6 +2220,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                 signature: state.signature,
                 binder_names,
                 outer: frame.binders,
+                bounds: state.bounds,
                 instantiations: records,
             });
             return Out::error();
@@ -2227,6 +2271,21 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             if unify_expected(&pattern, expected, &mut trial) {
                 assignment = trial;
             }
+        }
+        let source = self.written_span(span).unwrap_or(span);
+        let mut resolved = vec![false; assignment.len()];
+        let sources = vec![Some(source); assignment.len()];
+        let module = self.module;
+        if !self.resolve_bounds(
+            &generic.bounds,
+            module,
+            &mut assignment,
+            &mut resolved,
+            &sources,
+            span,
+            true,
+        ) {
+            return Out::error();
         }
         let missing = generic
             .binder_names
@@ -2684,6 +2743,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             Callee::Value(_, signature) => flatten(signature),
             Callee::Generic(generic) => {
                 binder_names.clone_from(&generic.binder_names);
+                bounds.clone_from(&generic.bounds);
                 preset = generic.outer;
                 flatten(&generic.signature)
             }

@@ -1,0 +1,12 @@
+id = "V2-TYPE-GENERIC-anonymous-bound-converted"
+rule = "V2-TYPE-GENERIC-anonymous-bound-converted"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#generics: a let-bound generic anonymous callable with a bound used as a function value is instantiated at the expected type, which satisfies the bound"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

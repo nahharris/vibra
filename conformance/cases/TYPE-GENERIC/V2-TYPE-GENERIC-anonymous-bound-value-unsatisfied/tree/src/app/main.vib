@@ -1,0 +1,5 @@
+type Box of I32 endtype
+fn apply takes {f: Fn({Box Box} Box)} returns r: I32 do let Box(x) be f(Box(1i32) Box(2i32)) endlet return x endfn
+fn main returns r: I32 do
+  return apply(fn(T) takes {a: T b: T} returns m: T given {T: Ordered} do return a endfn)
+endfn
