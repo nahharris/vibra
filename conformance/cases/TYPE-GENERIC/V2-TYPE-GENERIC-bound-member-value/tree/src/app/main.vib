@@ -1,0 +1,16 @@
+interface Pick
+  fn pick(T)
+    takes {x: Self item: T}
+    returns r: T
+    given {T: Ordered}
+  endfn
+endinterface
+
+type Plain of U8 endtype
+
+type Box of U8
+  impl Pick
+    fn pick(T) takes {x: Self item: T} returns r: T given {T: Ordered} do return item endfn
+  endimpl
+endtype
+fn f returns r: U8 do let g: Fn({Box Plain} Plain) be Pick.pick endlet return 1u8 endfn

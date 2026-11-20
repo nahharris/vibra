@@ -525,9 +525,9 @@ fn arguments(row: &NativeRow, scalars: &[i64]) -> Result<Vec<Argument>, Fault> {
 /// Runs the native routine of `row` against `memory`.
 ///
 /// `scalars` are the row's parameters in order, each widened to an `i64`, and
-/// the result is the row's result: an `Ordering` as `-1`, `0`, or `1`, or the
-/// component count of what a building row built or would build, or `-1` for
-/// the absence of one. See `vibra_ir::external::NativeRow` for the protocol of
+/// the result is the row's result: a length, `0` or `1` for whether two
+/// operands are the same, a parse status, or the component count of what a
+/// building row built or would build, or `-1` for the absence of one. See `vibra_ir::external::NativeRow` for the protocol of
 /// the destination.
 ///
 /// # Errors
@@ -545,7 +545,7 @@ pub fn call(
             let last = scalars.last().copied().ok_or(Fault::Signature)?;
             Some(u32::try_from(last).map_err(|_| Fault::OutOfBounds)?)
         }
-        Answer::Order | Answer::Length | Answer::Same => None,
+        Answer::Length | Answer::Same => None,
     };
     let object = |position: usize, layout: Layout| -> Result<Object<'_>, Fault> {
         match operands.get(position) {
@@ -626,20 +626,6 @@ pub fn call(
             return Ok(i64::from(crate::same(&a, &b)));
         }
 
-        C::StrCompare => {
-            let (a, b) = (
-                Chars(object(0, Layout::Chars)?),
-                Chars(object(1, Layout::Chars)?),
-            );
-            return Ok(i64::from(crate::order_code(crate::compare(&a, &b))));
-        }
-        C::BytesCompare => {
-            let (a, b) = (
-                ByteSeq(object(0, Layout::Bytes)?),
-                ByteSeq(object(1, Layout::Bytes)?),
-            );
-            return Ok(i64::from(crate::order_code(crate::compare(&a, &b))));
-        }
         C::StrConcat => {
             let (a, b) = (
                 Chars(object(0, Layout::Chars)?),

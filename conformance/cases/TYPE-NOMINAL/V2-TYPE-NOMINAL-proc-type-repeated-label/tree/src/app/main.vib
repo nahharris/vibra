@@ -1,0 +1,1 @@
+fn f takes {p: Proc({I32 depth: U8 depth: U8} Void)} returns r: I32 do return 1i32 endfn

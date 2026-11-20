@@ -121,8 +121,11 @@ impl<'a> BodyChecker<'_, 'a> {
                     return;
                 };
                 if data.invariant && !data.fallible {
-                    let node = constant_operands(node, &self.layout.constants)
-                        .then(|| node.clone());
+                    let program = self.program;
+                    let node = constant_operands(node, &self.layout.constants, &|id| {
+                        program.library_of(id)
+                    })
+                    .then(|| node.clone());
                     self.sites.push(Site::Where { ty, span, node });
                 }
             }
@@ -159,7 +162,10 @@ impl<'a> BodyChecker<'_, 'a> {
         else {
             return false;
         };
-        if !constant_operands(value, &self.layout.constants) {
+        let program = self.program;
+        if !constant_operands(value, &self.layout.constants, &|id| {
+            program.library_of(id)
+        }) {
             return false;
         }
         self.sites.push(Site::Pattern {
@@ -448,7 +454,8 @@ impl<'a> BodyChecker<'_, 'a> {
         let folded = if fallible_construction(self.program, &node) {
             Err(NotConstant::Expression)
         } else {
-            fold(&node, &self.layout.constants)
+            let program = self.program;
+            fold(&node, &self.layout.constants, &|id| program.library_of(id))
         };
         match folded {
             Ok(value) => {

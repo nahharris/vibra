@@ -24,8 +24,7 @@
 //!    returns the same count. The cells of an object that hold references take
 //!    one `dup` each, so the counts stay exact, and nothing is dropped.
 //!
-//! A row that answers a scalar returns it directly: an `Ordering` as `-1`,
-//! `0`, or `1`. A row that reads a number from text (`parse`) builds no object
+//! A row that answers a scalar returns it directly. A row that reads a number from text (`parse`) builds no object
 //! and needs no allocation either: it takes the address of an 8-byte cell the
 //! caller owns as its last operand, writes the number there in the cell format
 //! of its type when the text spells one, and returns a status (`0` for a
@@ -49,7 +48,7 @@ use super::{CompilerIntrinsic, FloatOp, FloatType, IntegerOp, IntegerType};
 /// A scalar of a native row's signature.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Scalar {
-    /// `i32`: an offset of an arena object, a class byte, or an ordering.
+    /// `i32`: an offset of an arena object, a class byte, or a status.
     I32,
     /// `i64`: an index, or a component count.
     I64,
@@ -135,8 +134,6 @@ pub enum Totality {
 /// What a native row answers.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Answer {
-    /// An `Ordering` of the two operands, as `-1`, `0`, or `1` (`i32`).
-    Order,
     /// The number of components of the operand (`i64`).
     Length,
     /// Whether the two operands hold the same components, as `0` or `1`
@@ -195,7 +192,7 @@ impl NativeRow {
     #[must_use]
     pub const fn result(&self) -> Scalar {
         match self.answer {
-            Answer::Order | Answer::Same | Answer::Parsed => Scalar::I32,
+            Answer::Same | Answer::Parsed => Scalar::I32,
             Answer::Length | Answer::Object { .. } => Scalar::I64,
         }
     }
@@ -249,7 +246,7 @@ macro_rules! table {
 
 /// Every native row. A row's place in this list is nothing a program can
 /// observe.
-pub const NATIVE_ROWS: [NativeRow; 40] = table![
+pub const NATIVE_ROWS: [NativeRow; 38] = table![
     (Integer, IntegerOp, I8, IntegerType),
     (Integer, IntegerOp, I16, IntegerType),
     (Integer, IntegerOp, I32, IntegerType),
@@ -263,7 +260,6 @@ pub const NATIVE_ROWS: [NativeRow; 40] = table![
     row(CompilerIntrinsic::StrConcat, &[Text, Text], object(Str, Total)),
     row(CompilerIntrinsic::StrLength, &[Text], Answer::Length),
     row(CompilerIntrinsic::StrEqual, &[Text, Text], Answer::Same),
-    row(CompilerIntrinsic::StrCompare, &[Text, Text], Answer::Order),
     row(
         CompilerIntrinsic::StrSlice,
         &[Text, Index, Index],
@@ -288,11 +284,7 @@ pub const NATIVE_ROWS: [NativeRow; 40] = table![
     ),
     row(CompilerIntrinsic::BytesLength, &[Bytes], Answer::Length),
     row(CompilerIntrinsic::BytesEqual, &[Bytes, Bytes], Answer::Same),
-    row(
-        CompilerIntrinsic::BytesCompare,
-        &[Bytes, Bytes],
-        Answer::Order,
-    ),
+
     row(
         CompilerIntrinsic::BytesSlice,
         &[Bytes, Index, Index],

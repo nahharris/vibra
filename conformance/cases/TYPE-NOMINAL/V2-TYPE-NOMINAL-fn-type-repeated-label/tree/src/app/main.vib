@@ -1,0 +1,1 @@
+fn f takes {g: Fn({I32 width: U64 width: U64} U64)} returns r: U64 do return g(1i32) endfn

@@ -154,6 +154,146 @@ fn a_default_is_a_constant_expression() {
     assert_eq!(run(source).as_deref(), Ok(value("i32", "3i32").as_str()));
 }
 
+/// A dict of constants is a constant expression: its default holds its
+/// entries in canonical key order, and a later duplicate key replaces the
+/// earlier value (`docs/spec/02-type-system.md`, "Constant expressions and
+/// constant patterns", "Dict keys, equality, and order").
+#[test]
+fn a_dict_is_a_labelled_default() {
+    let entries = |keys: &str, pairs: &str| {
+        format!(
+            "{{format: @value.v2 typeInfo: {{kind: @list arguments: [{{kind: @tuple \
+             arguments: [{keys} @i32]}}]}} value: {{kind: @list values: [{pairs}]}}}}"
+        )
+    };
+    let source = "fn main returns r: List({{I32 Atom} I32}) do return Iter.collect(t()) endfn\n\
+                  fn t labelled {d: Dict({I32 Atom} I32) be \
+                  [{2i32 @b}: 1i32 {1i32 @z}: 2i32 {2i32 @a}: 3i32 {2i32 @b}: 4i32]} \
+                  returns r: Dict({I32 Atom} I32) do return d endfn\n";
+    let key = "{kind: @tuple values: [";
+    let expected = entries(
+        "{kind: @tuple arguments: [@i32 @atom]}",
+        &format!(
+            "{{kind: @tuple values: [{key}1i32 @z]}} 2i32]}} \
+             {{kind: @tuple values: [{key}2i32 @a]}} 3i32]}} \
+             {{kind: @tuple values: [{key}2i32 @b]}} 4i32]}}"
+        ),
+    );
+    assert_eq!(run(source).as_deref(), Ok(expected.as_str()));
+    let source = "fn main returns r: List({Bool I32}) do return Iter.collect(t()) endfn\n\
+                  fn t labelled {d: Dict(Bool I32) be [true: 1i32 false: 2i32]} \
+                  returns r: Dict(Bool I32) do return d endfn\n";
+    let bool_type = "{kind: @declared path: @std.bool.Bool seed: \
+                     \"sha256:4268661a9b49c6b0bb8e217b87210f192a927e613ae076c3286270365f3334c7\" \
+                     arguments: []}";
+    let case =
+        |name: &str| format!("{{kind: @enum typeInfo: {bool_type} variant: @{name}}}");
+    let expected = entries(
+        bool_type,
+        &format!(
+            "{{kind: @tuple values: [{} 2i32]}} {{kind: @tuple values: [{} 1i32]}}",
+            case("false"),
+            case("true")
+        ),
+    );
+    assert_eq!(run(source).as_deref(), Ok(expected.as_str()));
+    // A written argument replaces the default, and a lookup finds by key.
+    let source = "fn main returns r: I32 do return I32.add(get() get(d: [@x: 9i32])) endfn\n\
+                  fn get labelled {d: Dict(Atom I32) be [@y: 1i32 @x: 2i32 @y: 3i32]} \
+                  returns r: I32 do return match d(@x) case Option.some(value: v) v \
+                  case Option.none() 0i32 endmatch endfn\n";
+    assert_eq!(run(source).as_deref(), Ok(value("i32", "11i32").as_str()));
+}
+
+#[test]
+fn a_dict_default_holds_only_constants() {
+    let source = "fn main returns r: U64 do return List.length(Dict.entries(t())) endfn\n\
+                  fn k returns r: U8 do return 1u8 endfn\n\
+                  fn t labelled {d: Dict(U8 U8) be [k(): 1u8]} \
+                  returns r: Dict(U8 U8) do return d endfn\n";
+    assert_eq!(
+        faults(source),
+        [(DiagnosticCode::TypeNotConstant, at(source, "[k(): 1u8]", 0))]
+    );
+}
+
+/// A declared key type is ordered by its own `Ordered` implementation, which
+/// only an evaluation applies; the checker does not run it to fold a default.
+#[test]
+fn a_dict_default_keyed_by_its_own_order_is_unavailable() {
+    let source = "type Key of U8 impl Ordered fn compare takes {left: Self right: Self} \
+                  returns order: Ordering do let Key(l) be left endlet \
+                  let Key(r) be right endlet return Ordered.compare(r l) endfn endimpl endtype\n\
+                  fn main returns r: U64 do return List.length(Dict.entries(t())) endfn\n\
+                  fn t labelled {d: Dict(Key U8) be [Key(1u8): 1u8 Key(2u8): 2u8]} \
+                  returns r: Dict(Key U8) do return d endfn\n";
+    let result = check_source(SOURCE, source);
+    assert!(result.only_unavailable(), "{:#?}", result.diagnostics());
+    assert_eq!(
+        faults(source),
+        [(
+            DiagnosticCode::ToolUnavailable,
+            at(source, "[Key(1u8): 1u8 Key(2u8): 2u8]", 0)
+        )]
+    );
+}
+
+/// A default whose type mentions a type parameter is valid when it checks at
+/// that type for every instantiation; its value is the same at each one.
+#[test]
+fn a_default_may_mention_a_type_parameter() {
+    let pad = "fn pad(T) takes {xs: List(T)} labelled {tail: List(T) be [] \
+               spare: Option(T) be Option.none()} returns r: U64 do \
+               let n be match spare case Option.some(value: _) 1u64 case Option.none() 0u64 \
+               endmatch endlet \
+               return U64.add(n List.length(List.concat(xs tail))) endfn\n";
+    let source = format!(
+        "fn main returns r: U64 do return U64.add(pad([1i32 2i32]) \
+         pad([\"a\"] tail: [\"b\" \"c\"] spare: Option.some(value: \"d\"))) endfn\n{pad}"
+    );
+    assert_eq!(run(&source).as_deref(), Ok(value("u64", "6u64").as_str()));
+    // Through a generic caller, whose own parameter fixes the callee's.
+    let source = format!(
+        "fn main returns r: U64 do return outer(@a) endfn\n\
+         fn outer(U) takes {{u: U}} returns r: U64 do return pad([u u]) endfn\n{pad}"
+    );
+    assert_eq!(run(&source).as_deref(), Ok(value("u64", "2u64").as_str()));
+    // Through a function value, whose call takes the default the function
+    // carries.
+    let source = format!(
+        "fn main returns r: U64 do let f: Fn({{List(I32) tail: List(I32) \
+         spare: Option(I32)}} U64) be pad endlet return f([7i32]) endfn\n{pad}"
+    );
+    assert_eq!(run(&source).as_deref(), Ok(value("u64", "1u64").as_str()));
+    // An anonymous `fn` whose default mentions the enclosing parameter.
+    let source = "fn main returns r: U64 do return wrap(@a) endfn\n\
+                  fn wrap(T) takes {v: T} returns r: U64 do \
+                  let g be fn takes {x: T} labelled {xs: List(T) be []} returns r: U64 do \
+                  return List.length(List.append(xs x)) endfn endlet \
+                  return U64.add(g(v) g(v xs: [v v])) endfn\n";
+    assert_eq!(run(source).as_deref(), Ok(value("u64", "4u64").as_str()));
+}
+
+/// A default that holds a value of the type parameter does not check at it
+/// for every instantiation.
+#[test]
+fn a_default_must_check_at_every_instantiation() {
+    let source = "fn main returns r: U64 do return pad([1i32]) endfn\n\
+                  fn pad(T) takes {xs: List(T)} labelled {tail: List(T) be [1i32]} \
+                  returns r: U64 do return List.length(List.concat(xs tail)) endfn\n";
+    assert_eq!(
+        faults(source),
+        [(DiagnosticCode::TypeMismatch, at(source, "1i32", 1))]
+    );
+    let source = "fn main returns r: I32 do return pick(1i32) endfn\n\
+                  fn pick(T) takes {x: T} labelled {other: T be 0i32} \
+                  returns r: T do return other endfn\n";
+    assert_eq!(
+        faults(source),
+        [(DiagnosticCode::TypeMismatch, at(source, "0i32", 0))]
+    );
+}
+
 #[test]
 fn a_fn_type_has_its_labels() {
     let source = format!(
@@ -169,6 +309,40 @@ fn a_fn_type_has_its_labels() {
         faults(&source),
         [(DiagnosticCode::TypeMismatch, at(&source, "pad", 0))]
     );
+}
+
+/// Each label of a callable type names one input: a repeated one is
+/// `@type.typeArgumentMismatch` at the second (`docs/spec/02-type-system.md`,
+/// "Callable types").
+#[test]
+fn a_callable_type_names_each_label_once() {
+    let source = format!(
+        "fn main returns r: U64 do let f: Fn({{Str width: U64 width: U64}} U64) be pad \
+         endlet return f(\"x\") endfn\n{PAD}"
+    );
+    assert_eq!(
+        faults(&source),
+        [(
+            DiagnosticCode::TypeTypeArgumentMismatch,
+            at(&source, "width", 1)
+        )]
+    );
+    let source = "fn run takes {p: Proc({I32 n: U8 n: U8} Void)} returns r: I32 \
+                  do return 1i32 endfn\n";
+    let second = at(source, "n: U8", 1).start();
+    assert_eq!(
+        faults(source),
+        [(
+            DiagnosticCode::TypeTypeArgumentMismatch,
+            ByteSpan::new(second, second + 1)
+        )]
+    );
+    // Two labels, each once, are an ordinary callable type.
+    let source = "fn main returns r: U64 do let f: Fn({Str depth: U64 width: U64} U64) \
+                  be two endlet return f(\"x\") endfn\n\
+                  fn two takes {s: Str} labelled {width: U64 be 4u64 depth: U64 be 1u64} \
+                  returns r: U64 do return U64.add(width depth) endfn\n";
+    assert_eq!(run(source).as_deref(), Ok(value("u64", "5u64").as_str()));
 }
 
 #[test]
@@ -251,6 +425,38 @@ fn a_constructor_is_not_a_function_value() {
                   let f: Fn({F64} Celsius) be fn takes {v: F64} returns c: Celsius do \
                   return Celsius(v) endfn endlet return f(1.0f64) endfn\n";
     assert!(run(source).is_ok(), "{:?}", run(source));
+}
+
+/// With nothing expected, a declared type or a case named without being
+/// applied is `@type.mismatch` at the name, as it is where a function is
+/// expected (`docs/spec/02-type-system.md`, "Functions as values").
+#[test]
+fn a_constructor_with_nothing_expected_is_not_a_value() {
+    let source = "type Celsius of F64 endtype\n\
+                  fn main returns r: F64 do let f be Celsius endlet return 1.0f64 endfn\n";
+    assert_eq!(
+        faults(source),
+        [(DiagnosticCode::TypeMismatch, at(source, "Celsius", 1))]
+    );
+    let source = "type Shape case empty case dot {x: I32} endtype\n\
+                  fn main returns r: I32 do let s be Shape.dot endlet return 1i32 endfn\n";
+    assert_eq!(
+        faults(source),
+        [(DiagnosticCode::TypeMismatch, at(source, "Shape.dot", 0))]
+    );
+    // A non-callable expected type is no different.
+    let source = "type Celsius of F64 endtype\n\
+                  fn main returns r: F64 do let f: F64 be Celsius endlet return f endfn\n";
+    assert_eq!(
+        faults(source),
+        [(DiagnosticCode::TypeMismatch, at(source, "Celsius", 1))]
+    );
+    // Applied, the same names are constructions.
+    let source = "type Shape case empty case dot {x: I32} endtype\n\
+                  fn main returns r: I32 do let s be Shape.dot(x: 2i32) endlet \
+                  return match s case Shape.dot(x: x) x case Shape.empty() 0i32 endmatch \
+                  endfn\n";
+    assert_eq!(run(source).as_deref(), Ok(value("i32", "2i32").as_str()));
 }
 
 #[test]

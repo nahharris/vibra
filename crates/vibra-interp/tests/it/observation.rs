@@ -14,8 +14,7 @@ use vibra_ir::{
 use crate::{
     BASE, LIMITS, SEED, bytes_type, closure, construct, dict, err_value, eval, fn_type,
     function, id, int, library_set, list_of, lit, node, none_value, program, row,
-    set_with, signature, some_value, str_type, text, text_value, tuple_of, u64_lit,
-    var, void,
+    set_with, signature, some_value, text, text_value, tuple_of, u64_lit, var, void,
 };
 
 fn f64_lit(value: f64) -> Node {
@@ -288,38 +287,33 @@ fn a_lookup_out_of_range_or_of_a_missing_key_is_none() {
     );
     let entries = || {
         construct(
-            dict(str_type(), Type::I32),
-            Construction::Dict(vec![(text("a"), int(1)), (text("b"), int(2))]),
+            dict(Type::I32, Type::I32),
+            Construction::Dict(vec![(int(1), int(10)), (int(2), int(20))]),
         )
     };
     assert_eq!(
-        eval(&set, &lookup(entries(), text("b"))),
-        Evaluation::Value(some_value(Value::I32(2)))
+        eval(&set, &lookup(entries(), int(2))),
+        Evaluation::Value(some_value(Value::I32(20)))
     );
     assert_eq!(
-        eval(&set, &lookup(entries(), text("z"))),
+        eval(&set, &lookup(entries(), int(9))),
         Evaluation::Value(none_value())
     );
 }
 
-/// Keys `"b"`, `"a"`, `"a"` give two entries, `"a"` first, holding the later
-/// value.
+/// Keys `2`, `1`, `1` give two entries, `1` first, holding the later value.
 #[test]
 fn a_dict_is_in_key_order_with_the_later_duplicate_value() {
     let set = library_set();
     let literal = construct(
-        dict(str_type(), Type::I32),
-        Construction::Dict(vec![
-            (text("b"), int(1)),
-            (text("a"), int(2)),
-            (text("a"), int(3)),
-        ]),
+        dict(Type::I32, Type::I32),
+        Construction::Dict(vec![(int(2), int(1)), (int(1), int(2)), (int(1), int(3))]),
     );
     assert_eq!(
         eval(&set, &literal),
         Evaluation::Value(Value::Dict(vec![
-            (text_value("a"), Value::I32(3)),
-            (text_value("b"), Value::I32(1)),
+            (Value::I32(1), Value::I32(3)),
+            (Value::I32(2), Value::I32(1)),
         ]))
     );
 }
@@ -328,8 +322,8 @@ fn atom(name: &str) -> Node {
     lit(Type::Atom, Value::Atom(name.to_owned()))
 }
 
-/// Atoms order by their spelling's bytes, and a tuple of an atom and a
-/// `Str` component-wise, the `Str` by its own `Ordered` implementation.
+/// Atoms order by their spelling's bytes, and a tuple of an atom and an
+/// `I32` component-wise, the `I32` by its own `Ordered` implementation.
 #[test]
 fn structural_keys_order_component_wise() {
     let set = library_set();
@@ -350,30 +344,27 @@ fn structural_keys_order_component_wise() {
             (atom_value("b"), Value::I32(1)),
         ]))
     );
-    let key_type = Type::Tuple(vec![Type::Atom, str_type()]);
-    let key = |name: &str, text_value: &str| {
-        tuple_of(
-            vec![Type::Atom, str_type()],
-            vec![atom(name), text(text_value)],
-        )
+    let key_type = Type::Tuple(vec![Type::Atom, Type::I32]);
+    let key = |name: &str, number: i32| {
+        tuple_of(vec![Type::Atom, Type::I32], vec![atom(name), int(number)])
     };
     let pairs = construct(
         dict(key_type, Type::I32),
         Construction::Dict(vec![
-            (key("a", "z"), int(1)),
-            (key("a", "b"), int(2)),
-            (key("Z", "z"), int(3)),
+            (key("a", 9), int(1)),
+            (key("a", 2), int(2)),
+            (key("Z", 9), int(3)),
         ]),
     );
-    let pair = |name: &str, text: &str| {
-        Value::Tuple(vec![Value::Atom(name.to_owned()), text_value(text)])
+    let pair = |name: &str, number: i32| {
+        Value::Tuple(vec![Value::Atom(name.to_owned()), Value::I32(number)])
     };
     assert_eq!(
         eval(&set, &pairs),
         Evaluation::Value(Value::Dict(vec![
-            (pair("Z", "z"), Value::I32(3)),
-            (pair("a", "b"), Value::I32(2)),
-            (pair("a", "z"), Value::I32(1)),
+            (pair("Z", 9), Value::I32(3)),
+            (pair("a", 2), Value::I32(2)),
+            (pair("a", 9), Value::I32(1)),
         ]))
     );
 }

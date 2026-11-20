@@ -1,0 +1,12 @@
+id = "V2-TYPE-GENERIC-bound-interface-satisfied"
+rule = "V2-TYPE-GENERIC-bound-interface-satisfied"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#generics: interface value types and bounds whose arguments implement their parameters' bounds are accepted"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

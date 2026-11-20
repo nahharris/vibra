@@ -901,8 +901,11 @@ impl<'a> Checker<'a> {
     }
 
     /// Checks the defaults of a callable with the labels `labels`: one
-    /// constant of the label's type for each label, as the source chapter's
-    /// `labelled` gives every optional parameter, and no other.
+    /// constant for each label, as the source chapter's `labelled` gives
+    /// every optional parameter, and no other. A constant is closed, so a
+    /// default's type is its label's type with every binder replaced by
+    /// `Never` ([`Type::at_never`]): the default's value is then a value of
+    /// the label's type at every instantiation of the callable.
     pub(crate) fn check_defaults(
         &self,
         labels: &NamedTypes,
@@ -920,7 +923,7 @@ impl<'a> Checker<'a> {
                 });
             }
             self.check_constant(default)?;
-            expect(expected, default.value_type())?;
+            expect(&expected.at_never(), default.value_type())?;
         }
         if let Some((label, _)) = labels
             .entries()
@@ -942,6 +945,26 @@ impl<'a> Checker<'a> {
             Err(IrError::InvalidType(format!(
                 "{key} does not implement `Ordered` and keys no dict"
             )))
+        }
+    }
+
+    /// Checks the key of a row that builds a dict, `dict.fromList`, at
+    /// `type_arguments`: a closed key MUST implement `Ordered`, as the key
+    /// of a dict literal must. An open key is a binder of the standard
+    /// library's generic `Dict`, which the checker fixes only at a written
+    /// destination type whose key it has checked.
+    pub(crate) fn check_built_dict(
+        &self,
+        intrinsic: CompilerIntrinsic,
+        type_arguments: &[Type],
+    ) -> Result<(), IrError> {
+        match type_arguments.first() {
+            Some(key)
+                if intrinsic == CompilerIntrinsic::DictFromList && key.is_closed() =>
+            {
+                self.check_dict_key(key)
+            }
+            _ => Ok(()),
         }
     }
 

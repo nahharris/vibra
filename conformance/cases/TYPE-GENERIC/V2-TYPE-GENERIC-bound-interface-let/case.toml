@@ -1,0 +1,19 @@
+id = "V2-TYPE-GENERIC-bound-interface-let"
+rule = "V2-TYPE-GENERIC-bound-interface-let"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#generics: an interface value type in a let annotation checks each argument against its parameter's bound"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.unsatisfiedBound"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 183, end = 188 }
+related = [{ source = "src/app/main.vib", span = { start = 30, end = 37 } }]

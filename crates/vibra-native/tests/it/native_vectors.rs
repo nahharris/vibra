@@ -171,15 +171,7 @@ fn answer(row: &NativeRow, operands: &[Value]) -> Result<Value, String> {
     Ok(match row.answer {
         Answer::Length => Value::U64(heap.run(row, &scalars)?.cast_unsigned()),
         Answer::Same => Value::bool(heap.run(row, &scalars)? == 1),
-        Answer::Order => case(
-            match heap.run(row, &scalars)? {
-                -1 => "less",
-                0 => "equal",
-                1 => "greater",
-                other => return Err(format!("{}: order {other}", row.name())),
-            },
-            Vec::new(),
-        ),
+
         Answer::Parsed => {
             let cell = heap.object(kind::LIST, 8, 1) + 32;
             scalars.push(i64::try_from(cell).unwrap());
@@ -264,7 +256,7 @@ fn native_vectors() {
         CompilerIntrinsic::StrConcat,
         CompilerIntrinsic::StrSlice,
         CompilerIntrinsic::StrFromUtf8,
-        CompilerIntrinsic::BytesCompare,
+        CompilerIntrinsic::BytesEqual,
         CompilerIntrinsic::Float(FloatType::F64, vibra_ir::external::FloatOp::ToStr),
         CompilerIntrinsic::Integer(
             IntegerType::I8,

@@ -466,7 +466,7 @@ Negative zero is normalized only where an operation says so.
 | `List.concat` | `Fn({List(T) List(T)} List(T))` | the first list's elements, then the second's |
 | `List.slice` | `Fn({List(T) U64 U64} Option(List(T)))` | a half-open range of elements, with the same bounds rule |
 | dict literal | pairs to `Dict(K V)` | every pair evaluated; key order; a later duplicate wins; the empty literal is `[:]` |
-| `From(List({K V}))` on `Dict(K V)` | | the same ordering and duplicate rule |
+| `From(List({K V}))` on `Dict(K V)` | `Fn({List({K V})} Dict(K V))` | the same ordering and duplicate rule; its body is the registry row `dict.fromList` |
 | `Dict.entries` | `Fn({Dict(K V)} List({K V}))` | the entries in key order |
 | `dict.next` | `Fn({Dict(K V)} Option({{K V} Dict(K V)}))` | the first entry in key order and the remainder; the pure primitive behind `Dict`'s nested `Iter` implementation |
 

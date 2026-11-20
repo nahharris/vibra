@@ -19,8 +19,9 @@
 //! Every walk keeps a work list, so no host stack grows with what a checker
 //! built.
 
-use crate::conformance::match_open;
+use crate::conformance::{Evidence, match_open};
 use crate::expr::{CallTarget, ContractCall, Expr, Node, Tables};
+use crate::external::CompilerIntrinsic;
 use crate::{Binder, FunctionBody, Implementation, IrError, Type, TypeId};
 
 /// The most goals the evidence of one instantiation may visit: the limit
@@ -376,4 +377,66 @@ pub(crate) fn check_instantiations(tables: &Tables<'_>) -> Result<(), IrError> {
         name: name(found.caller),
         callee: name(found.callee),
     })
+}
+
+/// Checks that every instantiation of a function whose body is the row
+/// `dict.fromList`, at a closed key, keys its dict with a type that
+/// implements `Ordered`, as a dict literal's key must. The walk covers every
+/// function, guard, and global, and the members the evidence for each bound
+/// selects. A key that stays open is a type parameter of the caller, which
+/// the checker never leaves to an unbounded parameter outside the standard
+/// library's own `Dict`.
+///
+/// # Errors
+///
+/// [`IrError::InvalidType`] for the first such instantiation whose key
+/// keys no dict.
+pub(crate) fn check_built_dicts(
+    tables: &Tables<'_>,
+    globals: &[&Node],
+) -> Result<(), IrError> {
+    let mut collector = Collector {
+        tables: *tables,
+        caller: 0,
+        found: Vec::new(),
+    };
+    for (index, function) in tables.functions.iter().enumerate() {
+        collector.caller = index;
+        if let FunctionBody::Expr(body) = &function.body {
+            collector.body(body);
+        }
+        let guards = function
+            .entry_guard
+            .iter()
+            .chain(function.exit_guard.iter().map(|exit| &exit.guard));
+        for guard in guards {
+            collector.body(&guard.predicate);
+            collector.body(&guard.consequence);
+        }
+    }
+    for initializer in globals {
+        collector.body(initializer);
+    }
+    for found in &collector.found {
+        let Some(FunctionBody::Intrinsic {
+            intrinsic: CompilerIntrinsic::DictFromList,
+            type_arguments,
+        }) = tables
+            .functions
+            .get(found.callee)
+            .map(|callee| &callee.body)
+        else {
+            continue;
+        };
+        let Some(key) = type_arguments.first() else {
+            continue;
+        };
+        let key = key.instantiate(&found.arguments);
+        if key.is_closed() && !tables.is_dict_key(Evidence::default(), &key)? {
+            return Err(IrError::InvalidType(format!(
+                "{key} does not implement `Ordered` and keys no dict built from a list"
+            )));
+        }
+    }
+    Ok(())
 }

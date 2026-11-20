@@ -15,7 +15,7 @@ use crate::conformance::Evidence;
 use crate::encode::{TypeTable, encode_value};
 use crate::expr::{Checker, Tables, expect};
 use crate::external::CompilerIntrinsic;
-use crate::instantiation::check_instantiations;
+use crate::instantiation::{check_built_dicts, check_instantiations};
 use crate::{
     Constant, ExitGuard, FnType, Guard, Implementation, InterfaceDefinition, IrError,
     Library, LibraryTypes, Node, OpenScope, SignatureRecord, SourceOrigin,
@@ -680,6 +680,12 @@ impl CheckedModuleSet {
             flow.absorb_owner(gathered, |flow, facts| flow.functions.push(facts));
         }
         check_instantiations(&tables)?;
+        let initializers = self
+            .globals
+            .iter()
+            .map(|global| &global.initializer)
+            .collect::<Vec<_>>();
+        check_built_dicts(&tables, &initializers)?;
         Ok(flow)
     }
 
@@ -834,6 +840,10 @@ impl CheckedModuleSet {
                 }
                 for argument in type_arguments {
                     argument.check_depth()?;
+                }
+                checker.check_built_dict(*intrinsic, type_arguments)?;
+                if *intrinsic == CompilerIntrinsic::DictFromList {
+                    gathered.facts.calls.extend(ordered_targets(tables));
                 }
                 let parameters = row
                     .parameters

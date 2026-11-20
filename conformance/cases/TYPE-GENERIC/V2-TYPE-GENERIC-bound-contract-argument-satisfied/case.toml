@@ -1,0 +1,12 @@
+id = "V2-TYPE-GENERIC-bound-contract-argument-satisfied"
+rule = "V2-TYPE-GENERIC-bound-contract-argument-satisfied"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#dispatch: an operand that fixes an interface parameter to a type meeting its bound selects the implementation"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

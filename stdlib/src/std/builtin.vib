@@ -1709,4 +1709,12 @@ type Dict(K V) of List({K V})
       symbol "dict.next"
     endfn
   endimpl
+  impl From(List({K V}))
+    fn convert
+      takes {value: List({K V})}
+      returns converted: Self
+      external @compiler
+      symbol "dict.fromList"
+    endfn
+  endimpl
 endtype

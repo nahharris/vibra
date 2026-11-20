@@ -37,7 +37,6 @@ pub mod arena;
 pub mod number;
 mod utf8;
 
-use std::cmp::Ordering;
 use std::marker::PhantomData;
 
 pub use utf8::{decode, encode};
@@ -160,27 +159,6 @@ pub fn slice<S: Source, K: Sink<Unit = S::Unit> + ?Sized>(
     true
 }
 
-/// `str.compare` and `bytes.compare`: lexicographic by unit, so the first
-/// differing unit decides and a proper prefix is less. The scalar value of a
-/// `Char` and a byte are their own order.
-pub fn compare<S, T>(first: &S, second: &T) -> Ordering
-where
-    S: Source,
-    T: Source<Unit = S::Unit>,
-    S::Unit: Ord,
-{
-    let pairs = first
-        .range(0, first.len())
-        .zip(second.range(0, second.len()));
-    for (left, right) in pairs {
-        let order = left.cmp(&right);
-        if order != Ordering::Equal {
-            return order;
-        }
-    }
-    first.len().cmp(&second.len())
-}
-
 /// `str.length`, `bytes.length`: the number of units.
 pub fn length<S: Source>(source: &S) -> u64 {
     source.len()
@@ -198,16 +176,6 @@ where
             .range(0, first.len())
             .zip(second.range(0, second.len()))
             .all(|(left, right)| left == right)
-}
-
-/// `-1`, `0`, or `1`: how a native row answers an `Ordering`.
-#[must_use]
-pub const fn order_code(order: Ordering) -> i32 {
-    match order {
-        Ordering::Less => -1,
-        Ordering::Equal => 0,
-        Ordering::Greater => 1,
-    }
 }
 
 /// `str.toUtf8`: the UTF-8 encoding of the scalars of `source`.
@@ -301,21 +269,6 @@ mod tests {
             "an empty range at the end is some"
         );
         assert!(out.0.is_empty());
-    }
-
-    #[test]
-    fn compare_is_lexicographic_and_a_proper_prefix_is_less() {
-        let cases: [(&[u32], &[u32], Ordering); 6] = [
-            (&[1, 2], &[1, 3], Ordering::Less),
-            (&[1, 2], &[1], Ordering::Greater),
-            (&[1], &[1, 2], Ordering::Less),
-            (&[], &[], Ordering::Equal),
-            (&[0xFFFF], &[0x1_D11E], Ordering::Less),
-            (&[7, 7], &[7, 7], Ordering::Equal),
-        ];
-        for (a, b, want) in cases {
-            assert_eq!(compare(&Slice(a), &Slice(b)), want, "{a:?} {b:?}");
-        }
     }
 
     #[test]

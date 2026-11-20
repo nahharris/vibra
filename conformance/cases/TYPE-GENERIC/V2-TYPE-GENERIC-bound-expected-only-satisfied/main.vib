@@ -1,0 +1,12 @@
+fn main returns r: U8 do let o: Option(U8) be none() endlet match o case Option.none() return 1u8 case _ return 0u8 endmatch endfn
+
+interface Feed(S)
+  given {S: Ordered}
+  fn feed
+    takes {x: Self item: S}
+    returns r: U8
+  endfn
+endinterface
+
+type Plain of U8 endtype
+fn none(T) returns r: Option(T) given {T: Ordered} do return Option.none() endfn

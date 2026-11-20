@@ -6,6 +6,7 @@ use vibra_interp::MemoryBudget;
 use super::{check_source, interpret};
 
 mod bodies;
+mod bounds;
 mod callables;
 mod contracts;
 mod interfaces;

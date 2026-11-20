@@ -1,0 +1,12 @@
+id = "V2-TYPE-GENERIC-bound-contract-value-satisfied"
+rule = "V2-TYPE-GENERIC-bound-contract-value-satisfied"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#functions-as-values: a contract member named as a value at interface arguments that meet their bounds is accepted"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

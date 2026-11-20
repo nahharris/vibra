@@ -546,14 +546,16 @@ fn without_bindings(pattern: &Pattern) -> Pattern {
 }
 
 /// Whether `node` is a construction whose every operand is constant.
+/// `library` names the library type an identity plays.
 pub(crate) fn constant_operands(
     node: &Node,
     constants: &BTreeMap<usize, Value>,
+    library: &dyn Fn(&vibra_ir::TypeId) -> Option<vibra_ir::Library>,
 ) -> bool {
     let Expr::Construct { .. } = &node.expr else {
         return false;
     };
     fragment::operands(node)
         .into_iter()
-        .all(|operand| super::callables::fold(operand, constants).is_ok())
+        .all(|operand| super::callables::fold(operand, constants, library).is_ok())
 }

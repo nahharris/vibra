@@ -1,0 +1,18 @@
+id = "V2-TYPE-GENERIC-no-call-site-type-arguments"
+rule = "V2-TYPE-GENERIC-no-call-site-type-arguments"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#generics: a call takes no type arguments, so a type written as its operand is a constructor where a value is needed"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.argumentMismatch"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 254, end = 256 }

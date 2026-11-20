@@ -1,0 +1,18 @@
+id = "V2-TYPE-INFER-case-not-value-unexpected"
+rule = "V2-TYPE-INFER-case-not-value-unexpected"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#functions-as-values: a case named in value position with nothing expected is @type.mismatch at the name"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.mismatch"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 80, end = 89 }

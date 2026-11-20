@@ -16,8 +16,8 @@ use vibra_ir::{
     ContractCall, Expr as IrExpr, FnType, Library, NamedTypes, Node, Substitution, Type,
 };
 
-use super::{BodyChecker, CallState, Out, Reference, Target, unify};
-use crate::check::declare::BoundData;
+use super::{BodyChecker, CallState, CallableScope, Out, Reference, Target, unify};
+use crate::check::declare::{BoundData, BoundGoal};
 use crate::check::interfaces::same_head;
 
 /// The most goals one search for evidence visits.
@@ -847,6 +847,9 @@ impl<'a> BodyChecker<'_, 'a> {
         // interface written in the result type before selection; the
         // associated and member-local positions wait for step 5.
         if let (Some(result), Some(expected)) = (&state.result, &dispatch.expected) {
+            let source = self
+                .written_span(state.application)
+                .unwrap_or(state.application);
             for (at, found) in positional_parts(result, expected, params)
                 .into_iter()
                 .enumerate()
@@ -855,6 +858,9 @@ impl<'a> BodyChecker<'_, 'a> {
                     (found, state.assignment.get_mut(at))
                 {
                     *slot = Some(found);
+                    if let Some(noted @ None) = state.sources.get_mut(at) {
+                        *noted = Some(source);
+                    }
                 }
             }
         }
@@ -874,8 +880,15 @@ impl<'a> BodyChecker<'_, 'a> {
                 state.failed = true;
             }
             Found::None => {
-                self.unsatisfied(span, &receiver, interface);
-                state.failed = true;
+                // An argument of the interface that breaks its parameter's
+                // bound is reported at the operand that fixes it, related to
+                // the bound, rather than as a receiver with no
+                // implementation.
+                self.call_bounds(state, false);
+                if !state.failed {
+                    self.unsatisfied(span, &receiver, interface);
+                    state.failed = true;
+                }
             }
         }
     }
@@ -1112,6 +1125,9 @@ impl<'a> BodyChecker<'_, 'a> {
         application: ByteSpan,
         last: bool,
     ) -> bool {
+        // A parameter fixed by the choice of another's evidence is reported
+        // where that other one is fixed.
+        let mut sources = sources.to_vec();
         loop {
             let mut progress = false;
             for (at, bound) in bounds.iter().enumerate() {
@@ -1169,6 +1185,17 @@ impl<'a> BodyChecker<'_, 'a> {
                         Some(chosen) if linked => {
                             let mut trial = assignment.to_vec();
                             if unify(pattern, &chosen, &mut trial) {
+                                for (slot, (before, after)) in
+                                    assignment.iter().zip(&trial).enumerate()
+                                {
+                                    if before.is_none()
+                                        && after.is_some()
+                                        && let Some(source @ None) =
+                                            sources.get_mut(slot)
+                                    {
+                                        *source = Some(span);
+                                    }
+                                }
                                 assignment.clone_from_slice(&trial);
                             } else {
                                 let wanted = closed(pattern, assignment)
@@ -1230,6 +1257,42 @@ impl<'a> BodyChecker<'_, 'a> {
                 return true;
             }
         }
+    }
+
+    /// Checks the written application `goal` where `scope` is in force: each
+    /// argument MUST satisfy the bound of its interface parameter, or it is
+    /// `@type.unsatisfiedBound` at the argument, related to the bound
+    /// (`docs/spec/02-type-system.md`, "Generics").
+    pub(crate) fn written_bounds(&mut self, goal: &BoundGoal, scope: CallableScope) {
+        let Some(data) = self.program.interfaces.get(goal.interface) else {
+            return;
+        };
+        if data.bounds.iter().all(Option::is_none)
+            || data.bounds.len() != goal.arguments.len()
+        {
+            return;
+        }
+        let bounds = data.bounds.clone();
+        let module = data.module;
+        self.binders = scope.binders;
+        self.self_type = scope.self_type;
+        self.bounds = scope.bounds;
+        self.associated = scope.associated;
+        self.self_interface = scope.self_interface;
+        let mut assignment =
+            goal.arguments.iter().cloned().map(Some).collect::<Vec<_>>();
+        let mut resolved = vec![false; bounds.len()];
+        let sources = goal.spans.iter().copied().map(Some).collect::<Vec<_>>();
+        self.resolve_bounds(
+            &bounds,
+            module,
+            &mut assignment,
+            &mut resolved,
+            &sources,
+            goal.application,
+            true,
+        );
+        self.instantiations.clear();
     }
 
     /// Fixes the open type parameters of `pattern`, a written interface
@@ -1364,6 +1427,34 @@ impl<'a> BodyChecker<'_, 'a> {
         }
     }
 
+    /// Resolves the bounds of `member` of `interface` named as a value at
+    /// `span`: the interface's and the member's own, as at a call. The
+    /// expected type fixes their parameters, so a breach is reported where
+    /// that type is written. Whether every bound holds.
+    fn value_bounds(
+        &mut self,
+        interface: usize,
+        member: &str,
+        span: ByteSpan,
+        assignment: &mut [Option<Type>],
+    ) -> bool {
+        let Some((bounds, module)) = self.contract_bounds(interface, member) else {
+            return true;
+        };
+        let source = self.written_span(span).unwrap_or(span);
+        let mut resolved = vec![false; bounds.len()];
+        let sources = vec![Some(source); bounds.len()];
+        self.resolve_bounds(
+            &bounds,
+            module,
+            assignment,
+            &mut resolved,
+            &sources,
+            span,
+            true,
+        )
+    }
+
     /// A contract member named as a value: instantiated from the expected
     /// callable type, which fixes the receiver and selects the
     /// implementation whose member it denotes.
@@ -1410,6 +1501,11 @@ impl<'a> BodyChecker<'_, 'a> {
                 return Out::error();
             }
             Found::None => {
+                // An argument of the interface that breaks its parameter's
+                // bound is reported where the expected type is written.
+                if !self.value_bounds(interface, member, span, &mut assignment) {
+                    return Out::error();
+                }
                 self.unsatisfied(span, &receiver, interface);
                 return Out::error();
             }
@@ -1434,6 +1530,9 @@ impl<'a> BodyChecker<'_, 'a> {
             {
                 *slot = Some(choice.clone());
             }
+        }
+        if !self.value_bounds(interface, member, span, &mut assignment) {
+            return Out::error();
         }
         let missing = names
             .iter()

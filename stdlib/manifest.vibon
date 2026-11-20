@@ -14,7 +14,7 @@
     }
     {
       path: @std.builtin
-      digest: "sha256:ccdf09f4f13106d3428cd4503d81dacd3d9d42faf76cd5e58120e35a0b7d1e62"
+      digest: "sha256:80f1280a0490a7916755e886d81c35236aa1416c245764be26267f23e11bfe7c"
       languageRoles: [@dict]
     }
     {
@@ -60,6 +60,7 @@
       "char.fromU32"
       "char.toU32"
       "dict.entries"
+      "dict.fromList"
       "dict.next"
       "f32.add"
       "f32.compareTotal"
