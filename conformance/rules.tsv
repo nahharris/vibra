@@ -493,3 +493,7 @@ V2-TYPE-GENERIC-expanding-contract	active	02-type-system.md#generics
 V2-TYPE-GENERIC-contract-same-instance	active	02-type-system.md#generics
 V2-TYPE-GENERIC-expanding-bound	active	02-type-system.md#generics
 V2-TYPE-GENERIC-bound-same-instance	active	02-type-system.md#generics
+V2-TYPE-INTERFACE-member-bound-stronger	active	02-type-system.md#implementations
+V2-TYPE-INTERFACE-member-bound-weaker	active	02-type-system.md#implementations
+V2-TYPE-INTERFACE-member-bound-missing	active	02-type-system.md#implementations
+V2-TYPE-INTERFACE-member-bound-renamed	active	02-type-system.md#implementations

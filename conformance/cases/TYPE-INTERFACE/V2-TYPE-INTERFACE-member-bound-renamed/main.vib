@@ -1,0 +1,21 @@
+interface Pick
+  fn pick(T)
+    takes {x: Self item: T other: T}
+    returns r: T
+    given {T: Ordered}
+  endfn
+endinterface
+
+type Box of U8
+  impl Pick
+    fn pick(U)
+      takes {x: Self item: U other: U}
+      returns r: U
+      given {U: Ordered}
+      do
+        return Ordered.max(item other)
+    endfn
+  endimpl
+endtype
+
+fn main returns r: I32 do return Pick.pick(Box(0u8) 3i32 2i32) endfn

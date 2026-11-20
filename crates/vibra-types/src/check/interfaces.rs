@@ -1015,6 +1015,55 @@ impl<'a> Program<'a> {
                 usable = false;
                 continue;
             }
+            let substitution = Substitution {
+                binders: &substitution_binders,
+                self_type: Some(&receiver),
+                associated: Some(&named_choices),
+            };
+            let differing_bound = (0..own).find_map(|at| {
+                let contract = declared
+                    .bounds
+                    .get(arguments.len().saturating_add(at))
+                    .cloned()
+                    .flatten()
+                    .map(|bound| substituted_bound(bound, &substitution));
+                let written = own_bounds
+                    .get(binders.len().saturating_add(at))
+                    .cloned()
+                    .flatten();
+                let same = match (&contract, &written) {
+                    (None, None) => true,
+                    (Some(contract), Some(written)) => {
+                        contract.interface == written.interface
+                            && contract.arguments == written.arguments
+                            && contract.choices == written.choices
+                    }
+                    _ => false,
+                };
+                let at_span = written
+                    .as_ref()
+                    .map(|bound| bound.span)
+                    .or_else(|| member.params().get(at).map(|param| param.span()));
+                (!same).then_some((at_span, contract))
+            });
+            if let Some((span, contract)) = differing_bound.filter(|_| choices_complete)
+            {
+                let diagnostic = Diagnostic::new(
+                    DiagnosticCode::TypeMismatch,
+                    span.unwrap_or_else(|| name.span()),
+                    format!(
+                        "this member's type parameters are bounded otherwise than those of `{interface_name}.{}` under the implementation's substitution",
+                        name.text()
+                    ),
+                );
+                let (related, note) = match contract {
+                    Some(bound) => (bound.span, "the contract's bound"),
+                    None => (declared.span, "the contract member"),
+                };
+                faults.push(self.related(diagnostic, interface_module, related, note));
+                usable = false;
+                continue;
+            }
             let external = member
                 .symbol()
                 .and_then(|symbol| symbol.value())
@@ -1247,6 +1296,23 @@ fn differing_type(
             .or_else(|| member.name().map(|name| name.span()));
     }
     None
+}
+
+/// `bound` with its positional arguments and choices under `substitution`.
+fn substituted_bound(bound: BoundData, substitution: &Substitution<'_>) -> BoundData {
+    BoundData {
+        arguments: bound
+            .arguments
+            .iter()
+            .map(|ty| ty.substitute(substitution))
+            .collect(),
+        choices: bound
+            .choices
+            .iter()
+            .map(|(name, ty)| (name.clone(), ty.substitute(substitution)))
+            .collect(),
+        ..bound
+    }
 }
 
 /// The span of a bare name in `written` that names one of the associated
