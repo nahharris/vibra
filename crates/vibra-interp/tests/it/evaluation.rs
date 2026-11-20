@@ -297,6 +297,33 @@ fn guarded(
     }
 }
 
+/// A `requires … else` the checker folded because its predicate is a
+/// constant that never holds: the predicate is the literal `false`, so every
+/// call returns the consequence and skips the body, which would trap at 2,
+/// while the call's argument is still evaluated first: one that traps at 3
+/// stops the call.
+#[test]
+fn a_folded_false_requires_still_evaluates_the_arguments() {
+    let folded = guarded(
+        "folded",
+        sequence(vec![trap_at(2), int(7)]),
+        Some(Guard {
+            predicate: boolean(false),
+            consequence: int(-1),
+        }),
+        None,
+    );
+    let set = set_with(vec![folded], Vec::new(), Vec::new());
+    assert_eq!(
+        eval(&set, &call(BASE, vec![int(5)])),
+        Evaluation::Value(Value::I32(-1))
+    );
+    assert_eq!(
+        eval(&set, &call(BASE, vec![sequence(vec![trap_at(3), int(5)])])),
+        Evaluation::Defect(Trap::InvalidCheckedProgram)
+    );
+}
+
 /// `requires x == 0 else -1`: a false condition gives the consequence and
 /// skips both the body and the `ensures`, which would trap here.
 #[test]

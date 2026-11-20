@@ -356,3 +356,65 @@ fn a_folded_guard_still_evaluates_the_arguments() -> Result<(), String> {
     );
     Ok(())
 }
+
+/// `chain{depth}`, a certified predicate whose cost doubles with each level.
+fn chain(depth: usize) -> String {
+    let mut source = String::from(
+        "fn c0 takes {x: I32} returns r: Bool do return Ordered.less(x 100i32) endfn\n",
+    );
+    for level in 1..=depth {
+        let below = level - 1;
+        source.push_str(&format!(
+            "fn c{level} takes {{x: I32}} returns r: Bool do return Bool.and(c{below}(x) c{below}(x)) endfn\n"
+        ));
+    }
+    source
+}
+
+#[test]
+fn the_ensures_predicate_runs_once_on_the_candidate() -> Result<(), String> {
+    let program = |guard: &str, body: &str| {
+        format!(
+            "fn main returns r: I32 do return f(4i32) endfn\n\
+             fn f takes {{x: I32}} returns r: I32 {guard} do {body} return x endfn\n{}",
+            chain(6)
+        )
+    };
+    let base = reductions(&program("", ""))?;
+    let once = reductions(&program("", "let _ be c6(x) endlet"))? - base;
+    let ensures = reductions(&program("ensures c6(r) else 0i32", ""))? - base;
+    assert!(once > 100, "one evaluation costs {once}");
+    assert!(
+        ensures + 20 > once && ensures < once + 20,
+        "ensures {ensures}, once {once}"
+    );
+    Ok(())
+}
+
+#[test]
+fn a_pattern_on_an_invariant_type_runs_no_predicate() -> Result<(), String> {
+    let program = |reads: usize| {
+        let sum = (0..reads).fold(String::from("0i32"), |sum, _| {
+            format!("I32.add(unwrap(p) {sum})")
+        });
+        format!(
+            "fn main returns r: I32 do match Heavy(7i32) case Result.ok(value: p) return {sum} \
+             case Result.err(error: _) return 0i32 endmatch endfn\n\
+             fn unwrap takes {{p: Heavy}} returns raw: I32 do let Heavy(raw) be p endlet return raw endfn\n\
+             type HeavyError case no endtype\n\
+             type Heavy of I32 where c6 else HeavyError.no() endtype\n{}",
+            chain(6)
+        )
+    };
+    let one = reductions(&program(1))?;
+    let four = reductions(&program(4))?;
+    let construction = reductions(&program(0))?;
+    let predicate = construction.saturating_sub(10);
+    assert!(predicate > 100, "the predicate costs about {predicate}");
+    assert!(
+        four - one < predicate / 2,
+        "three more reads cost {}",
+        four - one
+    );
+    Ok(())
+}
