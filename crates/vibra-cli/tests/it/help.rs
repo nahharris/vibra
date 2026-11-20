@@ -27,7 +27,7 @@ fn help_json() {
         .filter(|capability| capability["supported"] == true)
         .map(|capability| capability["command"].as_str().expect("command"))
         .collect::<Vec<_>>();
-    assert_eq!(supported, ["fmt", "check", "help"]);
+    assert_eq!(supported, ["fmt", "check", "test", "help"]);
     assert!(
         document["payload"]["usage"]
             .as_str()
@@ -61,6 +61,14 @@ fn help_names_what_it_supports_and_nothing_else() {
                 Some("check") => (
                     json!(["workspaceCheck"]),
                     json!(["staticV2"]),
+                    json!([
+                        "urn:vibra:schema:v2:command-result",
+                        "urn:vibra:schema:v2:diagnostic"
+                    ]),
+                ),
+                Some("test") => (
+                    json!(["workspaceTest"]),
+                    json!(["staticV2", "interpreterV2"]),
                     json!([
                         "urn:vibra:schema:v2:command-result",
                         "urn:vibra:schema:v2:diagnostic"
@@ -126,7 +134,14 @@ fn help_marks_unavailable() {
         .collect::<Vec<_>>();
     assert_eq!(commands.len(), 18);
     for line in &commands {
-        if ["help", "fmt PATH [--write]", "check [TARGET]"].contains(line) {
+        if [
+            "help",
+            "fmt PATH [--write]",
+            "check [TARGET]",
+            "test [TEST]",
+        ]
+        .contains(line)
+        {
             assert!(!line.contains("unavailable"), "{line}");
         } else {
             assert!(line.ends_with(" (unavailable)"), "{line}");
@@ -137,8 +152,8 @@ fn help_marks_unavailable() {
             .iter()
             .filter(|line| !line.contains("unavailable"))
             .count(),
-        3,
-        "exactly help, fmt, and check are shown as working"
+        4,
+        "exactly help, fmt, check, and test are shown as working"
     );
     assert!(outcome.stderr.is_empty());
 }

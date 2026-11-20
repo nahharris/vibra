@@ -143,11 +143,10 @@ fn check_bin_target_unsupported() {
 
 #[test]
 fn check_covers_tests() {
-    // A `test` declaration is `@tool.unavailable` until the test runner
-    // step, so the fault sits in a helper of the test module: the row is
-    // about which units `check` covers.
+    // The one fault is in the body of a `test`: `"a"` at bytes 50..53, on
+    // line 3 from column 27.
     let test =
-        "fn helper returns r: I32 do let x: I32 be \"a\" endlet return 1i32 endfn";
+        "use @std.assert enduse\n\ntest \"a\" do let x: I32 be \"a\" endlet endtest";
     let root = TempDir::project(
         "check-tests",
         LIBRARY,
@@ -155,15 +154,13 @@ fn check_covers_tests() {
     );
     let (code, document) = check(&root, &[]);
     assert_eq!(code, 1, "{document}");
-    let in_tests = document["diagnostics"]
-        .as_array()
-        .expect("diagnostics")
-        .iter()
-        .any(|diagnostic| {
-            diagnostic["code"] == "@type.mismatch"
-                && diagnostic["primarySpan"]["sourceId"] == "tests/a.vib"
-        });
-    assert!(in_tests, "{document}");
+    assert_eq!(codes(&document), ["@type.mismatch"]);
+    assert_eq!(
+        document["diagnostics"][0]["primarySpan"],
+        json!({"sourceId": "tests/a.vib", "start": 50, "end": 53,
+            "startPosition": {"line": 3, "column": 27},
+            "endPosition": {"line": 3, "column": 30}})
+    );
     let (code, named) = check(&root, &["@app"]);
     assert_eq!(code, 0, "{named}");
     assert_eq!(named["diagnostics"], json!([]));

@@ -68,14 +68,14 @@ fn every_parsed_command_has_an_inventory_row() {
 }
 
 #[test]
-fn the_capabilities_are_the_rows_and_help_fmt_and_check_are_supported() {
+fn the_capabilities_are_the_rows_and_help_fmt_check_and_test_are_supported() {
     let capabilities = capabilities();
     assert_eq!(capabilities.len(), LINES.len());
     for (capability, line) in capabilities.iter().zip(&LINES) {
         assert_eq!(capability.command, line.name());
         assert_eq!(
             capability.supported,
-            ["help", "fmt", "check"].contains(&line.name().as_str())
+            ["help", "fmt", "check", "test"].contains(&line.name().as_str())
         );
         assert_eq!(capability.supported, line.supported);
     }

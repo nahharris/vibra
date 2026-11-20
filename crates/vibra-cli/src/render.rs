@@ -2,8 +2,8 @@
 //!
 //! `docs/spec/05-tooling.md`, "Streams": in JSON format the tool writes
 //! exactly one envelope to standard output and its logs to standard error. In
-//! human format the usage text goes to standard output and each diagnostic is
-//! one line on standard error.
+//! human format the usage text, a format preview, and the test report go to
+//! standard output, and each diagnostic is one line on standard error.
 
 use std::collections::BTreeMap;
 use std::io::Write;
@@ -11,7 +11,7 @@ use std::io::Write;
 use vibra_diagnostics::{Diagnostic, LineIndex};
 use vibra_schema::{
     CommandOutcome, DiagnosticDocument, Envelope, Limits, Payload, SchemaViolation,
-    Status,
+    Status, TestPayload, TestResult,
 };
 
 use crate::args::OutputFormat;
@@ -42,6 +42,9 @@ pub struct Response {
     pub payload: Payload,
     /// A line for a person when the response carries no diagnostic to show.
     pub notice: Option<String>,
+    /// The limit profile, the limits reached, and whether the observation is
+    /// complete.
+    pub limits: Limits,
 }
 
 impl Response {
@@ -64,6 +67,7 @@ impl Response {
             sources: BTreeMap::new(),
             payload,
             notice: None,
+            limits: limits(),
         }
     }
 }
@@ -105,7 +109,7 @@ fn envelope(response: &Response) -> Result<Envelope, String> {
         response.command.clone(),
         response.status,
         response.result,
-        limits(),
+        response.limits.clone(),
     );
     envelope
         .workspace_revision
@@ -153,6 +157,59 @@ fn write_diagnostics<E: Write>(response: &Response, stderr: &mut E) {
     }
 }
 
+/// The human test report: one line per item with its selector and result
+/// atom; under each item that did not pass, its diagnostics, its failure, or
+/// its trap; and the passed, failed, and selected counts on the last line.
+fn write_test_report<W: Write>(test: &TestPayload, stdout: &mut W) {
+    for item in &test.tests {
+        let result = item
+            .result
+            .map_or("(stopped by a host event)", TestResult::as_atom);
+        let _ = writeln!(stdout, "{} {result}", item.name);
+        if item.result == Some(TestResult::Passed) {
+            continue;
+        }
+        for code in &item.diagnostics {
+            let _ = writeln!(stdout, "  diagnostic: {code}");
+        }
+        if let Some(failure) = &item.failure {
+            let span = &failure.primary_span;
+            let location = format!(
+                "{}:{}:{}",
+                span.source_id.as_deref().unwrap_or("<unknown>"),
+                span.start_position.line,
+                span.start_position.column
+            );
+            let assertion = failure.assertion.as_deref().unwrap_or("an assertion");
+            let _ = match (
+                &failure.observation_error,
+                &failure.expected,
+                &failure.actual,
+            ) {
+                (Some(_), _, _) => writeln!(
+                    stdout,
+                    "  failure: {assertion} could not observe an operand at {location}"
+                ),
+                (None, Some(expected), Some(actual)) => writeln!(
+                    stdout,
+                    "  failure: {assertion} expected {expected}, actual {actual} at {location}"
+                ),
+                (None, _, _) => {
+                    writeln!(stdout, "  failure: {assertion} is false at {location}")
+                }
+            };
+        }
+        if let Some(trap) = &item.trap {
+            let _ = writeln!(stdout, "  trap: {}", trap.trap_code);
+        }
+    }
+    let _ = writeln!(
+        stdout,
+        "passed {}, failed {}, selected {}",
+        test.passed, test.failed, test.selected
+    );
+}
+
 /// Writes `response` and returns the exit code.
 ///
 /// `serialize` turns the envelope into its validated JSON text; a failure
@@ -190,6 +247,7 @@ pub fn emit<W: Write, E: Write>(
                         let _ = write!(stdout, "{text}");
                     }
                 }
+                Payload::Test(test) => write_test_report(test, stdout),
                 _ => {}
             }
             write_diagnostics(response, stderr);
