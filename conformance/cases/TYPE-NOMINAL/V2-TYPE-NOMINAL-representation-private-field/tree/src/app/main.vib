@@ -1,0 +1,3 @@
+use @app.model enduse
+
+fn first takes {p: model.Point} returns r: I32 do return p.x endfn

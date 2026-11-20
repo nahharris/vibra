@@ -1,0 +1,19 @@
+id = "V2-CONTRACT-ingress-pattern-rebuild"
+rule = "V2-CONTRACT-ingress-pattern-rebuild"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#bare-guards: a construction from a value a pattern took out of the type is a new ingress: the invariant of the source gives raw greater than 0, which does not establish raw minus 1 greater than 0, so it is @contract.unproved at the construction, related to the type"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "unknown"
+
+[[expect.diagnostics]]
+code = "@contract.unproved"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 221, end = 248 }
+related = [{ source = "src/app/main.vib", span = { start = 5, end = 13 } }]

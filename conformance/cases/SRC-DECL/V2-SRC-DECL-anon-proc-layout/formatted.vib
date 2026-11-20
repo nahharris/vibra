@@ -1,0 +1,9 @@
+let p: Proc({Str} Void {Out}) be
+  proc
+    takes {s: Str}
+    returns r: Void
+    performs {Out}
+    do
+      return void
+  endproc
+endlet

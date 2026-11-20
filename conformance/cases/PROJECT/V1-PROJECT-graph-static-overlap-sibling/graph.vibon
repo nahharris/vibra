@@ -1,0 +1,1 @@
+{format: @sourceGraph.v1 units: [{name: @app kind: @lib modules: [{path: @app.a sourceId: "src/app/a.vib" bytesHex: "61"}]} {name: @extra kind: @lib modules: [{path: @extra.b sourceId: "src/apps/b.vib" bytesHex: "62"}]} {name: @tests kind: @tests modules: []}] dependencies: []}

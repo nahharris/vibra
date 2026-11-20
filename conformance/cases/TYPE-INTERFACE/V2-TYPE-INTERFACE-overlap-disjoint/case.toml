@@ -1,0 +1,12 @@
+id = "V2-TYPE-INTERFACE-overlap-disjoint"
+rule = "V2-TYPE-INTERFACE-overlap-disjoint"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#overlap: two keys of one interface whose arguments I8 and I16 do not unify do not overlap"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

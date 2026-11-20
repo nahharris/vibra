@@ -1,0 +1,12 @@
+id = "V2-SRC-DECL-anon-proc-layout"
+rule = "V2-SRC-DECL-anon-proc-layout"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#canonical-format: an anonymous proc uses the declaration layout, on the line after be one step in, with performs after returns"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "accepted"
+formatted = "formatted.vib"

@@ -1,0 +1,12 @@
+id = "V2-TYPE-CONTROL-missing-return-every-path"
+rule = "V2-TYPE-CONTROL-missing-return-every-path"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "01-source-language.md#return-try-await: a body whose every path ends in return cannot run off its end"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

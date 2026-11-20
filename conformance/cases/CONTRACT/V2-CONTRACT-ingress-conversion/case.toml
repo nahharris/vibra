@@ -1,0 +1,12 @@
+id = "V2-CONTRACT-ingress-conversion"
+rule = "V2-CONTRACT-ingress-conversion"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#type-invariants: a TryFrom implementation that returns the constructor's result is an ingress path: the error for 0, the value for 1"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

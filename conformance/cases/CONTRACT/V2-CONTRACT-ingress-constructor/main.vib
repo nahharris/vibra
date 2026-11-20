@@ -1,0 +1,3 @@
+type PositiveError case notPositive endtype
+type Positive of I32 where fn takes {raw: I32} returns ok: Bool do return Ordered.greater(raw 0i32) endfn else PositiveError.notPositive() endtype
+fn main returns r: Result(Positive PositiveError) do return Positive(0i32) endfn

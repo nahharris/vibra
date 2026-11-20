@@ -17,5 +17,6 @@ mod diagnostic_registry;
 mod encoding_readback;
 mod interpret;
 mod manifest;
+mod owner_coverage;
 mod runner;
 mod spec_examples;

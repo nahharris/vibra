@@ -1,0 +1,12 @@
+id = "V2-TYPE-CONTROL-match-constant-float-integer"
+rule = "V2-TYPE-CONTROL-match-constant-float-integer"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#constant-expressions-and-constant-patterns: an integer constant has a pattern form, so it is admitted in pattern position"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
