@@ -1,0 +1,13 @@
+id = "V2-CONTRACT-obligations-snapshot-passed"
+rule = "V2-CONTRACT-obligations-snapshot-passed"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "07-diagnostics-and-conformance.md#persistent-observations: the types snapshot of a discharged obligation lists the rules that discharged it"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+types = "types.vibon"

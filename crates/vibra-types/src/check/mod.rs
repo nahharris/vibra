@@ -26,6 +26,7 @@ mod interfaces;
 mod literal;
 mod lower;
 mod nominal;
+mod obligation;
 mod pattern;
 mod testing;
 
@@ -40,6 +41,7 @@ use vibra_resolve::{
 
 use crate::stdlib::{PRELUDE, Stdlib, load_stdlib};
 use declare::{BuildInputs, PackageName, Program, Source, parse_all};
+pub use obligation::{Obligation, ObligationKind, ObligationStatus};
 
 /// The package of a source checked alone.
 const SOURCE_PACKAGE: &str = "source";
@@ -63,6 +65,7 @@ pub struct CheckResult {
     functions: Vec<(String, usize)>,
     tests: Vec<CheckedTest>,
     test_set: Option<Arc<CheckedModuleSet>>,
+    obligations: Vec<Obligation>,
 }
 
 /// One test of a covered module of `@tests`: the function its body was
@@ -114,6 +117,7 @@ impl CheckResult {
             functions: Vec::new(),
             tests: Vec::new(),
             test_set: None,
+            obligations: Vec::new(),
         }
     }
 
@@ -168,14 +172,38 @@ impl CheckResult {
                 .all(|diagnostic| diagnostic.code() == DiagnosticCode::ToolUnavailable)
     }
 
+    /// Whether every type is known: no error, or only contract diagnostics,
+    /// `@tool.unavailable`, and `@tool.limitExceeded`.
+    #[must_use]
+    pub fn types_known(&self) -> bool {
+        self.diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.level() == Level::Error)
+            .all(|diagnostic| {
+                diagnostic.code().as_atom().starts_with("@contract.")
+                    || matches!(
+                        diagnostic.code(),
+                        DiagnosticCode::ToolUnavailable
+                            | DiagnosticCode::ToolLimitExceeded
+                    )
+            })
+    }
+
+    /// The obligation of every bare-guard site of the local declarations,
+    /// sorted by declaration and then span, when every type is known.
+    #[must_use]
+    pub fn obligations(&self) -> &[Obligation] {
+        &self.obligations
+    }
+
     /// The checked module set, when no error was found.
     #[must_use]
     pub const fn module_set(&self) -> Option<&Arc<CheckedModuleSet>> {
         self.module_set.as_ref()
     }
 
-    /// The `@types.v2` document of the local declarations checked, when no
-    /// error other than `@tool.unavailable` was found.
+    /// The `@types.v2` document of the local declarations checked, when
+    /// every type is known ([`types_known`](Self::types_known)).
     #[must_use]
     pub fn types_document(&self) -> Option<&str> {
         self.types.as_deref()
@@ -239,8 +267,11 @@ pub fn check_workspace(input: &ResolveInput, units: &[String]) -> CheckResult {
     result.diagnostics = diagnostics;
     if result.has_errors() {
         result.module_set = None;
-        if !result.only_unavailable() {
+        if !result.types_known() {
             result.types = None;
+            result.obligations.clear();
+        }
+        if !result.only_unavailable() {
             result.tests.clear();
             result.test_set = None;
         }

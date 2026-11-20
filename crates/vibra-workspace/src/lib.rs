@@ -59,3 +59,6 @@ pub use test_runner::{
 // `run_tests` reads them without depending on the interpreter or the IR.
 pub use vibra_interp::{FailureKind, MemoryBudget, TestAssertionFailure};
 pub use vibra_ir::{SourceOrigin, Trap};
+// The obligation records a check found, so that a consumer of a
+// WorkspaceCheck reads them without depending on the checker.
+pub use vibra_types::Obligation;

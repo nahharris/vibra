@@ -367,7 +367,7 @@ impl<'a> Program<'a> {
             for member in view.members() {
                 let Some(name) = member.name() else { continue };
                 let what = format!("the member `{interface_name}.{}`", name.text());
-                if !unguarded(&member) || member.kind() == CallableKind::Proc {
+                if member.performs().is_some() || member.kind() == CallableKind::Proc {
                     self.unsupported(module, member.construct().span(), &what);
                     continue;
                 }

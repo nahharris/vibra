@@ -1,0 +1,2 @@
+fn posElse takes {x: I32} returns r: I32 requires Ordered.greater(x 0i32) else -1i32 do return x endfn
+fn main returns r: I32 do let f: Fn({I32} I32) be posElse endlet return f(0i32) endfn

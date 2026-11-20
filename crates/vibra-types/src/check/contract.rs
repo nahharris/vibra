@@ -4,17 +4,18 @@
 //! pass checks each guard and each `where` operand as an expression
 //! ([`super::expr`]) and records, as a [`Site`], every place a bare guard
 //! states an obligation. Once every body is checked, [`review`] decides the
-//! [certified fragment](fragment) over the checked IR, reports what is
-//! outside it, reports each bare-guard obligation (whose discharge rules are
-//! not applied yet, so that each is `@contract.unproved` unless a tool limit
-//! stopped its evaluation) and decides each `let` pattern that a constant
-//! construction makes irrefutable, evaluating constants through [`ctfe`].
-//! It also folds each guard with `else` whose predicate is constant.
+//! [certified fragment](fragment) over the checked IR and reports what is
+//! outside it, discharges every bare-guard obligation by the rules of "Bare
+//! guards" ([`prove`], over the terms and facts of [`facts`]), decides each
+//! `let` pattern that a constant construction makes irrefutable, evaluating
+//! constants through [`ctfe`], and folds each guard with `else` whose
+//! predicate is constant.
 //!
 //! [`ctfe`]: super::ctfe
-
+mod facts;
 pub(crate) mod fragment;
 mod obligations;
+mod prove;
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -27,6 +28,7 @@ use vibra_ir::{
 use super::ctfe::{Evaluator, Outcome};
 use super::declare::{Entity, Program};
 use super::expr::{Checked, Layout};
+use super::obligation::Obligation;
 use fragment::{Facts, Standing, walk};
 
 /// A checked guard of a callable.
@@ -127,17 +129,33 @@ pub(crate) struct Reviewed {
     pub(crate) diagnostics: Vec<Diagnostic>,
     /// The folded guards of each function, by program index.
     pub(crate) folds: BTreeMap<usize, Fold>,
+    /// The obligation of every bare-guard site of a local declaration.
+    pub(crate) obligations: Vec<Obligation>,
+}
+
+/// A declaration whose body holds sites: a function, a module value, or a
+/// test, by program index.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum Owner {
+    /// A function.
+    Function(usize),
+    /// A module value.
+    Value(usize),
+    /// A test.
+    Test(usize),
 }
 
 /// What the review looks at: the program, its layout, its checked
-/// functions and invariants by program index, and its sites with the module
-/// of each.
+/// functions, module values, tests, and invariants by program index, and its
+/// sites with the module and the declaration of each.
 pub(crate) struct Inputs<'r, 'a> {
     pub(crate) program: &'r Program<'a>,
     pub(crate) layout: &'r Layout,
     pub(crate) functions: &'r BTreeMap<usize, Checked>,
+    pub(crate) values: &'r BTreeMap<usize, Checked>,
+    pub(crate) tests: &'r BTreeMap<usize, Checked>,
     pub(crate) invariants: &'r BTreeMap<usize, CheckedInvariant>,
-    pub(crate) sites: &'r [(usize, Site)],
+    pub(crate) sites: &'r [(usize, Owner, Site)],
 }
 
 /// The state the parts of a review share.
@@ -185,6 +203,45 @@ impl Context<'_, '_> {
         }
     }
 
+    /// The module and identity of `owner`.
+    fn owner(&self, owner: Owner) -> Option<(usize, String)> {
+        let program = self.program();
+        match owner {
+            Owner::Function(index) => program
+                .functions
+                .get(index)
+                .map(|data| (data.module, data.identity.clone())),
+            Owner::Value(index) => program
+                .values
+                .get(index)
+                .map(|data| (data.module, data.identity.clone())),
+            Owner::Test(index) => {
+                let data = program.tests.get(index)?;
+                let module = program.modules.get(data.module)?;
+                Some((
+                    data.module,
+                    program.identity_of(
+                        &module.path,
+                        module.embedded,
+                        "",
+                        "@test",
+                        &data.name,
+                    ),
+                ))
+            }
+        }
+    }
+
+    /// The source text at `span` of the module `module`.
+    fn source_text(&self, module: usize, span: ByteSpan) -> &str {
+        self.program()
+            .modules
+            .get(module)
+            .and_then(|data| data.text)
+            .and_then(|text| text.get(span.start()..span.end()))
+            .unwrap_or_default()
+    }
+
     /// The entry of the predicate of the type at program index `ty`.
     fn predicate_entry(&self, ty: usize) -> Option<usize> {
         match &self.inputs.invariants.get(&ty)?.predicate {
@@ -220,9 +277,10 @@ impl Context<'_, '_> {
             span,
             format!(
                 "evaluating this predicate over constant operands reached the \
-                 reduction limit of the limit profile `m1Default` ({} \
+                 reduction limit of the limit profile `{}` ({} \
                  reductions); the obligation's status is unknown",
-                super::ctfe::LIMITS.reductions
+                super::ctfe::PROFILE.name,
+                super::ctfe::PROFILE.compile_time.reductions
             ),
         );
         self.push(module, diagnostic);
@@ -334,6 +392,35 @@ fn facts(inputs: &Inputs<'_, '_>, anonymous: &BTreeMap<usize, usize>) -> Facts {
             facts.invariants.insert(id, entry);
         }
     }
+    for data in &program.impls {
+        let embedded = program
+            .modules
+            .get(data.module)
+            .is_none_or(|module| module.embedded);
+        let Some(interface) = program
+            .interfaces
+            .get(data.interface)
+            .and_then(|interface| interface.id.clone())
+        else {
+            continue;
+        };
+        if embedded || !data.usable || !data.binders.is_empty() {
+            continue;
+        }
+        for (member, function) in &data.members {
+            if let Some(entry) =
+                inputs.layout.functions.get(*function).copied().flatten()
+            {
+                facts.members.push((
+                    interface.clone(),
+                    data.arguments.clone(),
+                    data.receiver.clone(),
+                    member.clone(),
+                    entry,
+                ));
+            }
+        }
+    }
     facts
 }
 
@@ -417,8 +504,8 @@ pub(crate) fn review(
     let standings = std::mem::take(&mut context.standings);
     let mut evaluator = Evaluator::new(&facts, &standings, build);
     context.standings.clone_from(&standings);
-    obligations::bare_ensures(&mut context, &certified);
-    obligations::sites(&mut context, &certified, &mut evaluator);
+    prove::discharge(&mut context, &certified, &mut evaluator);
+    obligations::patterns(&mut context, &mut evaluator);
     folds(&mut context, &certified, &mut evaluator);
     context.reviewed
 }

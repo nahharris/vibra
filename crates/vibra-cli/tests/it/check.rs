@@ -212,3 +212,64 @@ fn check_json_validates() {
         );
     }
 }
+
+const POS: &str = "fn pos takes {x: I32} returns r: I32 requires Ordered.greater(x 0i32) do return x endfn\n";
+
+/// The status, kind, and rules of each obligation the payload carries.
+fn obligations(document: &Value) -> Vec<(String, String, Vec<String>)> {
+    document["payload"]["obligations"]
+        .as_array()
+        .expect("obligations")
+        .iter()
+        .map(|record| {
+            let text =
+                |field: &str| record[field].as_str().expect("a string").to_owned();
+            let rules = record["ruleIds"]
+                .as_array()
+                .expect("rules")
+                .iter()
+                .map(|rule| rule.as_str().expect("a rule").to_owned())
+                .collect();
+            (text("status"), text("kind"), rules)
+        })
+        .collect()
+}
+
+#[test]
+fn check_sends_the_obligations_and_an_unestablished_one_is_unknown() {
+    let passed = format!("{POS}fn main returns r: I32 do return pos(5i32) endfn\n");
+    let root = TempDir::project(
+        "check-obligation-passed",
+        LIBRARY,
+        &[("src/app/main.vib", passed.as_str())],
+    );
+    let (code, document) = check(&root, &[]);
+    assert_eq!(code, 0, "{document}");
+    assert_eq!(document["status"], "passed");
+    assert_eq!(
+        obligations(&document),
+        [(
+            "passed".to_owned(),
+            "requires".to_owned(),
+            vec!["GUARD-1".to_owned()]
+        )]
+    );
+    let unproved =
+        format!("{POS}fn f takes {{y: I32}} returns r: I32 do return pos(y) endfn\n");
+    let root = TempDir::project(
+        "check-obligation-unknown",
+        LIBRARY,
+        &[("src/app/main.vib", unproved.as_str())],
+    );
+    let (code, document) = check(&root, &[]);
+    assert_eq!(code, 1, "{document}");
+    assert_eq!(document["result"], "@command.diagnostics");
+    assert_eq!(document["status"], "unknown");
+    assert_eq!(codes(&document), ["@contract.unproved"]);
+    assert_eq!(
+        obligations(&document),
+        [("unknown".to_owned(), "requires".to_owned(), Vec::new())]
+    );
+    let source = &document["payload"]["obligations"][0]["source"];
+    assert_eq!(source["sourceId"], "src/app/main.vib");
+}

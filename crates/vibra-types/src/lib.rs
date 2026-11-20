@@ -20,7 +20,8 @@ mod check;
 mod stdlib;
 
 pub use check::{
-    CheckResult, CheckedTest, Interpretation, check_source, check_workspace, interpret,
+    CheckResult, CheckedTest, Interpretation, Obligation, ObligationKind,
+    ObligationStatus, check_source, check_workspace, interpret,
 };
 
 pub use stdlib::{

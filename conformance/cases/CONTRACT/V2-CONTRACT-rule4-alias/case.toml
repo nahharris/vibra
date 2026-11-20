@@ -1,0 +1,12 @@
+id = "V2-CONTRACT-rule4-alias"
+rule = "V2-CONTRACT-rule4-alias"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#bare-guards: GUARD-4: a let alias denotes the same value as the name it binds"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

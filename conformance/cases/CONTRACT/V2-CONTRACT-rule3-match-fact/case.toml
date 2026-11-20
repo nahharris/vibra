@@ -1,0 +1,12 @@
+id = "V2-CONTRACT-rule3-match-fact"
+rule = "V2-CONTRACT-rule3-match-fact"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#bare-guards: GUARD-3: a match arm supplies its case, which a certified predicate over the subject reads"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

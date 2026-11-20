@@ -1,0 +1,12 @@
+id = "V2-CONTRACT-obligation-kept-by-type"
+rule = "V2-CONTRACT-obligation-kept-by-type"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#guards-and-callable-types: a conversion keeps a bare requires that the parameter types establish"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

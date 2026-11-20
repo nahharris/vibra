@@ -1,0 +1,27 @@
+interface Sized
+  fn size
+    takes {value: Self n: I32}
+    returns r: I32
+    ensures Ordered.greater(r 0i32)
+  endfn
+endinterface
+type Good of I32
+  impl Sized
+    fn size
+      takes {value: Self m: I32}
+      returns s: I32
+      do
+        return 1i32
+    endfn
+  endimpl
+endtype
+type Bad of I32
+  impl Sized
+    fn size
+      takes {value: Self m: I32}
+      returns s: I32
+      do
+        return m
+    endfn
+  endimpl
+endtype

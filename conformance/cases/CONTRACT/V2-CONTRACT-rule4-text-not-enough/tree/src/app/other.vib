@@ -1,0 +1,1 @@
+fn gt takes {a: I32 b: I32} returns r: Bool visibility @public do return Ordered.greaterOrEqual(a b) endfn

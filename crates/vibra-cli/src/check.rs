@@ -11,9 +11,16 @@
 //! except that a reached limit or a bare guard that is not established make
 //! it `unknown`, and a disproved bare guard makes it `refuted`.
 
-use vibra_diagnostics::{Diagnostic, DiagnosticCode};
-use vibra_schema::{CheckPayload, CommandOutcome, ObligationRecord, Payload, Status};
-use vibra_workspace::{Discovery, PROJECT_FILE_NAME, WorkspaceCapture, check_snapshot};
+use std::collections::BTreeMap;
+
+use vibra_diagnostics::{Diagnostic, DiagnosticCode, LineIndex};
+use vibra_schema::{
+    CheckPayload, CommandOutcome, ObligationKind, ObligationRecord, Payload,
+    SpanDocument, Status,
+};
+use vibra_workspace::{
+    Discovery, Obligation, PROJECT_FILE_NAME, WorkspaceCapture, check_snapshot,
+};
 
 use crate::args::Invocation;
 use crate::refusal;
@@ -78,7 +85,10 @@ fn checked(
     diagnostics: Vec<Diagnostic>,
     obligations: Vec<ObligationRecord>,
 ) {
-    let (result, status) = outcome(&diagnostics, &obligations, false);
+    let limit_reached = diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code() == DiagnosticCode::ToolLimitExceeded);
+    let (result, status) = outcome(&diagnostics, &obligations, limit_reached);
     response.result = result;
     response.status = status;
     response.diagnostics = diagnostics;
@@ -86,6 +96,48 @@ fn checked(
         accepted: result == CommandOutcome::Ok,
         obligations,
     });
+}
+
+/// The obligation records of `obligations`, whose spans are rendered over
+/// the source texts `sources`, by source identity.
+fn records(
+    obligations: &[Obligation],
+    sources: &BTreeMap<String, String>,
+) -> Vec<ObligationRecord> {
+    obligations
+        .iter()
+        .filter_map(|obligation| {
+            let kind = match obligation.kind().atom() {
+                "requires" => ObligationKind::Requires,
+                "ensures" => ObligationKind::Ensures,
+                "where" => ObligationKind::Where,
+                _ => return None,
+            };
+            let status = match obligation.status().atom() {
+                "passed" => Status::Passed,
+                "refuted" => Status::Refuted,
+                "unknown" => Status::Unknown,
+                _ => Status::Unsupported,
+            };
+            let text = sources
+                .get(obligation.source_id())
+                .map_or("", String::as_str);
+            Some(ObligationRecord {
+                kind,
+                declaration: obligation.declaration().to_owned(),
+                predicate_identity: obligation.predicate().to_owned(),
+                source: SpanDocument::render(
+                    obligation.span(),
+                    &LineIndex::new(text),
+                    Some(obligation.source_id()),
+                ),
+                status,
+                rule_ids: obligation.rules().to_vec(),
+                dependencies: obligation.dependencies().to_vec(),
+                counterexample: obligation.counterexample().map(str::to_owned),
+            })
+        })
+        .collect()
 }
 
 /// The response to a well-formed `check` line.
@@ -140,9 +192,11 @@ pub fn run(invocation: &Invocation) -> Response {
         );
     }
     let check = check_snapshot(snapshot, target.as_deref());
-    // The checker records no obligation yet: the bare guard steps add them
-    // to the check result, and this payload carries them.
-    checked(&mut response, check.diagnostics().to_vec(), Vec::new());
+    let obligations = check
+        .check()
+        .map(|result| records(result.obligations(), &response.sources))
+        .unwrap_or_default();
+    checked(&mut response, check.diagnostics().to_vec(), obligations);
     if response.result == CommandOutcome::Ok {
         response.notice = Some("check passed".to_owned());
     }
@@ -151,8 +205,7 @@ pub fn run(invocation: &Invocation) -> Response {
 
 #[cfg(test)]
 mod tests {
-    use vibra_diagnostics::{ByteSpan, LineIndex};
-    use vibra_schema::{ObligationKind, SpanDocument};
+    use vibra_diagnostics::ByteSpan;
 
     use super::*;
 

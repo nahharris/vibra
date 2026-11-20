@@ -1,0 +1,3 @@
+fn isSome takes {o: Option(I32)} returns r: Bool do match o case Option.some(value: v) return true case _ return false endmatch endfn
+fn posOpt takes {o: Option(I32)} returns r: I32 requires isSome(o) do return 1i32 endfn
+fn f takes {o: Option(I32)} returns r: I32 do match o case Option.some(value: v) return posOpt(o) case _ return 0i32 endmatch endfn

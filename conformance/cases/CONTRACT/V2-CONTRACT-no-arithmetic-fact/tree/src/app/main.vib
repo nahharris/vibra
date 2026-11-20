@@ -1,0 +1,2 @@
+fn pos takes {x: I32} returns r: I32 requires Ordered.greater(x 0i32) do return x endfn
+fn f takes {x: I32 y: I32 z: I32} returns r: I32 do if Ordered.greater(x 0i32) then return pos(I32.add(x 1i32)) else return 0i32 endif endfn

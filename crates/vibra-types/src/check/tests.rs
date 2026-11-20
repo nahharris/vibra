@@ -9,6 +9,7 @@ mod bodies;
 mod bounds;
 mod callables;
 mod contracts;
+mod discharge;
 mod interfaces;
 mod testing;
 

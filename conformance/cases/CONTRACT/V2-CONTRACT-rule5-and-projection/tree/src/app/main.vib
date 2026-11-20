@@ -1,0 +1,2 @@
+fn pos takes {x: I32} returns r: I32 requires Ordered.greater(x 0i32) do return x endfn
+fn h takes {a: I32 b: I32} returns r: I32 requires Bool.and(Ordered.greater(a 0i32) Ordered.greater(b 0i32)) do return pos(a) endfn

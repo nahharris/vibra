@@ -1,0 +1,5 @@
+fn f takes {x: I32} returns r: I32 requires Ordered.greater(x 0i32) do return x endfn
+fn g takes {y: I32} returns r: I32 do return f(y) endfn
+fn h takes {x: I32} returns r: I32 ensures Ordered.greater(r 0i32) else 1i32 do return x endfn
+type SmallError case tooLarge endtype
+type Small of I32 where fn takes {v: I32} returns ok: Bool do return Ordered.less(v 10i32) endfn else SmallError.tooLarge() endtype
