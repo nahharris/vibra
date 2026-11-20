@@ -54,13 +54,16 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
     // Checked IR names its traps by diagnostic code and knows no syntax.
     ("vibra-ir", &["vibra-diagnostics"]),
     // The workspace reads a project's files and hands later phases a
-    // snapshot with the embedded standard library; no language crate depends
-    // on it.
+    // snapshot with the embedded standard library, and its test runner runs
+    // the checked tests in the reference interpreter; no language crate
+    // depends on it.
     (
         "vibra-workspace",
         &[
             "vibra-diagnostics",
             "vibra-fmt",
+            "vibra-interp",
+            "vibra-ir",
             "vibra-resolve",
             "vibra-syntax",
             "vibra-types",
