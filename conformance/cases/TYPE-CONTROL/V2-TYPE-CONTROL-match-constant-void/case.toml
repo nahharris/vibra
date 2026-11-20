@@ -1,0 +1,18 @@
+id = "V2-TYPE-CONTROL-match-constant-void"
+rule = "V2-TYPE-CONTROL-match-constant-void"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#constant-expressions-and-constant-patterns: void has no pattern form, so a void constant in pattern position is @pattern.unsupportedCoverage at the pattern"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@pattern.unsupportedCoverage"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 99, end = 106 }

@@ -21,9 +21,9 @@ use vibra_syntax::CstNode;
 use vibra_syntax::source::{Ident, Pattern, PatternForm};
 
 use super::{BodyChecker, Local};
-use crate::check::declare::{Entity, TypeKind};
+use crate::check::declare::{Entity, Program, TypeKind};
 use crate::check::literal::{self, LiteralFault};
-use crate::check::pattern::{Ctor, Literal, Pat};
+use crate::check::pattern::{Ctor, Literal, Pat, Space, space};
 
 /// A typed pattern.
 #[derive(Debug)]
@@ -67,6 +67,9 @@ enum Kind {
         width: usize,
     },
     List,
+    /// A constant pattern before the constants are known: it covers nothing
+    /// but itself and is not lowered.
+    Provisional,
 }
 
 #[derive(Debug)]
@@ -234,6 +237,13 @@ impl<'a> BodyChecker<'_, 'a> {
                     fields: names.into_iter().zip(fields).collect(),
                 }),
             ),
+            Kind::Provisional => {
+                self.opaque = self.opaque.saturating_add(1);
+                (
+                    Pat::ctor(Ctor::Literal(Literal::Opaque(self.opaque)), Vec::new()),
+                    None,
+                )
+            }
             Kind::List => {
                 let length = covers.len();
                 (
@@ -480,6 +490,10 @@ impl<'a> BodyChecker<'_, 'a> {
     }
 
     /// A constant pattern: the module value `index`, as its expanded value.
+    /// Once the constants are known it is the pattern of the value the
+    /// module value's initializer folds to; before, in the pass that finds
+    /// them, a fieldless case and a literal are read from the initializer's
+    /// text and any other constant is a pattern coverage cannot take apart.
     fn constant_pattern(
         &mut self,
         index: usize,
@@ -487,24 +501,92 @@ impl<'a> BodyChecker<'_, 'a> {
         span: ByteSpan,
     ) -> Kind {
         let program = self.program;
-        if let Some((owner, case)) = program.constant_case(index) {
-            let Some(data) = program.types.get(owner) else {
-                return Kind::Error;
-            };
-            let (Some(own), Some(at)) = (
-                data.self_type(),
-                data.cases().and_then(|cases| {
-                    cases.iter().position(|known| known.name == case)
-                }),
-            ) else {
-                return Kind::Error;
-            };
-            if let Some(ty) = ty
-                && *ty != own
-            {
-                self.misfit(Some(ty), span, "this constant pattern");
+        let Some(data) = program.values.get(index) else {
+            return Kind::Error;
+        };
+        let Some(own) = data.ty.clone() else {
+            self.skipped(data.module, span);
+            return Kind::Error;
+        };
+        if !self.layout.constants_known {
+            return self.provisional_constant(index, own, ty, span);
+        }
+        let value = self
+            .layout
+            .globals
+            .get(index)
+            .copied()
+            .flatten()
+            .and_then(|global| self.layout.constants.get(&global));
+        let Some(value) = value.cloned() else {
+            let related = data.view.name().map_or(span, |name| name.span());
+            self.report_related(
+                DiagnosticCode::NameRedeclaration,
+                span,
+                format!(
+                    "`{}` names a module value whose initializer is not constant: \
+                     it is neither a binder nor a constant pattern",
+                    data.name
+                ),
+                data.module,
+                related,
+                "the module value",
+            );
+            return Kind::Error;
+        };
+        let Some(ty) = ty else {
+            return Kind::Error;
+        };
+        if own != *ty {
+            self.misfit(Some(ty), span, "this constant pattern");
+            return Kind::Error;
+        }
+        let cover = match self.expand(&own, &value) {
+            Ok(cover) => cover,
+            Err(what) => {
+                self.report(
+                    DiagnosticCode::PatternUnsupportedCoverage,
+                    span,
+                    format!(
+                        "the constant `{}` holds {what}, which has no pattern form, \
+                         so coverage has no shape to expand it to",
+                        data.name
+                    ),
+                );
                 return Kind::Error;
             }
+        };
+        match Constant::new(own, value) {
+            Ok(constant) => Kind::Literal(constant, cover),
+            Err(_) => Kind::Error,
+        }
+    }
+
+    /// A constant pattern before the constants are known: a fieldless case or
+    /// a literal read from the initializer's text, or a pattern no other
+    /// pattern covers, left unlowered for the pass that knows the constants.
+    fn provisional_constant(
+        &mut self,
+        index: usize,
+        own: Type,
+        ty: Option<&Type>,
+        span: ByteSpan,
+    ) -> Kind {
+        let program = self.program;
+        let Some(ty) = ty else {
+            return Kind::Error;
+        };
+        if own != *ty {
+            self.misfit(Some(ty), span, "this constant pattern");
+            return Kind::Error;
+        }
+        if let Some((owner, case)) = program.constant_case(index)
+            && let Some(at) = program
+                .types
+                .get(owner)
+                .and_then(|data| data.cases())
+                .and_then(|cases| cases.iter().position(|known| known.name == case))
+        {
             let value = Value::Variant {
                 case,
                 fields: Vec::new(),
@@ -516,29 +598,82 @@ impl<'a> BodyChecker<'_, 'a> {
                 Err(_) => Kind::Error,
             };
         }
-        let value_type = program.values.get(index).and_then(|data| data.ty.clone());
         let written = program
             .constant_literal(index)
             .and_then(|node| literal::read(node, self.module_text(index)?));
-        let (Some(value_type), Some(written)) = (value_type, written) else {
-            self.unavailable(span, "this constant pattern");
-            return Kind::Error;
-        };
-        let Ok((own, value)) =
-            literal::evaluate(&written, Some(&value_type), program.str_type.as_ref())
-        else {
-            return Kind::Error;
-        };
-        if matches!(own, Type::F32 | Type::F64 | Type::Void) {
-            self.unavailable(span, "a constant pattern of a float or `void` value");
-            return Kind::Error;
+        if let Some(written) = written
+            && let Ok((own, value)) =
+                literal::evaluate(&written, Some(&own), program.str_type.as_ref())
+            && let Some(key) = literal_key(&value)
+        {
+            let cover = if matches!(own, Type::AtomSingleton(_)) {
+                Pat::ctor(Ctor::Single, Vec::new())
+            } else {
+                Pat::ctor(Ctor::Literal(key), Vec::new())
+            };
+            return match Constant::new(own, value) {
+                Ok(constant) => Kind::Literal(constant, cover),
+                Err(_) => Kind::Error,
+            };
         }
-        let Some(ty) = ty else {
-            return Kind::Error;
-        };
-        self.literal_kind(own, value, ty, span)
+        Kind::Provisional
     }
 
+    /// The pattern of the constant `value` of type `ty`, as coverage sees
+    /// it: a string, character, integer, or atom is its literal; a tuple,
+    /// record, or list the tuple, record, or list pattern of its components'
+    /// patterns; a case or declared type the constructor pattern of its
+    /// fields' patterns. What a value holds that has no pattern form, a
+    /// float, `void`, or a dict, is the error. Constants nest without bound,
+    /// so the value is walked with a work list and assembled bottom-up.
+    fn expand(&mut self, ty: &Type, value: &Value) -> Result<Rc<Pat>, &'static str> {
+        let program = self.program;
+        let mut shapes: Vec<(Ctor, Vec<usize>)> = Vec::new();
+        let mut pending = vec![(ty.clone(), value, None::<(usize, usize)>)];
+        while let Some((ty, value, parent)) = pending.pop() {
+            let index = shapes.len();
+            if let Some((parent, position)) = parent
+                && let Some(slot) = shapes
+                    .get_mut(parent)
+                    .and_then(|(_, children)| children.get_mut(position))
+            {
+                *slot = index;
+            }
+            let (ctor, children) = expand_level(program, &ty, value)?;
+            let ctor = match ctor {
+                Some(ctor) => ctor,
+                None => {
+                    self.opaque = self.opaque.saturating_add(1);
+                    Ctor::Literal(Literal::Opaque(self.opaque))
+                }
+            };
+            shapes.push((ctor, vec![0; children.len()]));
+            for (position, (child_type, child)) in
+                children.into_iter().enumerate().rev()
+            {
+                pending.push((child_type, child, Some((index, position))));
+            }
+        }
+        let mut built: Vec<Option<Rc<Pat>>> = vec![None; shapes.len()];
+        for (index, (ctor, children)) in shapes.into_iter().enumerate().rev() {
+            let children = children
+                .iter()
+                .map(|child| {
+                    built
+                        .get_mut(*child)
+                        .and_then(Option::take)
+                        .unwrap_or_else(Pat::wild)
+                })
+                .collect();
+            if let Some(slot) = built.get_mut(index) {
+                *slot = Some(Pat::ctor(ctor, children));
+            }
+        }
+        Ok(built
+            .first_mut()
+            .and_then(Option::take)
+            .unwrap_or_else(Pat::wild))
+    }
     /// The text of the module that declares the module value `index`.
     fn module_text(&self, index: usize) -> Option<&'a str> {
         let module = self.program.values.get(index)?.module;
@@ -851,6 +986,119 @@ fn all_unknown<'a>(
         .chain(labelled.iter().map(|(_, pattern)| *pattern))
         .map(|pattern| (pattern, None))
         .collect()
+}
+
+/// One level of a constant's pattern: its head, `None` for one coverage does
+/// not take apart, and its components with their types in declaration order.
+type ConstantLevel<'v> = (Option<Ctor>, Vec<(Type, &'v Value)>);
+
+/// One level of the pattern of the constant `value` of type `ty`, or what it
+/// holds that has no pattern form.
+fn expand_level<'v>(
+    program: &Program<'_>,
+    ty: &Type,
+    value: &'v Value,
+) -> Result<ConstantLevel<'v>, &'static str> {
+    let in_order = |declared: &[(String, Type)], fields: &'v [(String, Value)]| {
+        declared
+            .iter()
+            .map(|(name, field)| {
+                fields
+                    .iter()
+                    .find(|(known, _)| known == name)
+                    .map(|(_, value)| (field.clone(), value))
+            })
+            .collect::<Option<Vec<_>>>()
+            .ok_or("a value its type does not describe")
+    };
+    let declared = || match ty {
+        Type::Declared(id, arguments) => program
+            .type_index_of(id)
+            .and_then(|index| program.types.get(index))
+            .map(|data| (data, arguments)),
+        _ => None,
+    };
+    match value {
+        Value::F32(_) | Value::F64(_) => Err("a float"),
+        Value::Void => Err("`void`"),
+        Value::Dict(_) => Err("a dict"),
+        Value::Bytes(_) => Ok((None, Vec::new())),
+        Value::Tuple(items) => {
+            let components = match space(program, ty) {
+                Space::Product(components) => components,
+                _ => Vec::new(),
+            };
+            if components.len() != items.len() {
+                return Err("a value its type does not describe");
+            }
+            Ok((
+                Some(Ctor::Single),
+                components.into_iter().zip(items).collect(),
+            ))
+        }
+        Value::List(items) => match ty {
+            Type::List(element) => Ok((
+                Some(Ctor::List(items.len())),
+                items
+                    .iter()
+                    .map(|item| (element.as_ref().clone(), item))
+                    .collect(),
+            )),
+            _ => Err("a value its type does not describe"),
+        },
+        Value::Record(fields) => {
+            let declared_fields = match (ty, declared()) {
+                (Type::Record(named), _) => named.entries().to_vec(),
+                (_, Some((data, arguments))) => match &data.kind {
+                    TypeKind::Record(declared) => declared
+                        .iter()
+                        .map(|(name, field)| {
+                            (name.clone(), field.instantiate(arguments))
+                        })
+                        .collect(),
+                    _ => return Err("a value its type does not describe"),
+                },
+                _ => return Err("a value its type does not describe"),
+            };
+            Ok((Some(Ctor::Single), in_order(&declared_fields, fields)?))
+        }
+        Value::Variant { case, fields } => {
+            let (data, arguments) =
+                declared().ok_or("a value its type does not describe")?;
+            let (at, known) = data
+                .cases()
+                .and_then(|cases| {
+                    cases
+                        .iter()
+                        .enumerate()
+                        .find(|(_, known)| known.name == *case)
+                })
+                .ok_or("a value its type does not describe")?;
+            let declared_fields = known
+                .fields
+                .iter()
+                .flatten()
+                .map(|(name, field)| (name.clone(), field.instantiate(arguments)))
+                .collect::<Vec<_>>();
+            Ok((Some(Ctor::Case(at)), in_order(&declared_fields, fields)?))
+        }
+        Value::Wrapper(inner) => {
+            let (data, arguments) =
+                declared().ok_or("a value its type does not describe")?;
+            match &data.kind {
+                TypeKind::Wrapper(representation) => Ok((
+                    Some(Ctor::Single),
+                    vec![(representation.instantiate(arguments), &**inner)],
+                )),
+                _ => Err("a value its type does not describe"),
+            }
+        }
+        _ => match (ty, literal_key(value)) {
+            (Type::AtomSingleton(_), _) => Ok((Some(Ctor::Single), Vec::new())),
+            (_, Some(key)) => Ok((Some(Ctor::Literal(key)), Vec::new())),
+            (_, None) => Err("a value with no pattern form"),
+        },
+    }
 }
 
 /// The key coverage compares a literal value by.

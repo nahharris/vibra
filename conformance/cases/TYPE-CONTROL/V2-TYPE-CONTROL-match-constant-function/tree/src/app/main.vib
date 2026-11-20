@@ -1,0 +1,8 @@
+fn g returns r: I32 do return 1i32 endfn
+
+fn f takes {p: I32} returns r: I32 do
+  return match p
+    case g 1i32
+    case _ 0i32
+  endmatch
+endfn

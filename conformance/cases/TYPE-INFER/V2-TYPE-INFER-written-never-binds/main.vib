@@ -1,0 +1,7 @@
+fn main returns r: I32 do
+  match f()
+  case Result.ok(value: _) return 1i32
+  endmatch
+endfn
+
+fn f returns r: Result(Void Never) do return Result.ok(value: void) endfn

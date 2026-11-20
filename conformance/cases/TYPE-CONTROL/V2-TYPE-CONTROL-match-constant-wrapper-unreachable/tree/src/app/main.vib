@@ -1,0 +1,11 @@
+type Box of I32 endtype
+
+let small: Box be Box(3i32) endlet
+
+fn f takes {p: Box} returns r: I32 do
+  return match p
+    case small 1i32
+    case Box(3i32) 2i32
+    case _ 0i32
+  endmatch
+endfn

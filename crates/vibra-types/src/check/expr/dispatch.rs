@@ -16,7 +16,10 @@ use vibra_ir::{
     ContractCall, Expr as IrExpr, FnType, Library, NamedTypes, Node, Substitution, Type,
 };
 
-use super::{BodyChecker, CallState, CallableScope, Out, Reference, Target, unify};
+use super::{
+    BodyChecker, CallState, CallableScope, Out, Reference, Target, unify,
+    unify_expected,
+};
 use crate::check::declare::{BoundData, BoundGoal, GoalHead, key_diagnostic};
 use crate::check::interfaces::same_head;
 
@@ -311,7 +314,7 @@ impl<'a> BodyChecker<'_, 'a> {
     }
 
     /// Reports `code` at `span`, related to `related` of `module`.
-    fn report_related(
+    pub(super) fn report_related(
         &mut self,
         code: DiagnosticCode,
         span: ByteSpan,
@@ -934,7 +937,7 @@ impl<'a> BodyChecker<'_, 'a> {
         dispatch.view = Some(evidence.view);
         if let (Some(result), Some(expected)) = (&state.result, &dispatch.expected) {
             let mut trial = state.assignment.clone();
-            if unify(result, expected, &mut trial) {
+            if unify_expected(result, expected, &mut trial) {
                 let source = self.written_span(application).unwrap_or(application);
                 super::note_sources(
                     &state.assignment,
@@ -1513,8 +1516,9 @@ impl<'a> BodyChecker<'_, 'a> {
         let pattern = Type::function(signature);
         let var = dispatch.self_var();
         let mut assignment = vec![None; names.len()];
-        let fits =
-            expected.is_some_and(|expected| unify(&pattern, expected, &mut assignment));
+        let fits = expected.is_some_and(|expected| {
+            unify_expected(&pattern, expected, &mut assignment)
+        });
         let receiver = assignment.get(var).cloned().flatten();
         let Some(receiver) = receiver.filter(|_| fits) else {
             match expected {

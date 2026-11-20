@@ -1,0 +1,8 @@
+let nothing: Void be void endlet
+
+fn f takes {p: Void} returns r: I32 do
+  return match p
+    case nothing 1i32
+    case _ 0i32
+  endmatch
+endfn

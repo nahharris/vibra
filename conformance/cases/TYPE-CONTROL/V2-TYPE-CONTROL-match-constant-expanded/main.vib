@@ -1,0 +1,17 @@
+type Shape
+  case circle {r: I32}
+  case dot
+endtype
+
+let origin: {I32 I32} be {0i32 0i32} endlet
+let corner: {x: I32 y: Bool} be {x: 1i32 y: Bool.true()} endlet
+let unit: Shape be Shape.circle(r: 1i32) endlet
+let pair: List(I32) be [1i32 2i32] endlet
+
+fn main returns r: I32 do
+  let a be match {0i32 0i32} case origin 1i32 case _ 0i32 endmatch endlet
+  let b be match {x: 1i32 y: Bool.false()} case corner 0i32 case _ 2i32 endmatch endlet
+  let c be match Shape.circle(r: 1i32) case unit 4i32 case _ 0i32 endmatch endlet
+  let d be match [1i32 2i32] case pair 8i32 case _ 0i32 endmatch endlet
+  return I32.add(I32.add(a b) I32.add(c d))
+endfn

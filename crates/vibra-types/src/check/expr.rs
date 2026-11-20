@@ -1332,6 +1332,10 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             ByteSpan::new(span.start().saturating_add("return".len()), span.end());
         let operand_span = trim_start(self.text, operand_span);
         let node = match out.ty {
+            // `return spin(n)`, where `spin` returns `Never`, is a tail call.
+            Some(Type::Never) if out.node.as_ref().is_some_and(ends_in_call) => {
+                out.node
+            }
             Some(Type::Never) => {
                 self.report(
                     DiagnosticCode::TypeUnreachableCode,
@@ -1908,8 +1912,9 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             .chain(own.iter().map(|_| None))
             .collect::<Vec<_>>();
         let mut assignment = base.clone();
-        let fits =
-            expected.is_some_and(|expected| unify(&pattern, expected, &mut assignment));
+        let fits = expected.is_some_and(|expected| {
+            unify_expected(&pattern, expected, &mut assignment)
+        });
         if let Some(expected) = expected
             && !fits
         {
@@ -2095,7 +2100,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         let mut assignment = self.generic_assignment(generic);
         if let Some(expected) = expected {
             let mut trial = assignment.clone();
-            if unify(&pattern, expected, &mut trial) {
+            if unify_expected(&pattern, expected, &mut trial) {
                 assignment = trial;
             }
         }
@@ -2403,7 +2408,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             let mut assignment = vec![None; data.binders.len()];
             if let Some(expected) = expected {
                 let mut trial = assignment.clone();
-                if unify(&pattern, expected, &mut trial) {
+                if unify_expected(&pattern, expected, &mut trial) {
                     assignment = trial;
                 }
             }
@@ -2679,7 +2684,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             && let (Some(result), Some(expected)) = (&state.result, &expected)
         {
             let mut trial = state.assignment.clone();
-            if unify(result, expected, &mut trial) {
+            if unify_expected(result, expected, &mut trial) {
                 let source = self.written_span(application).unwrap_or(application);
                 note_sources(&state.assignment, &trial, &mut state.sources, source);
                 state.assignment = trial;
@@ -4623,16 +4628,48 @@ fn place(nodes: &mut Vec<Option<Node>>, at: usize, node: Option<Node>) {
     }
 }
 
+/// Whether `node` is a call, after the `let`s that hoist its arguments.
+fn ends_in_call(node: &Node) -> bool {
+    let mut node = node;
+    loop {
+        match &node.expr {
+            IrExpr::Call { .. } | IrExpr::TailCall { .. } => return true,
+            IrExpr::Let { body, .. } => node = body,
+            _ => return false,
+        }
+    }
+}
+
 /// Matches `pattern`, in which a [`Type::Binder`] below `assignment.len()`
-/// is a type parameter of a callee, against `actual`, recording what each
-/// parameter it meets must be. `Never` is never inferred. Whether every
+/// is a type parameter of a callee, against the type `actual` of an
+/// operand, recording what each parameter it meets must be. `Never` is
+/// never inferred: an operand of type `Never` fixes nothing. Whether every
 /// part matched.
 fn unify(pattern: &Type, actual: &Type, assignment: &mut [Option<Type>]) -> bool {
+    unify_at(pattern, actual, assignment, false)
+}
+
+/// [`unify`] against an expected type, which a written type supplies: a
+/// `Never` it fixes a parameter to binds that parameter.
+fn unify_expected(
+    pattern: &Type,
+    expected: &Type,
+    assignment: &mut [Option<Type>],
+) -> bool {
+    unify_at(pattern, expected, assignment, true)
+}
+
+fn unify_at(
+    pattern: &Type,
+    actual: &Type,
+    assignment: &mut [Option<Type>],
+    binds_never: bool,
+) -> bool {
     let mut pending = vec![(pattern, actual)];
     while let Some((pattern, actual)) = pending.pop() {
         match (pattern, actual) {
             (Type::Binder(at), _) if *at < assignment.len() => {
-                if *actual == Type::Never {
+                if *actual == Type::Never && !binds_never {
                     continue;
                 }
                 match assignment.get_mut(*at) {

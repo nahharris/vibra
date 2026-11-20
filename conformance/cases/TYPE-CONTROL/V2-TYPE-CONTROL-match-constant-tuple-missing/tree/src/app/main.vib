@@ -1,0 +1,8 @@
+let both: {Bool Bool} be {Bool.true() Bool.false()} endlet
+
+fn f takes {p: {Bool Bool}} returns r: I32 do
+  return match p
+    case both 1i32
+    case {Bool.true() Bool.true()} 2i32
+  endmatch
+endfn

@@ -1,0 +1,9 @@
+let corner: {x: I32 y: Bool} be {x: 1i32 y: Bool.true()} endlet
+
+fn f takes {p: {x: I32 y: Bool}} returns r: I32 do
+  return match p
+    case corner 1i32
+    case {x: 1i32 y: Bool.true()} 2i32
+    case _ 3i32
+  endmatch
+endfn

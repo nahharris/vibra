@@ -1,0 +1,12 @@
+id = "V2-TYPE-CONTROL-match-constant-covers"
+rule = "V2-TYPE-CONTROL-match-constant-covers"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#constant-expressions-and-constant-patterns: coverage treats a tuple constant pattern as its expanded value, so it and the other arms cover the subject"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

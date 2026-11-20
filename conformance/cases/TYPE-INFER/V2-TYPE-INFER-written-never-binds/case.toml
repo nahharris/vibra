@@ -1,0 +1,12 @@
+id = "V2-TYPE-INFER-written-never-binds"
+rule = "V2-TYPE-INFER-written-never-binds"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#inference-and-checking: a written type that fixes a type argument to Never binds it, so Result.ok(value: void) checked against a written Result(Void Never) is accepted"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

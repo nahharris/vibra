@@ -1,0 +1,8 @@
+let half: F64 be 0.5f64 endlet
+
+fn f takes {p: F64} returns r: I32 do
+  return match p
+    case half 1i32
+    case _ 0i32
+  endmatch
+endfn
