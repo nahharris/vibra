@@ -483,3 +483,9 @@ V2-TYPE-NOMINAL-dict-user-key	active	02-type-system.md#dict-keys-equality-and-or
 V2-TYPE-NOMINAL-dict-key-no-ordered	active	02-type-system.md#dict-keys-equality-and-order
 V2-PROJECT-test-unobservable	active	06-runtime.md#test-assertions
 V2-TYPE-INTERFACE-fold-member-local	active	02-type-system.md#dispatch
+V2-TYPE-INTERFACE-labelled-member	active	02-type-system.md#implementations
+V2-TYPE-INTERFACE-labelled-default-differs	active	02-type-system.md#implementations
+V2-TYPE-INTERFACE-labelled-type-differs	active	02-type-system.md#implementations
+V2-TYPE-INTERFACE-labelled-missing	active	02-type-system.md#implementations
+V2-TYPE-INTERFACE-labelled-contract-not-constant	active	02-type-system.md#constant-expressions-and-constant-patterns
+V2-TYPE-INTERFACE-labelled-default-member	active	02-type-system.md#implementations

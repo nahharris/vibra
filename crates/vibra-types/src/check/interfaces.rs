@@ -330,7 +330,7 @@ impl<'a> Program<'a> {
             for member in view.members() {
                 let Some(name) = member.name() else { continue };
                 let what = format!("the member `{interface_name}.{}`", name.text());
-                if !unguarded(&member) || !member.labelled().is_empty() {
+                if !unguarded(&member) {
                     self.unsupported(module, member.construct().span(), &what);
                     continue;
                 }
@@ -947,7 +947,7 @@ impl<'a> Program<'a> {
                 "the member `{}` of an implementation in `{host}`",
                 name.text()
             );
-            if !unguarded(&member) || !member.labelled().is_empty() {
+            if !unguarded(&member) {
                 self.unsupported(module, member.construct().span(), &what);
                 usable = false;
                 continue;
@@ -1215,7 +1215,16 @@ fn differing_type(
         return member.name().map(|name| name.span());
     };
     let takes = member.takes();
-    if takes.len() != expected.parameters.len() || signature.labels != expected.labels {
+    let names = |labels: &vibra_ir::NamedTypes| {
+        labels
+            .entries()
+            .iter()
+            .map(|(label, _)| label.clone())
+            .collect::<Vec<_>>()
+    };
+    if takes.len() != expected.parameters.len()
+        || names(&signature.labels) != names(&expected.labels)
+    {
         return member.name().map(|name| name.span());
     }
     for ((_, written), (actual, wanted)) in takes
@@ -1223,6 +1232,11 @@ fn differing_type(
         .zip(signature.parameters.iter().zip(&expected.parameters))
     {
         if actual != wanted {
+            return Some(written.span());
+        }
+    }
+    for (label, written, _) in member.labelled() {
+        if signature.labels.get(label.text()) != expected.labels.get(label.text()) {
             return Some(written.span());
         }
     }

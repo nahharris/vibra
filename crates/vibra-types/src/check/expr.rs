@@ -622,22 +622,8 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             .collect::<Vec<_>>();
         let (mut failed, destructured) =
             self.bind_parameters(signature, patterns, &names);
-        // A default is checked where nothing can leave a callable.
-        self.result = None;
-        let mut defaults = Vec::new();
-        for (name, _, default) in labelled {
-            let Some(ty) = signature.labels.get(name.text()).cloned() else {
-                failed = true;
-                continue;
-            };
-            let span = expr_span(default);
-            let out =
-                self.run(Task::Expr(default.clone(), Ctx::Value(Some(ty.clone()))));
-            match self.default_value(out, &ty, span) {
-                Some(constant) => defaults.push((name.text().to_owned(), constant)),
-                None => failed = true,
-            }
-        }
+        let (faulty, defaults) = self.labelled_defaults(signature, labelled);
+        failed |= faulty;
         self.result = Some(signature.result.clone());
         let out = self.run(Task::Body(Box::new(
             self.body_state(body, BodyMode::Callable),
@@ -660,6 +646,66 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             slot_count: self.slots.len(),
             defaults,
         }
+    }
+
+    /// Checks each labelled default of `labelled` as a constant of its
+    /// label's type in `signature`: whether one had a fault, and the
+    /// constants, in written order.
+    fn labelled_defaults(
+        &mut self,
+        signature: &FnType,
+        labelled: &[(Ident<'a>, TypeExpr<'a>, Expr<'a>)],
+    ) -> (bool, Vec<(String, Constant)>) {
+        // A default is checked where nothing can leave a callable.
+        self.result = None;
+        let mut failed = false;
+        let mut defaults = Vec::new();
+        for (name, _, default) in labelled {
+            let Some(ty) = signature.labels.get(name.text()).cloned() else {
+                failed = true;
+                continue;
+            };
+            let span = expr_span(default);
+            let out =
+                self.run(Task::Expr(default.clone(), Ctx::Value(Some(ty.clone()))));
+            match self.default_value(out, &ty, span) {
+                Some(constant) => defaults.push((name.text().to_owned(), constant)),
+                None => failed = true,
+            }
+        }
+        (failed, defaults)
+    }
+
+    /// The labelled defaults `labelled` of a contract member of type
+    /// `signature`, whose parameters are written as `patterns`, checked as a
+    /// callable's are under `scope`. The parameters are bound only so that a
+    /// default naming one is not constant; their patterns are checked where
+    /// the member's body is.
+    pub(crate) fn contract_defaults(
+        &mut self,
+        signature: &FnType,
+        patterns: &[Pattern<'a>],
+        labelled: &[(Ident<'a>, TypeExpr<'a>, Expr<'a>)],
+        scope: CallableScope,
+    ) -> Vec<(String, Constant)> {
+        self.locals.clear();
+        self.slots.clear();
+        self.frames.clear();
+        self.gaps.clear();
+        self.binders = scope.binders;
+        self.self_type = scope.self_type;
+        self.bounds = scope.bounds;
+        self.associated = scope.associated;
+        self.self_interface = scope.self_interface;
+        self.result_span = scope.result_span;
+        let names = labelled
+            .iter()
+            .map(|(name, _, _)| *name)
+            .collect::<Vec<_>>();
+        let mark = self.diagnostics.len();
+        let _ = self.bind_parameters(signature, patterns, &names);
+        self.diagnostics.truncate(mark);
+        self.labelled_defaults(signature, labelled).1
     }
 
     /// Binds the parameters of a callable of type `signature`, whose slots

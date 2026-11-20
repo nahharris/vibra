@@ -39,6 +39,9 @@ struct Pass {
     references: BTreeMap<Target, Vec<Reference>>,
     /// Every instantiation of a generic function inside a body.
     instantiations: Vec<Instantiation>,
+    /// The diagnostics of the labelled defaults of abstract contract
+    /// members, which no function holds.
+    contract: Vec<Diagnostic>,
 }
 
 fn layout(program: &Program<'_>) -> Layout {
@@ -77,6 +80,7 @@ fn check_bodies(
         faults: BTreeMap::new(),
         references: BTreeMap::new(),
         instantiations: Vec::new(),
+        contract: abstract_defaults(program, documents, layout),
     };
     for (index, data) in program.functions.iter().enumerate() {
         if !program.supported_fn(index) || data.external.is_some() {
@@ -106,6 +110,17 @@ fn check_bodies(
             .collect::<Vec<_>>();
         let labelled = data.view.labelled();
         let checked = checker.callable(signature, &patterns, &labelled, scope, body);
+        if let Some(interface) = data.implements {
+            let differing = differing_defaults(
+                program,
+                documents,
+                layout,
+                data,
+                interface,
+                &checked.defaults,
+            );
+            checker.diagnostics.extend(differing);
+        }
         pass.functions.insert(index, checked);
         pass.instantiations
             .extend(checker.instantiations.drain(..).map(
@@ -170,6 +185,132 @@ fn check_bodies(
             .insert(Target::Test(index), std::mem::take(&mut checker.references));
     }
     pass
+}
+
+/// The diagnostics of the labelled defaults of every abstract member of an
+/// interface outside the embedded library, each checked once as a constant
+/// of its label's type with the interface's parameters and `Self` open.
+fn abstract_defaults(
+    program: &Program<'_>,
+    documents: &[Document],
+    layout: &Layout,
+) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+    for (index, interface) in program.interfaces.iter().enumerate() {
+        let module = program.modules.get(interface.module);
+        if module.is_none_or(|module| module.embedded) {
+            continue;
+        }
+        let Some(text) = documents.get(interface.module).and_then(Document::text)
+        else {
+            continue;
+        };
+        for view in interface.view.members() {
+            let labelled = view.labelled();
+            let member = view
+                .name()
+                .and_then(|name| interface.member(name.text()))
+                .filter(|member| member.default.is_none());
+            let Some(member) = member.filter(|_| !labelled.is_empty()) else {
+                continue;
+            };
+            let mut checker = BodyChecker::new(program, layout, interface.module, text);
+            let patterns = view
+                .takes()
+                .into_iter()
+                .map(|(pattern, _)| pattern)
+                .collect::<Vec<_>>();
+            let scope = CallableScope {
+                binders: member.binders.clone(),
+                bounds: member.bounds.clone(),
+                self_type: Some(Type::SelfType),
+                associated: interface.own_associated(),
+                self_interface: Some(index),
+                result_span: None,
+            };
+            checker.contract_defaults(&member.signature, &patterns, &labelled, scope);
+            diagnostics.append(&mut checker.diagnostics);
+        }
+    }
+    diagnostics
+}
+
+/// The `@type.mismatch` of each labelled default of `data`, a member of an
+/// implementation of the interface `interface` whose constant defaults are
+/// `defaults`, that differs from the default its contract member writes,
+/// both checked under the implementation's substitution.
+fn differing_defaults(
+    program: &Program<'_>,
+    documents: &[Document],
+    layout: &Layout,
+    data: &FnData<'_>,
+    interface: usize,
+    defaults: &[(String, vibra_ir::Constant)],
+) -> Vec<Diagnostic> {
+    let Some(interface_data) = program.interfaces.get(interface) else {
+        return Vec::new();
+    };
+    let contract = interface_data
+        .view
+        .members()
+        .into_iter()
+        .find(|member| member.name().is_some_and(|name| name.text() == data.name));
+    let (Some(contract), Some(signature), Some(text)) = (
+        contract,
+        data.signature.as_ref(),
+        documents
+            .get(interface_data.module)
+            .and_then(Document::text),
+    ) else {
+        return Vec::new();
+    };
+    let declared = contract.labelled();
+    let patterns = contract
+        .takes()
+        .into_iter()
+        .map(|(pattern, _)| pattern)
+        .collect::<Vec<_>>();
+    let scope = CallableScope {
+        binders: data.binders.clone(),
+        bounds: data.bounds.clone(),
+        self_type: data.self_type.clone(),
+        associated: data.associated.clone(),
+        self_interface: None,
+        result_span: None,
+    };
+    // The contract's own faults are reported where it is declared.
+    let mut checker = BodyChecker::new(program, layout, interface_data.module, text);
+    let expected = checker.contract_defaults(signature, &patterns, &declared, scope);
+    let mut faults = Vec::new();
+    for (name, _, written) in data.view.labelled() {
+        let label = name.text();
+        let actual = defaults.iter().find(|(found, _)| found == label);
+        let wanted = expected.iter().find(|(found, _)| found == label);
+        let declared = declared.iter().find(|(found, _, _)| found.text() == label);
+        if let (Some((_, actual)), Some((_, wanted)), Some((_, _, declared))) =
+            (actual, wanted, declared)
+            && actual != wanted
+        {
+            let diagnostic = Diagnostic::new(
+                DiagnosticCode::TypeMismatch,
+                super::expr::expr_span(&written),
+                format!(
+                    "the default of `{label}` differs from the contract member's under the implementation's substitution"
+                ),
+            );
+            let diagnostic = match program.modules.get(data.module) {
+                Some(module) => diagnostic.with_source_id(module.source_id.as_ref()),
+                None => diagnostic,
+            };
+            faults.push(program.related(
+                diagnostic,
+                interface_data.module,
+                super::expr::expr_span(declared),
+                "the contract member's default",
+            ));
+        }
+    }
+    faults
 }
 
 fn module_of(program: &Program<'_>, target: Target) -> Option<usize> {
@@ -330,6 +471,7 @@ pub(crate) fn check_program(
             diagnostics.extend(faults.iter().cloned());
         }
     }
+    diagnostics.extend(pass.contract.iter().cloned());
     diagnostics.extend(initializer_cycles(&program, &pass.references));
     diagnostics.extend(expanding_instantiations(&program, &pass.instantiations));
     diagnostics.sort_by(|left, right| {

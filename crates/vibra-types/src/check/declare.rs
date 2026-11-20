@@ -8,17 +8,17 @@
 //! leaves an error type that reports nothing again.
 //!
 //! The checker supports `fn` declarations with parameter patterns, labelled
-//! parameters, type parameters bounded by `Any`, and written types of every
-//! form but `Proc`, `Intent`, and interface values; module values of those
-//! types; wrappers,
-//! declared tuples, declared records, and variant types, generic or not, with
-//! their members, a wrapper, declared tuple, or declared record with a bare
-//! `where` included; and, in the embedded standard library, the intrinsic
-//! scalar types and `List(T)` with their external members, and interfaces
-//! whose abstract members are not generic, with the implementations of them.
-//! A default member of such an interface is skipped with a note. Any other
-//! declaration of a local module is `@tool.unavailable` over the declaration;
-//! one of the standard library is skipped with a note.
+//! parameters, bounded type parameters, and written types of every form but
+//! `Proc` and `Intent`; module values of those types; wrappers, declared
+//! tuples, declared records, and variant types, generic or not, with their
+//! members, a wrapper, declared tuple, or declared record with a bare `where`
+//! included; interfaces with their parameters, associated types, abstract and
+//! default members, and their implementations in a type or in the interface;
+//! and, in the embedded standard library, the intrinsic scalar types and
+//! `List(T)` with their external members. A guarded member of an interface
+//! or an implementation is `@tool.unavailable`, as is any other declaration
+//! of a local module, over the declaration; one of the standard library is
+//! skipped with a note.
 //!
 //! A written type nests at most [`Type::MAX_DEPTH`] levels, measured before
 //! it is converted; an applied type supplies exactly its head's parameters;
