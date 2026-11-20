@@ -7,6 +7,7 @@ use super::{check_source, interpret};
 
 mod bodies;
 mod callables;
+mod interfaces;
 mod testing;
 
 const SOURCE: &str = "main.vib";

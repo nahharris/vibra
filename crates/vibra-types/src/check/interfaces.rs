@@ -20,6 +20,10 @@ use super::declare::{
     Scope, TypeKind, unguarded,
 };
 
+/// An interface as applied: its index, its positional arguments, and the
+/// choices its labels fix, in canonical name order.
+pub(crate) type Applied = (usize, Vec<Type>, Vec<(String, Type)>);
+
 /// The parts of an implementation its host decides: where it is written,
 /// its key, and the type parameters that key is open in.
 struct ImplHead<'a> {
@@ -70,7 +74,7 @@ impl<'a> Program<'a> {
         labelled: &[(Ident<'_>, TypeExpr<'_>)],
         scope: Scope<'_>,
         value: bool,
-    ) -> Result<(usize, Vec<Type>, Vec<(String, Type)>), NoType> {
+    ) -> Result<Applied, NoType> {
         let data = self.interfaces.get(index).ok_or(NoType::Unresolved)?;
         if data.id.is_none() {
             return Err(NoType::Unsupported);
