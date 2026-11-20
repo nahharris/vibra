@@ -7,6 +7,7 @@ use super::{check_source, interpret};
 
 mod bodies;
 mod callables;
+mod interfaces;
 mod testing;
 
 const SOURCE: &str = "main.vib";
@@ -64,7 +65,7 @@ fn the_standard_library_checks_clean() {
             "{names:?}"
         );
     }
-    assert!(!result.notes().is_empty());
+    assert!(result.notes().is_empty(), "{:#?}", result.notes());
 }
 
 #[test]

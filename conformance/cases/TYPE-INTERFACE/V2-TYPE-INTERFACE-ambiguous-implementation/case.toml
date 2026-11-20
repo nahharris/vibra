@@ -1,0 +1,18 @@
+id = "V2-TYPE-INTERFACE-ambiguous-implementation"
+rule = "V2-TYPE-INTERFACE-ambiguous-implementation"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#dispatch: two implementations that fit an undetermined positional argument are @type.ambiguousImplementation at the application"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.ambiguousImplementation"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 52, end = 67 }

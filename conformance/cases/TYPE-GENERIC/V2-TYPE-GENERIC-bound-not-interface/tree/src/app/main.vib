@@ -1,0 +1,9 @@
+fn main returns r: I32 do return 1i32 endfn
+
+fn apply(T)
+  takes {v: T}
+  returns r: I32
+  given {T: Fn({I32} I32)}
+  do
+    return 1i32
+endfn

@@ -1,0 +1,12 @@
+id = "V2-TYPE-NOMINAL-dict-user-key"
+rule = "V2-TYPE-NOMINAL-dict-user-key"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#dict-keys-equality-and-order: a declared type with an impl of Ordered keys a dict in the order it defines"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

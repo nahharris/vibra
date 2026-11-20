@@ -1,0 +1,18 @@
+id = "V2-TYPE-INTERFACE-value-self-input"
+rule = "V2-TYPE-INTERFACE-value-self-input"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#interface-values: through an interface value an argument for a second Self parameter is @type.argumentMismatch at that argument"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.argumentMismatch"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 96, end = 97 }

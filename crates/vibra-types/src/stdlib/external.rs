@@ -20,6 +20,11 @@
 //! and its result type; a row has no labelled parameter, no bound, and no
 //! guard, and it is a `fn`.
 //!
+//! A conversion row `<s>.to<T>` is the body of an implementation, never a
+//! member a source path names: it is bound by the `convert` member of an
+//! `impl From(S)` or `impl TryFrom(S)` nested in the destination type, so
+//! its owner there is the destination and its name `convert`.
+//!
 //! An `external @host` declaration is checked here for its symbol, against the
 //! host registry, and for its kind: the host rows are `proc` operations.
 
@@ -27,7 +32,9 @@ use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 use vibra_ir::external::CompilerIntrinsic;
 use vibra_ir::external::host::host_row;
 use vibra_syntax::SyntaxKind;
-use vibra_syntax::source::{Callable, CallableKind, Declaration, Module, TypeBody};
+use vibra_syntax::source::{
+    Callable, CallableKind, Declaration, Module, TypeBody, TypeForm,
+};
 
 use super::names::{LibraryNames, Scope, Written};
 
@@ -52,7 +59,14 @@ pub fn check_externals(
         match declaration {
             Declaration::Fn(callable) | Declaration::Proc(callable) => {
                 let scope = top.clone().with_binders(binder_names(&callable));
-                check(&callable, Some(module_owner), None, &scope, &mut found);
+                check(
+                    &callable,
+                    Some(module_owner),
+                    None,
+                    &scope,
+                    &mut found,
+                    false,
+                );
             }
             Declaration::Type(decl) => {
                 let Some(name) = decl.name() else { continue };
@@ -72,9 +86,13 @@ pub fn check_externals(
                 let owner_span = Some(name.span());
                 for member in decl.members() {
                     let scope = base.clone().with_binders(binder_names(&member));
-                    check(&member, owner, owner_span, &scope, &mut found);
+                    check(&member, owner, owner_span, &scope, &mut found, false);
                 }
                 for block in decl.impls() {
+                    let conversion = block.target().is_some_and(|target| {
+                        matches!(target.form(), Some(TypeForm::Path { path, .. })
+                            if matches!(path.dotted().as_str(), "From" | "TryFrom"))
+                    });
                     let mut inside = base.clone();
                     for choice in block.choices() {
                         if let (Some(choice), Some(chosen)) =
@@ -86,7 +104,9 @@ pub fn check_externals(
                     }
                     for member in block.members() {
                         let scope = inside.clone().with_binders(binder_names(&member));
-                        check(&member, owner, owner_span, &scope, &mut found);
+                        check(
+                            &member, owner, owner_span, &scope, &mut found, conversion,
+                        );
                     }
                 }
             }
@@ -107,7 +127,7 @@ pub fn check_externals(
                     );
                 for member in decl.members() {
                     let scope = base.clone().with_binders(binder_names(&member));
-                    check(&member, None, owner_span, &scope, &mut found);
+                    check(&member, None, owner_span, &scope, &mut found, false);
                 }
             }
             Declaration::Use(_) | Declaration::Let(_) | Declaration::Test(_) => {}
@@ -141,6 +161,7 @@ fn check(
     owner_span: Option<ByteSpan>,
     scope: &Scope<'_>,
     found: &mut Vec<Diagnostic>,
+    conversion: bool,
 ) {
     let Some(provider) = callable.external().and_then(|section| section.tag()) else {
         return;
@@ -162,13 +183,24 @@ fn check(
                 ));
                 return;
             };
-            if owner != Some(row.owner()) {
+            let (row_owner, member) = match row {
+                CompilerIntrinsic::Convert(_, target) if conversion => {
+                    (target.owner(), "convert".to_owned())
+                }
+                _ => (
+                    row.owner(),
+                    symbol
+                        .split_once('.')
+                        .map_or(symbol.as_str(), |(_, member)| member)
+                        .to_owned(),
+                ),
+            };
+            if owner != Some(row_owner) {
                 let mut diagnostic = Diagnostic::new(
                     DiagnosticCode::ExternalOwnerMismatch,
                     symbol_span,
                     format!(
-                        "the row `{symbol}` is owned by `{}`, not by the owner of this declaration",
-                        row.owner()
+                        "the row `{symbol}` is owned by `{row_owner}`, not by the owner of this declaration"
                     ),
                 );
                 if let Some(span) = owner_span {
@@ -178,7 +210,9 @@ fn check(
                 found.push(diagnostic);
                 return;
             }
-            if let Some(diagnostic) = name_fault(callable, &symbol, declaration_span) {
+            if let Some(diagnostic) =
+                name_fault(callable, &symbol, &member, declaration_span)
+            {
                 found.push(diagnostic);
                 return;
             }
@@ -202,7 +236,12 @@ fn check(
                 ));
                 return;
             }
-            if let Some(diagnostic) = name_fault(callable, &symbol, declaration_span) {
+            let member = symbol
+                .split_once('.')
+                .map_or(symbol.as_str(), |(_, member)| member);
+            if let Some(diagnostic) =
+                name_fault(callable, &symbol, member, declaration_span)
+            {
                 found.push(diagnostic);
                 return;
             }
@@ -220,15 +259,15 @@ fn check(
     }
 }
 
-/// `@external.signatureMismatch` at the declaration when its name is not the
-/// member part of the symbol it binds: `fn addChecked` binds a symbol that
-/// ends in `.addChecked`.
+/// `@external.signatureMismatch` at the declaration when its name is not
+/// `member`, the member part of the symbol it binds: `fn addChecked` binds a
+/// symbol that ends in `.addChecked`.
 fn name_fault(
     callable: &Callable<'_>,
     symbol: &str,
+    member: &str,
     declaration_span: ByteSpan,
 ) -> Option<Diagnostic> {
-    let member = symbol.split_once('.').map_or(symbol, |(_, member)| member);
     let name = callable.name()?;
     (name.text() != member).then(|| {
         Diagnostic::new(

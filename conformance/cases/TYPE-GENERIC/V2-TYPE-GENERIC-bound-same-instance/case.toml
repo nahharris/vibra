@@ -1,0 +1,12 @@
+id = "V2-TYPE-GENERIC-bound-same-instance"
+rule = "V2-TYPE-GENERIC-bound-same-instance"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#generics: a bound satisfied by the caller's own implementation at the same receiver hands every parameter on unchanged"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

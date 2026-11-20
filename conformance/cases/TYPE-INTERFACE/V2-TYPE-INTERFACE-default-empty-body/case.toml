@@ -1,0 +1,18 @@
+id = "V2-TYPE-INTERFACE-default-empty-body"
+rule = "V2-TYPE-INTERFACE-default-empty-body"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#interfaces: a default member with an empty body is @type.missingReturn at the body"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.missingReturn"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 109, end = 109 }

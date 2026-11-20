@@ -1,0 +1,7 @@
+fn main returns r: I32 do return 1i32 endfn
+
+interface Maker
+  fn make
+    returns r: I32
+  endfn
+endinterface

@@ -11,6 +11,7 @@
 //! machine over an explicit stack of tasks: no host stack grows with the
 //! depth of the program.
 
+mod dispatch;
 mod patterns;
 
 use std::collections::BTreeMap;
@@ -20,9 +21,8 @@ use std::sync::Arc;
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 use vibra_ir::external::compiler::{CompilerIntrinsic, is_assertion};
 use vibra_ir::{
-    Arguments, CallTarget, ClosureBody, Constant, Construction, ContractCall,
-    Expr as IrExpr, FnType, Library, MatchArm, NamedTypes, Node, Pattern as IrPattern,
-    SourceOrigin, Type, Value,
+    Arguments, CallTarget, ClosureBody, Constant, Construction, Expr as IrExpr, FnType,
+    Library, MatchArm, Node, Pattern as IrPattern, SourceOrigin, Type, Value,
 };
 use vibra_syntax::source::{
     Argument, Body, Callable, CallableKind, Expr, ExprForm, Ident, If, Let as LetView,
@@ -33,11 +33,11 @@ use vibra_syntax::{CstNode, SyntaxKind};
 
 use super::callables::{NotConstant, fold, mark_tail, substitute};
 use super::declare::{
-    Entity, NoType, Program, Scope, TypeKind, key_diagnostic, plain_callable,
-    substitute_self,
+    BoundData, Entity, NoType, Program, Scope, TypeKind, key_diagnostic, plain_callable,
 };
 use super::literal::{self, LiteralFault};
 use super::pattern::{Coverage, LimitReached, Pat};
+use dispatch::Dispatch;
 use patterns::pattern_span;
 
 /// Where each supported declaration lands in the checked module set.
@@ -228,7 +228,22 @@ struct CallState<'a> {
     assignment: Vec<Option<Type>>,
     /// Arguments whose parameter type was still open when they arrived.
     deferred: Vec<(usize, Type, ByteSpan)>,
-    receiver: Option<Type>,
+    /// The order the written arguments are checked in: a contract call's
+    /// receiver operand first, then the rest as written.
+    order: Vec<usize>,
+    /// Whether every argument was checked once.
+    first_pass: bool,
+    /// The dispatch of a contract call.
+    dispatch: Option<Box<Dispatch>>,
+    /// The bound of each type parameter of the callee, the module it is
+    /// written in, and whether it was resolved.
+    bounds: Vec<Option<BoundData>>,
+    bound_module: usize,
+    resolved: Vec<bool>,
+    /// Where each type parameter of the callee was first fixed.
+    sources: Vec<Option<ByteSpan>>,
+    /// Whether an argument checked again still lacked a type argument.
+    undetermined: bool,
     nodes: Vec<Option<Node>>,
     application: ByteSpan,
     callee_span: ByteSpan,
@@ -497,6 +512,33 @@ pub(crate) struct BodyChecker<'p, 'a> {
     frames: Vec<Frame>,
     /// The generic anonymous callable a `let` initializer just produced.
     generic: Option<GenericClosure>,
+    /// The bound of each type parameter in scope.
+    bounds: Vec<Option<BoundData>>,
+    /// The associated names in scope.
+    associated: Vec<(String, Type)>,
+    /// The interface whose default member is being checked.
+    self_interface: Option<usize>,
+    /// Each expression whose expected type is written, with the written
+    /// type's span.
+    destinations: Vec<(ByteSpan, ByteSpan)>,
+    /// The span of the written result type of the callable being checked.
+    result_span: Option<ByteSpan>,
+    /// Forms the checked IR cannot hold, reported only when the body has no
+    /// other fault.
+    gaps: Vec<(ByteSpan, String)>,
+}
+
+/// What a callable body sees besides its parameters: its type parameters
+/// and their bounds, `Self`, the associated names, the interface whose
+/// default member it is, and its written result type.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct CallableScope {
+    pub(crate) binders: Vec<String>,
+    pub(crate) bounds: Vec<Option<BoundData>>,
+    pub(crate) self_type: Option<Type>,
+    pub(crate) associated: Vec<(String, Type)>,
+    pub(crate) self_interface: Option<usize>,
+    pub(crate) result_span: Option<ByteSpan>,
 }
 
 /// The value of one checked callable body or initializer.
@@ -540,6 +582,12 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             opaque: 0,
             frames: Vec::new(),
             generic: None,
+            bounds: Vec::new(),
+            associated: Vec::new(),
+            self_interface: None,
+            destinations: Vec::new(),
+            result_span: None,
+            gaps: Vec::new(),
         }
     }
 
@@ -554,23 +602,63 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         signature: &FnType,
         patterns: &[Pattern<'a>],
         labelled: &[(Ident<'a>, TypeExpr<'a>, Expr<'a>)],
-        binders: &[String],
-        self_type: Option<Type>,
+        scope: CallableScope,
         body: Body<'a>,
     ) -> Checked {
         self.locals.clear();
         self.slots.clear();
         self.frames.clear();
-        self.binders = binders.to_vec();
-        self.self_type = self_type;
+        self.gaps.clear();
+        let mark = self.diagnostics.len();
+        self.binders = scope.binders;
+        self.self_type = scope.self_type;
+        self.bounds = scope.bounds;
+        self.associated = scope.associated;
+        self.self_interface = scope.self_interface;
+        self.result_span = scope.result_span;
         let names = labelled
             .iter()
             .map(|(name, _, _)| *name)
             .collect::<Vec<_>>();
         let (mut failed, destructured) =
             self.bind_parameters(signature, patterns, &names);
+        let (faulty, defaults) = self.labelled_defaults(signature, labelled);
+        failed |= faulty;
+        self.result = Some(signature.result.clone());
+        let out = self.run(Task::Body(Box::new(
+            self.body_state(body, BodyMode::Callable),
+        )));
+        let mut node = out
+            .node
+            .filter(|_| !failed)
+            .map(|body| self.wrap_destructured(body, destructured));
+        let gaps = std::mem::take(&mut self.gaps);
+        if !gaps.is_empty() {
+            node = None;
+        }
+        if self.diagnostics.len() == mark {
+            for (span, what) in gaps {
+                self.unavailable(span, &what);
+            }
+        }
+        Checked {
+            node,
+            slot_count: self.slots.len(),
+            defaults,
+        }
+    }
+
+    /// Checks each labelled default of `labelled` as a constant of its
+    /// label's type in `signature`: whether one had a fault, and the
+    /// constants, in written order.
+    fn labelled_defaults(
+        &mut self,
+        signature: &FnType,
+        labelled: &[(Ident<'a>, TypeExpr<'a>, Expr<'a>)],
+    ) -> (bool, Vec<(String, Constant)>) {
         // A default is checked where nothing can leave a callable.
         self.result = None;
+        let mut failed = false;
         let mut defaults = Vec::new();
         for (name, _, default) in labelled {
             let Some(ty) = signature.labels.get(name.text()).cloned() else {
@@ -585,19 +673,39 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                 None => failed = true,
             }
         }
-        self.result = Some(signature.result.clone());
-        let out = self.run(Task::Body(Box::new(
-            self.body_state(body, BodyMode::Callable),
-        )));
-        let node = out
-            .node
-            .filter(|_| !failed)
-            .map(|body| self.wrap_destructured(body, destructured));
-        Checked {
-            node,
-            slot_count: self.slots.len(),
-            defaults,
-        }
+        (failed, defaults)
+    }
+
+    /// The labelled defaults `labelled` of a contract member of type
+    /// `signature`, whose parameters are written as `patterns`, checked as a
+    /// callable's are under `scope`. The parameters are bound only so that a
+    /// default naming one is not constant; their patterns are checked where
+    /// the member's body is.
+    pub(crate) fn contract_defaults(
+        &mut self,
+        signature: &FnType,
+        patterns: &[Pattern<'a>],
+        labelled: &[(Ident<'a>, TypeExpr<'a>, Expr<'a>)],
+        scope: CallableScope,
+    ) -> Vec<(String, Constant)> {
+        self.locals.clear();
+        self.slots.clear();
+        self.frames.clear();
+        self.gaps.clear();
+        self.binders = scope.binders;
+        self.self_type = scope.self_type;
+        self.bounds = scope.bounds;
+        self.associated = scope.associated;
+        self.self_interface = scope.self_interface;
+        self.result_span = scope.result_span;
+        let names = labelled
+            .iter()
+            .map(|(name, _, _)| *name)
+            .collect::<Vec<_>>();
+        let mark = self.diagnostics.len();
+        let _ = self.bind_parameters(signature, patterns, &names);
+        self.diagnostics.truncate(mark);
+        self.labelled_defaults(signature, labelled).1
     }
 
     /// Binds the parameters of a callable of type `signature`, whose slots
@@ -707,7 +815,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                 None
             }
             Some(actual) => {
-                self.conform(ty, &actual, out.node, span, DiagnosticCode::TypeMismatch)
+                self.widen(ty, &actual, out.node, span, DiagnosticCode::TypeMismatch)
             }
             None => None,
         }?;
@@ -746,6 +854,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         self.frames.clear();
         self.binders.clear();
         self.self_type = None;
+        self.reset_scope();
         self.result = None;
         let out = self.run(Task::Body(Box::new(
             self.body_state(body, BodyMode::Branch(Ctx::Stmt)),
@@ -758,14 +867,23 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
     }
 
     /// Checks the initializer of a module value of type `ty`.
-    pub(crate) fn initializer(&mut self, ty: &Type, value: Expr<'a>) -> Checked {
+    pub(crate) fn initializer(
+        &mut self,
+        ty: &Type,
+        value: Expr<'a>,
+        written: Option<ByteSpan>,
+    ) -> Checked {
         self.locals.clear();
         self.slots.clear();
         self.frames.clear();
         self.binders.clear();
         self.self_type = None;
+        self.reset_scope();
         self.result = None;
         let span = expr_span(&value);
+        if let Some(written) = written {
+            self.destinations.push((span, written));
+        }
         let out = self.run(Task::Expr(value, Ctx::Value(Some(ty.clone()))));
         let node = match out.ty {
             Some(Type::Never) => {
@@ -777,7 +895,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                 None
             }
             Some(actual) => {
-                self.conform(ty, &actual, out.node, span, DiagnosticCode::TypeMismatch)
+                self.widen(ty, &actual, out.node, span, DiagnosticCode::TypeMismatch)
             }
             None => None,
         };
@@ -790,6 +908,16 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
 
     fn origin(&self, span: ByteSpan) -> SourceOrigin {
         SourceOrigin::new(Arc::clone(&self.source_id), span)
+    }
+
+    /// Clears what a callable's scope set: bounds, associated names, the
+    /// default member's interface, and the written result type.
+    fn reset_scope(&mut self) {
+        self.bounds.clear();
+        self.associated.clear();
+        self.self_interface = None;
+        self.result_span = None;
+        self.gaps.clear();
     }
 
     fn node(&self, expr: IrExpr, span: ByteSpan) -> Node {
@@ -817,7 +945,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
     }
 
     /// Checks `actual` against `expected`, reporting `code` at `span` when it
-    /// does not fit; widens an atom singleton to `Atom`.
+    /// does not fit. Nothing widens here: see [`Self::widen`].
     fn conform(
         &mut self,
         expected: &Type,
@@ -828,9 +956,6 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
     ) -> Option<Node> {
         if actual == expected || *actual == Type::Never {
             return node;
-        }
-        if *expected == Type::Atom && matches!(actual, Type::AtomSingleton(_)) {
-            return node.map(|node| self.node(IrExpr::WidenAtom(Box::new(node)), span));
         }
         self.report(
             code,
@@ -846,6 +971,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         let scope = Scope {
             self_type: self.self_type.as_ref(),
             binders: &self.binders,
+            associated: &self.associated,
         };
         match self.program.written(self.module, written, scope) {
             Ok(ty) => Some(ty),
@@ -964,6 +1090,11 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                     );
                     return Step::Done(Out::error());
                 };
+                if self.frames.is_empty()
+                    && let Some(written) = self.result_span
+                {
+                    self.destinations.push((expr_span(&operand), written));
+                }
                 Step::Child(
                     Task::Return(span),
                     Task::Expr(operand, Ctx::Value(Some(result))),
@@ -1038,7 +1169,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                 );
                 None
             }
-            Some(actual) => self.conform(
+            Some(actual) => self.widen(
                 &result,
                 &actual,
                 out.node,
@@ -1467,9 +1598,9 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                 self.unavailable(whole, "a constructor used as a value");
                 Out::error()
             }
-            Head::Contract(..) => {
-                self.unavailable(whole, "an interface member used as a value");
-                Out::error()
+            Head::Contract(interface, member) => {
+                let expected = state.ctx.expected().cloned();
+                self.contract_value(interface, &member, whole, expected.as_ref())
             }
             Head::Type(_) | Head::Static => {
                 self.unavailable(whole, "a type used as a value");
@@ -1528,6 +1659,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         let scope = Scope {
             self_type: self.self_type.as_ref(),
             binders: &binders,
+            associated: &self.associated,
         };
         let signature = match self.program.callable_type(self.module, &view, scope) {
             Ok(signature) => signature,
@@ -2226,6 +2358,9 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             (Some(signature.slot_types()), Some(signature.result.clone()))
         };
         let mut preset = 0;
+        let mut dispatch = None;
+        let mut bounds = Vec::new();
+        let mut bound_module = self.module;
         let (params, result) = match &callee {
             Callee::Function(index) => {
                 match program.functions.get(*index).and_then(|data| {
@@ -2233,6 +2368,8 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                 }) {
                     Some((data, signature)) => {
                         binder_names.clone_from(&data.binders);
+                        bounds.clone_from(&data.bounds);
+                        bound_module = data.module;
                         flatten(&signature)
                     }
                     None => (None, None),
@@ -2289,7 +2426,16 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                 }
                 None => (None, None),
             },
-            Callee::Contract(..) => (None, None),
+            Callee::Contract(interface, member) => {
+                match self.contract_signature(*interface, member, application) {
+                    Some((names, signature, found)) => {
+                        binder_names = names;
+                        dispatch = Some(Box::new(found));
+                        flatten(&signature)
+                    }
+                    None => (None, None),
+                }
+            }
             Callee::Lookup(_, collection) => match self.lookup_types(collection) {
                 Some((key, item)) => {
                     let result = program.library_type(Library::Option, vec![item]);
@@ -2322,22 +2468,33 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             assignment,
             binder_names,
             deferred: Vec::new(),
-            receiver: None,
+            order: Vec::new(),
+            first_pass: false,
+            dispatch,
+            resolved: vec![false; bounds.len()],
+            bounds,
+            bound_module,
+            sources: Vec::new(),
+            undetermined: false,
             nodes: Vec::new(),
             application,
             callee_span,
             failed: false,
             never_reported: false,
         });
+        state.sources = vec![None; state.assignment.len()];
+        state.order = (0..state.args.len()).collect();
         self.bind_arguments(&mut state);
-        if !matches!(state.callee, Callee::Contract(..)) {
-            self.check_arity(&mut state);
-        }
-        if !state.assignment.is_empty()
+        self.check_arity(&mut state);
+        if state.dispatch.is_some() {
+            self.contract_start(&mut state, expected.as_ref());
+        } else if !state.assignment.is_empty()
             && let (Some(result), Some(expected)) = (&state.result, &expected)
         {
             let mut trial = state.assignment.clone();
             if unify(result, expected, &mut trial) {
+                let source = self.written_span(application).unwrap_or(application);
+                note_sources(&state.assignment, &trial, &mut state.sources, source);
                 state.assignment = trial;
             }
         }
@@ -2529,6 +2686,17 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                 place(&mut state.nodes, at, None);
                 return self.next_argument(state);
             }
+            // Checked again, it still only lacks a type argument of the
+            // callee: that parameter is undetermined, which is reported once,
+            // at the application.
+            if out.ty.is_none() && state.open && state.retrying && ambiguous_only {
+                self.diagnostics.truncate(diagnostics);
+                self.references.truncate(references);
+                self.instantiations.truncate(instantiations);
+                state.undetermined = true;
+                place(&mut state.nodes, at, None);
+                return self.next_argument(state);
+            }
             let node = match out.ty {
                 Some(Type::Never) => {
                     if !state.never_reported {
@@ -2543,14 +2711,17 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                     None
                 }
                 Some(actual) => {
-                    if let Callee::Contract(interface, member) = &state.callee
-                        && at == 0
-                        && state.receiver.is_none()
+                    if state
+                        .dispatch
+                        .as_ref()
+                        .is_some_and(|dispatch| dispatch.receiver_arg == Some(at))
                     {
-                        let (interface, member) = (*interface, member.clone());
-                        self.contract_receiver(
-                            &mut state, interface, &member, &actual, span,
-                        );
+                        self.receiver_arrived(&mut state, &actual, span);
+                    }
+                    if self.self_outside_slot(&state, at, span) {
+                        state.failed = true;
+                        place(&mut state.nodes, at, None);
+                        return self.next_argument(state);
                     }
                     match state.slot(at).cloned() {
                         Some(pattern) => {
@@ -2558,7 +2729,28 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                             let fits = trial.is_empty()
                                 || unify(&pattern, &actual, &mut trial);
                             if fits {
+                                note_sources(
+                                    &state.assignment,
+                                    &trial,
+                                    &mut state.sources,
+                                    span,
+                                );
                                 state.assignment = trial;
+                            } else {
+                                let mut widened = state.assignment.clone();
+                                if self.widening_inference(
+                                    &pattern,
+                                    &actual,
+                                    &mut widened,
+                                ) {
+                                    note_sources(
+                                        &state.assignment,
+                                        &widened,
+                                        &mut state.sources,
+                                        span,
+                                    );
+                                    state.assignment = widened;
+                                }
                             }
                             match state.instance(&pattern) {
                                 None if !fits => {
@@ -2571,6 +2763,17 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                                     );
                                     state.failed = true;
                                     None
+                                }
+                                Some(expected)
+                                    if !matches!(pattern, Type::Binder(_)) =>
+                                {
+                                    self.widen(
+                                        &expected,
+                                        &actual,
+                                        out.node,
+                                        span,
+                                        DiagnosticCode::TypeArgumentMismatch,
+                                    )
                                 }
                                 Some(expected) => self.conform(
                                     &expected,
@@ -2608,21 +2811,35 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
     /// were checked, or finishes the call.
     fn next_argument(&mut self, mut state: Box<CallState<'a>>) -> Step<'a> {
         loop {
-            let at = if state.next < state.args.len() {
+            let at = if let Some(at) = state.order.get(state.next).copied() {
                 state.next += 1;
-                state.next - 1
-            } else if state.retry.is_empty() {
-                break;
+                at
             } else {
+                if !state.first_pass {
+                    state.first_pass = true;
+                    self.first_pass_done(&mut state);
+                    if state.failed {
+                        for at in std::mem::take(&mut state.retry) {
+                            place(&mut state.nodes, at, None);
+                        }
+                    }
+                }
+                if state.retry.is_empty() {
+                    break;
+                }
                 state.retrying = true;
                 state.retry.remove(0)
             };
             let Some(arg) = state.args.get(at) else { break };
             let value = arg.value.clone();
             let expected = state.slot(at).and_then(|pattern| state.instance(pattern));
-            let skip_rest = matches!(state.callee, Callee::Contract(..))
-                && at > 0
-                && state.receiver.is_none();
+            let skip_rest = state.dispatch.as_ref().is_some_and(|dispatch| {
+                dispatch.receiver_arg.is_some_and(|receiver| receiver != at)
+                    && !matches!(
+                        state.assignment.get(dispatch.self_var()),
+                        Some(Some(_))
+                    )
+            });
             if skip_rest {
                 state.failed = true;
                 place(&mut state.nodes, at, None);
@@ -2641,65 +2858,51 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                 Task::Expr(value, Ctx::Value(expected)),
             );
         }
-        if let Callee::Contract(..) = state.callee
-            && state.args.is_empty()
-        {
-            self.report(
-                DiagnosticCode::TypeArgumentMismatch,
-                state.application,
-                "an interface member is applied to its receiver first",
-            );
-            state.failed = true;
+        if !state.first_pass {
+            state.first_pass = true;
+            self.first_pass_done(&mut state);
         }
         Step::Done(self.finish_call(*state))
     }
 
-    fn contract_receiver(
-        &mut self,
-        state: &mut CallState<'a>,
-        interface: usize,
-        member: &str,
-        receiver: &Type,
-        span: ByteSpan,
-    ) {
-        let program = self.program;
-        let Some(data) = program.interfaces.get(interface) else {
-            return;
-        };
-        let Some(declared) =
-            data.members.iter().find(|declared| declared.name == member)
-        else {
-            return;
-        };
-        if declared.receiver != Some(0) {
-            self.unavailable(
-                state.application,
-                "an interface member without a receiver",
-            );
-            state.failed = true;
+    /// What follows the check of every argument once: a contract call's
+    /// selection and the resolution of the callee's bounds, both before any
+    /// argument set aside is checked again.
+    fn first_pass_done(&mut self, state: &mut CallState<'a>) {
+        self.select(state);
+        self.call_bounds(state);
+    }
+
+    /// Resolves the bounds of the callee of `state`.
+    fn call_bounds(&mut self, state: &mut CallState<'a>) {
+        if state.failed || state.bounds.iter().all(Option::is_none) {
             return;
         }
-        match program.implementation(interface, receiver) {
-            Some(_) => {
-                let signature = substitute_self(&declared.signature, receiver);
-                state.params = Some(signature.parameters);
-                state.result = Some(signature.result);
-                state.receiver = Some(receiver.clone());
-                self.check_arity(state);
-            }
-            None => {
-                self.report(
-                    DiagnosticCode::TypeUnsatisfiedBound,
-                    span,
-                    format!("`{receiver}` does not implement `{}`", data.name),
-                );
-                state.failed = true;
-            }
+        let bounds = std::mem::take(&mut state.bounds);
+        let mut resolved = std::mem::take(&mut state.resolved);
+        let holds = self.resolve_bounds(
+            &bounds,
+            state.bound_module,
+            &mut state.assignment,
+            &mut resolved,
+            &state.sources,
+            state.application,
+        );
+        state.bounds = bounds;
+        state.resolved = resolved;
+        if !holds {
+            state.failed = true;
         }
     }
 
     fn finish_call(&mut self, mut state: CallState<'a>) -> Out {
         let program = self.program;
+        self.call_bounds(&mut state);
+        let contract = if state.dispatch.is_some() && !state.failed {
+            self.contract_call(&state)
+        } else {
+            None
+        };
         let missing = state
             .binder_names
             .iter()
@@ -2709,6 +2912,13 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             .collect::<Vec<_>>();
         if !missing.is_empty() && state.params.is_some() && !state.failed {
             self.ambiguous(state.application, &missing);
+            state.failed = true;
+        } else if state.undetermined && !state.failed {
+            self.report(
+                DiagnosticCode::TypeAmbiguousInference,
+                state.application,
+                "an operand of this call has a type nothing determines",
+            );
             state.failed = true;
         }
         if let Callee::Function(index) = state.callee
@@ -2786,7 +2996,6 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             nodes,
             binding,
             labels,
-            receiver,
             application,
             callee_span,
             failed,
@@ -2898,41 +3107,13 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                         construction,
                     })
             }
-            Callee::Contract(interface, member) => {
-                let id = program
-                    .interfaces
-                    .get(interface)
-                    .and_then(|data| data.id.clone());
-                if let Some(receiver) = &receiver
-                    && let Some(implementation) =
-                        program.implementation(interface, receiver)
-                    && let Some((_, function)) = implementation
-                        .members
-                        .iter()
-                        .find(|(name, _)| *name == member)
-                {
-                    self.references.push(Reference {
-                        target: Target::Function(*function),
-                        span: callee_span,
-                    });
-                }
-                match (id, receiver) {
-                    (Some(interface), Some(receiver)) => Some(IrExpr::Call {
-                        target: CallTarget::Contract(Box::new(ContractCall {
-                            interface,
-                            member,
-                            receiver,
-                            arguments: Vec::new(),
-                            choices: NamedTypes::empty(),
-                            member_arguments: Vec::new(),
-                        })),
-                        arguments: Arguments {
-                            positional: written,
-                            labelled: Vec::new(),
-                        },
-                    }),
-                    _ => None,
-                }
+            Callee::Contract(..) => {
+                contract
+                    .zip(lowered(self, written))
+                    .map(|(call, arguments)| IrExpr::Call {
+                        target: CallTarget::Contract(Box::new(call)),
+                        arguments,
+                    })
             }
             Callee::Lookup(collection, _) => collection
                 .zip(written.into_iter().next())
@@ -3776,6 +3957,12 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                         state.pieces.push(None);
                         return self.step_body(state, None);
                     };
+                    if let (Some(_), Some(written_type)) =
+                        (&written, view.written_type())
+                    {
+                        self.destinations
+                            .push((expr_span(&value), written_type.span()));
+                    }
                     state.pending = Pending::Let {
                         pattern,
                         pattern_span,
@@ -3887,7 +4074,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                     }
                     Some(actual) => match &written {
                         Some(expected) => {
-                            let node = self.conform(
+                            let node = self.widen(
                                 expected,
                                 &actual,
                                 out.node,
@@ -4254,6 +4441,22 @@ fn unify(pattern: &Type, actual: &Type, assignment: &mut [Option<Type>]) -> bool
             {
                 pending.extend(patterns.iter().zip(actuals));
             }
+            (
+                Type::Interface(left, patterns, choices),
+                Type::Interface(right, actuals, chosen),
+            ) if left == right
+                && patterns.len() == actuals.len()
+                && choices.names().eq(chosen.names()) =>
+            {
+                pending.extend(patterns.iter().zip(actuals));
+                pending.extend(
+                    choices
+                        .entries()
+                        .iter()
+                        .zip(chosen.entries())
+                        .map(|((_, pattern), (_, actual))| (pattern, actual)),
+                );
+            }
             (Type::Fn(pattern), Type::Fn(actual))
                 if pattern.parameters.len() == actual.parameters.len()
                     && pattern.labels.names().eq(actual.labels.names()) =>
@@ -4277,6 +4480,21 @@ fn unify(pattern: &Type, actual: &Type, assignment: &mut [Option<Type>]) -> bool
         }
     }
     true
+}
+
+/// Records `span` as the source of each type parameter that `after` fixes
+/// and `before` did not.
+fn note_sources(
+    before: &[Option<Type>],
+    after: &[Option<Type>],
+    sources: &mut [Option<ByteSpan>],
+    span: ByteSpan,
+) {
+    for ((before, after), source) in before.iter().zip(after).zip(sources.iter_mut()) {
+        if before.is_none() && after.is_some() && source.is_none() {
+            *source = Some(span);
+        }
+    }
 }
 
 /// The type of an `if` or `match` from its branches' types.

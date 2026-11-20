@@ -32,8 +32,8 @@ mod value;
 
 pub use constant::Constant;
 pub use encode::{
-    CANONICAL_NAN_F32, CANONICAL_NAN_F64, EncodeError, TypeTable, encode_type,
-    encode_value, type_document, value_document,
+    CANONICAL_NAN_F32, CANONICAL_NAN_F64, EncodeError, TypeTable, encode_open_type,
+    encode_type, encode_value, type_document, value_document,
 };
 pub use expr::{
     Arguments, CallTarget, ClosureBody, Construction, ContractCall, ExitGuard, Expr,

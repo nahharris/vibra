@@ -1,0 +1,31 @@
+fn main
+  returns r: U8
+  do
+    return Iter.fold(
+      Once(Option.some(value: 5u8))
+      1u8
+      fn
+        takes {acc: U8 item: U8}
+        returns sum: U8
+        do
+          return U8.add(acc item)
+      endfn
+    )
+endfn
+
+type Once of Option(U8)
+  impl Iter
+    type Item of U8 endtype
+    fn next
+      takes {value: Self}
+      returns step: Option({Item Self})
+      do
+        match value
+          case Once(Option.some(value: item))
+            return Option.some(value: {item Once(Option.none())})
+          case Once(Option.none())
+            return Option.none()
+        endmatch
+    endfn
+  endimpl
+endtype

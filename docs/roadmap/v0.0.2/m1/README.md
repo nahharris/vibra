@@ -93,7 +93,7 @@ the vertical-slice rule.
 | 16 | [check-data](steps/16-check-data.md) | vertical | 15 | 08, 24, 27 | `vibra-types`, `vibra-interp`, `stdlib/`, `conformance/cases` | landed |
 | 17 | [check-bodies](steps/17-check-bodies.md) | vertical | 16 | 08, 24, 27 | `vibra-types`, `vibra-interp`, `conformance/cases` | landed |
 | 18 | [check-callables](steps/18-check-callables.md) | vertical | 17 | 08, 23, 24, 25, 27 | `vibra-types`, `vibra-interp`, `conformance/cases` | landed |
-| 19 | [check-interfaces](steps/19-check-interfaces.md) | vertical | 18 | 08, 23, 24, 25, 26, 27 | `vibra-types`, `vibra-interp`, `stdlib/`, `conformance/cases` | planned |
+| 19 | [check-interfaces](steps/19-check-interfaces.md) | vertical | 18 | 08, 23, 24, 25, 26, 27 | `vibra-types`, `vibra-ir`, `vibra-cli`, `stdlib/`, `conformance/cases` | landed |
 | 20 | [stdlib-pure](steps/20-stdlib-pure.md) | vertical | 19 | 08, 23, 24, 25, 26, 27 | `stdlib/`, `vibra-types`, `vibra-interp`, `conformance/cases` | planned |
 | 21 | [guards-with-else](steps/21-guards-with-else.md) | vertical | 20 | 08, 23, 24, 25, 26, 27 | `vibra-types`, `vibra-interp`, `conformance/cases` | planned |
 | 22 | [discharge](steps/22-discharge.md) | vertical | 21 | 08, 23, 24, 25, 26, 27 | `vibra-types`, `conformance/cases` | planned |

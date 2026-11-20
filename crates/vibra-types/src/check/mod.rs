@@ -18,6 +18,7 @@ mod cycle;
 mod declare;
 mod expr;
 mod generics;
+mod interfaces;
 mod literal;
 mod lower;
 mod nominal;

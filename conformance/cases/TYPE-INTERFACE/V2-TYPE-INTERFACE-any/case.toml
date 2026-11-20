@@ -1,0 +1,12 @@
+id = "V2-TYPE-INTERFACE-any"
+rule = "V2-TYPE-INTERFACE-any"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#interface-values: every type widens to Any at a parameter type"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

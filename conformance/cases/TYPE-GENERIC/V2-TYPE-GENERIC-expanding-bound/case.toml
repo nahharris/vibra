@@ -1,0 +1,18 @@
+id = "V2-TYPE-GENERIC-expanding-bound"
+rule = "V2-TYPE-GENERIC-expanding-bound"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#generics: a bound satisfied by the caller's own implementation at a larger receiver expands without end, at the call"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.expandingInstantiation"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 376, end = 392 }

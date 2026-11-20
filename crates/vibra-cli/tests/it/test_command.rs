@@ -140,6 +140,55 @@ fn test_failure() {
     );
 }
 
+/// `tests/observe.vib`: `assert.equal` on two `Any` values holding closures.
+/// Its imports take 24 bytes, so the test is line 3 from byte 24.
+const OBSERVE: &str = "use @std.assert enduse\n\n\
+                       test \"closures\" do \
+                       let a: Any be fn takes {n: I32} returns m: I32 do return n endfn endlet \
+                       let b: Any be fn takes {n: I32} returns m: I32 do return n endfn endlet \
+                       assert.equal(a b) endtest\n";
+
+#[test]
+fn test_observation_error() {
+    let root = project("test-observation", &[("tests/observe.vib", OBSERVE)]);
+    let (code, document) = test(&root, &[]);
+    assert_eq!(code, 1, "{document}");
+    assert_eq!(document["result"], "@command.testFailed");
+    assert_eq!(document["status"], "refuted");
+    assert_eq!(counts(&document), (1, 0, 1));
+    // The call `assert.equal(a b)` is bytes 187..204, on line 3 from column
+    // 164 to column 181. Its operands are observed at `Any`, encoded `@any`.
+    assert_eq!(codes(&document), ["@tool.unsupportedValue"]);
+    let span = &document["diagnostics"][0]["primarySpan"];
+    assert_eq!(span["sourceId"], "tests/observe.vib");
+    assert_eq!((&span["start"], &span["end"]), (&json!(187), &json!(204)));
+    let item = &document["payload"]["tests"][0];
+    assert_eq!(item["name"], "@tests.observe::\"closures\"");
+    assert_eq!(item["result"], "@test.assertionFailed");
+    assert_eq!(item["status"], "refuted");
+    assert_eq!(item["trap"], Value::Null);
+    assert_eq!(item["diagnostics"], json!(["@tool.unsupportedValue"]));
+    assert_eq!(
+        item["failure"],
+        json!({
+            "kind": "observation",
+            "assertion": "assert.equal",
+            "expected": null,
+            "actual": null,
+            "primarySpan": {
+                "sourceId": "tests/observe.vib", "start": 187, "end": 204,
+                "startPosition": {"line": 3, "column": 164},
+                "endPosition": {"line": 3, "column": 181}
+            },
+            "observationError": {
+                "code": "unsupportedValue",
+                "type": "@any",
+                "origin": null
+            }
+        })
+    );
+}
+
 #[test]
 fn test_selector() {
     let other = "test \"other\" do assert.true(false) endtest\n";

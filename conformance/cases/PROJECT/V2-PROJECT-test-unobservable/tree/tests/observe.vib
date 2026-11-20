@@ -1,0 +1,21 @@
+use @std.assert enduse
+
+test "closures" do
+  let a: Any be
+    fn
+      takes {n: I32}
+      returns m: I32
+      do
+        return n
+    endfn
+  endlet
+  let b: Any be
+    fn
+      takes {n: I32}
+      returns m: I32
+      do
+        return n
+    endfn
+  endlet
+  assert.equal(a b)
+endtest

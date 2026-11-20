@@ -1,0 +1,27 @@
+fn main
+  returns r: I32
+  do
+    let p: Printable be User(name: "Ada" id: UserId(1u64)) endlet
+    let a: Any be p endlet
+    return 1i32
+endfn
+
+interface Printable
+  fn render
+    takes {value: Self}
+    returns text: Str
+  endfn
+endinterface
+type UserId of U64 endtype
+
+type User of {name: Str id: UserId}
+  impl Printable
+    fn render
+      takes {value: Self}
+      returns text: Str
+      do
+        let User(name: name id: _) be value endlet
+        return name
+    endfn
+  endimpl
+endtype

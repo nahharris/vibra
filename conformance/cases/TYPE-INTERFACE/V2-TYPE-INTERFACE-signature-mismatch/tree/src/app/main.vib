@@ -1,0 +1,18 @@
+fn main returns r: I32 do return 1i32 endfn
+
+interface Printable
+  fn render
+    takes {value: Self}
+    returns text: Str
+  endfn
+endinterface
+type User of {name: Str}
+  impl Printable
+    fn render
+      takes {value: Self}
+      returns text: U64
+      do
+        return 1u64
+    endfn
+  endimpl
+endtype

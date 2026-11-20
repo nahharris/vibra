@@ -1,0 +1,8 @@
+fn main returns r: I32 do return 1i32 endfn
+
+interface Split
+  fn split
+    takes {v: Self}
+    returns r: Option({Self List(Self)})
+  endfn
+endinterface

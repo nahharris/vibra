@@ -1,0 +1,9 @@
+fn main returns r: I32 do return 1i32 endfn
+
+fn f(I)
+  takes {it: I}
+  returns r: I32
+  given {I: Iter(Thing: U8)}
+  do
+    return 1i32
+endfn

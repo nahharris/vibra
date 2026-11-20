@@ -1,0 +1,12 @@
+id = "V2-TYPE-INTERFACE-labelled-member"
+rule = "V2-TYPE-INTERFACE-labelled-member"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#implementations: a contract member with a labelled parameter takes it or its default through a call, also through an interface value"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

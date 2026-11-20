@@ -1,0 +1,18 @@
+id = "V2-TYPE-INTERFACE-impl-never"
+rule = "V2-TYPE-INTERFACE-impl-never"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#implementations: an impl in an interface for Never is @name.wrongEntityKind at the impl"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@name.wrongEntityKind"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 124, end = 242 }

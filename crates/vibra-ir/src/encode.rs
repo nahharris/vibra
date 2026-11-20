@@ -330,6 +330,32 @@ pub fn type_document(ty: &Type) -> Result<String, EncodeError> {
     ))
 }
 
+/// The canonical bytes of the open type encoding of `ty`, as a signature or
+/// implementation record writes it.
+///
+/// # Errors
+///
+/// None for a type of a record that was built; the result keeps the
+/// writer's signature.
+pub fn encode_open_type(ty: &Type) -> Result<String, EncodeError> {
+    let mut out = String::new();
+    write_type(&mut out, ty, true)?;
+    Ok(out)
+}
+
+impl InterfaceKey {
+    /// The canonical bytes of this interface key: `{entity arguments}`.
+    ///
+    /// # Errors
+    ///
+    /// As [`encode_open_type`].
+    pub fn encode(&self) -> Result<String, EncodeError> {
+        let mut out = String::new();
+        write_key(&mut out, self)?;
+        Ok(out)
+    }
+}
+
 fn write_key(out: &mut String, key: &InterfaceKey) -> Result<(), EncodeError> {
     out.push('{');
     write_entity(out, key.interface.entity());

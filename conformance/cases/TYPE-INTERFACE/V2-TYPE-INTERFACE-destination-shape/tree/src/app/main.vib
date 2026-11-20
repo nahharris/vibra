@@ -1,0 +1,13 @@
+fn main
+  returns r: I32
+  do
+    let t: {U8 U16} be Twin.twin(1u8) endlet
+    return 1i32
+endfn
+
+interface Twin
+  fn twin
+    takes {n: U8}
+    returns r: {Self Self}
+  endfn
+endinterface

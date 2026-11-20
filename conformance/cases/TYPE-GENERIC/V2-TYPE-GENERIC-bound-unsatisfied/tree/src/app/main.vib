@@ -1,0 +1,15 @@
+fn main returns r: Str do return show(1i32) endfn
+
+fn show(T)
+  takes {v: T}
+  returns r: Str
+  given {T: Printable}
+  do
+    return Printable.render(v)
+endfn
+interface Printable
+  fn render
+    takes {value: Self}
+    returns text: Str
+  endfn
+endinterface

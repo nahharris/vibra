@@ -1,0 +1,32 @@
+fn main
+  returns r: I32
+  do
+    let r: Option(Str) be largest([3i32 1i32]) endlet
+    return 1i32
+endfn
+
+fn largest(T I)
+  takes {items: I}
+  returns r: Option(T)
+  given {T: Ordered I: Iter(Item: T)}
+  do
+    match Iter.next(items)
+      case Option.some(value: {first rest})
+        return Option.some(value: largestFrom(first rest))
+      case Option.none()
+        return Option.none()
+    endmatch
+endfn
+
+fn largestFrom(T I)
+  takes {best: T items: I}
+  returns r: T
+  given {T: Ordered I: Iter(Item: T)}
+  do
+    match Iter.next(items)
+      case Option.some(value: {item rest})
+        return largestFrom(Ordered.max(best item) rest)
+      case Option.none()
+        return best
+    endmatch
+endfn

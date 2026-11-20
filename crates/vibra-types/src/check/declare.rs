@@ -8,17 +8,17 @@
 //! leaves an error type that reports nothing again.
 //!
 //! The checker supports `fn` declarations with parameter patterns, labelled
-//! parameters, type parameters bounded by `Any`, and written types of every
-//! form but `Proc`, `Intent`, and interface values; module values of those
-//! types; wrappers,
-//! declared tuples, declared records, and variant types, generic or not, with
-//! their members, a wrapper, declared tuple, or declared record with a bare
-//! `where` included; and, in the embedded standard library, the intrinsic
-//! scalar types and `List(T)` with their external members, and interfaces
-//! whose abstract members are not generic, with the implementations of them.
-//! A default member of such an interface is skipped with a note. Any other
-//! declaration of a local module is `@tool.unavailable` over the declaration;
-//! one of the standard library is skipped with a note.
+//! parameters, bounded type parameters, and written types of every form but
+//! `Proc` and `Intent`; module values of those types; wrappers, declared
+//! tuples, declared records, and variant types, generic or not, with their
+//! members, a wrapper, declared tuple, or declared record with a bare `where`
+//! included; interfaces with their parameters, associated types, abstract and
+//! default members, and their implementations in a type or in the interface;
+//! and, in the embedded standard library, the intrinsic scalar types and
+//! `List(T)` with their external members. A guarded member of an interface
+//! or an implementation is `@tool.unavailable`, as is any other declaration
+//! of a local module, over the declaration; one of the standard library is
+//! skipped with a note.
 //!
 //! A written type nests at most [`Type::MAX_DEPTH`] levels, measured before
 //! it is converted; an applied type supplies exactly its head's parameters;
@@ -205,15 +205,32 @@ impl TypeData<'_> {
     }
 }
 
-/// The type parameters a written type may name, and what `Self` denotes.
+/// The type parameters a written type may name, what `Self` denotes, and
+/// the associated type names in scope with what each denotes.
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct Scope<'s> {
     pub(crate) self_type: Option<&'s Type>,
     /// Each name in scope stands for the [`Type::Binder`] at its position.
     pub(crate) binders: &'s [String],
+    /// The bare associated names: inside an interface each is its own
+    /// [`Type::Associated`], inside an `impl` each is the chosen type.
+    pub(crate) associated: &'s [(String, Type)],
 }
 
-/// One `fn`: top level, a member of a type, or a member of an `impl`.
+/// The bound of a type parameter: an interface at its positional
+/// arguments, with the choices its labels fix, in canonical name order. A
+/// type parameter of the header is a [`Type::Binder`] into its binders.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct BoundData {
+    pub(crate) interface: usize,
+    pub(crate) arguments: Vec<Type>,
+    pub(crate) choices: Vec<(String, Type)>,
+    /// The written bound.
+    pub(crate) span: ByteSpan,
+}
+
+/// One `fn`: top level, a member of a type, a member of an `impl`, or the
+/// default member of an interface.
 #[derive(Debug)]
 pub(crate) struct FnData<'a> {
     pub(crate) module: usize,
@@ -221,6 +238,8 @@ pub(crate) struct FnData<'a> {
     pub(crate) owner: Option<usize>,
     /// The interface it implements, for a member of an `impl`.
     pub(crate) implements: Option<usize>,
+    /// The interface whose default member it is.
+    pub(crate) contract: Option<usize>,
     pub(crate) name: String,
     pub(crate) view: Callable<'a>,
     pub(crate) identity: String,
@@ -228,6 +247,12 @@ pub(crate) struct FnData<'a> {
     pub(crate) qualified: String,
     /// The type parameters in scope: the owner's, then its own.
     pub(crate) binders: Vec<String>,
+    /// The bound of each binder, `None` for `Any`.
+    pub(crate) bounds: Vec<Option<BoundData>>,
+    /// What `Self` denotes in its header and body.
+    pub(crate) self_type: Option<Type>,
+    /// The associated names in scope in its header and body.
+    pub(crate) associated: Vec<(String, Type)>,
     /// The signature, when this checker supports the header; a type
     /// parameter is a [`Type::Binder`] into `binders`.
     pub(crate) signature: Option<FnType>,
@@ -261,14 +286,24 @@ pub(crate) struct TestData<'a> {
     pub(crate) qualified: String,
 }
 
-/// One abstract member of a supported interface.
+/// One callable member of a supported interface.
 #[derive(Clone, Debug)]
 pub(crate) struct InterfaceMemberData {
     pub(crate) name: String,
-    /// Its type, `Self` written as [`Type::SelfType`].
+    /// The member's name as written.
+    pub(crate) span: ByteSpan,
+    /// Its type: `Self` is [`Type::SelfType`], the interface's parameters
+    /// and then the member's own are [`Type::Binder`]s into `binders`, and
+    /// an associated type is its [`Type::Associated`].
     pub(crate) signature: FnType,
+    /// The interface's parameters, then the member's own.
+    pub(crate) binders: Vec<String>,
+    /// The bound of each binder.
+    pub(crate) bounds: Vec<Option<BoundData>>,
     /// The receiver slot: the first positional parameter written `Self`.
     pub(crate) receiver: Option<usize>,
+    /// The function holding the default body of a default member.
+    pub(crate) default: Option<usize>,
 }
 
 /// One `interface`.
@@ -279,18 +314,61 @@ pub(crate) struct InterfaceData<'a> {
     pub(crate) view: InterfaceDecl<'a>,
     /// The checked IR identity, when this checker supports the interface.
     pub(crate) id: Option<TypeId>,
+    /// The type parameters, in written order.
+    pub(crate) params: Vec<String>,
+    /// The bound of each parameter.
+    pub(crate) bounds: Vec<Option<BoundData>>,
+    /// The associated types, in declaration order, with where each is
+    /// declared.
+    pub(crate) associated: Vec<(String, ByteSpan)>,
     pub(crate) members: Vec<InterfaceMemberData>,
 }
 
-/// One supported implementation: an `impl` of a supported interface in a
-/// supported type.
+impl InterfaceData<'_> {
+    /// The member `name`.
+    pub(crate) fn member(&self, name: &str) -> Option<&InterfaceMemberData> {
+        self.members.iter().find(|member| member.name == name)
+    }
+
+    /// The associated names as they denote themselves inside the
+    /// interface.
+    pub(crate) fn own_associated(&self) -> Vec<(String, Type)> {
+        self.associated
+            .iter()
+            .map(|(name, _)| (name.clone(), Type::Associated(name.clone())))
+            .collect()
+    }
+}
+
+/// One implementation of a supported interface: an `impl` nested in a type
+/// or in an interface.
 #[derive(Debug)]
 pub(crate) struct ImplData {
-    pub(crate) owner: usize,
+    pub(crate) module: usize,
     pub(crate) interface: usize,
+    /// The type parameters its key is open in.
+    pub(crate) binders: Vec<String>,
+    /// The bound of each binder.
+    pub(crate) bounds: Vec<Option<BoundData>>,
     pub(crate) receiver: Type,
-    /// The function supplying each member.
+    /// The interface's positional arguments.
+    pub(crate) arguments: Vec<Type>,
+    /// The choice of every associated type, in canonical name order.
+    pub(crate) choices: Vec<(String, Type)>,
+    /// The function supplying each member it supplies.
     pub(crate) members: Vec<(String, usize)>,
+    /// The `impl` head: the keyword and the target.
+    pub(crate) head: ByteSpan,
+    /// Whether dispatch, widening, and bounds may select it: it supplies
+    /// every abstract member and overlaps no earlier implementation.
+    pub(crate) usable: bool,
+}
+
+/// Where an `impl` is nested: in a type, or in an interface.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Host {
+    Type(usize),
+    Interface(usize),
 }
 
 /// The package and version of a provenance.
@@ -401,11 +479,13 @@ impl<'a> Program<'a> {
                     .map(|entity| (*library, entity))
             })
             .collect();
+        program.interface_shapes();
         program.type_kinds(&pending_impls);
         program.interface_headers();
         program.function_headers();
         program.value_headers();
         program.implementations(pending_impls);
+        program.overlaps();
         program.str_type = inputs
             .str_role
             .as_ref()
@@ -439,7 +519,7 @@ impl<'a> Program<'a> {
         source: &Source,
         document: &'a Document,
         inputs: &BuildInputs<'_>,
-        pending_impls: &mut Vec<(usize, Impl<'a>)>,
+        pending_impls: &mut Vec<(Host, Impl<'a>)>,
     ) {
         let module_index = self.modules.len();
         let view = vibra_syntax::module(document);
@@ -524,6 +604,10 @@ impl<'a> Program<'a> {
                                 member_name.text()
                             ),
                             binders,
+                            bounds: Vec::new(),
+                            self_type: None,
+                            associated: Vec::new(),
+                            contract: None,
                             signature: None,
                             external: None,
                         });
@@ -533,7 +617,7 @@ impl<'a> Program<'a> {
                         }
                     }
                     for block in decl.impls() {
-                        pending_impls.push((index, block));
+                        pending_impls.push((Host::Type(index), block));
                     }
                 }
                 Declaration::Interface(decl) => {
@@ -544,9 +628,15 @@ impl<'a> Program<'a> {
                         name: name.text().to_owned(),
                         view: decl,
                         id: None,
+                        params: Vec::new(),
+                        bounds: Vec::new(),
+                        associated: Vec::new(),
                         members: Vec::new(),
                     });
                     self.declare(module_index, name.text(), Entity::Interface(index));
+                    for block in decl.impls() {
+                        pending_impls.push((Host::Interface(index), block));
+                    }
                 }
                 Declaration::Fn(callable) => {
                     let Some(name) = callable.name() else {
@@ -566,6 +656,10 @@ impl<'a> Program<'a> {
                             .iter()
                             .map(|param| param.text().to_owned())
                             .collect(),
+                        bounds: Vec::new(),
+                        self_type: None,
+                        associated: Vec::new(),
+                        contract: None,
                         signature: None,
                         external: None,
                     });
@@ -878,6 +972,13 @@ impl<'a> Program<'a> {
                     {
                         return Ok(Type::Binder(at));
                     }
+                    if let Some((_, ty)) = scope
+                        .associated
+                        .iter()
+                        .find(|(name, _)| name == first.text())
+                    {
+                        return Ok(ty.clone());
+                    }
                     if first.text() == "Any" && self.lookup(module, "Any").is_none() {
                         return Ok(Type::Any);
                     }
@@ -897,7 +998,26 @@ impl<'a> Program<'a> {
                 }
                 let index = match entity {
                     Entity::Type(index) => index,
-                    Entity::Interface(_) => return Err(NoType::Unsupported),
+                    Entity::Interface(index) => {
+                        let (interface, arguments, choices) = self
+                            .interface_application(
+                                module,
+                                index,
+                                written,
+                                &positional,
+                                &labelled,
+                                scope,
+                                true,
+                            )?;
+                        let id = self
+                            .interfaces
+                            .get(interface)
+                            .and_then(|data| data.id.clone())
+                            .ok_or(NoType::Unsupported)?;
+                        let choices =
+                            NamedTypes::new(choices).map_err(|_| NoType::Unresolved)?;
+                        return Ok(Type::Interface(id, arguments, choices));
+                    }
                     _ => return Err(NoType::Unresolved),
                 };
                 let data = self.types.get(index).ok_or(NoType::Unresolved)?;
@@ -992,7 +1112,7 @@ impl<'a> Program<'a> {
 
     /// Decides the shape of every type: first which bodies this checker can
     /// read, then each body, until no type turns out unsupported.
-    fn type_kinds(&mut self, pending_impls: &[(usize, Impl<'a>)]) {
+    fn type_kinds(&mut self, pending_impls: &[(Host, Impl<'a>)]) {
         for index in 0..self.types.len() {
             let Some(data) = self.types.get(index) else {
                 continue;
@@ -1112,14 +1232,15 @@ impl<'a> Program<'a> {
 
     /// The receiver of every `impl Ordered` written in a type without
     /// parameters.
-    fn ordered_receivers(&self, pending_impls: &[(usize, Impl<'a>)]) -> Vec<Type> {
+    fn ordered_receivers(&self, pending_impls: &[(Host, Impl<'a>)]) -> Vec<Type> {
         let Some(ordered) = self.library.iter().find_map(|(binding, entity)| {
             (*binding == Library::Ordered).then_some(*entity)
         }) else {
             return Vec::new();
         };
         let mut receivers = Vec::new();
-        for (owner, block) in pending_impls {
+        for (host, block) in pending_impls {
+            let Host::Type(owner) = host else { continue };
             let Some(data) = self.types.get(*owner) else {
                 continue;
             };
@@ -1156,6 +1277,7 @@ impl<'a> Program<'a> {
         let scope = Scope {
             self_type: self_type.as_ref(),
             binders: &data.params,
+            associated: &[],
         };
         match data.view.body() {
             Some(TypeBody::Cases(cases)) => {
@@ -1212,107 +1334,8 @@ impl<'a> Program<'a> {
         }
     }
 
-    /// Reads every interface of the standard library whose abstract members
-    /// are non-generic `fn` members of written supported types. Its default
-    /// members are skipped, each with a note.
-    fn interface_headers(&mut self) {
-        let mut results = Vec::new();
-        let mut defaults = Vec::new();
-        for (index, data) in self.interfaces.iter().enumerate() {
-            let view = data.view;
-            let mut members = Vec::new();
-            let mut skipped = Vec::new();
-            let mut supported = view.params().is_empty()
-                && view.given().is_none()
-                && view.assoc_types().is_empty()
-                && self
-                    .modules
-                    .get(data.module)
-                    .is_some_and(|module| module.embedded);
-            for member in view.members() {
-                if !supported {
-                    break;
-                }
-                let Some(name) = member.name() else {
-                    supported = false;
-                    break;
-                };
-                if member.body().is_some() {
-                    skipped.push((
-                        data.module,
-                        member.construct().span(),
-                        format!("the default member `{}.{}`", data.name, name.text()),
-                    ));
-                    continue;
-                }
-                // Labelled defaults of a contract member are instantiated
-                // under each implementation, which is the interfaces step's.
-                if !plain_callable(&member)
-                    || !member.params().is_empty()
-                    || !member.labelled().is_empty()
-                {
-                    supported = false;
-                    break;
-                }
-                let scope = Scope {
-                    self_type: Some(&Type::SelfType),
-                    binders: &[],
-                };
-                match self.callable_type(data.module, &member, scope).ok() {
-                    Some(signature) => {
-                        let receiver = signature
-                            .parameters
-                            .iter()
-                            .position(|parameter| *parameter == Type::SelfType);
-                        members.push(InterfaceMemberData {
-                            name: name.text().to_owned(),
-                            signature,
-                            receiver,
-                        });
-                    }
-                    None => supported = false,
-                }
-            }
-            results.push((index, supported.then_some(members)));
-            if supported {
-                defaults.append(&mut skipped);
-            }
-        }
-        for (module, span, what) in defaults {
-            self.unsupported(module, span, &what);
-        }
-        for (index, members) in results {
-            let Some(data) = self.interfaces.get(index) else {
-                continue;
-            };
-            let module = data.module;
-            let span = data.view.construct().span();
-            let name = data.name.clone();
-            match members {
-                Some(members) => {
-                    let path = self
-                        .modules
-                        .get(module)
-                        .map(|module| module.path.trim_start_matches('@').to_owned());
-                    let id = path.and_then(|path| {
-                        self.interface_identity(index).and_then(|seed| {
-                            TypeId::new(format!("{path}.{name}"), seed).ok()
-                        })
-                    });
-                    if let Some(data) = self.interfaces.get_mut(index) {
-                        data.id = id;
-                        data.members = members;
-                    }
-                }
-                None => {
-                    self.unsupported(module, span, &format!("the interface `{name}`"))
-                }
-            }
-        }
-    }
-
     /// The identity of an interface: its anchor in its package.
-    fn interface_identity(&self, index: usize) -> Option<String> {
+    pub(crate) fn interface_identity(&self, index: usize) -> Option<String> {
         let data = self.interfaces.get(index)?;
         let module = self.modules.get(data.module)?;
         Some(self.identity_of(
@@ -1324,7 +1347,7 @@ impl<'a> Program<'a> {
         ))
     }
 
-    fn identity_of(
+    pub(crate) fn identity_of(
         &self,
         module: &str,
         embedded: bool,
@@ -1392,11 +1415,14 @@ impl<'a> Program<'a> {
     fn function_headers(&mut self) {
         let mut results = Vec::new();
         for (index, data) in self.functions.iter().enumerate() {
+            if data.contract.is_some() || data.implements.is_some() {
+                continue;
+            }
             let owner = data.owner.and_then(|owner| self.types.get(owner));
             let owner_supported = data.owner.is_none()
                 || owner.is_some_and(|owner| owner.self_type().is_some());
             if !owner_supported {
-                results.push((index, Err(NoType::Unresolved), None));
+                results.push((index, Err(NoType::Unresolved), None, None));
                 continue;
             }
             let self_type = owner.and_then(TypeData::self_type);
@@ -1408,17 +1434,28 @@ impl<'a> Program<'a> {
             let scope = Scope {
                 self_type: self_type.as_ref(),
                 binders: &data.binders,
+                associated: &[],
             };
-            let header = if !plain_callable(&data.view)
+            let own = data.view.params().len();
+            let header = if !unguarded(&data.view)
                 || (external.is_none() && data.view.body().is_none())
             {
                 Err(NoType::Unsupported)
             } else {
-                self.callable_type(data.module, &data.view, scope)
+                self.read_bounds(
+                    data.module,
+                    data.view.given(),
+                    &data.binders,
+                    data.binders.len().saturating_sub(own),
+                    scope,
+                )
+                .and_then(|bounds| {
+                    Ok((self.callable_type(data.module, &data.view, scope)?, bounds))
+                })
             };
-            results.push((index, header, external));
+            results.push((index, header, external, self_type));
         }
-        for (index, header, external) in results {
+        for (index, header, external, self_type) in results {
             let Some(data) = self.functions.get(index) else {
                 continue;
             };
@@ -1426,10 +1463,12 @@ impl<'a> Program<'a> {
             let span = data.view.construct().span();
             let what = format!("the function `{}`", data.qualified);
             match header {
-                Ok(signature) => {
+                Ok((signature, bounds)) => {
                     if let Some(data) = self.functions.get_mut(index) {
                         data.signature = Some(signature);
                         data.external = external;
+                        data.bounds = bounds;
+                        data.self_type = self_type;
                     }
                 }
                 Err(why) => self.no_type(module, span, &what, why),
@@ -1485,137 +1524,6 @@ impl<'a> Program<'a> {
                     }
                 }
                 Err(why) => self.no_type(module, span, &what, why),
-            }
-        }
-    }
-
-    /// Records every `impl` of a supported interface whose members all have
-    /// supported headers of the implemented member's type.
-    fn implementations(&mut self, pending: Vec<(usize, Impl<'a>)>) {
-        for (owner, block) in pending {
-            let Some(data) = self.types.get(owner) else {
-                continue;
-            };
-            let module = data.module;
-            let receiver = data.self_type().filter(|_| data.params.is_empty());
-            let interface = block.target().and_then(|target| match target.form() {
-                Some(TypeForm::Path {
-                    path,
-                    positional,
-                    labelled,
-                }) if positional.is_empty() && labelled.is_empty() => {
-                    match path.segments().as_slice() {
-                        [name] => match self.lookup(module, name.text()) {
-                            Some(Entity::Interface(index)) => Some(index),
-                            _ => None,
-                        },
-                        _ => None,
-                    }
-                }
-                _ => None,
-            });
-            let span = block.node().span();
-            let target_name = block
-                .target()
-                .and_then(|target| match target.form() {
-                    Some(TypeForm::Path { path, .. }) => Some(path.dotted()),
-                    _ => None,
-                })
-                .unwrap_or_default();
-            let what =
-                format!("the implementation of `{target_name}` for `{}`", data.name);
-            let supported = interface
-                .and_then(|index| self.interfaces.get(index).map(|data| (index, data)))
-                .filter(|(_, data)| data.id.is_some());
-            let (Some(receiver), Some((interface, interface_data))) =
-                (receiver, supported)
-            else {
-                self.unsupported(module, span, &what);
-                continue;
-            };
-            let expected = interface_data.members.clone();
-            let interface_name = interface_data.name.clone();
-            let mut members = Vec::new();
-            let mut complete = block.choices().is_empty();
-            for member in block.members() {
-                let Some(name) = member.name() else {
-                    complete = false;
-                    continue;
-                };
-                let scope = Scope {
-                    self_type: Some(&receiver),
-                    binders: &[],
-                };
-                let header = (plain_callable(&member)
-                    && member.params().is_empty()
-                    && member.labelled().is_empty())
-                .then(|| self.callable_type(module, &member, scope).ok())
-                .flatten();
-                let declared = expected
-                    .iter()
-                    .find(|declared| declared.name == name.text());
-                let fits = match (&header, declared) {
-                    (Some(signature), Some(declared)) => {
-                        *signature == substitute_self(&declared.signature, &receiver)
-                    }
-                    _ => false,
-                };
-                let external = member
-                    .symbol()
-                    .and_then(|symbol| symbol.value())
-                    .and_then(|symbol| CompilerIntrinsic::from_symbol(&symbol));
-                if !fits || (external.is_none() && member.body().is_none()) {
-                    complete = false;
-                    continue;
-                }
-                let Some(signature) = header else {
-                    continue;
-                };
-                let owner_name = self
-                    .types
-                    .get(owner)
-                    .map(|data| data.name.clone())
-                    .unwrap_or_default();
-                let dotted = self
-                    .modules
-                    .get(module)
-                    .map(|data| data.path.trim_start_matches('@').to_owned())
-                    .unwrap_or_default();
-                let fn_index = self.functions.len();
-                self.functions.push(FnData {
-                    module,
-                    owner: Some(owner),
-                    implements: Some(interface),
-                    name: name.text().to_owned(),
-                    view: member,
-                    identity: String::new(),
-                    qualified: format!(
-                        "{dotted}.{owner_name}.{interface_name}.{}",
-                        name.text()
-                    ),
-                    binders: Vec::new(),
-                    signature: Some(signature),
-                    external,
-                });
-                members.push((name.text().to_owned(), fn_index));
-            }
-            let all = expected
-                .iter()
-                .all(|declared| members.iter().any(|(name, _)| *name == declared.name));
-            if complete && all && members.len() == expected.len() {
-                self.impls.push(ImplData {
-                    owner,
-                    interface,
-                    receiver,
-                    members,
-                });
-            } else {
-                for (_, index) in &members {
-                    if let Some(data) = self.functions.get_mut(*index) {
-                        data.signature = None;
-                    }
-                }
-                self.unsupported(module, span, &what);
             }
         }
     }
@@ -1729,33 +1637,18 @@ impl<'a> Program<'a> {
         }
         None
     }
-
-    /// The implementation of `interface` for `receiver`.
-    pub(crate) fn implementation(
-        &self,
-        interface: usize,
-        receiver: &Type,
-    ) -> Option<&ImplData> {
-        self.impls.iter().find(|data| {
-            data.interface == interface
-                && data.receiver == *receiver
-                && self
-                    .types
-                    .get(data.owner)
-                    .and_then(|owner| self.modules.get(owner.module))
-                    .is_some_and(|module| module.in_scope)
-        })
-    }
 }
 
 /// Whether a callable header has only what this checker supports besides
 /// its types, labelled parameters, and type parameters: no guards, row, or
 /// bound other than `Any`.
 pub(crate) fn plain_callable(view: &Callable<'_>) -> bool {
-    bounds_are_any(view.given())
-        && view.requires().is_none()
-        && view.ensures().is_none()
-        && view.performs().is_none()
+    bounds_are_any(view.given()) && unguarded(view)
+}
+
+/// Whether a callable header has no guard and no row.
+pub(crate) fn unguarded(view: &Callable<'_>) -> bool {
+    view.requires().is_none() && view.ensures().is_none() && view.performs().is_none()
 }
 
 /// Whether every entry of a `given` section, if any, is the bound `Any`.
@@ -1850,18 +1743,4 @@ pub(crate) fn key_diagnostic(
         format!("`{key}` does not implement `Ordered`, so it keys no dict")
     };
     Diagnostic::new(code, span, message)
-}
-/// `signature` with `Self` replaced by `receiver`.
-pub(crate) fn substitute_self(signature: &FnType, receiver: &Type) -> FnType {
-    let replace = |ty: &Type| {
-        if *ty == Type::SelfType {
-            receiver.clone()
-        } else {
-            ty.clone()
-        }
-    };
-    FnType::new(
-        signature.parameters.iter().map(replace).collect(),
-        replace(&signature.result),
-    )
 }

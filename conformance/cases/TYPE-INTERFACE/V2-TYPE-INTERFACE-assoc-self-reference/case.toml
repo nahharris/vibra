@@ -1,0 +1,18 @@
+id = "V2-TYPE-INTERFACE-assoc-self-reference"
+rule = "V2-TYPE-INTERFACE-assoc-self-reference"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#associated-types: a choice that names an associated type of its own impl is @name.unknownSymbol at that name"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@name.unknownSymbol"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 105, end = 109 }

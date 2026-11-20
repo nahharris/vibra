@@ -1,0 +1,19 @@
+id = "V2-TYPE-INTERFACE-assoc-missing"
+rule = "V2-TYPE-INTERFACE-assoc-missing"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#associated-types: an impl that does not choose an associated type is @type.missingAbstractMember at the impl head"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.missingAbstractMember"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 71, end = 80 }
+related = [{ span = { start = 284, end = 288 } }]
