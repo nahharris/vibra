@@ -1,0 +1,13 @@
+id = "V2-PROJECT-test-fresh-state"
+rule = "V2-PROJECT-test-fresh-state"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "04-programs-and-packages.md#tests: each test starts with fresh module values"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

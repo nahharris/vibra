@@ -250,6 +250,29 @@ fn the_expectation_keys_decode() {
 }
 
 #[test]
+fn the_host_event_key_is_camel_case() {
+    let text = format!(
+        "{}hostEvent = \"@runtime.memoryExhausted\"\n",
+        manifest_of_operation("interpret")
+    );
+    let case = CaseManifest::from_str(&text).expect("a valid manifest");
+    assert_eq!(
+        case.expectations.host_event.map(|code| code.as_atom()),
+        Some("@runtime.memoryExhausted")
+    );
+    let text = format!(
+        "{}host_event = \"@runtime.memoryExhausted\"\n",
+        manifest_of_operation("interpret")
+    );
+    let error =
+        CaseManifest::from_str(&text).expect_err("the snake-case key is unknown");
+    assert!(
+        error.to_string().contains("unknown field `host_event`"),
+        "{error}"
+    );
+}
+
+#[test]
 fn a_fix_on_a_code_without_fix_capability_is_rejected() {
     let text = format!(
         "{}\n[[expect.diagnostics]]\ncode = \"@style.casing\"\nlevel = \"@warning\"\n\

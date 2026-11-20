@@ -1,0 +1,13 @@
+id = "V2-PROJECT-test-passes"
+rule = "V2-PROJECT-test-passes"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "04-programs-and-packages.md#assertions: a test whose assertion holds passes and the suite is ok"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

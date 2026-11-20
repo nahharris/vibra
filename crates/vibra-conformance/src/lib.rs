@@ -20,9 +20,9 @@
 //! [`ReaderV2Handler`] runs the `reader` operation under `readerV2`;
 //! [`ProjectDecodeHandler`], [`SourceGraphHandler`], [`ResolveHandler`], and
 //! [`WorkspaceCheckHandler`] run `projectDecode`, `sourceGraph`, `resolve`,
-//! and `workspaceCheck` under `staticV2`; [`InterpretHandler`] runs
-//! `interpret` under `interpreterV2`; [`FormatHandler`] runs `format`
-//! under `toolingV2`.
+//! and `workspaceCheck` under `staticV2`; [`InterpretHandler`] and
+//! [`WorkspaceTestHandler`] run `interpret` and `workspaceTest` under
+//! `interpreterV2`; [`FormatHandler`] runs `format` under `toolingV2`.
 //! Every other case is unavailable until the step that makes its
 //! observations exist registers a handler.
 
@@ -38,6 +38,7 @@ mod rules;
 mod runner;
 mod standard;
 mod workspace_check;
+mod workspace_test;
 
 pub use corpus::{
     Case, CaseInputDocument, CaseTreeFile, Corpus, CorpusError, corpus_root,
@@ -63,3 +64,4 @@ pub use rules::{
 pub use runner::{CaseReport, CaseStatus, ConformanceRunner, ProfileCounts, RunReport};
 pub use standard::{DispatchResult, ProfileDispatcher, standard_dispatcher};
 pub use workspace_check::WorkspaceCheckHandler;
+pub use workspace_test::WorkspaceTestHandler;

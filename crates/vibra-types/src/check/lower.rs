@@ -20,16 +20,18 @@ use vibra_ir::{
 };
 use vibra_syntax::Document;
 
-use super::CheckResult;
 use super::cycle::initializer_cycles;
 use super::declare::{Entity, Program, TypeData, TypeKind};
 use super::expr::{BodyChecker, Checked, Layout, Reference, Target};
 use super::generics::{Instantiation, expanding_instantiations};
+use super::testing::{self, TestFaults};
+use super::{CheckResult, CheckedTest};
 
 /// The bodies of one pass.
 struct Pass {
     functions: BTreeMap<usize, Checked>,
     values: BTreeMap<usize, Checked>,
+    tests: BTreeMap<usize, Checked>,
     /// The diagnostics of each declaration.
     faults: BTreeMap<Target, Vec<Diagnostic>>,
     /// The references of each declaration.
@@ -70,6 +72,7 @@ fn check_bodies(
     let mut pass = Pass {
         functions: BTreeMap::new(),
         values: BTreeMap::new(),
+        tests: BTreeMap::new(),
         faults: BTreeMap::new(),
         references: BTreeMap::new(),
         instantiations: Vec::new(),
@@ -140,6 +143,26 @@ fn check_bodies(
             std::mem::take(&mut checker.references),
         );
     }
+    for (index, data) in program.tests.iter().enumerate() {
+        if !testing::checked_test(program, index) {
+            continue;
+        }
+        let (Some(body), Some(text)) = (
+            data.view.body(),
+            documents.get(data.module).and_then(Document::text),
+        ) else {
+            continue;
+        };
+        let mut checker = BodyChecker::new(program, layout, data.module, text);
+        let checked = checker.test_body(body);
+        pass.tests.insert(index, checked);
+        pass.faults.insert(
+            Target::Test(index),
+            std::mem::take(&mut checker.diagnostics),
+        );
+        pass.references
+            .insert(Target::Test(index), std::mem::take(&mut checker.references));
+    }
     pass
 }
 
@@ -147,6 +170,7 @@ fn module_of(program: &Program<'_>, target: Target) -> Option<usize> {
     match target {
         Target::Function(index) => program.functions.get(index).map(|data| data.module),
         Target::Value(index) => program.values.get(index).map(|data| data.module),
+        Target::Test(index) => program.tests.get(index).map(|data| data.module),
     }
 }
 
@@ -165,6 +189,11 @@ fn name_of(program: &Program<'_>, target: Target) -> String {
             .unwrap_or_default(),
         Target::Value(index) => program
             .values
+            .get(index)
+            .map(|data| data.qualified.clone())
+            .unwrap_or_default(),
+        Target::Test(index) => program
+            .tests
             .get(index)
             .map(|data| data.qualified.clone())
             .unwrap_or_default(),
@@ -223,6 +252,7 @@ fn skip_faulty_stdlib(program: &mut Program<'_>, pass: &Pass) {
                     data.ty = None;
                 }
             }
+            Target::Test(_) => {}
         }
     }
 }
@@ -237,11 +267,14 @@ pub(crate) fn check_program(
     skip_faulty_stdlib(&mut program, &first);
     drop(first);
     let layout = layout(&program);
-    let mut pass = check_bodies(&program, documents, &layout);
-    let mut diagnostics = std::mem::take(&mut program.diagnostics);
-    for (target, faults) in &mut pass.faults {
+    let pass = check_bodies(&program, documents, &layout);
+    let test_faults = testing::declaration_faults(&program);
+    let reported = std::mem::take(&mut program.diagnostics);
+    let mut diagnostics = reported.clone();
+    diagnostics.extend(test_faults.diagnostics.iter().cloned());
+    for (target, faults) in &pass.faults {
         if !embedded(&program, *target) {
-            diagnostics.append(faults);
+            diagnostics.extend(faults.iter().cloned());
         }
     }
     diagnostics.extend(initializer_cycles(&program, &pass.references));
@@ -270,19 +303,34 @@ pub(crate) fn check_program(
         entry: None,
         types: None,
         functions: Vec::new(),
+        tests: Vec::new(),
+        test_set: None,
     };
     if result.has_errors() {
         if result.only_unavailable() {
             result.types = types_document(&program);
+            let (set, tests) = runnable_tests(
+                &mut program,
+                documents,
+                &layout,
+                &pass,
+                &reported,
+                &test_faults,
+            );
+            result.test_set = set;
+            result.tests = tests;
         }
         return result;
     }
-    match assemble(&program, &layout, pass) {
-        Ok((set, functions)) => {
+    let lowered = pass.tests.keys().copied().collect::<Vec<_>>();
+    match assemble(&program, &layout, pass, &lowered) {
+        Ok(assembled) => {
             result.types = types_document(&program);
             result.entry = entry(&program, &layout);
-            result.functions = functions;
-            result.module_set = Some(set);
+            result.functions = assembled.functions;
+            result.tests = checked_tests(&program, &assembled.tests, &BTreeMap::new());
+            result.test_set = Some(Arc::clone(&assembled.set));
+            result.module_set = Some(assembled.set);
         }
         Err(message) => result.diagnostics.push(Diagnostic::new(
             DiagnosticCode::RuntimeInvalidCheckedProgram,
@@ -293,6 +341,140 @@ pub(crate) fn check_program(
     result
 }
 
+/// Every test of the modules of `@tests` in scope, in program order, with
+/// the function `lowered` gives it or the fault `unavailable` gives it.
+fn checked_tests(
+    program: &Program<'_>,
+    lowered: &BTreeMap<usize, usize>,
+    unavailable: &BTreeMap<Target, Diagnostic>,
+) -> Vec<CheckedTest> {
+    program
+        .tests
+        .iter()
+        .enumerate()
+        .filter(|(_, test)| {
+            program
+                .modules
+                .get(test.module)
+                .is_some_and(|module| module.in_scope && module.tests)
+        })
+        .map(|(index, test)| CheckedTest {
+            module: program
+                .modules
+                .get(test.module)
+                .map(|module| module.path.clone())
+                .unwrap_or_default(),
+            name: test.name.clone(),
+            function: lowered.get(&index).copied(),
+            unavailable: unavailable.get(&Target::Test(index)).cloned(),
+        })
+        .collect()
+}
+
+/// The tests of a program whose every error is `@tool.unavailable`: every
+/// declaration that has, or reaches, a fault is dropped, the rest is checked
+/// again and lowered, and a test is unavailable with the fault its closure
+/// reaches. When the rest cannot be lowered either, every test is
+/// unavailable.
+fn runnable_tests(
+    program: &mut Program<'_>,
+    documents: &[Document],
+    layout: &Layout,
+    pass: &Pass,
+    reported: &[Diagnostic],
+    test_faults: &TestFaults,
+) -> (Option<Arc<CheckedModuleSet>>, Vec<CheckedTest>) {
+    let lowered = |target: Target| match target {
+        Target::Function(index) => {
+            layout.functions.get(index).copied().flatten().is_some()
+                && program.functions.get(index).is_some_and(|data| {
+                    data.external.is_some()
+                        || pass
+                            .functions
+                            .get(&index)
+                            .is_some_and(|checked| checked.node.is_some())
+                })
+        }
+        Target::Value(index) => {
+            layout.globals.get(index).copied().flatten().is_some()
+                && pass
+                    .values
+                    .get(&index)
+                    .is_some_and(|checked| checked.node.is_some())
+        }
+        Target::Test(index) => pass
+            .tests
+            .get(&index)
+            .is_some_and(|checked| checked.node.is_some()),
+    };
+    let mut bad = testing::unavailable_closure(
+        program,
+        reported,
+        &pass.faults,
+        &pass.references,
+        &lowered,
+        &test_faults.unavailable,
+    );
+    let runnable = pass
+        .tests
+        .keys()
+        .copied()
+        .filter(|index| !bad.contains_key(&Target::Test(*index)))
+        .collect::<Vec<_>>();
+    let none = BTreeMap::new();
+    if runnable.is_empty() {
+        return (None, checked_tests(program, &none, &bad));
+    }
+    for target in bad.keys() {
+        match *target {
+            Target::Function(index) => {
+                if let Some(data) = program.functions.get_mut(index) {
+                    data.signature = None;
+                }
+            }
+            Target::Value(index) => {
+                if let Some(data) = program.values.get_mut(index) {
+                    data.ty = None;
+                }
+            }
+            Target::Test(_) => {}
+        }
+    }
+    let layout = self::layout(program);
+    let mut reduced = check_bodies(program, documents, &layout);
+    reduced.tests.retain(|index, _| runnable.contains(index));
+    let refaulted = reduced.faults.iter().find(|(target, faults)| {
+        !faults.is_empty()
+            && !embedded(program, **target)
+            && match target {
+                Target::Test(index) => runnable.contains(index),
+                _ => true,
+            }
+    });
+    let failure = match refaulted {
+        Some((_, faults)) => faults.first().cloned(),
+        None => match assemble(program, &layout, reduced, &runnable) {
+            Ok(assembled) => {
+                return (
+                    Some(assembled.set),
+                    checked_tests(program, &assembled.tests, &bad),
+                );
+            }
+            Err(message) => Some(Diagnostic::new(
+                DiagnosticCode::ToolUnavailable,
+                ByteSpan::empty_at(0),
+                format!("the tests that remain cannot be lowered: {message}"),
+            )),
+        },
+    };
+    if let Some(failure) = failure {
+        for index in runnable {
+            bad.insert(Target::Test(index), failure.clone());
+        }
+    }
+    (None, checked_tests(program, &none, &bad))
+}
+
 fn origin(program: &Program<'_>, module: usize, span: ByteSpan) -> SourceOrigin {
     let source = program
         .modules
@@ -301,12 +483,22 @@ fn origin(program: &Program<'_>, module: usize, span: ByteSpan) -> SourceOrigin 
     SourceOrigin::new(source, span)
 }
 
-type Assembled = (Arc<CheckedModuleSet>, Vec<(String, usize)>);
+/// A lowered module set.
+struct Assembled {
+    set: Arc<CheckedModuleSet>,
+    /// The qualified name and index of every function of a declaration.
+    functions: Vec<(String, usize)>,
+    /// The function index of each lowered test, by test index.
+    tests: BTreeMap<usize, usize>,
+}
 
+/// Lowers the declarations `layout` places and the tests `tests`, whose
+/// functions follow every other function.
 fn assemble(
     program: &Program<'_>,
     layout: &Layout,
     mut pass: Pass,
+    tests: &[usize],
 ) -> Result<Assembled, String> {
     let in_scope = |module: usize| {
         program
@@ -455,6 +647,31 @@ fn assemble(
         names.push((data.qualified.clone(), at));
         functions.push(function);
     }
+    let mut lowered_tests = BTreeMap::new();
+    for index in tests {
+        let Some(data) = program.tests.get(*index) else {
+            return Err(format!("no test {index}"));
+        };
+        let Some(body) = pass
+            .tests
+            .remove(index)
+            .and_then(|checked| checked.node.map(|node| (node, checked.slot_count)))
+        else {
+            return Err(format!("the test `{}` was not lowered", data.qualified));
+        };
+        let (body, slot_count) = body;
+        lowered_tests.insert(*index, functions.len());
+        functions.push(CheckedFunction {
+            name: data.qualified.clone(),
+            signature: signature_record(&[], FnType::new(Vec::new(), Type::Void))?,
+            defaults: Vec::new(),
+            body: FunctionBody::Expr(Box::new(body)),
+            entry_guard: None,
+            exit_guard: None,
+            slot_count,
+            origin: origin(program, data.module, data.view.construct().span()),
+        });
+    }
     let mut implementations = Vec::new();
     for data in &program.impls {
         let owner_module = program.types.get(data.owner).map(|owner| owner.module);
@@ -516,7 +733,11 @@ fn assemble(
         implementations,
     })
     .map_err(|error| error.to_string())?;
-    Ok((set, names))
+    Ok(Assembled {
+        set,
+        functions: names,
+        tests: lowered_tests,
+    })
 }
 
 /// The signature record of a function with the type parameters `binders`,

@@ -1,0 +1,5 @@
+use @std.assert enduse
+
+use @app.math enduse
+
+test "functions" do assert.equal(math.add math.add) endtest

@@ -1,6 +1,6 @@
 [package]
 name = "vibra-workspace"
-description = "Vibra project discovery, the typed project file, the confined source snapshot, and the source graph."
+description = "Vibra project discovery, the typed project file, the confined source snapshot, the source graph, and the test runner."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -12,6 +12,8 @@ publish.workspace = true
 sha2.workspace = true
 vibra-diagnostics.workspace = true
 vibra-fmt.workspace = true
+vibra-interp.workspace = true
+vibra-ir.workspace = true
 vibra-resolve.workspace = true
 vibra-syntax.workspace = true
 vibra-types.workspace = true

@@ -15,7 +15,7 @@ fn the_embedded_library_loads() {
         stdlib.modules().len(),
         stdlib.roles().len()
     );
-    assert_eq!(stdlib.modules().len(), 6);
+    assert_eq!(stdlib.modules().len(), 7);
     assert_eq!(stdlib.roles().len(), 9);
     assert_eq!(stdlib.package_name(), "std");
     assert_eq!(stdlib.package_version(), "0.0.2");
@@ -125,6 +125,11 @@ fn the_overlay_is_the_unit_std() {
     assert_eq!(
         modules,
         vec![
+            (
+                "@std.assert",
+                "assert".to_owned(),
+                "stdlib/src/std/assert.vib"
+            ),
             ("@std.bool", "bool".to_owned(), "stdlib/src/std/bool.vib"),
             (
                 "@std.builtin",
@@ -168,6 +173,7 @@ fn the_overlay_is_resolution_s_embedded_unit() {
     assert_eq!(
         modules,
         [
+            ("@std.assert", "stdlib/src/std/assert.vib"),
             ("@std.bool", "stdlib/src/std/bool.vib"),
             ("@std.builtin", "stdlib/src/std/builtin.vib"),
             ("@std.core", "stdlib/src/std/core.vib"),

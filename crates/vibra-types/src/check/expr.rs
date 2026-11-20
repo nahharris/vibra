@@ -17,6 +17,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
+use vibra_ir::external::compiler::{CompilerIntrinsic, is_assertion};
 use vibra_ir::{
     Arguments, CallTarget, Constant, Construction, ContractCall, Expr as IrExpr,
     FnType, Library, MatchArm, NamedTypes, Node, Pattern as IrPattern, SourceOrigin,
@@ -51,6 +52,8 @@ pub(crate) enum Target {
     Value(usize),
     /// A function, by its program index.
     Function(usize),
+    /// A test, by its program index. Nothing refers to a test.
+    Test(usize),
 }
 
 /// One reference of a body: what it names and where.
@@ -483,6 +486,23 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         });
         Checked {
             node,
+            slot_count: self.slots.len(),
+        }
+    }
+
+    /// Checks the body of a test: a body of type `Void` outside any callable,
+    /// so that a `return` or a `try` written directly in it is reported.
+    pub(crate) fn test_body(&mut self, body: Body<'a>) -> Checked {
+        self.locals.clear();
+        self.slots.clear();
+        self.binders.clear();
+        self.self_type = None;
+        self.result = None;
+        let out = self.run(Task::Body(Box::new(
+            self.body_state(body, BodyMode::Branch(Ctx::Stmt)),
+        )));
+        Checked {
+            node: out.node,
             slot_count: self.slots.len(),
         }
     }
@@ -1396,6 +1416,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             target: Target::Function(index),
             span,
         });
+        let outside = self.assertion_outside_tests(index, span);
         let pattern = Type::function(signature);
         let (ty, type_arguments) = if data.binders.is_empty() {
             (pattern, Vec::new())
@@ -1422,22 +1443,82 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             self.instantiations.push((index, arguments.clone(), span));
             (pattern.instantiate(&arguments), arguments)
         };
-        let node =
-            self.layout
-                .functions
-                .get(index)
-                .copied()
-                .flatten()
-                .map(|function| {
-                    self.node(
-                        IrExpr::Function {
-                            function,
-                            type_arguments,
-                        },
-                        span,
-                    )
-                });
+        let node = self
+            .layout
+            .functions
+            .get(index)
+            .copied()
+            .flatten()
+            .map(|function| {
+                self.node(
+                    IrExpr::Function {
+                        function,
+                        type_arguments,
+                    },
+                    span,
+                )
+            })
+            .filter(|_| !outside);
         Out { ty: Some(ty), node }
+    }
+
+    /// Reports `@module.assertionOutsideTests` at `span` when the function
+    /// `index` is bound to an assertion row of the registry and this module
+    /// is not a module of `@tests`.
+    fn assertion_outside_tests(&mut self, index: usize, span: ByteSpan) -> bool {
+        let program = self.program;
+        let in_tests = program
+            .modules
+            .get(self.module)
+            .is_some_and(|module| module.tests);
+        let assertion = program
+            .functions
+            .get(index)
+            .and_then(|data| data.external)
+            .is_some_and(|row| is_assertion(&row.symbol()));
+        if in_tests || !assertion {
+            return false;
+        }
+        self.report(
+            DiagnosticCode::ModuleAssertionOutsideTests,
+            span,
+            "an assertion is used only in a module of `@tests`",
+        );
+        true
+    }
+
+    /// Reports `@type.functionNotEquatable` at each operand of an
+    /// `assert.equal` call whose type contains a callable.
+    fn unequatable_operands(&mut self, state: &CallState<'a>) -> bool {
+        let Callee::Function(index) = state.callee else {
+            return false;
+        };
+        let row = self
+            .program
+            .functions
+            .get(index)
+            .and_then(|data| data.external);
+        if row != Some(CompilerIntrinsic::AssertEqual) {
+            return false;
+        }
+        let Some(Some(operand)) = state.assignment.first() else {
+            return false;
+        };
+        if self.program.key_fault(operand)
+            != Some(DiagnosticCode::TypeFunctionNotEquatable)
+        {
+            return false;
+        }
+        for arg in &state.args {
+            self.report(
+                DiagnosticCode::TypeFunctionNotEquatable,
+                expr_span(&arg.value),
+                format!(
+                    "an operand of `assert.equal` has the type `{operand}`, which contains a callable"
+                ),
+            );
+        }
+        true
     }
 
     fn call_state(
@@ -1854,6 +1935,14 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             .collect::<Vec<_>>();
         if !missing.is_empty() && state.params.is_some() && !state.failed {
             self.ambiguous(state.application, &missing);
+            state.failed = true;
+        }
+        if let Callee::Function(index) = state.callee
+            && self.assertion_outside_tests(index, state.callee_span)
+        {
+            state.failed = true;
+        }
+        if !state.failed && self.unequatable_operands(&state) {
             state.failed = true;
         }
         for (at, actual, span) in std::mem::take(&mut state.deferred) {

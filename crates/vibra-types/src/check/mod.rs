@@ -21,6 +21,7 @@ mod literal;
 mod lower;
 mod nominal;
 mod pattern;
+mod testing;
 
 use std::sync::Arc;
 
@@ -54,6 +55,46 @@ pub struct CheckResult {
     entry: Option<usize>,
     types: Option<String>,
     functions: Vec<(String, usize)>,
+    tests: Vec<CheckedTest>,
+    test_set: Option<Arc<CheckedModuleSet>>,
+}
+
+/// One test of a covered module of `@tests`: the function its body was
+/// lowered to, or the `@tool.unavailable` its declaration closure reaches.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CheckedTest {
+    module: String,
+    name: String,
+    function: Option<usize>,
+    unavailable: Option<Diagnostic>,
+}
+
+impl CheckedTest {
+    /// The module path atom, `@` included.
+    #[must_use]
+    pub fn module(&self) -> &str {
+        &self.module
+    }
+
+    /// The decoded name.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// The index of the test's function in [`CheckResult::test_set`], a
+    /// `Fn({} Void)`, when the test can run.
+    #[must_use]
+    pub const fn function(&self) -> Option<usize> {
+        self.function
+    }
+
+    /// The `@tool.unavailable` at the form the test's declaration closure
+    /// holds, when the test cannot run.
+    #[must_use]
+    pub const fn unavailable(&self) -> Option<&Diagnostic> {
+        self.unavailable.as_ref()
+    }
 }
 
 impl CheckResult {
@@ -65,7 +106,25 @@ impl CheckResult {
             entry: None,
             types: None,
             functions: Vec::new(),
+            tests: Vec::new(),
+            test_set: None,
         }
+    }
+
+    /// The tests of the covered modules of `@tests`, in the order of their
+    /// modules and then of their declarations, when no error other than
+    /// `@tool.unavailable` was found; empty otherwise.
+    #[must_use]
+    pub fn tests(&self) -> &[CheckedTest] {
+        &self.tests
+    }
+
+    /// The module set the runnable [`tests`](Self::tests) were lowered
+    /// into: the [`module_set`](Self::module_set) when no error was found,
+    /// and otherwise the declarations that reach no unsupported form.
+    #[must_use]
+    pub const fn test_set(&self) -> Option<&Arc<CheckedModuleSet>> {
+        self.test_set.as_ref()
     }
 
     /// Every diagnostic, resolution's first, then the checker's in source
@@ -132,7 +191,8 @@ impl CheckResult {
 
 /// Checks the units named in `units` (`@app`, `@tests`) of a resolved
 /// workspace, every module they import, and every module of the embedded
-/// standard library.
+/// standard library. A name in `units` may also be one module's path
+/// (`@tests.math`), which covers that module and its imports.
 #[must_use]
 pub fn check_workspace(input: &ResolveInput, units: &[String]) -> CheckResult {
     let stdlib = match load_stdlib() {
@@ -152,6 +212,7 @@ pub fn check_workspace(input: &ResolveInput, units: &[String]) -> CheckResult {
                 source_id: module.source_id().to_owned(),
                 bytes: module.bytes().to_vec(),
                 embedded: false,
+                tests: unit.kind() == UnitKind::Tests,
             });
         }
     }
@@ -161,6 +222,7 @@ pub fn check_workspace(input: &ResolveInput, units: &[String]) -> CheckResult {
             source_id: module.source_id().to_owned(),
             bytes: module.bytes().to_vec(),
             embedded: true,
+            tests: false,
         });
     }
     let documents = parse_all(&sources);
@@ -173,6 +235,8 @@ pub fn check_workspace(input: &ResolveInput, units: &[String]) -> CheckResult {
         result.module_set = None;
         if !result.only_unavailable() {
             result.types = None;
+            result.tests.clear();
+            result.test_set = None;
         }
         result.entry = None;
         result.functions.clear();

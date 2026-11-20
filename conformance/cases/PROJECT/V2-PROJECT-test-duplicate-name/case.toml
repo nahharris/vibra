@@ -1,0 +1,19 @@
+id = "V2-PROJECT-test-duplicate-name"
+rule = "V2-PROJECT-test-duplicate-name"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "04-programs-and-packages.md#tests: two tests of one module with one name are a redeclaration"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@name.redeclaration"
+level = "@error"
+source = "tests/math.vib"
+span = { start = 53, end = 59 }
+related = [{ source = "tests/math.vib", span = { start = 29, end = 35 } }]

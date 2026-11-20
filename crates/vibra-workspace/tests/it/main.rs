@@ -17,3 +17,4 @@ mod project;
 mod resolve;
 mod revision;
 mod snapshot;
+mod test_runner;

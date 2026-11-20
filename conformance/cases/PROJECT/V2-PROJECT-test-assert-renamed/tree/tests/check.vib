@@ -1,0 +1,3 @@
+use @std.assert as check enduse
+
+test "renamed" do check.true(true) endtest

@@ -781,7 +781,7 @@ A test record has `name` (`Str`, the selector); `result` (a `@test.*` atom);
   invalid or unavailable test has an empty one. Diagnostics are not copied
   into test observations.
 - An empty suite has result `@command.ok` and no tests.
-- A host event is expected with `expect.host_event` and the event's atom. A
+- A host event is expected with `expect.hostEvent` and the event's atom. A
   case MUST NOT depend on the exact allocation at which memory runs out. A
   tool limit is expected as unknown, with the limit profile.
 - An execution that traps records the code and origin and no value. Its

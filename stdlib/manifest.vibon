@@ -3,6 +3,11 @@
   package: {name: "std" version: "0.0.2"}
   modules: [
     {
+      path: @std.assert
+      digest: "sha256:015c1a81cbd520f0f27a926aa5a6596296bc0b3fac4fe65c358e50263494d760"
+      languageRoles: []
+    }
+    {
       path: @std.bool
       digest: "sha256:13417f012cb71cb05c87bd81d44acd5d90c89285f8c93e15c9593c03bfe9f70a"
       languageRoles: [@bool]
@@ -35,6 +40,9 @@
   ]
   symbols: {
     compiler: [
+      "assert.equal"
+      "assert.false"
+      "assert.true"
       "char.fromU32"
       "char.toU32"
       "dict.entries"

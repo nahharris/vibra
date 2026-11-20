@@ -1,0 +1,5 @@
+use @std.assert enduse
+
+use @app.math enduse
+
+test "adds" do assert.equal(3i32 math.add(1i32 2i32)) endtest

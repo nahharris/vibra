@@ -17,13 +17,16 @@
 //! filesystem access; [`resolve_input`] hands its modules to resolution,
 //! [`check_snapshot`] checks the targets it covers, and [`plan_format`]
 //! formats one confined document, checking a captured module's candidate
-//! text in place of its bytes.
+//! text in place of its bytes. [`run_tests`] discovers, checks, and runs the
+//! tests of a snapshot, and [`TestRun::document`] is its `@testRun.v2`
+//! observation.
 //!
 //! # Position in the architecture
 //!
-//! This crate depends on `vibra-diagnostics`, `vibra-fmt`,
-//! `vibra-resolve`, `vibra-syntax`, and `vibra-types`. It is the tooling crate that reads a
-//! project's files; no language crate depends on it.
+//! This crate depends on `vibra-diagnostics`, `vibra-fmt`, `vibra-interp`,
+//! `vibra-ir`, `vibra-resolve`, `vibra-syntax`, and `vibra-types`. It is
+//! the tooling crate that reads a project's files; no language crate depends
+//! on it.
 
 mod discovery;
 mod format_plan;
@@ -33,6 +36,7 @@ mod revision;
 mod semantic;
 mod snapshot;
 mod source_graph;
+mod test_runner;
 
 pub use discovery::{DiscoveredProject, discover_project, discover_project_at};
 pub use format_plan::{
@@ -47,3 +51,7 @@ pub use revision::{DuplicateRecord, RevisionKind, RevisionRecord, workspace_revi
 pub use semantic::{WorkspaceCheck, check_snapshot};
 pub use snapshot::{SourceFile, SourceSnapshot, SourceUnit, TESTS_ROOT, UnitKind};
 pub use source_graph::{GRAPH_FORMAT, GraphDependency, SourceGraph};
+pub use test_runner::{
+    InvalidSelection, SuiteResult, TEST_RUN_FORMAT, TestItem, TestOutcome, TestRun,
+    TestSelector, run_tests,
+};
