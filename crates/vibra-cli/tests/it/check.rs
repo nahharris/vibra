@@ -273,3 +273,34 @@ fn check_sends_the_obligations_and_an_unestablished_one_is_unknown() {
     let source = &document["payload"]["obligations"][0]["source"];
     assert_eq!(source["sourceId"], "src/app/main.vib");
 }
+
+/// The example project of the repository, `examples/hello`.
+fn hello_example() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/hello")
+}
+
+#[test]
+fn examples_check() {
+    let (code, document) = envelope_in(&hello_example(), &["--format", "json", "check"]);
+    assert_eq!(code, 0, "{document}");
+    assert_eq!(document["status"], "passed");
+    assert_eq!(document["result"], "@command.ok");
+    assert_eq!(document["diagnostics"], json!([]));
+    let (code, tests) = envelope_in(&hello_example(), &["--format", "json", "test"]);
+    assert_eq!(code, 0, "{tests}");
+    assert_eq!(tests["status"], "passed");
+}
+
+#[test]
+fn the_readme_shows_the_checked_example() {
+    let readme = std::fs::read_to_string(hello_example().join("../../README.md"))
+        .expect("the repository README");
+    for file in ["src/hello/greeting.vib", "tests/greeting.vib", "project.vibon"] {
+        let text = std::fs::read_to_string(hello_example().join(file))
+            .expect("an example file");
+        assert!(
+            readme.contains(&text),
+            "README.md shows `examples/hello/{file}` as it is"
+        );
+    }
+}

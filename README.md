@@ -53,77 +53,96 @@ sandbox.
 
 ## 👋 Hello, Vibra
 
-```vibra
-use @std.io.StdoutText enduse
-use @std.process.ExitCode enduse
+The project in [examples/hello](examples/hello) is a library with one
+module and one test module. `src/hello/greeting.vib`:
 
-proc main
-  takes {out: StdoutText}
-  returns code: ExitCode
-  performs {StdoutText}
+```vibra
+type Greeting
+  case world
+  case named {name: Str}
+  visibility @public
+endtype
+
+fn message
+  takes {greeting: Greeting}
+  returns text: Str
+  visibility @public
   do
-    match await StdoutText.write(out "Hello, world!\n")
-      case Result.ok(value: _)
-        return ExitCode(0u8)
-      case Result.err(error: _)
-        return ExitCode(1u8)
+    return match greeting
+      case Greeting.world()
+        "Hello, world!"
+      case Greeting.named(name: name)
+        Str.concat("Hello, " Str.concat(name "!"))
     endmatch
-endproc
+endfn
 ```
 
-`main` takes `out`, a grant to write text to standard output, and declares
-in `performs` that writing is the one operation it may perform. The write can
-fail, so its result is a `Result` and both cases are handled.
+`Greeting` is a type with two cases, and `message` is a function: it takes
+a greeting, returns text, and performs nothing. The `match` covers both
+cases; leaving one out is an error the checker reports before anything runs.
+Every form ends with its own closer, such as `endtype`, `endmatch`, and
+`endfn`.
 
-The project file says where that grant comes from:
+`tests/greeting.vib` imports the module and checks two results:
+
+```vibra
+use @std.assert enduse
+
+use @hello.greeting enduse
+
+test "greets the world"
+  do
+    assert.equal("Hello, world!" greeting.message(greeting.Greeting.world()))
+endtest
+
+test "greets by name"
+  do
+    assert.equal("Hello, Ada!" greeting.message(greeting.Greeting.named(name: "Ada")))
+endtest
+```
+
+`project.vibon` names the package and its one target:
 
 ```vibon
 {
   format: @project.v2
   package: {name: "hello" version: "0.1.0"}
-  targets: [
-    {
-      name: @app
-      kind: @bin
-      root: "src/app"
-      entry: @app.main.main
-      effects: [@std.io.StdoutText]
-      grants: [
-        @out: {
-          provider: @host.io.stdout
-          resource: {kind: @processStream}
-          after: []
-        }
-      ]
-    }
-  ]
+  targets: [{name: @hello kind: @lib root: "src/hello"}]
   dependencies: [:]
 }
 ```
 
-Save the program as `src/app/main.vib` and the project description as
-`project.vibon`. A `.vibon` file is written with the same braces, brackets,
-and literals as Vibra source, and holds data only.
+A `.vibon` file is written with the same braces, brackets, and literals as
+Vibra source, and holds data only.
 
 ## Try the pre-alpha
 
-The language was redesigned after v0.0.1, and this page describes the
-redesign. It is specified in [the documentation](docs/index.md) and is being
+The language is specified in [the documentation](docs/index.md) and is being
 implemented for [v0.0.2](docs/roadmap/v0.0.2/README.md). The
-[v0.0.1 binaries](https://github.com/nahharris/vibra/releases) and the code
-on `main` still run the earlier S-expression syntax, so the example above
-does not run on them yet.
+[v0.0.1 binaries](https://github.com/nahharris/vibra/releases) run the
+earlier S-expression syntax, not this one.
 
 To build the CLI from source with the pinned Rust toolchain:
 
 ```sh
-cargo build --release --locked -p vibra-cli-v1
+cargo build --release --locked -p vibra-cli
 ```
 
-While milestone 1 of v0.0.2 is in progress, the v0.0.1 toolchain is the
-`vibra-v1` binary, built by the command above. The commands are the same in
-both: `vibra project init`, `vibra fmt`, `vibra check`, `vibra test`, and
-`vibra run`. Use `vibra help` to see what your build supports.
+Then, from `examples/hello`:
+
+```sh
+vibra check
+vibra test
+vibra fmt src/hello/greeting.vib
+```
+
+`vibra check` checks every target and test module, `vibra test` runs the
+tests in the reference interpreter, and `vibra fmt PATH` previews the
+canonical format of one file (`--write` applies it). `--format json` gives
+each command's result as one JSON document. `vibra help` lists every command
+and which ones this build supports; the others report that they are
+unavailable. Operations, grants, and `vibra run` arrive with milestone 2 of
+v0.0.2.
 ### Skills for coding agents
 
 This repository is a plugin marketplace for Claude Code, Cursor, and Codex.

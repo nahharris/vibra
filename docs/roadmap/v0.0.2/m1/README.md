@@ -46,7 +46,12 @@ The decisions and their reasons are in [architecture.md](architecture.md).
 In one line each:
 
 - New crates under the final names beside the old crates, which step 01
-  renames with a `-v1` suffix and step 28 deletes.
+  renames with a `-v1` suffix and step 28 deletes. The five `-v1` crates the
+  native track is compiled against, `vibra-diagnostics-v1`,
+  `vibra-syntax-v1`, `vibra-ir-v1`, `vibra-host-v1`, and `vibra-native-v1`,
+  stay after step 28: the native track lowers the v1 checked IR, which does
+  not map mechanically onto the new one. Package X2-01 moves the native
+  track to `vibra-ir`, `vibra-native`, and `vibra-host` and deletes them.
 - The checked IR is closed in step 12 for the whole of M1, with a migration
   table for the native track; package X2-01 moves the native track to it.
 - The packages N1 to N12 of the native contract are each assigned once:

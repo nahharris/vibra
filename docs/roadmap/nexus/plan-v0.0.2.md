@@ -43,6 +43,11 @@ and §6.
    around a defect trap or a typed error (N44).
 4. The existing lowering slice passes again on the rewritten checked IR, for
    the forms that survive unchanged.
+5. The native track depends on `vibra-diagnostics`, `vibra-ir`,
+   `vibra-native`, and `vibra-host`, and the five `-v1` crates it was
+   compiled against are deleted: `vibra-diagnostics-v1`, `vibra-syntax-v1`,
+   `vibra-ir-v1`, `vibra-host-v1`, and `vibra-native-v1`, with their rows of
+   the architecture test and `NATIVE_TRACK_V1_CRATES`.
 
 **Validation:**
 
