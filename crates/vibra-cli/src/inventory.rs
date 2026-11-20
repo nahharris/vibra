@@ -148,6 +148,10 @@ pub static LINES: [Line; 18] = [
         words: &["test"],
         synopsis: "test [TEST]",
         optional: 1,
+        supported: true,
+        operations: &["workspaceTest"],
+        profiles: &["staticV2", "interpreterV2"],
+        schema_ids: &[COMMAND_RESULT_SCHEMA_ID, DIAGNOSTIC_SCHEMA_ID],
         ..UNSUPPORTED
     },
     Line {

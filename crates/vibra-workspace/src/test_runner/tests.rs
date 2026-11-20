@@ -46,6 +46,52 @@ impl Drop for Tree {
 }
 
 #[test]
+fn the_suite_result_follows_the_precedence_over_all_five_outcomes() {
+    let trap = TestOutcome::Trap {
+        trap: Trap::InvalidCheckedProgram,
+        origin: None,
+    };
+    let exhausted = TestOutcome::Exhausted;
+    let unavailable = TestOutcome::Unavailable(vibra_diagnostics::Diagnostic::new(
+        vibra_diagnostics::DiagnosticCode::ToolUnavailable,
+        vibra_diagnostics::ByteSpan::empty_at(0),
+        "unsupported",
+    ));
+    let failed = TestOutcome::AssertionFailed(vibra_interp::TestAssertionFailure {
+        kind: vibra_interp::FailureKind::Assertion,
+        assertion: "assert.true".to_owned(),
+        expected: None,
+        actual: None,
+        origin: vibra_ir::SourceOrigin::new(
+            "tests/math.vib",
+            vibra_diagnostics::ByteSpan::new(0, 1),
+        ),
+    });
+    let passed = TestOutcome::Passed;
+    let table: [(&[&TestOutcome], SuiteResult); 9] = [
+        (&[], SuiteResult::Ok),
+        (&[&passed, &passed], SuiteResult::Ok),
+        (&[&passed, &failed], SuiteResult::TestFailed),
+        (&[&failed, &unavailable, &passed], SuiteResult::Unavailable),
+        (
+            &[&unavailable, &exhausted, &failed],
+            SuiteResult::OperationalFailure,
+        ),
+        (&[&exhausted, &trap, &unavailable], SuiteResult::Trap),
+        (&[&failed, &passed, &trap], SuiteResult::Trap),
+        (&[&exhausted], SuiteResult::OperationalFailure),
+        (&[&unavailable], SuiteResult::Unavailable),
+    ];
+    for (outcomes, expected) in table {
+        assert_eq!(
+            SuiteResult::by_precedence(outcomes.iter().copied()),
+            expected,
+            "{outcomes:?}"
+        );
+    }
+}
+
+#[test]
 fn a_trap_ends_only_its_own_test() -> Result<(), String> {
     let tree = Tree::new()?;
     let root = fs::canonicalize(&tree.0).map_err(|error| error.to_string())?;
