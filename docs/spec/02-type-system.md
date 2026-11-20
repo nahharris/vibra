@@ -1157,7 +1157,10 @@ a call of a callable whose result type is `Never`, or an `if`, `match`, or
 `Never` is admitted at any expected type; this is not widening. It may appear
 only as a statement, including the last statement of a branch, arm, block, or
 fallback; in an operand position it is `@type.unreachableCode`. A statement
-after a statement of type `Never` is `@type.unreachableCode` as well.
+after a statement of type `Never` is `@type.unreachableCode` as well. The
+operand of `return` is the exception: `return spin(n)`, where `spin` returns
+`Never`, is a tail call and is accepted, and a later statement is reported
+only as after any `return`, never because of the call.
 
 A type is **uninhabited** when it is `Never`, a tuple, record, or wrapper
 with an uninhabited component, or a variant type all of whose cases have an

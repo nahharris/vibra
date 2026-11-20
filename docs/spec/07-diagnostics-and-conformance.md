@@ -308,7 +308,7 @@ Every row is an error with no automatic fix.
 | a callable body that can run off its end | `@type.missingReturn`, the body; an empty body is the zero-width span right after `do` |
 | a `return` operand of the wrong type | `@type.mismatch`, the operand |
 | a `return` outside a callable, in a module value, or directly in a test | `@type.invalidReturn`, the `return` |
-| a statement after one that cannot complete | `@type.unreachableCode`, the first such statement, related to the earlier one |
+| a statement after one that cannot complete; a `return` of a `Never`-typed call is no fault | `@type.unreachableCode`, the first such statement, related to the earlier one |
 | a name bound twice, or shadowing | `@name.redeclaration`, the later name, related to the earlier |
 | a keyword or prelude name used as a binder | `@name.reservedDeclaration`, the name |
 | a prelude spelling used for a module value, function, or import | `@name.reservedValueSpelling`, the introduction |
