@@ -1079,7 +1079,9 @@ A **constant expression** is a literal, an atom, or `void`; a construction,
 tuple, record, list, or dict whose operands are all constant expressions and
 whose type has no `where … else`; or the name of a module value whose
 initializer is a constant expression. A function call is never a constant
-expression, so the property is decidable without evaluation.
+expression, so the property is decidable without evaluation. Neither is a
+dict whose canonical key order uses a declared type's own `Ordered`
+implementation, since ordering its entries would run that implementation.
 
 A name in pattern position that resolves to a constant module value is a
 constant pattern: it means the pattern of that value and binds nothing.

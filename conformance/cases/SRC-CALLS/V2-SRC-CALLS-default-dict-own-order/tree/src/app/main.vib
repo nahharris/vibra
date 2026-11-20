@@ -1,0 +1,19 @@
+type Key of U8
+  impl Ordered
+    fn compare
+      takes {left: Self right: Self}
+      returns order: Ordering
+      do
+        let Key(l) be left endlet
+        let Key(r) be right endlet
+        return Ordered.compare(r l)
+    endfn
+  endimpl
+endtype
+
+fn table
+  labelled {d: Dict(Key U8) be [Key(1u8): 1u8 Key(2u8): 2u8]}
+  returns r: Dict(Key U8)
+  do
+    return d
+endfn

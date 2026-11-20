@@ -692,3 +692,4 @@ V2-TYPE-GENERIC-dict-unbounded-key	active	02-type-system.md#dict-keys-equality-a
 V2-TYPE-GENERIC-dict-key-other-bound	active	02-type-system.md#dict-keys-equality-and-order
 V2-TYPE-GENERIC-dict-key-of-type	active	02-type-system.md#dict-keys-equality-and-order
 V2-TYPE-GENERIC-dict-key-of-type-unbounded	active	02-type-system.md#dict-keys-equality-and-order
+V2-SRC-CALLS-default-dict-own-order	active	02-type-system.md#constant-expressions-and-constant-patterns

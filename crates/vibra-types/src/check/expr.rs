@@ -986,9 +986,12 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                 }
             }
             Err(NotConstant::Dict) => {
-                self.unavailable(
+                self.report(
+                    DiagnosticCode::TypeNotConstant,
                     span,
-                    "a dict default keyed by a type ordered by its own implementation",
+                    "a dict keyed by a type ordered by its own `Ordered` implementation \
+                     is no constant expression: ordering its entries would run that \
+                     implementation",
                 );
                 None
             }

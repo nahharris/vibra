@@ -491,12 +491,8 @@ impl<'a> BodyChecker<'_, 'a> {
                 }
                 constant
             }
-            Err(NotConstant::Dict) => {
-                self.unavailable(span, "a dict as a consequence");
-                None
-            }
             Err(NotConstant::Pending) if !self.layout.constants_known => None,
-            Err(NotConstant::Pending | NotConstant::Expression) => {
+            Err(NotConstant::Pending | NotConstant::Expression | NotConstant::Dict) => {
                 self.report(
                     DiagnosticCode::ContractInvalidConsequence,
                     span,

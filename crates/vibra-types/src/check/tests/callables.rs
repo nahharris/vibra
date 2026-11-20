@@ -218,24 +218,39 @@ fn a_dict_default_holds_only_constants() {
 }
 
 /// A declared key type is ordered by its own `Ordered` implementation, which
-/// only an evaluation applies; the checker does not run it to fold a default.
+/// only running it applies, so a dict keyed by it is no constant expression,
+/// whatever its number of entries; a dict keyed by a tuple of `Str` and an
+/// atom is one.
 #[test]
-fn a_dict_default_keyed_by_its_own_order_is_unavailable() {
-    let source = "type Key of U8 impl Ordered fn compare takes {left: Self right: Self} \
-                  returns order: Ordering do let Key(l) be left endlet \
-                  let Key(r) be right endlet return Ordered.compare(r l) endfn endimpl endtype\n\
-                  fn main returns r: U64 do return List.length(Dict.entries(t())) endfn\n\
-                  fn t labelled {d: Dict(Key U8) be [Key(1u8): 1u8 Key(2u8): 2u8]} \
-                  returns r: Dict(Key U8) do return d endfn\n";
-    let result = check_source(SOURCE, source);
-    assert!(result.only_unavailable(), "{:#?}", result.diagnostics());
-    assert_eq!(
-        faults(source),
-        [(
-            DiagnosticCode::ToolUnavailable,
-            at(source, "[Key(1u8): 1u8 Key(2u8): 2u8]", 0)
-        )]
-    );
+fn a_dict_keyed_by_its_own_order_is_no_constant() {
+    let key = "type Key of U8 impl Ordered fn compare takes {left: Self right: Self} \
+               returns order: Ordering do let Key(l) be left endlet \
+               let Key(r) be right endlet return Ordered.compare(r l) endfn endimpl endtype\n\
+               fn main returns r: U64 do return List.length(Dict.entries(t())) endfn\n";
+    for default in [
+        "[Key(1u8): 1u8 Key(2u8): 2u8]",
+        "[Key(1u8): 1u8]",
+        "[{Key(1u8) @a}: 1u8]",
+    ] {
+        let key_type = if default.starts_with("[{") {
+            "{Key Atom}"
+        } else {
+            "Key"
+        };
+        let source = format!(
+            "{key}fn t labelled {{d: Dict({key_type} U8) be {default}}} \
+             returns r: Dict({key_type} U8) do return d endfn\n"
+        );
+        assert_eq!(
+            faults(&source),
+            [(DiagnosticCode::TypeNotConstant, at(&source, default, 0))],
+            "{source}"
+        );
+    }
+    let source = "fn main returns r: U64 do return List.length(Dict.entries(t())) endfn\n\
+                  fn t labelled {d: Dict({Str Atom} U8) be [{\"b\" @a}: 1u8 {\"a\" @b}: 2u8]} \
+                  returns r: Dict({Str Atom} U8) do return d endfn\n";
+    assert_eq!(run(source).as_deref(), Ok(value("u64", "2u64").as_str()));
 }
 
 /// A default whose type mentions a type parameter is valid when it checks at
