@@ -5,7 +5,8 @@ use vibra_syntax::parse_source_with;
 use vibra_syntax::source::SourceOptions;
 use vibra_types::StdlibInputs;
 
-const MODULES: [&str; 6] = [
+const MODULES: [&str; 7] = [
+    "@std.assert",
     "@std.bool",
     "@std.builtin",
     "@std.core",
@@ -21,7 +22,7 @@ fn library_mode() -> SourceOptions {
 }
 
 #[test]
-fn the_embedded_modules_are_the_six_of_the_bootstrap() {
+fn the_embedded_modules_are_those_of_the_manifest() {
     let paths = StdlibInputs::embedded()
         .modules
         .iter()

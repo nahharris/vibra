@@ -19,6 +19,7 @@ fn every_role_is_claimed_exactly_once() {
     assert_eq!(
         per_module,
         vec![
+            ("@std.assert", vec![]),
             ("@std.bool", vec![Role::Bool]),
             ("@std.builtin", vec![Role::Str, Role::Bytes, Role::Dict]),
             ("@std.core", vec![Role::Equatable, Role::Ordered]),

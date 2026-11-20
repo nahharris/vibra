@@ -1,0 +1,19 @@
+id = "V2-PROJECT-test-invalid-selection"
+rule = "V2-PROJECT-test-invalid-selection"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "05-tooling.md#tests-and-selection: a static error in the selection makes every item invalid and none runs"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+testRun = "test-run.vibon"
+
+[[expect.diagnostics]]
+code = "@type.argumentMismatch"
+level = "@error"
+source = "tests/math.vib"
+span = { start = 50, end = 54 }

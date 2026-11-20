@@ -1,0 +1,7 @@
+use @std.assert enduse
+
+use @app.math enduse
+
+test "closure" do assert.equal(1i32 math.viaClosure()) endtest
+
+test "plain" do assert.equal(3i32 math.add(1i32 2i32)) endtest

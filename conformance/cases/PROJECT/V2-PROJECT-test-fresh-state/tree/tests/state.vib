@@ -1,0 +1,7 @@
+use @std.assert enduse
+
+let base: I32 be I32.add(1i32 2i32) endlet
+
+test "reads once" do assert.equal(3i32 base) endtest
+
+test "reads again" do assert.equal(3i32 base) endtest

@@ -1,0 +1,13 @@
+id = "V2-PROJECT-test-assert-renamed"
+rule = "V2-PROJECT-test-assert-renamed"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "04-programs-and-packages.md#tests: the required import resolves to @std.assert under another local name"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

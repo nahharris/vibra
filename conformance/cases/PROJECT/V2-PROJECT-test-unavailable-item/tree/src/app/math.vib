@@ -1,0 +1,16 @@
+fn add
+  takes {left: I32 right: I32}
+  returns sum: I32
+  visibility @public
+  do
+    return I32.add(left right)
+endfn
+
+fn viaClosure
+  takes {}
+  returns r: I32
+  visibility @public
+  do
+    let f be fn takes {x: I32} returns y: I32 do return x endfn endlet
+    return 1i32
+endfn

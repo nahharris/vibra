@@ -1,0 +1,8 @@
+use @std.assert enduse
+
+use @app.math enduse
+
+test "stops" do
+  assert.equal(4i32 math.add(1i32 2i32))
+  assert.true(false)
+endtest

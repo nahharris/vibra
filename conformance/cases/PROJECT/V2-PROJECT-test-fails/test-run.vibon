@@ -1,0 +1,7 @@
+{
+  format: @testRun.v2
+  result: @command.testFailed
+  tests: [
+    {name: "@tests.math::\"adds\"" result: @test.assertionFailed failure: {kind: @assertion assertion: "assert.equal" expected: "4i32" actual: "3i32" primarySpan: {sourceId: "tests/math.vib" start: 61u64 end: 99u64}} auditTrace: {format: @auditTrace.v2 revision: "sha256:cd5e72855a89de753eee21feffa3de7718a9094cb264153211485937240d1cd7" drivers: [{provider: @hostWorld.v2 version: "0.0.2"}] policies: [:] redaction: @none events: []}}
+  ]
+}

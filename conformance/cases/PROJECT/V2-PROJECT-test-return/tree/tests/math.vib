@@ -1,0 +1,3 @@
+use @std.assert enduse
+
+test "returns" do return void endtest

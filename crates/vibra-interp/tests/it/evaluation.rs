@@ -252,6 +252,8 @@ fn a_module_value_is_evaluated_once() {
     let twice = runs(2);
     assert_eq!(once.value.value(), &Value::U64(1_000));
     assert!(once.instrumentation.reduction_count > 1_000);
+    assert_eq!(once.instrumentation.module_value_initializations, 1);
+    assert_eq!(twice.instrumentation.module_value_initializations, 1);
     // Both bodies are sequences; the second only adds its second read.
     assert_eq!(
         twice.instrumentation.reduction_count,

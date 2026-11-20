@@ -1,0 +1,27 @@
+// The assertions of a test body. Each is bound to an assertion row of the
+// compiler intrinsic registry, whose owner is `assert`; a use outside the
+// `@tests` unit is rejected. A false assertion ends the running test.
+
+fn true
+  takes {condition: Bool}
+  returns done: Void
+  visibility @public
+  external @compiler
+  symbol "assert.true"
+endfn
+
+fn false
+  takes {condition: Bool}
+  returns done: Void
+  visibility @public
+  external @compiler
+  symbol "assert.false"
+endfn
+
+fn equal(T)
+  takes {expected: T actual: T}
+  returns done: Void
+  visibility @public
+  external @compiler
+  symbol "assert.equal"
+endfn

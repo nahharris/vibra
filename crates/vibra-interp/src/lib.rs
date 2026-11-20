@@ -93,6 +93,9 @@ pub struct Instrumentation {
     pub tail_transfer_count: u64,
     /// How many checked nodes were evaluated.
     pub reduction_count: u64,
+    /// How many module-value initializers started: each module value read
+    /// at all is initialized once per execution.
+    pub module_value_initializations: u64,
     /// The largest footprint accounted against the budget: frames,
     /// continuations, the values reachable at the last measurement, and
     /// every value allocated since.

@@ -32,7 +32,7 @@ use vibra_ir::external::compiler::CompilerIntrinsic;
 use vibra_ir::{FnType, Library, NamedTypes, Type, TypeId};
 use vibra_syntax::source::{
     Callable, Declaration, ExprForm, Given, Impl, InterfaceDecl, Module, ModuleLet,
-    Primary, SourceOptions, Suffix, TypeBody, TypeDecl, TypeExpr, TypeForm,
+    Primary, SourceOptions, Suffix, Test, TypeBody, TypeDecl, TypeExpr, TypeForm,
 };
 use vibra_syntax::{CstNode, Document, parse_source, parse_source_with};
 
@@ -49,6 +49,8 @@ pub(crate) struct Source {
     pub(crate) bytes: Vec<u8>,
     /// Whether the module belongs to the embedded standard library.
     pub(crate) embedded: bool,
+    /// Whether the module belongs to the `@tests` unit.
+    pub(crate) tests: bool,
 }
 
 /// Parses every source in the grammar of where it comes from.
@@ -84,7 +86,7 @@ pub(crate) enum Entity {
     Value(usize),
     /// A module, through an import.
     Module(usize),
-    /// A declaration this checker has no table for: a `proc` or a `test`.
+    /// A declaration this checker has no table for: a `proc`.
     Other(usize, ByteSpan),
 }
 
@@ -97,6 +99,8 @@ pub(crate) struct ModuleData<'a> {
     pub(crate) source_id: Arc<str>,
     /// Whether it belongs to the embedded standard library.
     pub(crate) embedded: bool,
+    /// Whether it belongs to the `@tests` unit.
+    pub(crate) tests: bool,
     /// Whether its declarations are checked and lowered.
     pub(crate) in_scope: bool,
     /// The typed view.
@@ -243,6 +247,20 @@ pub(crate) struct ValueData<'a> {
     pub(crate) ty: Option<Type>,
 }
 
+/// One `test`.
+#[derive(Debug)]
+pub(crate) struct TestData<'a> {
+    pub(crate) module: usize,
+    /// The decoded name.
+    pub(crate) name: String,
+    /// The span of the name string, quotes included.
+    pub(crate) name_span: ByteSpan,
+    pub(crate) view: Test<'a>,
+    /// The name the checked IR records: the module and the name, as a
+    /// selector writes them.
+    pub(crate) qualified: String,
+}
+
 /// One abstract member of a supported interface.
 #[derive(Clone, Debug)]
 pub(crate) struct InterfaceMemberData {
@@ -289,6 +307,7 @@ pub(crate) struct Program<'a> {
     pub(crate) types: Vec<TypeData<'a>>,
     pub(crate) functions: Vec<FnData<'a>>,
     pub(crate) values: Vec<ValueData<'a>>,
+    pub(crate) tests: Vec<TestData<'a>>,
     pub(crate) interfaces: Vec<InterfaceData<'a>>,
     pub(crate) impls: Vec<ImplData>,
     /// The declaration each prelude name resolves to.
@@ -349,6 +368,7 @@ impl<'a> Program<'a> {
             types: Vec::new(),
             functions: Vec::new(),
             values: Vec::new(),
+            tests: Vec::new(),
             interfaces: Vec::new(),
             impls: Vec::new(),
             prelude: BTreeMap::new(),
@@ -427,6 +447,7 @@ impl<'a> Program<'a> {
             path: source.path.clone(),
             source_id: Arc::from(source.source_id.as_str()),
             embedded: source.embedded,
+            tests: source.tests,
             in_scope: false,
             view,
             text: document.text(),
@@ -573,7 +594,27 @@ impl<'a> Program<'a> {
                     });
                     self.declare(module_index, name.text(), Entity::Value(index));
                 }
-                Declaration::Test(_) => {}
+                Declaration::Test(view) => {
+                    let name =
+                        view.construct().contents().iter().find(|child| {
+                            child.kind() == vibra_syntax::SyntaxKind::String
+                        });
+                    let (Some(name), Some(node)) = (view.name_value(), name) else {
+                        continue;
+                    };
+                    let qualified = format!(
+                        "{}::{}",
+                        source.path,
+                        vibra_syntax::canonical_string(&name)
+                    );
+                    self.tests.push(TestData {
+                        module: module_index,
+                        name,
+                        name_span: node.span(),
+                        view,
+                        qualified,
+                    });
+                }
             }
         }
     }
@@ -615,13 +656,17 @@ impl<'a> Program<'a> {
         }
     }
 
-    /// Marks the embedded modules, the modules of `units`, and every module
-    /// they import, transitively, as checked.
+    /// Marks the embedded modules, the modules of `units` (each a unit or a
+    /// module path), and every module they import, transitively, as checked.
     fn mark_scope(&mut self, units: &[String]) {
         let mut pending = Vec::new();
         for (index, module) in self.modules.iter().enumerate() {
             let unit = module.path.split('.').next().unwrap_or(&module.path);
-            if module.embedded || units.iter().any(|selected| selected == unit) {
+            if module.embedded
+                || units
+                    .iter()
+                    .any(|selected| *selected == unit || *selected == module.path)
+            {
                 pending.push(index);
             }
         }
@@ -1403,10 +1448,8 @@ impl<'a> Program<'a> {
                         );
                         self.unsupported(module, callable.construct().span(), &what);
                     }
-                    Declaration::Test(test) => {
-                        self.unsupported(module, test.construct().span(), "the test");
-                    }
-                    Declaration::Interface(_)
+                    Declaration::Test(_)
+                    | Declaration::Interface(_)
                     | Declaration::Use(_)
                     | Declaration::Type(_)
                     | Declaration::Fn(_)

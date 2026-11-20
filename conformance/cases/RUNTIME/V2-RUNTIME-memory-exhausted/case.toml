@@ -9,7 +9,7 @@ source = "main.vib"
 
 [expect]
 verdict = "unknown"
-host_event = "@runtime.memoryExhausted"
+hostEvent = "@runtime.memoryExhausted"
 
 [[expect.diagnostics]]
 code = "@runtime.memoryExhausted"

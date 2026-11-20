@@ -1,0 +1,24 @@
+id = "V2-PROJECT-test-function-not-equatable"
+rule = "V2-PROJECT-test-function-not-equatable"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "04-programs-and-packages.md#assertions: an assert.equal operand whose type holds a callable is rejected at the operand"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.functionNotEquatable"
+level = "@error"
+source = "tests/math.vib"
+span = { start = 79, end = 87 }
+
+[[expect.diagnostics]]
+code = "@type.functionNotEquatable"
+level = "@error"
+source = "tests/math.vib"
+span = { start = 88, end = 96 }

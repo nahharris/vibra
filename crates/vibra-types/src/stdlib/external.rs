@@ -6,18 +6,19 @@
 //! An `external @compiler` declaration binds a row of the `@compiler`
 //! registry. Its symbol MUST be a row (`@external.unknownSymbol` at the
 //! symbol), the row's owner MUST be the declaration's owner
-//! (`@external.ownerMismatch` at the symbol, related to the owner), and its
-//! written signature MUST be the row's (`@external.signatureMismatch` at the
-//! declaration, with the expected signature in a note). A declaration shows
-//! the first of these faults only.
+//! (`@external.ownerMismatch` at the symbol, related to the owner), its name
+//! MUST be the member part of the symbol, and its written signature MUST be
+//! the row's (each `@external.signatureMismatch` at the declaration, with the
+//! expected name or signature in a note). A declaration shows the first of
+//! these faults only.
 //!
 //! The owner of a member of a type is the type's wire tag for a builtin type
 //! (`Intrinsic(@i32)` owns `i32`) and its role for a type that plays one
 //! (`role @str` owns `str`); the owner of a module-level function is the last
-//! part of its module path (`@std.assert` owns `assert`). The signature is the
-//! declaration's binders (the owner's type parameters, then its own), its
-//! positional parameter types, and its result type; a row has no labelled
-//! parameter, no bound, and no guard, and it is a `fn`.
+//! part of its module path. The signature is the declaration's binders (the
+//! owner's type parameters, then its own), its positional parameter types,
+//! and its result type; a row has no labelled parameter, no bound, and no
+//! guard, and it is a `fn`.
 //!
 //! An `external @host` declaration is checked here for its symbol, against the
 //! host registry, and for its kind: the host rows are `proc` operations.
@@ -177,6 +178,10 @@ fn check(
                 found.push(diagnostic);
                 return;
             }
+            if let Some(diagnostic) = name_fault(callable, &symbol, declaration_span) {
+                found.push(diagnostic);
+                return;
+            }
             if !signature_fits(callable, row, scope) {
                 found.push(
                     Diagnostic::new(
@@ -197,6 +202,10 @@ fn check(
                 ));
                 return;
             }
+            if let Some(diagnostic) = name_fault(callable, &symbol, declaration_span) {
+                found.push(diagnostic);
+                return;
+            }
             if callable.kind() != CallableKind::Proc {
                 found.push(Diagnostic::new(
                     DiagnosticCode::ExternalSignatureMismatch,
@@ -209,6 +218,29 @@ fn check(
         }
         _ => {}
     }
+}
+
+/// `@external.signatureMismatch` at the declaration when its name is not the
+/// member part of the symbol it binds: `fn addChecked` binds a symbol that
+/// ends in `.addChecked`.
+fn name_fault(
+    callable: &Callable<'_>,
+    symbol: &str,
+    declaration_span: ByteSpan,
+) -> Option<Diagnostic> {
+    let member = symbol.split_once('.').map_or(symbol, |(_, member)| member);
+    let name = callable.name()?;
+    (name.text() != member).then(|| {
+        Diagnostic::new(
+            DiagnosticCode::ExternalSignatureMismatch,
+            declaration_span,
+            format!(
+                "the declaration `{}` binds `{symbol}`, whose member is `{member}`",
+                name.text()
+            ),
+        )
+        .with_note(format!("expected the name `{member}`"))
+    })
 }
 
 /// Whether the written signature of `callable` is the signature of `row`.
