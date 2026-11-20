@@ -253,6 +253,38 @@ fn a_constructor_is_not_a_function_value() {
     assert!(run(source).is_ok(), "{:?}", run(source));
 }
 
+/// With nothing expected, a declared type or a case named without being
+/// applied is `@type.mismatch` at the name, as it is where a function is
+/// expected (`docs/spec/02-type-system.md`, "Functions as values").
+#[test]
+fn a_constructor_with_nothing_expected_is_not_a_value() {
+    let source = "type Celsius of F64 endtype\n\
+                  fn main returns r: F64 do let f be Celsius endlet return 1.0f64 endfn\n";
+    assert_eq!(
+        faults(source),
+        [(DiagnosticCode::TypeMismatch, at(source, "Celsius", 1))]
+    );
+    let source = "type Shape case empty case dot {x: I32} endtype\n\
+                  fn main returns r: I32 do let s be Shape.dot endlet return 1i32 endfn\n";
+    assert_eq!(
+        faults(source),
+        [(DiagnosticCode::TypeMismatch, at(source, "Shape.dot", 0))]
+    );
+    // A non-callable expected type is no different.
+    let source = "type Celsius of F64 endtype\n\
+                  fn main returns r: F64 do let f: F64 be Celsius endlet return f endfn\n";
+    assert_eq!(
+        faults(source),
+        [(DiagnosticCode::TypeMismatch, at(source, "Celsius", 1))]
+    );
+    // Applied, the same names are constructions.
+    let source = "type Shape case empty case dot {x: I32} endtype\n\
+                  fn main returns r: I32 do let s be Shape.dot(x: 2i32) endlet \
+                  return match s case Shape.dot(x: x) x case Shape.empty() 0i32 endmatch \
+                  endfn\n";
+    assert_eq!(run(source).as_deref(), Ok(value("i32", "2i32").as_str()));
+}
+
 #[test]
 fn a_member_is_a_function_value() {
     let source = "type U of {n: List(I32)} \

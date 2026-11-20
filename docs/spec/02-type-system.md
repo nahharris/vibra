@@ -423,7 +423,11 @@ selects it.
 ## Functions as values
 
 A `fn` or `proc` path in expression position is a first-class value of its
-callable type. Constructors, field reads, and lookups are not.
+callable type. Constructors, field reads, and lookups are not. A declared
+type or case named in value position without being applied is
+`@type.mismatch` at the name, whether a function value, another type, or no
+type is expected there; as an argument it does not fit its slot. An
+anonymous `fn` wraps a constructor where a function value is needed.
 
 A contract member named as a value is instantiated from its written expected
 callable type, which fixes the receiver exactly as a call's operands would;

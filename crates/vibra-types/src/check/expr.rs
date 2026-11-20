@@ -1590,19 +1590,16 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                 let expected = state.ctx.expected().cloned();
                 self.generic_value(&generic, whole, expected.as_ref())
             }
-            Head::Case(..) | Head::Type(_) if is_callable(state.ctx.expected()) => {
-                self.not_a_function(whole, state.ctx.expected());
-                Out::error()
-            }
-            Head::Case(..) => {
-                self.unavailable(whole, "a constructor used as a value");
+            Head::Case(..) | Head::Type(_) => {
+                let expected = state.ctx.expected().cloned();
+                self.not_a_function(whole, expected.as_ref());
                 Out::error()
             }
             Head::Contract(interface, member) => {
                 let expected = state.ctx.expected().cloned();
                 self.contract_value(interface, &member, whole, expected.as_ref())
             }
-            Head::Type(_) | Head::Static => {
+            Head::Static => {
                 self.unavailable(whole, "a type used as a value");
                 Out::error()
             }
@@ -1611,23 +1608,25 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         Step::Done(out)
     }
 
-    /// Reports a constructor written at `span` where a function value of
-    /// `expected` is: a constructor is not a function value.
+    /// Reports a declared type or case named at `span` in value position
+    /// without being applied: a constructor is not a value, whatever is
+    /// `expected`.
     fn not_a_function(&mut self, span: ByteSpan, expected: Option<&Type>) {
         let code = if self.argument == Some(span) {
             DiagnosticCode::TypeArgumentMismatch
         } else {
             DiagnosticCode::TypeMismatch
         };
-        let expected = expected.map(ToString::to_string).unwrap_or_default();
-        self.report(
-            code,
-            span,
-            format!(
+        let message = match expected {
+            Some(expected) => format!(
                 "expected `{expected}`, found a constructor, which is not a function \
                  value; an anonymous `fn` wraps one"
             ),
-        );
+            None => "found a constructor, which is not a function value; apply it, \
+                     or wrap it in an anonymous `fn`"
+                .to_owned(),
+        };
+        self.report(code, span, message);
     }
 
     /// Starts the anonymous callable `view` written at `span`: reads its
@@ -4415,11 +4414,6 @@ fn place(nodes: &mut Vec<Option<Node>>, at: usize, node: Option<Node>) {
         Some(slot) => *slot = node,
         None => nodes.push(node),
     }
-}
-
-/// Whether `expected` is a callable type.
-const fn is_callable(expected: Option<&Type>) -> bool {
-    matches!(expected, Some(Type::Fn(_)))
 }
 
 /// Matches `pattern`, in which a [`Type::Binder`] below `assignment.len()`
