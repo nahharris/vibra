@@ -233,7 +233,7 @@ command-line context.
 | a repeated type parameter; an associated type with the name of a visible type parameter | `@name.genericRedeclaration`, the later parameter, the associated type, or the `impl` head |
 | a reserved word in a label position | `@name.reservedLabel`, the word |
 | a test module without an import that resolves to `@std.assert` | `@module.missingRequiredImport`, at its first test's name |
-| a test outside `@tests`; outside `@tests`, a use of a declaration bound to an [assertion row](06-runtime.md#assertion-operations) | `@module.testOutsideTests`; `@module.assertionOutsideTests`, the use |
+| a test outside `@tests`; outside `@tests`, a use of a declaration bound to an [assertion row](06-runtime.md#assertion-operations) | `@module.testOutsideTests`, the whole `test` declaration; `@module.assertionOutsideTests`, the use |
 
 Resolution reads only the captured source graph.
 
@@ -274,11 +274,11 @@ Resolution reads only the captured source graph.
 | a field read of a value without that field | `@type.unknownRecordField`, the field name |
 | a literal that does not fit its type | `@type.numericOutOfRange`, the literal |
 | a module value whose initializer reaches itself | `@type.initializerCycle`, the `let`, related along the cycle |
-| a declared type whose expansion repeats | `@type.infiniteSize`, the declaration whose expansion first repeats |
-| a type nested more than 64 levels | `@type.depthExceeded`, the written type, or the expression whose type it is |
+| a declared type whose expansion repeats | `@type.infiniteSize`, the whole declaration whose expansion first repeats, `type` to `endtype` |
+| a type nested more than 64 levels, a declared callable's own type included | `@type.depthExceeded`, the written type, the expression whose type it is, or a callable's deepest written parameter or result type |
 | a generic callable that reaches itself at a type built around one of its own type parameters | `@type.expandingInstantiation`, the call or callable reference with the expanding type argument, related along the cycle |
 | an inadmissible dict key type | `@type.invalidDictKey`, the key type |
-| a callable as a dict key, or an `assert.equal` operand whose type contains a callable, plan, or grant | `@type.functionNotEquatable`, the type or the operand |
+| a callable as a dict key, or an `assert.equal` operand whose type contains a callable, plan, or grant | `@type.functionNotEquatable`, the type, or each such operand |
 | `try` on a wrong carrier, in a callable with another carrier, or directly in a test | `@type.invalidTry`, the `try` |
 | a fallible value left unused as a statement | `@type.unhandledFallible`, the statement |
 | an `impl` inside an interface that targets a type of the same module | `@type.redundantImplementation`, the `impl` head |
@@ -288,7 +288,7 @@ Resolution reads only the captured source graph.
 | two implementations still candidates at a call | `@type.ambiguousImplementation`, the application |
 | a contract member with no receiver slot whose written result type does not contain `Self` | `@type.undispatchableContractMember`, the member's name |
 | a contract member whose written result type places `Self` outside the [`Self` map](02-type-system.md#interfaces), found when the interface declaration is checked, whether or not the interface is used as a value | `@type.unsupportedSelfPosition`, the result type |
-| a destination-dispatched call with no written expected type | `@type.ambiguousDestination`, the application |
+| a destination-dispatched call with no expected type | `@type.ambiguousDestination`, the application |
 | `From` and `TryFrom` sources of one receiver that unify | `@type.redundantConversion`, the later `impl` head, related to the earlier |
 | a receiver or destination with no implementation for the selected key; a call on a type parameter of a member its bound does not give; a label-bound parameter that fails its own bound | `@type.unsatisfiedBound`, the operand or the expected type, related to the interface or bound |
 | a declared type or case named in value position without being applied, whatever is expected there; an implementation member whose signature differs from the contract; a widening whose label differs from the implementation's choice; a label-bound parameter fixed to two types; a deferred associated equality or a complete result that disagrees after selection; a destination-dispatched call whose expected type has no position for `Self` or gives `Self` two types, at the application | `@type.mismatch`, the differing type or expression |
@@ -305,7 +305,7 @@ Every row is an error with no automatic fix.
 | a `let` or parameter pattern that can fail, with no `else` | `@pattern.refutableBinding`, the pattern |
 | a `let … else` whose pattern cannot fail | `@pattern.irrefutableLetElse`, the pattern |
 | an `else` of a `let` that can complete normally | `@type.mismatch`, the `else` body |
-| a callable body that can run off its end | `@type.missingReturn`, the body |
+| a callable body that can run off its end | `@type.missingReturn`, the body; an empty body is the zero-width span right after `do` |
 | a `return` operand of the wrong type | `@type.mismatch`, the operand |
 | a `return` outside a callable, in a module value, or directly in a test | `@type.invalidReturn`, the `return` |
 | a statement after one that cannot complete | `@type.unreachableCode`, the first such statement, related to the earlier one |
@@ -315,7 +315,7 @@ Every row is an error with no automatic fix.
 | a pattern name that resolves to a module value or function that is not constant | `@name.redeclaration`, the name, related to that declaration |
 | a labelled default that is not constant | `@type.notConstant`, the expression |
 | a `match` that does not cover its type | `@pattern.nonExhaustive`, the `match`, with one uncovered shape |
-| coverage the checker cannot decide for this type | `@pattern.unsupportedCoverage`, the `match` |
+| coverage the checker cannot decide for this type | `@pattern.unsupportedCoverage`, the `match`, or the `let` or parameter pattern |
 | an arm that is repeated, already covered, or uninhabited | `@pattern.unreachableArm`, the arm's pattern |
 | a type argument the call does not determine, including one still undetermined when no bound is resolvable | `@type.ambiguousInference`, the application |
 | a type argument that does not meet its bound, written, inferred, or an `impl` target's argument; an argument of an interface at a call that does not meet its parameter's bound | `@type.unsatisfiedBound`, the actual type as written, or the operand or expected type that fixes it, related to the bound |
@@ -378,7 +378,8 @@ them only, the checker reads each of these default members of `Ordered` as
 its defining relation, so the facts apply to a predicate written with one:
 `less(x y)` is x < y, `lessOrEqual(x y)` is x ≤ y, `greater(x y)` is x > y,
 `greaterOrEqual(x y)` is x ≥ y, and `inRange(x low high)` is low ≤ x and
-x ≤ high. `min` and `max` are not relations and are not covered.
+x ≤ high. Each reading of ≤ or ≥ also gives its converse: x ≤ y is y ≥ x.
+`min` and `max` are not relations and are not covered.
 
 | ID | From | The checker may conclude |
 | --- | --- | --- |
@@ -493,13 +494,24 @@ this specification. They are never regenerated from an engine's output.
 - Paths are relative to the case, confined, and checked by extension. The
   loader captures the tree first; a handler reads only that capture.
 - `interpret`'s entry is a fixture for observing values. It is not an
-  exception to the entry contract of a binary.
+  exception to the entry contract of a binary. A source that checks and
+  declares no function without parameters is `@tool.unavailable` at offset
+  0 of the source.
+- The observed verdict of a check is `accepted` with no error;
+  `unsupported` when every error is `@tool.unavailable`; otherwise
+  `unknown` when an error is `@contract.unproved` or `@tool.limitExceeded`,
+  as for the [command status](05-tooling.md#versioned-envelope-and-results);
+  and `refuted` otherwise. An `interpret` run that ends in a host event is
+  `unknown`, and the case observes the event and its diagnostic, which has
+  no location.
 - `workspaceRun` and `workspaceTest` may name one `@hostWorld.v2`
   document, inside the case directory and outside the source tree. Without
   it the default deterministic world applies. Every test and every executor
   gets a fresh copy. A malformed world fails only its case, once, and never
   becomes an empty permissive world. World data describes inputs; the fake
   broker issues the grants.
+- A `formatted` expectation, the text a `reader` or `format` case formats,
+  is compared byte for byte; it is source text, not a snapshot.
 - An expected verdict is `accepted`, `refuted`, `unknown`, or `unsupported`.
   A case passes when its observed verdict equals the expected one and every
   other expectation is met. A case for a static rule includes a passing
@@ -664,6 +676,14 @@ has `span`, `path` (atom), `name` (`Str`, the local name), and `to`
 (optional `Str`, the identity of the module or declaration, absent when
 resolution failed).
 
+The records are those of the local package: the embedded standard library
+contributes none, though a `to` may name one of its identities. A module
+has no declaration record; its identity, which an import's `to` names, is
+the hash of its [anchor](02-type-system.md#declared-types).
+An `impl` block has no anchor, so neither it nor its members have a
+declaration record. A declaration's span is its whole form, an import's the
+whole `use`, and a reference's the bytes of its path.
+
 ```vibon
 {
   format: @resolved.v2
@@ -716,8 +736,17 @@ sorted: the identity of the guarded declaration and of every declaration
 whose checked body or value the discharge read, without `declaration`
 itself); and `counterexample` (optional `Str`, the canonical VIBON text of
 the refuting values). `declaration` then `span` orders the obligations
-totally. A module value is never generic, so its `typeInfo` is a closed
-type encoding.
+totally.
+
+A refuted obligation is refuted by evaluation, so its `rules` are `["GUARD-1"]`.
+Its counterexample is the [value encoding](06-runtime.md#values) of a record
+keyed by the names the predicate reads, the guarded declaration's parameters or,
+for an `ensures`, its result name, such as `{kind: @record fields: {x: 0i32}}`;
+an anonymous `where` predicate gives the refuting value itself. For the
+`ensures` of a contract member, `declaration` is the implementation member and
+`span` is the contract's predicate, in the interface's module; its
+`@contract.unproved` is at the implementation's `return`. A module value is
+never generic, so its `typeInfo` is a closed type encoding.
 
 The document is produced whenever every type is known: when the check has
 no error, or when every error is a contract diagnostic (`@contract.*`),
@@ -766,7 +795,8 @@ A test record has `name` (`Str`, the selector); `result` (a `@test.*` atom);
 `failure` (optional record `kind: @assertion` or `@observation`,
 `assertion: Str`, `expected: Str` optional, `actual: Str` optional,
 `primarySpan`: span record, `observationError` optional record
-`code: Atom`, `typeInfo: T` optional); `trap` (optional record
+`code: Atom`, `typeInfo: T` optional, the static type of the operand that
+could not be shown); `trap` (optional record
 `trapCode: Atom`, `origin: U64` optional); and `auditTrace` (the test's
 [`@auditTrace.v2`](06-runtime.md#audit-trace) document).
 

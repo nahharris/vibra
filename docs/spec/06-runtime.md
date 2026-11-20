@@ -207,8 +207,8 @@ actual type arguments.
 - A default member runs under the substitution of the implementation
   selected for its own call, so an associated name in its body denotes that
   implementation's choice.
-- A destination-dispatched conversion uses the instantiated, written
-  destination type.
+- A destination-dispatched conversion uses the instantiated destination
+  type.
 - A type parameter bound to a choice by label, as in
   `given {T: Ordered I: Iter(Item: T)}`, is instantiated at the choice of
   the selected implementation, and its own bound's evidence comes from that
@@ -399,7 +399,7 @@ The registry rows `<t>.equal`, `<t>.compare`, `<t>.toStr`, `<t>.parse`, and
 `<s>.to<T>`, such as `i16.equal` and `i16.toI32`, are the bodies these
 implementations bind. None of them is a member a source path can name.
 
-The destination of a conversion is its written expected type. The default
+The destination of a conversion is its expected type. The default
 members of `Ordered` call `compare` once. `min` and `max` return the left
 operand on a tie. `inRange` compares the lower bound first, and the upper
 bound only if needed. The order laws of a user's implementation are that
