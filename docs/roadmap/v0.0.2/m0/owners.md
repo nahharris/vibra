@@ -2,13 +2,27 @@
 
 For every supported form of the specification this table names the step
 that implements it, the conformance cases planned for it, its diagnostics,
-and its schema. A form without all four is not supported. Steps are those of
-the [M1 plan](../m1/README.md); a form owned by a later milestone carries
+and its schema. A form without all four is not supported. A bare step number
+is a step of the [M1 plan](../m1/README.md); a number after `M2` is a step
+of the [M2 plan](../m2/README.md). A form owned by a later milestone carries
 that milestone's name and no detail.
+
+## Findings
+
+Forms that the release names and no M1 or M2 step can own.
+
+| Form | Finding |
+| --- | --- |
+| Command `eval` | The M2 scope does not contain it. Its owner is M3, "Bounded evaluation"; it stays `@tool.unavailable` through M2. |
+| Commands `project init`, `inspect`, `add`, `remove`, `sync` | No milestone of the release names them. They stay `@tool.unavailable`; an owner is needed before the release gate is read as complete. |
+| `@project.staleLock`, `@git` dependencies, the lock | Not in this release. M2 step 27 reports a `@git` dependency as `@tool.unavailable` (`V2-PROJECT-git-dependency-unavailable`). |
+| The `effectWitnesses` query expansion | The witness of `@effect.outsideCeiling` is carried by the diagnostic from M2 step 09. The expansion belongs to `query`, which is M3. |
+| The observation of a `workspaceRun` case | The diagnostics chapter names the operation and no document for its result. The cases of M2 step 29 are host tests until the document is named ([question 17](../m2/spec-questions.md#q17-the-observation-of-a-workspacerun-case)). |
+| Reserved HTTP items of required coverage 11 | No network operation exists in this release; no step owns them. |
 
 How to read a row:
 
-- **Step** lists the M1 step that reads the form first and, after a slash,
+- **Step** lists the step that reads the form first and, after a slash,
   the steps that give it meaning.
 - **Cases** are identities under `conformance/cases/<PREFIX>/<id>/`, each
   defined in the step guide named in the row. A trailing `*` stands for
@@ -72,19 +86,19 @@ Source chapter, "Grammar".
 | `impl` | 05 / 19 | `V2-SRC-DECL-impl-in-type`, `V2-SRC-DECL-impl-top-level`, `V2-SRC-DECL-impl-with-section`, `V2-SRC-DECL-impl-member-guard`, `V2-TYPE-INTERFACE-impl-*`, `V2-TYPE-INTERFACE-missing-member`, `V2-TYPE-INTERFACE-unknown-member`, `V2-TYPE-INTERFACE-member-twice`, `V2-TYPE-INTERFACE-default-override`, `V2-TYPE-INTERFACE-overlap` | `@syntax.invalidForm`, `@syntax.invalidSection`, `@type.redundantImplementation`, `@type.missingAbstractMember`, `@type.defaultOverride`, `@type.overlappingImplementation`, `@type.typeArgumentMismatch`, `@name.wrongEntityKind`, `@name.unknownSymbol`, `@name.memberCollision` | tree, `@types.v2` |
 | `assoc-choice` | 05 / 19 | `V2-SRC-DECL-impl-in-type`, `V2-TYPE-INTERFACE-assoc-once`, `V2-TYPE-INTERFACE-assoc-missing`, `V2-TYPE-INTERFACE-assoc-twice`, `V2-TYPE-INTERFACE-assoc-self-reference` | `@name.redeclaration`, `@name.unknownSymbol`, `@type.missingAbstractMember` | tree, `@types.v2` |
 | `fn-decl` | 07 / 15, 18 | `V2-SRC-DECL-fn-pattern-param`, `V2-SRC-DECL-fn-greet`, `V2-SRC-DECL-fn-one-line`, `V2-SRC-DECL-fn-section-order`, `V2-SRC-DECL-fn-no-body`, `V2-SRC-DECL-fn-local-declaration`, `V2-SRC-DECL-member-and-impl`, `V2-TYPE-CONTROL-missing-return` | `@syntax.invalidForm`, `@syntax.duplicateSection`, `@syntax.invalidSection`, `@type.missingReturn` | tree, `@types.v2` |
-| `proc-decl` | 07 (syntax) / M2 | `V2-SRC-READER-golden-proc-decl`, `V2-SRC-DECL-proc-basic`, `V2-SRC-DECL-proc-native`, `V2-TOOL-unavailable-proc` | `@tool.unavailable` in M1 | tree |
+| `proc-decl` | 07 (syntax) / M2 05, 07 | `V2-SRC-READER-golden-proc-decl`, `V2-SRC-DECL-proc-basic`, `V2-SRC-DECL-proc-native`, `V2-EFFECT-proc-*`, `V2-RUNTIME-plan-*` | `@type.argumentMismatch`, `@type.missingReturn`, `@effect.invalidAwait` | tree, `@types.v2`, `@testRun.v2` |
 | `signature` | 07 / 11, 15 | `V2-SRC-DECL-fn-pattern-param`, `V2-SRC-DECL-fn-missing-returns`, `V2-SRC-DECL-fn-empty-takes`, `V2-TYPE-NAMES-result-name-in-body`, `V2-TYPE-NAMES-result-name-in-ensures`, `V2-TYPE-CONTROL-return-type` | `@syntax.invalidForm`, `@name.unknownSymbol`, `@type.mismatch` | tree, `@types.v2` |
 | `params` | 07 / 17 | `V2-SRC-DECL-fn-pattern-param`, `V2-TYPE-CONTROL-param-refutable`, `V2-TYPE-CONTROL-param-tuple`, `V2-TYPE-NAMES-shadow-parameter` | `@pattern.refutableBinding`, `@name.redeclaration` | tree, `@types.v2` |
 | `labelled` | 07 / 18 | `V2-SRC-READER-golden-labelled`, `V2-SRC-DECL-fn-labelled`, `V2-SRC-DECL-fn-reserved-label`, `V2-SRC-CALLS-labelled-*`, `V2-SRC-CALLS-default-not-constant`, `V2-SRC-CALLS-default-constant-construction` | `@name.reservedLabel`, `@type.notConstant`, `@type.argumentMismatch` | tree, `@types.v2` |
 | `type-params` | 05 / 10, 16 | `V2-SRC-DECL-type-generic-given`, `V2-SRC-DECL-fn-generic`, `V2-TYPE-NAMES-generic-redeclaration`, `V2-TYPE-GENERIC-pair`, `V2-TYPE-GENERIC-argument-count`, `V2-TYPE-GENERIC-uninferable` | `@name.genericRedeclaration`, `@type.typeArgumentMismatch`, `@type.ambiguousInference` | tree, `@types.v2` |
 | `module-let` | 06 / 15 | `V2-SRC-EXPR-literals`, `V2-SRC-DECL-module-let*`, `V2-TYPE-CONTROL-module-value`, `V2-TYPE-CONTROL-module-value-forward`, `V2-TYPE-CONTROL-initializer-cycle`, `V2-TYPE-CONTROL-initializer-return`, `V2-PROJECT-test-fresh-state` | `@syntax.invalidForm`, `@type.initializerCycle`, `@type.invalidReturn` | tree, `@types.v2` |
-| `test` | 07 / 23 | `V2-SRC-DECL-test-basic`, `V2-SRC-DECL-test-world`, `V2-SRC-DECL-test-two-params`, `V2-PROJECT-test-*` | `@module.testOutsideTests`, `@module.missingRequiredImport`, `@name.redeclaration`, `@type.invalidReturn`, `@type.invalidTry`; `@tool.unavailable` for `takes` and `performs` in M1 | tree, `@testRun.v2` |
+| `test` | 07 / 23; M2 07, 21 | `V2-SRC-DECL-test-basic`, `V2-SRC-DECL-test-world`, `V2-SRC-DECL-test-two-params`, `V2-PROJECT-test-*`; `takes` and `performs`: `V2-EFFECT-await-in-test`, `V2-EFFECT-row-on-test`, `V2-PROJECT-test-takes-*`, `V2-GRANT-test-without-world` | `@module.testOutsideTests`, `@module.missingRequiredImport`, `@name.redeclaration`, `@type.invalidReturn`, `@type.invalidTry`, `@effect.outsideCeiling`, `@type.argumentMismatch` | tree, `@testRun.v2` |
 | `given` | 05 / 10, 19 | `V2-SRC-DECL-type-generic-given`, `V2-TYPE-GENERIC-given-unknown`, `V2-TYPE-NAMES-wrong-kind-bound`, `V2-TYPE-GENERIC-bound-satisfied`, `V2-TYPE-GENERIC-bound-unsatisfied` | `@name.unknownSymbol`, `@name.wrongEntityKind`, `@type.unsatisfiedBound` | tree, `@types.v2` |
 | `requires` | 07 / 21, 22 | `V2-SRC-READER-golden-requires`, `V2-SRC-DECL-fn-duplicate-requires`, `V2-CONTRACT-requires-*`, `V2-CONTRACT-bare-requires-unproved`, `V2-CONTRACT-rule*` | `@syntax.duplicateSection`, `@contract.invalidPredicate`, `@contract.invalidConsequence`, `@contract.unsupportedPredicate`, `@contract.unproved`, `@contract.refuted` | tree, `@types.v2` |
 | `ensures` | 07 / 21, 22 | `V2-SRC-READER-golden-ensures`, `V2-CONTRACT-ensures-*`, `V2-CONTRACT-rule7-certified-result`, `V2-CONTRACT-member-ensures-established` | `@contract.invalidPredicate`, `@contract.invalidConsequence`, `@contract.unproved`, `@contract.refuted` | tree, `@types.v2` |
 | `where` | 05 / 21, 22 | `V2-SRC-DECL-type-where`, `V2-CONTRACT-where-*`, `V2-CONTRACT-constant-construction-*`, `V2-CONTRACT-nonconstant-construction`, `V2-TYPE-CONTROL-match-where-no-coverage` | `@type.invalidInvariant`, `@contract.invalidPredicate`, `@contract.invalidConsequence`, `@contract.unproved`, `@contract.refuted`, `@pattern.refutableBinding` | tree, `@types.v2` |
-| `performs` | 07 (syntax) / M2 | `V2-SRC-DECL-test-world`, `V2-SRC-DECL-fn-performs` | `@syntax.invalidSection` on a `fn`; rows are M2 | tree |
-| `row` | 07 (syntax) / M2 | `V2-SRC-DECL-proc-basic`, `V2-SRC-DECL-type-callable-types` | M2 | tree |
+| `performs` | 07 (syntax) / M2 08, 09 | `V2-SRC-DECL-test-world`, `V2-SRC-DECL-fn-performs`, `V2-EFFECT-row-*`, `V2-EFFECT-ceiling-*`, `V2-EFFECT-outside-ceiling-*`, `V2-EFFECT-anon-fn-performs` | `@syntax.invalidSection` on a `fn`; `@effect.invalidReference`, `@effect.duplicateRoot`, `@effect.outsideCeiling`, `@contract.unusedEffect` | tree, `@types.v2` |
+| `row` | 07 (syntax) / M2 08, 10 | `V2-SRC-DECL-proc-basic`, `V2-SRC-DECL-type-callable-types`, `V2-EFFECT-row-two-roots`, `V2-EFFECT-row-duplicate`, `V2-EFFECT-row-duplicate-alias`, `V2-EFFECT-proc-type-row-duplicate`, `V2-EFFECT-proc-type-row-invalid` | `@effect.invalidReference`, `@effect.duplicateRoot` | tree, `@types.v2` |
 | `visibility` | 05 / 10 | `V2-SRC-DECL-type-record`, `V2-SRC-DECL-type-bad-tag`, `V2-SRC-DECL-module-let-visibility`, `V2-PROJECT-import-private` | `@syntax.invalidForm`, `@name.privateAccess` | tree, `@resolved.v2` |
 | `representation` | 05 / 16 | `V2-SRC-DECL-type-representation`, `V2-SRC-DECL-type-bad-tag`, `V2-TYPE-NOMINAL-representation-private`, `V2-TYPE-NOMINAL-representation-default`, `V2-TYPE-NOMINAL-representation-public`, `V2-TYPE-INTERFACE-str-representation-private` | `@name.inaccessibleRepresentation` | tree, `@types.v2` |
 | `role` | 05 / 14 | `V2-SRC-DECL-type-role-outside-stdlib`; host tests of step 14 (each role claimed once) | `@syntax.invalidSection` | tree, `@stdlibManifest.v2` |
@@ -96,7 +110,7 @@ Source chapter, "Grammar".
 | `statement` | 06 / 15, 17 | `V2-SRC-EXPR-do-block`, `V2-TYPE-CONTROL-if-statement-void`, `V2-TYPE-CONTROL-unhandled-fallible`, `V2-TYPE-CONTROL-unreachable-after-return` | `@type.unhandledFallible`, `@type.unreachableCode` | tree |
 | `let` | 06 / 11, 17 | `V2-SRC-EXPR-do-block`, `V2-SRC-EXPR-let-else`, `V2-SRC-EXPR-let-misplaced`, `V2-SRC-EXPR-let-missing-be`, `V2-TYPE-NAMES-let-*`, `V2-TYPE-CONTROL-let-*` | `@syntax.misplacedBinding`, `@syntax.invalidForm`, `@pattern.refutableBinding`, `@pattern.irrefutableLetElse`, `@type.mismatch` | tree, `@resolved.v2`, `@types.v2` |
 | `expr` | 06 / 15 | `V2-SRC-EXPR-return-try-await`, `V2-TYPE-CONTROL-return-type`, `V2-TYPE-CONTROL-never-operand`, `V2-PROJECT-test-return` | `@type.invalidReturn`, `@type.mismatch`, `@type.unreachableCode` | tree, `@types.v2` |
-| `unary` | 06 / 17 | `V2-SRC-EXPR-return-try-await`, `V2-TYPE-CONTROL-try-*`, `V2-EFFECT-await-in-fn` | `@type.invalidTry`, `@effect.invalidAwait`; `await` in a `proc` is M2 | tree, `@types.v2` |
+| `unary` | 06 / 17 | `V2-SRC-EXPR-return-try-await`, `V2-TYPE-CONTROL-try-*`, `V2-EFFECT-await-in-fn`; `await` in a `proc`, M2 05: `V2-EFFECT-proc-await-direct`, `V2-EFFECT-await-*` | `@type.invalidTry`, `@effect.invalidAwait`, `@type.mismatch` | tree, `@types.v2` |
 | `postfix` | 06 / 15, 16 | `V2-SRC-EXPR-application`, `V2-SRC-EXPR-nullary-and-value`, `V2-SRC-EXPR-field-path`, `V2-SRC-CALLS-function-value`, `V2-SRC-CALLS-callee-expression`, `V2-SRC-CALLS-arity`, `V2-SRC-CALLS-order`, `V2-SRC-CALLS-lookup-*`, `V2-TYPE-NOMINAL-not-applicable`, `V2-TYPE-NOMINAL-field-read` | `@type.notApplicable`, `@type.argumentMismatch`, `@type.unknownRecordField` | tree, `@types.v2`, `@value.v2` |
 | `argument` | 06 / 15, 18 | `V2-SRC-EXPR-application`, `V2-SRC-EXPR-labelled-arguments`, `V2-SRC-CALLS-label-on-positional`, `V2-SRC-CALLS-labelled-any-position`, `V2-SRC-CALLS-labelled-duplicate`, `V2-SRC-CALLS-labelled-unknown` | `@type.argumentMismatch` | tree |
 | `primary` | 06 / 16 | `V2-SRC-EXPR-literals`, `V2-SRC-EXPR-products`, `V2-SRC-EXPR-collections`, `V2-SRC-EXPR-mixed-record`, `V2-SRC-EXPR-paren-group`, `V2-TYPE-NOMINAL-list`, `V2-TYPE-NOMINAL-list-mixed`, `V2-TYPE-NOMINAL-empty-tuple`, `V2-TYPE-NOMINAL-dict-order-and-duplicate`, `V2-TYPE-INFER-empty-list-ambiguous`, `V2-TYPE-INFER-empty-dict-expected` | `@syntax.invalidForm`, `@type.mismatch`, `@type.ambiguousInference`, `@type.invalidDictKey` | tree, `@value.v2` |
@@ -106,10 +120,10 @@ Source chapter, "Grammar".
 | `arm` | 06 / 17 | `V2-SRC-EXPR-match`, `V2-TYPE-CONTROL-match-unreachable`, `V2-TYPE-CONTROL-match-unreachable-nested`, `V2-TYPE-NAMES-sibling-scopes` | `@pattern.unreachableArm` | tree |
 | `do-block` | 06 / 15 | `V2-SRC-EXPR-do-block`, `V2-TYPE-CONTROL-do-value`, `V2-TYPE-NAMES-shadow-nested` | `@type.mismatch` | tree |
 | `anon-fn` | 07 / 11, 18 | `V2-SRC-READER-golden-anon-fn`, `V2-SRC-DECL-anon-fn`, `V2-SRC-DECL-anon-fn-named`, `V2-TYPE-NAMES-anon-fn-scope`, `V2-SRC-EXPR-anon-fn-*`, `V2-RUNTIME-closure-captures-value`, `V2-PROJECT-test-return-in-anon-fn` | `@syntax.invalidForm`, `@name.unknownSymbol`, `@type.ambiguousInference` | tree, `@types.v2` |
-| `anon-proc` | 07 (syntax) / M2 | `V2-SRC-READER-golden-anon-proc`, `V2-SRC-DECL-anon-proc` | `@tool.unavailable` in M1 | tree |
+| `anon-proc` | 07 (syntax) / M2 10 | `V2-SRC-READER-golden-anon-proc`, `V2-SRC-DECL-anon-proc`, `V2-EFFECT-anon-proc-*`, `V2-RUNTIME-anon-proc-captures` | `@effect.invalidReference`, `@effect.outsideCeiling`, `@effect.invalidAwait` | tree, `@types.v2` |
 | `pattern` | 06 / 11, 17 | `V2-SRC-EXPR-patterns`, `V2-TYPE-NAMES-pattern-twice`, `V2-TYPE-NAMES-constant-pattern`, `V2-TYPE-NAMES-bool-constant-pattern`, `V2-TYPE-NAMES-function-as-pattern`, `V2-TYPE-NAMES-nonconstant-as-pattern`, `V2-TYPE-CONTROL-pattern-type-mismatch`, `V2-TYPE-CONTROL-pattern-shape-*`, `V2-TYPE-CONTROL-match-nested` | `@syntax.invalidForm`, `@name.redeclaration`, `@name.wrongEntityKind`, `@type.mismatch`, `@type.argumentMismatch`, `@pattern.nonExhaustive` | tree, `@resolved.v2` |
 | `pattern-literal` | 06 / 17 | `V2-SRC-EXPR-patterns`, `V2-SRC-EXPR-pattern-float`, `V2-SRC-EXPR-pattern-void`, `V2-TYPE-CONTROL-match-literal-open`, `V2-TYPE-CONTROL-match-str-literal`, `V2-TYPE-CONTROL-match-atom-singleton` | `@syntax.invalidForm`, `@type.mismatch`, `@pattern.nonExhaustive` | tree, `@types.v2` |
-| `type-expr` | 05 / 10, 16 | `V2-SRC-DECL-type-callable-types`, `V2-SRC-DECL-type-paren-type`, `V2-SRC-DECL-type-assoc-label`, `V2-TYPE-NAMES-unknown-type`, `V2-TYPE-GENERIC-argument-count`, `V2-TYPE-INTERFACE-assoc-label`, `V2-TYPE-INTERFACE-assoc-label-unknown`; the `Proc` and `Intent` alternatives are M2 | `@syntax.invalidForm`, `@name.unknownSymbol`, `@name.wrongEntityKind`, `@type.typeArgumentMismatch` | tree, `@types.v2` |
+| `type-expr` | 05 / 10, 16 | `V2-SRC-DECL-type-callable-types`, `V2-SRC-DECL-type-paren-type`, `V2-SRC-DECL-type-assoc-label`, `V2-TYPE-NAMES-unknown-type`, `V2-TYPE-GENERIC-argument-count`, `V2-TYPE-INTERFACE-assoc-label`, `V2-TYPE-INTERFACE-assoc-label-unknown`; the `Proc` and `Intent` alternatives, M2 10: `V2-EFFECT-proc-type-*`, `V2-EFFECT-intent-type-result` | `@syntax.invalidForm`, `@name.unknownSymbol`, `@name.wrongEntityKind`, `@type.typeArgumentMismatch` | tree, `@types.v2` |
 | `record-type` | 05 / 16 | `V2-SRC-DECL-type-record`, `V2-SRC-DECL-type-mixed-product`, `V2-TYPE-NOMINAL-structural-record-order`, `V2-TYPE-NOMINAL-record-duplicate-field` | `@syntax.invalidForm`, `@name.memberCollision` | tree, `@types.v2` |
 | `inputs` | 05 / 18 | `V2-SRC-DECL-type-callable-types`, `V2-TYPE-NOMINAL-fn-type-with-labelled`, `V2-TYPE-NOMINAL-fn-type-labelled-mismatch` | `@type.mismatch` | tree, `@types.v2` |
 | `path` | 06 / 11 | `V2-SRC-DECL-type-path`, `V2-SRC-EXPR-field-path`, `V2-TYPE-NAMES-path-vs-field`, `V2-TYPE-NAMES-longest-prefix`, `V2-TYPE-NAMES-unknown-first-part`, `V2-TYPE-NAMES-self-outside` | `@name.unknownSymbol`, `@type.unknownRecordField` | tree, `@resolved.v2` |
@@ -128,7 +142,7 @@ Type chapter, by section.
 | Structural types | 16 | `V2-TYPE-NOMINAL-structural-record-order`, `V2-TYPE-NOMINAL-tuple-arity`, `V2-TYPE-NOMINAL-empty-tuple`, `V2-TYPE-NOMINAL-list`, `V2-TYPE-NOMINAL-list-mixed`, `V2-TYPE-NOMINAL-depth-*` | `@type.mismatch`, `@type.depthExceeded` | `@types.v2`, `@value.v2` |
 | Recursive types | 16 | `V2-TYPE-NOMINAL-recursive-list`, `V2-TYPE-NOMINAL-infinite-size`, `V2-TYPE-NOMINAL-infinite-size-mutual` | `@type.infiniteSize` | `@types.v2` |
 | Callable types (`Fn`) | 18 | `V2-TYPE-NOMINAL-fn-type-with-labelled`, `V2-TYPE-NOMINAL-fn-type-labelled-mismatch`, `V2-SRC-CALLS-function-value` | `@type.mismatch` | `@types.v2` |
-| Callable types (`Proc`, `Intent`) | M2 | M2 | M2 | M2 |
+| Callable types (`Proc`, `Intent`) | M2 10 | `V2-EFFECT-proc-type-*`, `V2-EFFECT-intent-*`, `V2-EFFECT-callback-row-*`, `V2-EFFECT-return-row-mismatch`, `V2-EFFECT-field-row-mismatch`, `V2-EFFECT-fn-for-proc`, `V2-EFFECT-proc-for-fn`, `V2-EFFECT-named-proc-value*`, `V2-TYPE-NAMES-suspicious-row*`, `V2-RUNTIME-callback-awaited` | `@type.argumentMismatch`, `@type.mismatch`, `@type.suspiciousRow`, `@contract.obligationLost`, `@effect.invalidReference`, `@effect.duplicateRoot` | `@types.v2`, `@testRun.v2` |
 | Dict keys, equality, and order | 16 / 19 | `V2-TYPE-NOMINAL-dict-*`, `V2-TYPE-INTERFACE-equatable-tuple`, `V2-PROJECT-test-function-not-equatable` | `@type.invalidDictKey`, `@type.functionNotEquatable` | `@types.v2`, `@value.v2` |
 | Application | 15 / 16 | `V2-SRC-CALLS-arity`, `V2-SRC-CALLS-order`, `V2-SRC-CALLS-callee-expression`, `V2-SRC-CALLS-lookup-*`, `V2-SRC-CALLS-evaluation-order`, `V2-TYPE-NOMINAL-not-applicable` | `@type.argumentMismatch`, `@type.notApplicable` | `@types.v2`, `@value.v2` |
 | Namespaces and resolution | 10 / 11 | `V2-TYPE-NAMES-*` | `@name.unknownSymbol`, `@name.wrongEntityKind`, `@name.privateAccess`, `@name.redeclaration`, `@name.memberCollision`, `@name.genericRedeclaration`, `@name.reservedDeclaration`, `@name.reservedValueSpelling`, `@style.casing` | `@resolved.v2` |
@@ -186,7 +200,7 @@ identities are those of `conformance/rules.tsv`.
 | `INT-6` | 22 | `V2-CONTRACT-int6` | `@contract.unproved` | `@types.v2` |
 | `INT-7` | 22 | `V2-CONTRACT-int7`, `V2-CONTRACT-int7-nearest-failing` | `@contract.unproved` | `@types.v2` |
 | `INT-8` | 22 | `V2-CONTRACT-int8` | `@contract.refuted` | `@types.v2` |
-| Guards on a `proc`; plans | M2 | M2 | M2 | M2 |
+| Guards on a `proc`; plans | M2 05, 07 | `V2-CONTRACT-proc-requires-*`, `V2-EFFECT-proc-plan-bound`, `V2-EFFECT-plan-*`, `V2-RUNTIME-plan-built-not-run`, `V2-RUNTIME-plan-awaited-twice`, `V2-RUNTIME-requires-else-on-await`, `V2-RUNTIME-ensures-else-on-await` | `@contract.refuted`, `@type.unhandledFallible` | `@types.v2`, `@testRun.v2` |
 
 ## Programs, packages, and data
 
@@ -196,16 +210,16 @@ Programs chapter.
 | --- | --- | --- | --- | --- |
 | VIBON data documents | 03 | `V2-SRC-READER-vibon-*`, `V2-SRC-READER-data-duplicate-field`, `V2-SRC-READER-data-duplicate-key`, `V2-SRC-READER-data-extension` | `@syntax.invalidForm`, `@data.duplicateField`, `@data.duplicateKey`, `@data.invalidExtension` | tree |
 | Project file (`@project.v2`), library targets | 09 | `V2-PROJECT-decode-*` | `@data.invalidShape`, `@data.invalidValue`, `@data.duplicateField`, `@data.duplicateKey`, `@project.reservedUnitName` | `@project.v2` |
-| Binary targets, entry, grant bindings | M2 | `V2-PROJECT-decode-binary-shape`, `V2-PROJECT-workspace-check-bin-unavailable` (the M1 boundary) | `@tool.unavailable` in M1 | M2 |
+| Binary targets, entry, grant bindings | M2 25, 26 | `V2-PROJECT-decode-binary-shape`, `V2-PROJECT-entry-*`, `V2-EFFECT-entry-*`, `V2-EFFECT-target-effects-*`, `V2-GRANT-binding-*`, `V2-GRANT-policy-*`, `V2-GRANT-limits-*`, `V2-EFFECT-startup-row-outside-ceiling` | `@project.entryOutsideTarget`, `@project.entryOnLibrary`, `@project.invalidEntrySignature`, `@effect.outsideCeiling`, `@effect.invalidReference`, `@effect.duplicateRoot`, `@contract.unusedEffect`, `@grant.invalidBinding`, `@grant.bindingCycle`, `@grant.invalidPolicy`, `@grant.policyTooComplex` | `@project.v2`, `@types.v2` |
 | Discovery and the source snapshot | 09 | `V1-PROJECT-graph-static-sorted`, `V1-PROJECT-graph-static-dot-root`, `V2-PROJECT-graph-not-found`, `V2-PROJECT-graph-root-missing`, `V2-PROJECT-graph-empty-tests` | `@project.notFound`, `@project.invalidTargetRoot`, `@project.ioError`, `@module.ioError`, `@module.pathEscape` | `@sourceGraph.v1` |
 | Units and targets | 09 | `V1-PROJECT-graph-static-overlap`, `V2-PROJECT-graph-reserved-tests`, `V2-PROJECT-graph-reserved-std` | `@project.overlappingTargetRoots`, `@project.reservedUnitName` | `@sourceGraph.v1` |
 | Module paths | 09 | `V1-PROJECT-graph-static-invalid-segment`, `V1-PROJECT-graph-static-collision`, `V2-PROJECT-graph-case-collision` | `@module.invalidSegment`, `@module.fileDirectoryCollision`, `@module.sourceIdCollision`, `@module.caseCollision` | `@sourceGraph.v1` |
 | Imports | 10 | `V2-PROJECT-import-*` | `@module.unknownPath`, `@module.importCycle`, `@name.privateAccess`, `@name.unknownSymbol` | `@resolved.v2` |
-| Local dependencies | M2 | M2 | M2 | M2 |
+| Local dependencies | M2 27 | `V2-PROJECT-path-dependency-*`, `V2-PROJECT-dependency-*`, `V2-PROJECT-git-dependency-unavailable` | `@project.dependencyCycle`, `@project.ambiguousDependencyTarget`, `@module.pathEscape`, `@name.privateAccess`, `@tool.unavailable` | `@project.v2`, `@sourceGraph.v1` |
 | Git dependencies and the lock | not in this release | | | |
 | The standard library (embedding, manifest, roles) | 14 | host tests of step 14 | `@external.unknownSymbol`, `@external.signatureMismatch`, `@external.ownerMismatch`, `@runtime.invalidCheckedProgram`, `@module.sourceIdCollision` | `@stdlibManifest.v2` |
 | Tests | 23 / 25 | `V2-PROJECT-test-*`; the host test `check_covers_tests` of step 25 | `@module.testOutsideTests`, `@module.missingRequiredImport`, `@name.redeclaration`, `@type.invalidReturn`, `@type.invalidTry` | `@testRun.v2` |
-| Test worlds and grants | M2 | `V2-PROJECT-test-unavailable-item` (the M1 boundary) | `@tool.unavailable` in M1 | M2 |
+| Test worlds and grants | M2 21 / M2 22 | `V2-GRANT-test-*`, `V2-EFFECT-test-row-missing-*`, `V2-PROJECT-test-takes-*`, `V2-RUNTIME-trace-*`, `V2-RUNTIME-invocation-gaps`, `V2-RUNTIME-root-ordinals`; the host tests `ATK-test-world-op-on-leaf`, `ATK-test-runner-no-system-driver` | `@effect.outsideCeiling`, `@name.unknownSymbol`, `@type.argumentMismatch` | `@testRun.v2`, `@hostWorld.v2`, `@auditTrace.v2` |
 | Assertions | 23 | `V2-PROJECT-test-fails`, `V2-PROJECT-test-stops-at-failure`, `V2-PROJECT-test-assert-renamed`, `V2-PROJECT-test-equal-typed-from-actual`, `V2-PROJECT-assert-outside-tests`, `V2-PROJECT-assert-value-outside-tests`, `V2-PROJECT-test-function-not-equatable`, `V2-PROJECT-test-unobservable` | `@module.assertionOutsideTests`, `@type.functionNotEquatable`, `@tool.unsupportedValue` | `@testRun.v2`, `@stdlibManifest.v2` |
 | Build products | not in this release | | | |
 
@@ -225,10 +239,10 @@ intrinsic registry".
 | `@std.str` | 14 (role) / 20 | `V2-TYPE-INTERFACE-str-*`, `V2-TYPE-CONVERT-parse-integer`, `V2-TYPE-CONVERT-render-integer`, `V2-TYPE-CONVERT-float-text`, `V2-TYPE-CONVERT-float-parse` | `@name.inaccessibleRepresentation` | `@value.v2` |
 | `@std.bytes` | 14 (role) / 20 | `V2-TYPE-INTERFACE-bytes-members`, `V2-TYPE-INTERFACE-str-utf8` | none | `@value.v2` |
 | `@std.assert` | 23 | `V2-PROJECT-test-passes`, `V2-PROJECT-test-fails`, `V2-PROJECT-assert-outside-tests` | `@module.assertionOutsideTests`, `@module.missingRequiredImport` | `@testRun.v2` |
-| `@std.test` | M2 | | | |
-| `@std.process` | M2 | | | |
-| `@std.policy` | M2 | | | |
-| `@std.io`, `@std.fs`, `@std.env`, `@std.time`, `@std.random` | M2 | | | |
+| `@std.test` | M2 21 | `V2-GRANT-test-reads-note`, `V2-GRANT-test-directory-*`, `V2-GRANT-test-default-world`, `V2-GRANT-test-worlds-isolated` | `@effect.outsideCeiling`, `@name.unknownSymbol` | `@testRun.v2`, `@hostWorld.v2` |
+| `@std.process` | M2 18 / M2 25 | `V2-TYPE-INTERFACE-exit-code`, `V2-TYPE-INTERFACE-exit-code-width`, `V2-PROJECT-entry-result-not-exit-code` | `@type.argumentMismatch`, `@project.invalidEntrySignature` | `@types.v2` |
+| `@std.policy` | M2 18 / M2 22 | `V2-TYPE-INTERFACE-std-policy-types`, `V2-TYPE-INTERFACE-scope-error-*`, `V2-TYPE-INTERFACE-grant-limits*`, `V2-GRANT-limit-*`, `V2-GRANT-restrict-*` | `@name.unknownSymbol`, `@type.argumentMismatch` | `@types.v2`, `@testRun.v2` |
+| `@std.io`, `@std.fs`, `@std.env`, `@std.time`, `@std.random` | M2 19 / M2 21, 22 | `V2-EFFECT-std-*`, `V2-TYPE-INTERFACE-std-error-*`, `V2-TYPE-INTERFACE-std-fs-policy-types`, `V2-TYPE-INTERFACE-fs-policy-missing-field`, `V2-TYPE-INTERFACE-relative-path-*`, `V2-RUNTIME-relative-path-names`, `V2-EFFECT-impl-host-member-*`, `V2-GRANT-narrowing-types`, `V2-GRANT-restrict-on-stream`, `V2-GRANT-sub-result-is-fallible`, `V2-SRC-DECL-host-outside-std`; the host test `ATK-stdlib-host-signature` | `@effect.outsideCeiling`, `@type.invalidTry`, `@type.unhandledFallible`, `@pattern.nonExhaustive`, `@pattern.refutableBinding`, `@type.missingAbstractMember`, `@type.defaultOverride`, `@external.signatureMismatch`, `@external.ownerMismatch`, `@external.unknownSymbol` | `@types.v2`, `@stdlibManifest.v2` |
 
 ## Runtime and tooling forms
 
@@ -248,17 +262,24 @@ intrinsic registry".
 | Command `fmt` | 25 | `V2-TOOL-format-*` | `@module.pathEscape`, `@module.ioError` | `urn:vibra:schema:v2:command-result` |
 | Command `check` | 25 | `V2-PROJECT-workspace-check-library`, `V2-PROJECT-workspace-check-bin-unavailable`; host tests of step 25 | `@project.notFound`, `@tool.unavailable` | `urn:vibra:schema:v2:command-result`, `@types.v2` |
 | Command `test` | 26 | host tests of step 26 over the `V2-PROJECT-test-*` projects | `@tool.unavailable`, `@tool.unsupportedValue`, `@runtime.memoryExhausted` | `urn:vibra:schema:v2:command-result`, `@testRun.v2` |
-| `proc`, plans, `await`, effect rows, ceilings | M2 | | | |
-| Grants, policies, bindings, startup, the entry outcome | M2 | | | |
-| Host registry, host world, audit trace, `run`, `eval`, `project` commands | M2 | | | |
+| `proc`, plans, `await`, effect rows, ceilings | M2 03, 06 / M2 05, 07, 08, 09, 10 | `V2-EFFECT-*` of those guides, `V2-RUNTIME-plan-*`, `V2-RUNTIME-return-await-tail`, `V2-RUNTIME-await-unbounded`, `V2-RUNTIME-model-impl-*`; the host tests `ATK-ir-*`, `ATK-interp-await-in-pure-frame` | `@effect.invalidAwait`, `@effect.invalidReference`, `@effect.duplicateRoot`, `@effect.outsideCeiling`, `@contract.unusedEffect`, `@type.suspiciousRow`, `@runtime.invalidCheckedProgram` | `@types.v2`, `@testRun.v2` |
+| Grants, policies, bindings, startup, the entry outcome | M2 14, 15, 20 / M2 22, 26, 28, 29 | `V2-GRANT-*` of those guides, `V2-RUNTIME-run-*`; the host tests `ATK-forged-token`, `ATK-foreign-grant`, `ATK-stale-grant`, `ATK-narrow-*`, `ATK-counter-*`, `ATK-startup-failure-not-none`, `ATK-admit-plan-outside-ceiling`, `ATK-released-grant`, `ATK-release-on-trap` | `@grant.invalidBinding`, `@grant.bindingCycle`, `@grant.invalidPolicy`, `@grant.policyTooComplex`, `@grant.requiredUnavailable`, `@grant.acquisitionFailed`, `@runtime.memoryExhausted` | `@project.v2`, `@auditTrace.v2`, `urn:vibra:schema:v2:command-result` |
+| Host registry of major 2 | M2 02 / M2 19, 20 | host tests of M2 step 02; `V2-EFFECT-std-each-interface`; `ATK-stdlib-host-signature`, `ATK-encode-grant` | `@external.unknownSymbol`, `@external.signatureMismatch`, `@external.ownerMismatch`, `@runtime.invalidHostValue` | the registry listing `host-2.0.txt` |
+| Host world | M2 16 / M2 21, 29 | host tests of M2 step 16; `V2-GRANT-test-default-world`, `V2-RUNTIME-run-fresh-world`, `V2-RUNTIME-run-stdin`; `ATK-driver-error-not-fault`, `ATK-no-redispatch-on-error` | `@data.invalidShape`, `@data.invalidValue` | `@hostWorld.v2` |
+| Audit trace | M2 17 / M2 21, 29 | host tests of M2 step 17; `V2-RUNTIME-trace-*`, `V2-RUNTIME-invocation-gaps`, `V2-RUNTIME-root-ordinals`, `V2-RUNTIME-await-twice-two-events`; `ATK-trace-decode-grants-nothing` | none | `@auditTrace.v2` |
+| Real drivers and the file scope on Windows | M2 13, 30, 31 / M2 33 | the host tests `ATK-fs-*`, `ATK-run-*`, `ATK-driver-absent-at-admission`, `ATK-no-process-exit` | `@grant.acquisitionFailed`, `@tool.unavailable` | `@auditTrace.v2` |
+| Command `run` | M2 32 / M2 29 | host tests of M2 step 32 over the `V2-RUNTIME-run-*` projects; `V2-GRANT-release-optional-absent` | `@grant.requiredUnavailable`, `@grant.acquisitionFailed`, `@runtime.memoryExhausted`, `@tool.unavailable` | `urn:vibra:schema:v2:command-result` |
+| Command `eval` | M3 | | | |
+| `project` commands | no owner; see the findings | | | |
 | `query`, `edit`, `lint`, the index, snapshot and claim identity | M3 | | | |
 | MCP server | not in this release | | | |
 | Native execution slice | M4 | | | |
 
 ## Diagnostic codes
 
-Every row of the registry, with the M1 steps whose guides cite it. A code
-with no M1 step belongs to the milestone named.
+Every row of the registry, with the steps whose guides cite it. A code that
+M1 cites keeps its M1 steps; a code first produced in M2 names its M2 steps.
+A code with no step belongs to the milestone named.
 
 | Code | Owner |
 | --- | --- |
@@ -323,7 +344,7 @@ with no M1 step belongs to the milestone named.
 | `@type.invalidReturn` | steps 15, 23 |
 | `@type.missingReturn` | steps 07, 15, 17, 19 |
 | `@type.invalidInvariant` | steps 21 |
-| `@type.suspiciousRow` | M2 |
+| `@type.suspiciousRow` | M2 step 10 |
 | `@type.unreachableCode` | steps 15 |
 | `@pattern.refutableBinding` | steps 17, 21 |
 | `@pattern.irrefutableLetElse` | steps 17 |
@@ -331,9 +352,9 @@ with no M1 step belongs to the milestone named.
 | `@pattern.unreachableArm` | steps 15, 17 |
 | `@pattern.unsupportedCoverage` | steps 17 |
 | `@pattern.invalidConstant` | steps 17 |
-| `@effect.outsideCeiling` | M2 |
-| `@effect.invalidReference` | M2 |
-| `@effect.duplicateRoot` | M2 |
+| `@effect.outsideCeiling` | M2 steps 09, 10, 19, 21, 25, 26 |
+| `@effect.invalidReference` | M2 steps 08, 10, 25 |
+| `@effect.duplicateRoot` | M2 steps 08, 10, 25 |
 | `@effect.invalidAwait` | steps 17 |
 | `@external.unknownSymbol` | steps 14 |
 | `@external.ownerMismatch` | steps 14 |
@@ -344,34 +365,34 @@ with no M1 step belongs to the milestone named.
 | `@data.duplicateField` | steps 03, 09 |
 | `@data.duplicateKey` | steps 03, 09 |
 | `@project.staleLock` | not in this release |
-| `@project.dependencyCycle` | M2 |
-| `@project.entryOutsideTarget` | M2 |
-| `@project.entryOnLibrary` | M2 |
-| `@project.invalidEntrySignature` | M2 |
-| `@project.ambiguousDependencyTarget` | M2 |
+| `@project.dependencyCycle` | M2 step 27 |
+| `@project.entryOutsideTarget` | M2 step 25 |
+| `@project.entryOnLibrary` | M2 step 25 |
+| `@project.invalidEntrySignature` | M2 step 25 |
+| `@project.ambiguousDependencyTarget` | M2 step 27 |
 | `@project.reservedUnitName` | steps 09 |
 | `@project.duplicateName` | steps 08 |
 | `@project.overlappingTargetRoots` | steps 09 |
 | `@project.notFound` | steps 09, 25 |
 | `@project.invalidTargetRoot` | steps 09 |
 | `@project.ioError` | steps 09 |
-| `@runtime.invalidHostValue` | M2 |
+| `@runtime.invalidHostValue` | M2 step 20 |
 | `@runtime.invalidCheckedProgram` | steps 12, 13, 14, 27 |
 | `@runtime.memoryExhausted` | steps 13, 15, 26, 29 |
 | `@style.casing` | steps 02, 10 |
-| `@contract.unusedEffect` | M2 |
+| `@contract.unusedEffect` | M2 steps 09, 10, 25, 26 |
 | `@contract.unproved` | steps 21, 22, 29 |
 | `@contract.refuted` | steps 22, 29 |
 | `@contract.unsupportedPredicate` | steps 21, 22 |
 | `@contract.obligationLost` | steps 18, 21, 22 |
 | `@contract.invalidPredicate` | steps 21 |
 | `@contract.invalidConsequence` | steps 21 |
-| `@grant.invalidBinding` | M2 |
-| `@grant.bindingCycle` | M2 |
-| `@grant.requiredUnavailable` | M2 |
-| `@grant.acquisitionFailed` | M2 |
-| `@grant.invalidPolicy` | M2 |
-| `@grant.policyTooComplex` | M2 |
+| `@grant.invalidBinding` | M2 step 26 |
+| `@grant.bindingCycle` | M2 step 26 |
+| `@grant.requiredUnavailable` | M2 steps 28, 29, 32 |
+| `@grant.acquisitionFailed` | M2 steps 17, 28 |
+| `@grant.invalidPolicy` | M2 step 26 |
+| `@grant.policyTooComplex` | M2 step 26 |
 | `@tool.unavailable` | steps 03, 04, 05, 06, 07, 15, 23, 24, 25, 26, 27 |
 | `@tool.stalePlan` | M3 |
 | `@tool.actionDenied` | M3 |
