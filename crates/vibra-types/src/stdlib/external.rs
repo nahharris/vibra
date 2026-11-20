@@ -31,8 +31,8 @@
 //! host registry, and for its kind: the host rows are `proc` operations.
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
-use vibra_ir::external::{CompilerIntrinsic, FloatOp, IntegerOp};
 use vibra_ir::external::host::host_row;
+use vibra_ir::external::{CompilerIntrinsic, FloatOp, IntegerOp};
 use vibra_syntax::SyntaxKind;
 use vibra_syntax::source::{
     Callable, CallableKind, Declaration, Module, TypeBody, TypeForm,
