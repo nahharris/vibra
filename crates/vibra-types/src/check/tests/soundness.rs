@@ -440,3 +440,151 @@ fn a_module_value_the_discharge_reads_is_a_dependency() {
     assert_eq!(statuses(source), [(REQUIRES, PASSED)]);
     assert_eq!(dependency_counts(source), [2]);
 }
+
+#[test]
+fn fields_written_out_of_order_are_read_by_name() {
+    // GUARD-1 over a record and a case whose fields are not written in
+    // the type's order: `a` is 2 and `b` is 1, so `a < b` is false.
+    let record = "fn need takes {p: {a: I32 b: I32}} returns r: I32 requires Ordered.less(p.a p.b) do return 0i32 endfn\n\
+         fn run returns r: I32 do return need({b: 1i32 a: 2i32}) endfn\n";
+    decides(
+        record,
+        &[(DiagnosticCode::ContractRefuted, "Ordered.less(p.a p.b)")],
+        &[(REQUIRES, REFUTED)],
+    );
+    let case = "type Pair case pair {a: I32 b: I32} case none endtype\n\
+         fn less takes {p: Pair} returns r: Bool do match p case Pair.pair(a: a b: b) return Ordered.less(a b) case Pair.none() return true endmatch endfn\n\
+         fn need takes {p: Pair} returns r: I32 requires less(p) do return 0i32 endfn\n\
+         fn run returns r: I32 do return need(Pair.pair(b: 1i32 a: 2i32)) endfn\n";
+    decides(
+        case,
+        &[(DiagnosticCode::ContractRefuted, "less(p)")],
+        &[(REQUIRES, REFUTED)],
+    );
+    // A field of a construction is its operand of that name.
+    let symbolic = "fn need takes {p: {a: I32 b: I32}} returns r: I32 requires Ordered.less(p.a p.b) do return 0i32 endfn\n\
+         fn run takes {x: I32 y: I32} returns r: I32 do if Ordered.less(y x) then return need({b: x a: y}) endif return 0i32 endfn\n";
+    decides(symbolic, &[], &[(REQUIRES, PASSED)]);
+    let wrong = symbolic.replace("need({b: x a: y})", "need({b: y a: x})");
+    decides(
+        &wrong,
+        &[(UNPROVED, "need({b: y a: x})")],
+        &[(REQUIRES, UNKNOWN)],
+    );
+}
+#[test]
+fn integer_facts_are_only_of_the_sized_integer_types() {
+    // GUARD-6: a type's own `Ordered` need not be an order. This one
+    // calls every pair less, so `less(a b)` does not give `greater(b a)`.
+    let source = "type Key of U8 impl Ordered fn compare takes {left: Self right: Self} returns order: Ordering do return Ordering.less() endfn endimpl endtype\n\
+         fn need takes {a: Key b: Key} returns r: I32 requires Ordered.greater(b a) do return 0i32 endfn\n\
+         fn run takes {a: Key b: Key} returns r: I32 do if Ordered.less(a b) then return need(a b) endif return 0i32 endfn\n";
+    // Its predicate is not certified, so no call to `need` is discharged.
+    let uncertified = |source: &str| {
+        assert!(
+            statuses(source).iter().all(|(_, status)| *status != PASSED),
+            "{source}"
+        );
+        assert!(
+            faults(source)
+                .iter()
+                .any(|(code, _)| *code == DiagnosticCode::ContractUnsupportedPredicate),
+            "{source}"
+        );
+    };
+    uncertified(source);
+    // Nor at an open type.
+    uncertified(
+        "fn need(T) takes {a: T b: T} returns r: I32 given {T: Ordered} requires Ordered.greater(b a) do return 0i32 endfn\n\
+         fn run(T) takes {a: T b: T} returns r: I32 given {T: Ordered} do if Ordered.less(a b) then return need(a b) endif return 0i32 endfn\n",
+    );
+    // At a sized integer type it is INT-1.
+    let source = "fn need takes {a: U8 b: U8} returns r: I32 requires Ordered.greater(b a) do return 0i32 endfn\n\
+         fn run takes {a: U8 b: U8} returns r: I32 do if Ordered.less(a b) then return need(a b) endif return 0i32 endfn\n";
+    decides(source, &[], &[(REQUIRES, PASSED)]);
+}
+
+#[test]
+fn a_closure_argument_is_its_own_slot_order() {
+    // GUARD-4 through a closure: its parameters are positional, and a
+    // proof over the closure's body is not read through.
+    let source = format!(
+        "{POS}fn f takes {{x: I32}} returns r: I32 do let g be fn takes {{a: I32 b: I32}} returns s: I32 do return a endfn endlet if Ordered.greater(x 0i32) then return pos(g(0i32 x)) endif return 0i32 endfn\n"
+    );
+    decides(
+        &source,
+        &[(UNPROVED, "pos(g(0i32 x))")],
+        &[(REQUIRES, UNKNOWN)],
+    );
+}
+#[test]
+fn a_branch_fact_ends_with_its_branch() {
+    // GUARD-3: past `endif` the condition is no fact.
+    let source = format!(
+        "{POS}fn f takes {{x: I32}} returns r: I32 do let y be if Ordered.greater(x 0i32) then 1i32 else 2i32 endif endlet return pos(x) endfn\n"
+    );
+    decides(&source, &[(UNPROVED, "pos(x)")], &[(REQUIRES, UNKNOWN)]);
+    // Nor past `endmatch`.
+    let source = format!(
+        "{POS}fn f takes {{x: I32 o: Option(I32)}} returns r: I32 do let y be match o case Option.some(value: v) if Ordered.greater(x 0i32) then v else 0i32 endif case _ 0i32 endmatch endlet return pos(x) endfn\n"
+    );
+    decides(&source, &[(UNPROVED, "pos(x)")], &[(REQUIRES, UNKNOWN)]);
+    // An argument evaluated before the branch is not inside it.
+    let source = format!(
+        "{POS}fn two takes {{a: I32 b: Bool}} returns r: I32 do return a endfn\n\
+         fn f takes {{x: I32}} returns r: I32 do return two(pos(x) Ordered.greater(x 0i32)) endfn\n"
+    );
+    decides(&source, &[(UNPROVED, "pos(x)")], &[(REQUIRES, UNKNOWN)]);
+}
+
+#[test]
+fn a_result_fact_needs_the_requires_of_that_call_discharged() {
+    // GUARD-7: `mk(x)` has its `requires` unproved, so its `ensures` is no
+    // fact of its result.
+    let source = format!(
+        "{POS}fn mk takes {{x: I32}} returns r: I32 requires Ordered.greater(x 0i32) ensures Ordered.greater(r 0i32) do return x endfn\n\
+         fn f takes {{x: I32}} returns r: I32 do return pos(mk(x)) endfn\n"
+    );
+    decides(
+        &source,
+        &[(UNPROVED, "pos(mk(x))"), (UNPROVED, "mk(x)")],
+        &[(REQUIRES, UNKNOWN), (REQUIRES, UNKNOWN), (ENSURES, PASSED)],
+    );
+    // With it discharged, the result fact holds.
+    let source = source.replace(
+        "do return pos(mk(x)) endfn",
+        "do if Ordered.greater(x 0i32) then return pos(mk(x)) endif return 0i32 endfn",
+    );
+    decides(
+        &source,
+        &[],
+        &[(REQUIRES, PASSED), (REQUIRES, PASSED), (ENSURES, PASSED)],
+    );
+}
+#[test]
+fn a_contract_call_is_compared_in_its_member_slot_order() {
+    // GUARD-1 and GUARD-4 at a member with labels written out of order.
+    let member = |call: &str, guard: &str| {
+        format!(
+            "interface Span fn span takes {{value: Self}} labelled {{a: I32 be 0i32 b: I32 be 0i32}} returns r: I32 requires Ordered.less(a b) endfn endinterface\n\
+             type A of I32 impl Span fn span takes {{value: Self}} labelled {{a: I32 be 0i32 b: I32 be 0i32}} returns s: I32 do return a endfn endimpl endtype\n\
+             fn run takes {{x: I32 y: I32}} returns r: I32 do if {guard} then return {call} endif return 0i32 endfn\n"
+        )
+    };
+    let source = member("Span.span(A(1i32) b: 1i32 a: 2i32)", "true");
+    decides(
+        &source,
+        &[(DiagnosticCode::ContractRefuted, "Ordered.less(a b)")],
+        &[(REQUIRES, REFUTED)],
+    );
+    let source = member("Span.span(A(1i32) b: 2i32 a: 1i32)", "true");
+    decides(&source, &[], &[(REQUIRES, PASSED)]);
+    let source = member("Span.span(A(1i32) b: x a: y)", "Ordered.less(y x)");
+    decides(&source, &[], &[(REQUIRES, PASSED)]);
+    let source = member("Span.span(A(1i32) b: y a: x)", "Ordered.less(y x)");
+    decides(
+        &source,
+        &[(UNPROVED, "Span.span(A(1i32) b: y a: x)")],
+        &[(REQUIRES, UNKNOWN)],
+    );
+}
