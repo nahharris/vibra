@@ -13,17 +13,13 @@
 
 use std::sync::Arc;
 
-use vibra_interp::{Evaluation, Limits, MemoryBudget};
-use vibra_ir::{CheckedModuleSet, Node, Value};
+use vibra_interp::{Evaluation, LimitProfile};
+use vibra_ir::{CheckedModuleSet, Node, Type, Value};
 
 use super::contract::fragment::{Facts, Standing, reads_slots, walk};
 
-/// The limits of the limit profile `m1Default` on one compile-time
-/// evaluation: its reductions and the default memory budget.
-pub(crate) const LIMITS: Limits = Limits {
-    reductions: 10_000_000,
-    memory: MemoryBudget::DEFAULT,
-};
+/// The limit profile compile-time evaluations run under.
+pub(crate) const PROFILE: LimitProfile = LimitProfile::M1_DEFAULT;
 
 /// What one compile-time evaluation established.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -86,24 +82,35 @@ impl<'e> Evaluator<'e> {
             })
     }
 
-    /// Evaluates `node`, a certified expression that reads no slot.
-    pub(crate) fn evaluate(&mut self, node: &Node) -> Outcome {
-        if reads_slots(node) || !self.certified(node) {
-            return Outcome::Unevaluated;
-        }
-        let set = match &self.set {
+    /// The module set evaluations run over, built on first use.
+    fn set(&mut self) -> Option<Arc<CheckedModuleSet>> {
+        match &self.set {
             Some(set) => set.clone(),
             None => {
                 let set = (self.build)();
                 self.set = Some(set.clone());
                 set
             }
-        };
-        let Some(set) = set else {
+        }
+    }
+
+    /// The canonical VIBON text of `value`, of type `ty`, over the types of
+    /// the module set evaluations run over.
+    pub(crate) fn encode(&mut self, value: &Value, ty: &Type) -> Option<String> {
+        let set = self.set()?;
+        vibra_ir::encode_value(value, ty, set.types()).ok()
+    }
+
+    /// Evaluates `node`, a certified expression that reads no slot.
+    pub(crate) fn evaluate(&mut self, node: &Node) -> Outcome {
+        if reads_slots(node) || !self.certified(node) {
+            return Outcome::Unevaluated;
+        }
+        let Some(set) = self.set() else {
             return Outcome::Unevaluated;
         };
         self.evaluated += 1;
-        match vibra_interp::evaluate(&set, &node.expr, &[], LIMITS) {
+        match vibra_interp::evaluate(&set, &node.expr, &[], PROFILE.compile_time) {
             Evaluation::Value(value) => Outcome::Value(value),
             Evaluation::LimitReached(_) => Outcome::LimitReached,
             Evaluation::Defect(_) => Outcome::Unevaluated,

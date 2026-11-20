@@ -256,25 +256,25 @@ fn try_without_an_enclosing_result_is_invalid() {
 }
 
 /// A bare `where` is read and its predicate checked; each construction of
-/// the type states an obligation, which no discharge rule establishes yet.
+/// the type states an obligation: one of a constant is decided by
+/// evaluation, and one of a parameter that nothing establishes is unproved.
 #[test]
 fn bare_where_types_are_read() {
-    let source = "type Small of I32 where fn takes {v: I32} returns r: Bool do return true endfn endtype\n\
+    let source = "type Small of I32 where fn takes {v: I32} returns r: Bool do return Ordered.greater(v 0i32) endfn endtype\n\
                   fn f takes {s: Small} returns r: I32 do return match s case Small(n) n endmatch endfn\n";
     assert_eq!(faults(source), []);
+    let head = source
+        .lines()
+        .next()
+        .map_or(String::new(), |line| format!("{line}\n"));
+    let source = format!("{head}fn g returns r: Small do return Small(1i32) endfn\n");
+    assert_eq!(faults(&source), []);
     let source = format!(
-        "{}fn g returns r: Small do return Small(1i32) endfn\n",
-        source
-            .lines()
-            .next()
-            .map_or(String::new(), |line| format!("{line}\n"))
+        "{head}fn g takes {{x: I32}} returns r: Small do return Small(x) endfn\n"
     );
     assert_eq!(
         faults(&source),
-        [(
-            DiagnosticCode::ContractUnproved,
-            at(&source, "Small(1i32)", 0)
-        )]
+        [(DiagnosticCode::ContractUnproved, at(&source, "Small(x)", 0))]
     );
 }
 

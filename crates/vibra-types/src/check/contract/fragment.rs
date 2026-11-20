@@ -21,8 +21,10 @@
 //! - the primitive comparison is a call of a member of the interfaces
 //!   playing `@equatable` and `@ordered` at a closed receiver built only from
 //!   compiler scalars and types of the embedded standard library, whose
-//!   implementations are the library's own; the `Bool` operations are the
-//!   members of `Bool`, ordinary functions whose bodies are certified.
+//!   implementations are the library's own; a call of a member whose
+//!   selected implementation is a program's own `impl`, at a closed
+//!   receiver, is an ordinary call of that member; the `Bool` operations are
+//!   the members of `Bool`, ordinary functions whose bodies are certified.
 //!
 //! Every other node is outside the fragment: a `let`, a lookup, a `try`, a
 //! closure or a function as a value, a call through a value, an intrinsic,
@@ -66,6 +68,10 @@ pub(crate) struct Facts {
     /// The entry, among the entries of a [`Standings`] table, of the
     /// invariant predicate of each declared type that has an invariant.
     pub(crate) invariants: BTreeMap<TypeId, usize>,
+    /// The checked index of each member a program's own `impl` supplies at
+    /// a closed receiver, by interface, interface arguments, receiver, and
+    /// member name.
+    pub(crate) members: Vec<(TypeId, Vec<Type>, Type, String, usize)>,
 }
 
 impl Facts {
@@ -103,6 +109,16 @@ impl Facts {
                 {
                     Admission::Admitted
                 }
+                CallTarget::Contract(call) if call.member_arguments.is_empty() => self
+                    .members
+                    .iter()
+                    .find(|(interface, arguments, receiver, member, _)| {
+                        *interface == call.interface
+                            && *arguments == call.arguments
+                            && *receiver == call.receiver
+                            && *member == call.member
+                    })
+                    .map_or(Admission::Outside, |(.., entry)| Admission::Calls(*entry)),
                 CallTarget::Contract(_) | CallTarget::Value(_) => Admission::Outside,
             },
             Expr::If { .. }

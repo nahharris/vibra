@@ -23,7 +23,7 @@ use vibra_syntax::Document;
 
 use super::callables::fold;
 use super::contract::{
-    self, CheckedGuard, CheckedInvariant, Fold, Inputs, Predicate, Site,
+    self, CheckedGuard, CheckedInvariant, Fold, Inputs, Owner, Predicate, Site,
     anonymous_entries,
 };
 use super::cycle::initializer_cycles;
@@ -33,6 +33,7 @@ use super::expr::{
     fallible_construction,
 };
 use super::generics::{Instantiation, expanding_instantiations};
+use super::obligation::Obligation;
 use super::testing::{self, TestFaults};
 use super::{CheckResult, CheckedTest};
 
@@ -57,7 +58,7 @@ struct Pass {
     errors: BTreeMap<usize, Type>,
     /// Every site of a bare-guard obligation or of a pattern a constant
     /// construction decides, with its module.
-    sites: Vec<(usize, Site)>,
+    sites: Vec<(usize, Owner, Site)>,
 }
 
 fn layout(program: &Program<'_>) -> Layout {
@@ -144,8 +145,12 @@ fn check_bodies(
             checker.diagnostics.extend(differing);
         }
         pass.functions.insert(index, checked);
-        pass.sites
-            .extend(checker.sites.drain(..).map(|site| (data.module, site)));
+        pass.sites.extend(
+            checker
+                .sites
+                .drain(..)
+                .map(|site| (data.module, Owner::Function(index), site)),
+        );
         pass.instantiations
             .extend(checker.instantiations.drain(..).map(
                 |(callee, arguments, span)| Instantiation {
@@ -179,8 +184,12 @@ fn check_bodies(
         let written = data.view.written_type().map(|written| written.span());
         let checked = checker.initializer(ty, value, written);
         pass.values.insert(index, checked);
-        pass.sites
-            .extend(checker.sites.drain(..).map(|site| (data.module, site)));
+        pass.sites.extend(
+            checker
+                .sites
+                .drain(..)
+                .map(|site| (data.module, Owner::Value(index), site)),
+        );
         pass.faults.insert(
             Target::Value(index),
             std::mem::take(&mut checker.diagnostics),
@@ -203,8 +212,12 @@ fn check_bodies(
         let mut checker = BodyChecker::new(program, layout, data.module, text);
         let checked = checker.test_body(body);
         pass.tests.insert(index, checked);
-        pass.sites
-            .extend(checker.sites.drain(..).map(|site| (data.module, site)));
+        pass.sites.extend(
+            checker
+                .sites
+                .drain(..)
+                .map(|site| (data.module, Owner::Test(index), site)),
+        );
         pass.faults.insert(
             Target::Test(index),
             std::mem::take(&mut checker.diagnostics),
@@ -545,6 +558,8 @@ pub(crate) fn check_program(
         program: &program,
         layout: &layout,
         functions: &pass.functions,
+        values: &pass.values,
+        tests: &pass.tests,
         invariants: &pass.invariants,
         sites: &pass.sites,
     };
@@ -564,6 +579,18 @@ pub(crate) fn check_program(
     }
     diagnostics.extend(pass.contract.iter().cloned());
     diagnostics.extend(reviewed.diagnostics);
+    let mut obligations = reviewed.obligations;
+    obligations.sort_by(|left, right| {
+        let key = |obligation: &Obligation| {
+            (
+                obligation.declaration.clone(),
+                obligation.source_id.clone(),
+                obligation.span.start(),
+                obligation.span.end(),
+            )
+        };
+        key(left).cmp(&key(right))
+    });
     diagnostics.extend(initializer_cycles(&program, &pass.references));
     diagnostics.extend(expanding_instantiations(&program, &pass.instantiations));
     diagnostics.sort_by(|left, right| {
@@ -592,10 +619,14 @@ pub(crate) fn check_program(
         functions: Vec::new(),
         tests: Vec::new(),
         test_set: None,
+        obligations: Vec::new(),
     };
+    if result.types_known() {
+        result.types = types_document(&program, &obligations);
+        result.obligations = obligations;
+    }
     if result.has_errors() {
         if result.only_unavailable() {
-            result.types = types_document(&program);
             let (set, tests) = runnable_tests(
                 &mut program,
                 documents,
@@ -612,7 +643,6 @@ pub(crate) fn check_program(
     let lowered = pass.tests.keys().copied().collect::<Vec<_>>();
     match assemble(&program, &layout, &pass, &lowered, &reviewed.folds, false) {
         Ok(assembled) => {
-            result.types = types_document(&program);
             result.entry = entry(&program, &layout);
             result.functions = assembled.functions;
             result.tests = checked_tests(&program, &assembled.tests, &BTreeMap::new());
@@ -1365,7 +1395,7 @@ fn entry(program: &Program<'_>, layout: &Layout) -> Option<usize> {
 }
 
 /// The `@types.v2` document of the local declarations in scope.
-fn types_document(program: &Program<'_>) -> Option<String> {
+fn types_document(program: &Program<'_>, obligations: &[Obligation]) -> Option<String> {
     let local = |module: usize| {
         program
             .modules
@@ -1427,12 +1457,17 @@ fn types_document(program: &Program<'_>) -> Option<String> {
             .join(" ")
     };
     Some(format!(
-        "{{format: @types.v2 moduleValues: [{}] callables: [{}] implementations: [{}] obligations: []}}\n",
+        "{{format: @types.v2 moduleValues: [{}] callables: [{}] implementations: [{}] obligations: [{}]}}\n",
         join(values),
         join(callables),
         implementations
             .into_iter()
             .map(|(_, text)| text)
+            .collect::<Vec<_>>()
+            .join(" "),
+        obligations
+            .iter()
+            .map(Obligation::record)
             .collect::<Vec<_>>()
             .join(" ")
     ))

@@ -1,0 +1,1527 @@
+//! Terms and facts: what the discharge rules reason about.
+//!
+//! `docs/spec/02-type-system.md`, "Bare guards", and
+//! `docs/spec/07-diagnostics-and-conformance.md`, "Integer facts". A
+//! [`Term`] is a value of the checked IR built only from parameters,
+//! constants, calls, constructions, and the parts patterns take apart, with
+//! every immutable `let` alias, literal equality, and actual argument
+//! substituted: two terms are equal exactly when their resolved callee, type
+//! arguments, and operands are the same entities (rule 4). A [`FactSet`]
+//! holds the `Bool` terms known to be `true` or `false` at one program point,
+//! each with the [`Evidence`] that established it. [`prove`] decides one goal
+//! against a fact set by the Boolean structure of rule 5, the listed integer
+//! facts of rule 6, and the case facts of rule 3, and nothing else.
+//!
+//! Every walk here is a work list, so no host stack grows with the depth of
+//! a program.
+
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+
+use vibra_ir::{
+    CallTarget, Constant, Construction, ContractCall, Expr, NamedTypes, Node, Pattern,
+    Type, TypeId, Value,
+};
+
+/// A discharge rule or an integer fact, as an obligation record lists it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum Rule {
+    /// `GUARD-1` to `GUARD-7`.
+    Guard(u8),
+    /// `INT-1` to `INT-8`.
+    Int(u8),
+}
+
+/// `GUARD-1`, constants.
+pub(crate) const CONSTANTS: Rule = Rule::Guard(1);
+/// `GUARD-2`, type invariant.
+pub(crate) const INVARIANT: Rule = Rule::Guard(2);
+/// `GUARD-3`, dominating branch.
+pub(crate) const BRANCH: Rule = Rule::Guard(3);
+/// `GUARD-4`, substitution.
+pub(crate) const SUBSTITUTION: Rule = Rule::Guard(4);
+/// `GUARD-5`, Boolean structure.
+pub(crate) const BOOLEAN: Rule = Rule::Guard(5);
+/// `GUARD-6`, the listed integer facts.
+pub(crate) const INTEGER: Rule = Rule::Guard(6);
+/// `GUARD-7`, certified results.
+pub(crate) const RESULT: Rule = Rule::Guard(7);
+
+/// What established a fact or a goal: the rules used, in the order first
+/// used, and the declarations whose checked body or value was read.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Evidence {
+    rules: Vec<Rule>,
+    /// The identities of the declarations read.
+    pub(crate) reads: BTreeSet<String>,
+}
+
+impl Evidence {
+    /// The evidence of one rule.
+    pub(crate) fn of(rule: Rule) -> Self {
+        Self::default().with(rule)
+    }
+
+    /// This evidence, then `rule`.
+    pub(crate) fn with(mut self, rule: Rule) -> Self {
+        if !self.rules.contains(&rule) {
+            self.rules.push(rule);
+        }
+        self
+    }
+
+    /// This evidence, having read the declaration `identity`.
+    pub(crate) fn reading(mut self, identity: &str) -> Self {
+        if !identity.is_empty() {
+            self.reads.insert(identity.to_owned());
+        }
+        self
+    }
+
+    /// This evidence, then `other`.
+    pub(crate) fn and(mut self, other: &Self) -> Self {
+        for rule in &other.rules {
+            self = self.with(*rule);
+        }
+        self.reads.extend(other.reads.iter().cloned());
+        self
+    }
+
+    /// The rule identifiers as an obligation record lists them: the
+    /// discharge rules in the order first used, with the integer facts
+    /// right after `GUARD-6`.
+    pub(crate) fn identifiers(&self) -> Vec<String> {
+        let facts = self
+            .rules
+            .iter()
+            .filter_map(|rule| match rule {
+                Rule::Int(fact) => Some(format!("INT-{fact}")),
+                Rule::Guard(_) => None,
+            })
+            .collect::<Vec<_>>();
+        let mut out = Vec::new();
+        let mut placed = false;
+        for rule in &self.rules {
+            if let Rule::Guard(guard) = rule {
+                out.push(format!("GUARD-{guard}"));
+                if *guard == 6 {
+                    out.extend(facts.iter().cloned());
+                    placed = true;
+                }
+            }
+        }
+        if !placed && !facts.is_empty() {
+            out.push("GUARD-6".to_owned());
+            out.extend(facts);
+        }
+        out
+    }
+}
+
+/// A term, by its place in a [`Terms`] arena.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(crate) struct Term(usize);
+
+/// What a call of a term calls.
+#[derive(Clone, Debug)]
+pub(crate) enum Callee {
+    /// A function, by its checked index, at its type arguments.
+    Function(usize, Vec<Type>),
+    /// An interface member at its substitution.
+    Contract(Box<ContractCall>),
+    /// A compiler intrinsic, by its spelling and type arguments.
+    Intrinsic(String),
+}
+
+/// One term.
+#[derive(Clone, Debug)]
+pub(crate) enum Data {
+    /// A value nothing more is known of; each is distinct.
+    Opaque,
+    /// A slot of one activation: a parameter, or a binding nothing names.
+    Slot(usize, usize),
+    /// A constant.
+    Constant(Constant),
+    /// A call and its arguments: the positional ones, then the labelled
+    /// ones in the callee's order.
+    Call(Callee, Vec<Term>),
+    /// A construction of the type, with its shape (`case:` and the case
+    /// name for a case, `wrapper` for a wrapper, then the field names) and
+    /// its operands.
+    Construct(Type, Vec<String>, Vec<Term>),
+    /// A field of a record.
+    Field(Term, String),
+    /// The representation of a value of a declared type.
+    Repr(Term),
+    /// A component of a tuple.
+    Item(Term, usize),
+    /// A field of a value of a case.
+    CaseField(Term, String, String),
+    /// Whether a value is of a case: a `Bool` term.
+    IsCase(Term, String),
+}
+
+/// The terms of one discharge, each stored once.
+#[derive(Debug, Default)]
+pub(crate) struct Terms {
+    data: Vec<Data>,
+    index: HashMap<String, Term>,
+    /// The type of each slot term, as the slot's reads state it.
+    slot_types: HashMap<Term, Type>,
+}
+
+impl Terms {
+    /// The static type of `term`, when it is a slot, a constant, or a
+    /// construction.
+    pub(crate) fn type_of(&self, term: Term) -> Option<&Type> {
+        match self.get(term)? {
+            Data::Slot(..) => self.slot_types.get(&term),
+            Data::Constant(constant) => Some(constant.value_type()),
+            Data::Construct(ty, ..) => Some(ty),
+            _ => None,
+        }
+    }
+
+    /// `term` and every term it is built from, each once.
+    pub(crate) fn subterms(&self, term: Term) -> Vec<Term> {
+        let mut seen = BTreeSet::new();
+        let mut out = Vec::new();
+        let mut pending = vec![term];
+        while let Some(term) = pending.pop() {
+            if !seen.insert(term) {
+                continue;
+            }
+            out.push(term);
+            match self.get(term) {
+                Some(Data::Call(_, operands) | Data::Construct(_, _, operands)) => {
+                    pending.extend(operands.iter().copied());
+                }
+                Some(
+                    Data::Field(inner, _)
+                    | Data::Repr(inner)
+                    | Data::Item(inner, _)
+                    | Data::CaseField(inner, ..)
+                    | Data::IsCase(inner, _),
+                ) => pending.push(*inner),
+                _ => {}
+            }
+        }
+        out
+    }
+
+    /// The term `data`, normalized: a part of a construction is the operand
+    /// it names.
+    pub(crate) fn intern(&mut self, data: Data) -> Term {
+        let data = self.normalize(data);
+        if let Data::Opaque = data {
+            let term = Term(self.data.len());
+            self.data.push(data);
+            return term;
+        }
+        let key = key(&data);
+        if let Some(term) = self.index.get(&key) {
+            return *term;
+        }
+        let term = Term(self.data.len());
+        self.data.push(data);
+        self.index.insert(key, term);
+        term
+    }
+
+    fn normalize(&self, data: Data) -> Data {
+        let operand =
+            |term: Term, wanted: &dyn Fn(&[String]) -> Option<usize>| match self
+                .get(term)
+            {
+                Some(Data::Construct(_, shape, operands)) => {
+                    wanted(shape).and_then(|at| operands.get(at).copied())
+                }
+                _ => None,
+            };
+        let found = match &data {
+            Data::Repr(term) => operand(*term, &|shape| {
+                (shape.first().map(String::as_str) == Some("wrapper")).then_some(0)
+            }),
+            Data::Field(term, field) => {
+                if let Some(Data::Repr(inner)) = self.get(*term) {
+                    return Data::Field(*inner, field.clone());
+                }
+                operand(*term, &|shape| {
+                    if shape
+                        .first()
+                        .is_some_and(|first| first.starts_with("case:"))
+                    {
+                        return None;
+                    }
+                    shape.iter().position(|name| name == field)
+                })
+            }
+            Data::Item(term, at) => {
+                if let Some(Data::Repr(inner)) = self.get(*term) {
+                    return Data::Item(*inner, *at);
+                }
+                operand(*term, &|shape| shape.is_empty().then_some(*at))
+            }
+            Data::CaseField(term, case, field) => operand(*term, &|shape| {
+                let (head, names) = shape.split_first()?;
+                (head.strip_prefix("case:") == Some(case.as_str()))
+                    .then(|| names.iter().position(|name| name == field))
+                    .flatten()
+            }),
+            _ => None,
+        };
+        match found.and_then(|term| self.get(term)) {
+            Some(found) => found.clone(),
+            None => data,
+        }
+    }
+
+    /// A term distinct from every other.
+    pub(crate) fn opaque(&mut self) -> Term {
+        self.intern(Data::Opaque)
+    }
+
+    /// The term at `term`.
+    pub(crate) fn get(&self, term: Term) -> Option<&Data> {
+        self.data.get(term.0)
+    }
+
+    /// The constant `term` is, when it is one.
+    pub(crate) fn constant(&self, term: Term) -> Option<&Constant> {
+        match self.get(term)? {
+            Data::Constant(constant) => Some(constant),
+            _ => None,
+        }
+    }
+
+    /// The case `term` is constructed with, when it is a construction of a
+    /// case or a constant of one.
+    pub(crate) fn case_of(&self, term: Term) -> Option<&str> {
+        match self.get(term)? {
+            Data::Construct(_, shape, _) => shape.first()?.strip_prefix("case:"),
+            Data::Constant(constant) => match constant.value() {
+                Value::Variant { case, .. } => Some(case),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+}
+
+/// The text two equal terms share and two different terms do not.
+fn key(data: &Data) -> String {
+    match data {
+        Data::Slot(activation, slot) => format!("s{activation}.{slot}"),
+        Data::Call(callee, operands) => {
+            let callee = match callee {
+                Callee::Function(function, arguments) => {
+                    format!("f{function}{arguments:?}")
+                }
+                Callee::Contract(call) => format!("k{call:?}"),
+                Callee::Intrinsic(spelling) => format!("i{spelling}"),
+            };
+            format!("c{callee}{operands:?}")
+        }
+        _ => format!("{data:?}"),
+    }
+}
+
+/// A `Bool` operation of the embedded library.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Connective {
+    /// `Bool.not`.
+    Not,
+    /// `Bool.and`.
+    And,
+    /// `Bool.or`.
+    Or,
+    /// `Bool.xor`.
+    Xor,
+}
+
+/// A comparison of two values of one sized integer type, read as its
+/// defining relation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+enum Relation {
+    Less,
+    LessOrEqual,
+    Greater,
+    GreaterOrEqual,
+    Equal,
+    NotEqual,
+}
+
+impl Relation {
+    /// The relation that holds when this one does not, by the defining
+    /// relations of the `Ordered` members over a total order.
+    const fn negation(self) -> Self {
+        match self {
+            Self::Less => Self::GreaterOrEqual,
+            Self::LessOrEqual => Self::Greater,
+            Self::Greater => Self::LessOrEqual,
+            Self::GreaterOrEqual => Self::Less,
+            Self::Equal => Self::NotEqual,
+            Self::NotEqual => Self::Equal,
+        }
+    }
+}
+
+/// A body a call of a certified function may be read through.
+#[derive(Clone, Debug)]
+pub(crate) struct Readable<'v> {
+    /// The body.
+    pub(crate) body: &'v Node,
+    /// The identity of the function.
+    pub(crate) identity: String,
+}
+
+/// What the terms of one review are built against.
+#[derive(Debug, Default)]
+pub(crate) struct Vocabulary<'v> {
+    /// The `Bool` operations, by checked function index.
+    pub(crate) connectives: BTreeMap<usize, Connective>,
+    /// The interfaces playing `@ordered` and `@equatable`.
+    pub(crate) ordered: Option<TypeId>,
+    pub(crate) equatable: Option<TypeId>,
+    /// The declared types with an invariant.
+    pub(crate) invariant_types: BTreeSet<TypeId>,
+    /// The constant module values, by global index.
+    pub(crate) globals: BTreeMap<usize, Constant>,
+    /// The labelled defaults of each function, by checked index.
+    pub(crate) defaults: BTreeMap<usize, Vec<(String, Constant)>>,
+    /// The bodies of the certified functions, by checked index.
+    pub(crate) certified: BTreeMap<usize, Readable<'v>>,
+}
+
+impl Vocabulary<'_> {
+    /// The `Bool` operation `term` applies, and its operands.
+    fn connective(&self, terms: &Terms, term: Term) -> Option<(Connective, Vec<Term>)> {
+        match terms.get(term)? {
+            Data::Call(Callee::Function(function, _), operands) => self
+                .connectives
+                .get(function)
+                .map(|connective| (*connective, operands.clone())),
+            _ => None,
+        }
+    }
+
+    /// The integer comparison `term` is: its relation (`None` for
+    /// `inRange`), its receiver, and its operands.
+    fn comparison(
+        &self,
+        terms: &Terms,
+        term: Term,
+    ) -> Option<(Option<Relation>, ContractCall, Vec<Term>)> {
+        let Some(Data::Call(Callee::Contract(call), operands)) = terms.get(term) else {
+            return None;
+        };
+        if !sized_integer(&call.receiver) {
+            return None;
+        }
+        let relation = if Some(&call.interface) == self.ordered.as_ref() {
+            match call.member.as_str() {
+                "less" => Some(Relation::Less),
+                "lessOrEqual" => Some(Relation::LessOrEqual),
+                "greater" => Some(Relation::Greater),
+                "greaterOrEqual" => Some(Relation::GreaterOrEqual),
+                "inRange" => None,
+                _ => return None,
+            }
+        } else if Some(&call.interface) == self.equatable.as_ref()
+            && call.member == "equal"
+        {
+            Some(Relation::Equal)
+        } else {
+            return None;
+        };
+        Some((relation, (**call).clone(), operands.clone()))
+    }
+
+    /// The call of the `Ordered` or `Equatable` member `member` at the
+    /// receiver of `like`, over `left` and `right`.
+    fn relation_term(
+        &self,
+        terms: &mut Terms,
+        like: &ContractCall,
+        relation: Relation,
+        left: Term,
+        right: Term,
+    ) -> Option<Term> {
+        let (interface, member) = match relation {
+            Relation::Less => (self.ordered.clone()?, "less"),
+            Relation::LessOrEqual => (self.ordered.clone()?, "lessOrEqual"),
+            Relation::Greater => (self.ordered.clone()?, "greater"),
+            Relation::GreaterOrEqual => (self.ordered.clone()?, "greaterOrEqual"),
+            Relation::Equal | Relation::NotEqual => (self.equatable.clone()?, "equal"),
+        };
+        let call = ContractCall {
+            interface,
+            member: member.to_owned(),
+            receiver: like.receiver.clone(),
+            arguments: Vec::new(),
+            choices: NamedTypes::empty(),
+            member_arguments: Vec::new(),
+        };
+        Some(terms.intern(Data::Call(
+            Callee::Contract(Box::new(call)),
+            vec![left, right],
+        )))
+    }
+
+    /// The `Equatable.equal` call over `left` and `right` at `receiver`.
+    pub(crate) fn equality(
+        &self,
+        terms: &mut Terms,
+        receiver: &Type,
+        left: Term,
+        right: Term,
+    ) -> Option<Term> {
+        let call = ContractCall {
+            interface: self.equatable.clone()?,
+            member: "equal".to_owned(),
+            receiver: receiver.clone(),
+            arguments: Vec::new(),
+            choices: NamedTypes::empty(),
+            member_arguments: Vec::new(),
+        };
+        Some(terms.intern(Data::Call(
+            Callee::Contract(Box::new(call)),
+            vec![left, right],
+        )))
+    }
+}
+
+/// Whether `ty` is one of the eight sized integer types.
+pub(crate) const fn sized_integer(ty: &Type) -> bool {
+    matches!(
+        ty,
+        Type::I8
+            | Type::I16
+            | Type::I32
+            | Type::I64
+            | Type::U8
+            | Type::U16
+            | Type::U32
+            | Type::U64
+    )
+}
+
+/// The integer a constant of a sized integer type holds.
+const fn integer(value: &Value) -> Option<i128> {
+    Some(match value {
+        Value::I8(value) => *value as i128,
+        Value::I16(value) => *value as i128,
+        Value::I32(value) => *value as i128,
+        Value::I64(value) => *value as i128,
+        Value::U8(value) => *value as i128,
+        Value::U16(value) => *value as i128,
+        Value::U32(value) => *value as i128,
+        Value::U64(value) => *value as i128,
+        _ => return None,
+    })
+}
+
+/// Whether `value` is the `Bool` value `true` (`Some(true)`) or `false`.
+pub(crate) fn truth(value: &Value) -> Option<bool> {
+    match value {
+        Value::Variant { case, fields } if fields.is_empty() => match case.as_str() {
+            "true" => Some(true),
+            "false" => Some(false),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// What the slots of one activation stand for while terms are built.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct Env {
+    /// The activation.
+    pub(crate) activation: usize,
+    /// Whether a slot nothing binds is that slot of the activation; when it
+    /// is not, it is an opaque value.
+    pub(crate) open: bool,
+    slots: BTreeMap<usize, (Term, bool)>,
+    undo: Vec<(usize, Option<(Term, bool)>)>,
+    rewrites: Vec<(Term, Term)>,
+}
+
+/// A point of an [`Env`] and a [`FactSet`] to go back to.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Mark {
+    undo: usize,
+    rewrites: usize,
+    facts: usize,
+}
+
+impl Env {
+    /// The slots of the activation `activation`, open or not.
+    pub(crate) fn new(activation: usize, open: bool) -> Self {
+        Self {
+            activation,
+            open,
+            ..Self::default()
+        }
+    }
+
+    /// Binds `slot` to `term`; `alias` when the binding is an immutable
+    /// `let` alias, which rule 4 substitutes.
+    pub(crate) fn bind(&mut self, slot: usize, term: Term, alias: bool) {
+        let old = self.slots.insert(slot, (term, alias));
+        self.undo.push((slot, old));
+    }
+
+    /// Rewrites `from` as the constant `to`: a literal equality.
+    pub(crate) fn rewrite(&mut self, from: Term, to: Term) {
+        self.rewrites.push((from, to));
+    }
+
+    /// The point to go back to, with `facts`.
+    pub(crate) fn mark(&self, facts: &FactSet) -> Mark {
+        Mark {
+            undo: self.undo.len(),
+            rewrites: self.rewrites.len(),
+            facts: facts.facts.len(),
+        }
+    }
+
+    /// Goes back to `mark`.
+    pub(crate) fn restore(&mut self, facts: &mut FactSet, mark: Mark) {
+        while self.undo.len() > mark.undo {
+            if let Some((slot, old)) = self.undo.pop() {
+                match old {
+                    Some(old) => {
+                        self.slots.insert(slot, old);
+                    }
+                    None => {
+                        self.slots.remove(&slot);
+                    }
+                }
+            }
+        }
+        self.rewrites.truncate(mark.rewrites);
+        facts.facts.truncate(mark.facts);
+    }
+
+    fn rewritten(&self, term: Term) -> Option<Term> {
+        self.rewrites
+            .iter()
+            .rev()
+            .find(|(from, _)| *from == term)
+            .map(|(_, to)| *to)
+    }
+}
+
+/// The parts a pattern binds over a subject: each sub-pattern and the term
+/// it matches.
+pub(crate) fn pattern_parts<'p>(
+    terms: &mut Terms,
+    pattern: &'p Pattern,
+    subject: Term,
+) -> Vec<(&'p Pattern, Term)> {
+    let mut parts = Vec::new();
+    let mut pending = vec![(pattern, subject)];
+    while let Some((pattern, term)) = pending.pop() {
+        parts.push((pattern, term));
+        match pattern {
+            Pattern::Wrapper(inner) => {
+                let repr = terms.intern(Data::Repr(term));
+                pending.push((inner, repr));
+            }
+            Pattern::Record(fields) => {
+                for (name, inner) in fields {
+                    let field = terms.intern(Data::Field(term, name.clone()));
+                    pending.push((inner, field));
+                }
+            }
+            Pattern::Tuple(items) => {
+                for (at, inner) in items.iter().enumerate() {
+                    let item = terms.intern(Data::Item(term, at));
+                    pending.push((inner, item));
+                }
+            }
+            Pattern::Case { case, fields } => {
+                for (name, inner) in fields {
+                    let field =
+                        terms.intern(Data::CaseField(term, case.clone(), name.clone()));
+                    pending.push((inner, field));
+                }
+            }
+            Pattern::List(items) => {
+                for inner in items {
+                    let element = terms.opaque();
+                    pending.push((inner, element));
+                }
+            }
+            Pattern::Discard | Pattern::Bind(_) | Pattern::Literal(_) => {}
+        }
+    }
+    parts
+}
+
+/// Whether `pattern` matches every value of its subject's shape without a
+/// test: only bindings, discards, and wrappers, records, and tuples of them.
+fn destructures(pattern: &Pattern) -> bool {
+    let mut pending = vec![pattern];
+    while let Some(pattern) = pending.pop() {
+        match pattern {
+            Pattern::Discard | Pattern::Bind(_) => {}
+            Pattern::Wrapper(inner) => pending.push(inner),
+            Pattern::Record(fields) => pending.extend(fields.iter().map(|(_, p)| p)),
+            Pattern::Tuple(items) => pending.extend(items.iter()),
+            Pattern::Literal(_) | Pattern::Case { .. } | Pattern::List(_) => {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+enum Build<'n> {
+    Visit(&'n Node),
+    Make(&'n Node),
+    Bind(Option<usize>),
+    Pattern(&'n Pattern),
+    Mark,
+    Restore,
+}
+
+/// Builds the term of `node` under `env`, and whether a `let` alias or a
+/// literal equality was substituted on the way (rule 4). A slot nothing
+/// binds is the activation's own when `env` is open, and opaque otherwise.
+pub(crate) fn build(
+    terms: &mut Terms,
+    vocabulary: &Vocabulary<'_>,
+    env: &mut Env,
+    node: &Node,
+) -> (Term, bool) {
+    let mut substituted = false;
+    let mut stack: Vec<Term> = Vec::new();
+    let mut marks: Vec<usize> = Vec::new();
+    let mut pending = vec![Build::Visit(node)];
+    while let Some(step) = pending.pop() {
+        match step {
+            Build::Visit(node) => match &node.expr {
+                Expr::Return(inner) | Expr::WidenAtom(inner) => {
+                    pending.push(Build::Visit(inner));
+                }
+                Expr::Sequence(nodes) => match nodes.last() {
+                    Some(last) => pending.push(Build::Visit(last)),
+                    None => stack.push(terms.opaque()),
+                },
+                Expr::Let { slot, value, body } => {
+                    pending.push(Build::Restore);
+                    pending.push(Build::Visit(body));
+                    pending.push(Build::Bind(*slot));
+                    pending.push(Build::Visit(value));
+                    pending.push(Build::Mark);
+                }
+                Expr::Match { subject, arms, .. } => match arms.as_slice() {
+                    [arm] if destructures(&arm.pattern) => {
+                        pending.push(Build::Restore);
+                        pending.push(Build::Visit(&arm.body));
+                        pending.push(Build::Pattern(&arm.pattern));
+                        pending.push(Build::Visit(subject));
+                        pending.push(Build::Mark);
+                    }
+                    _ => stack.push(terms.opaque()),
+                },
+                Expr::Call {
+                    target: CallTarget::Direct { .. } | CallTarget::Contract(_),
+                    arguments,
+                }
+                | Expr::TailCall {
+                    target: CallTarget::Direct { .. } | CallTarget::Contract(_),
+                    arguments,
+                } => {
+                    pending.push(Build::Make(node));
+                    let children = arguments
+                        .positional
+                        .iter()
+                        .chain(arguments.labelled.iter().map(|(_, node)| node));
+                    let children = children.collect::<Vec<_>>();
+                    pending.extend(children.into_iter().rev().map(Build::Visit));
+                }
+                Expr::Intrinsic { arguments, .. } => {
+                    pending.push(Build::Make(node));
+                    pending.extend(arguments.iter().rev().map(Build::Visit));
+                }
+                Expr::Construct { construction, .. } => {
+                    let children: Vec<&Node> = match construction {
+                        Construction::Tuple(nodes) | Construction::List(nodes) => {
+                            nodes.iter().collect()
+                        }
+                        Construction::Record(fields)
+                        | Construction::Case { fields, .. } => {
+                            fields.iter().map(|(_, node)| node).collect()
+                        }
+                        Construction::Wrapper(inner) => vec![&**inner],
+                        Construction::Dict(_) => {
+                            stack.push(terms.opaque());
+                            continue;
+                        }
+                    };
+                    pending.push(Build::Make(node));
+                    pending.extend(children.into_iter().rev().map(Build::Visit));
+                }
+                Expr::Field { record, .. } => {
+                    pending.push(Build::Make(node));
+                    pending.push(Build::Visit(record));
+                }
+                Expr::Literal(_) | Expr::Global(_) | Expr::Variable { .. } => {
+                    pending.push(Build::Make(node));
+                }
+                _ => stack.push(terms.opaque()),
+            },
+            Build::Make(node) => {
+                let term =
+                    make(terms, vocabulary, env, node, &mut stack, &mut substituted);
+                let term = match env.rewritten(term) {
+                    Some(constant) => {
+                        substituted = true;
+                        constant
+                    }
+                    None => term,
+                };
+                stack.push(term);
+            }
+            Build::Bind(slot) => {
+                let value = stack.pop().unwrap_or_else(|| terms.opaque());
+                if let Some(slot) = slot {
+                    env.bind(slot, value, true);
+                }
+            }
+            Build::Pattern(pattern) => {
+                let subject = stack.pop().unwrap_or_else(|| terms.opaque());
+                for (part, term) in pattern_parts(terms, pattern, subject) {
+                    if let Pattern::Bind(slot) = part {
+                        env.bind(*slot, term, false);
+                    }
+                }
+            }
+            Build::Mark => marks.push(env.undo.len()),
+            Build::Restore => {
+                let mark = marks.pop().unwrap_or_default();
+                while env.undo.len() > mark {
+                    if let Some((slot, old)) = env.undo.pop() {
+                        match old {
+                            Some(old) => {
+                                env.slots.insert(slot, old);
+                            }
+                            None => {
+                                env.slots.remove(&slot);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    let term = stack.pop().unwrap_or_else(|| terms.opaque());
+    (term, substituted)
+}
+
+/// The term of `node`, whose operands' terms are the last ones on `stack`.
+fn make(
+    terms: &mut Terms,
+    vocabulary: &Vocabulary<'_>,
+    env: &Env,
+    node: &Node,
+    stack: &mut Vec<Term>,
+    substituted: &mut bool,
+) -> Term {
+    let take = |count: usize, stack: &mut Vec<Term>| {
+        let start = stack.len().saturating_sub(count);
+        stack.split_off(start)
+    };
+    match &node.expr {
+        Expr::Literal(constant) => terms.intern(Data::Constant(constant.clone())),
+        Expr::Global(global) => match vocabulary.globals.get(global) {
+            Some(constant) => terms.intern(Data::Constant(constant.clone())),
+            None => terms.opaque(),
+        },
+        Expr::Variable { slot, value_type } => match env.slots.get(slot) {
+            Some((term, alias)) => {
+                *substituted |= *alias;
+                *term
+            }
+            None if env.open => {
+                let term = terms.intern(Data::Slot(env.activation, *slot));
+                terms.slot_types.insert(term, value_type.clone());
+                term
+            }
+            None => terms.opaque(),
+        },
+        Expr::Call { target, arguments } | Expr::TailCall { target, arguments } => {
+            let count = arguments.positional.len() + arguments.labelled.len();
+            let mut operands = take(count, stack);
+            let callee = match target {
+                CallTarget::Direct {
+                    function,
+                    type_arguments,
+                } => {
+                    // A label not written holds the callee's default.
+                    let defaults = vocabulary.defaults.get(function);
+                    for (at, (label, written)) in arguments.labelled.iter().enumerate()
+                    {
+                        if !matches!(written.expr, Expr::Default(_)) {
+                            continue;
+                        }
+                        let default = defaults
+                            .and_then(|defaults| {
+                                defaults.iter().find(|(name, _)| name == label)
+                            })
+                            .map(|(_, constant)| constant.clone());
+                        if let (Some(default), Some(slot)) =
+                            (default, operands.get_mut(arguments.positional.len() + at))
+                        {
+                            *slot = terms.intern(Data::Constant(default));
+                        }
+                    }
+                    Callee::Function(*function, type_arguments.clone())
+                }
+                CallTarget::Contract(call) => Callee::Contract(call.clone()),
+                CallTarget::Value(_) => return terms.opaque(),
+            };
+            terms.intern(Data::Call(callee, operands))
+        }
+        Expr::Intrinsic {
+            intrinsic,
+            type_arguments,
+            arguments,
+        } => {
+            let operands = take(arguments.len(), stack);
+            terms.intern(Data::Call(
+                Callee::Intrinsic(format!("{intrinsic:?}{type_arguments:?}")),
+                operands,
+            ))
+        }
+        Expr::Construct {
+            value_type,
+            construction,
+        } => {
+            let (shape, count) = match construction {
+                Construction::Tuple(nodes) | Construction::List(nodes) => {
+                    (Vec::new(), nodes.len())
+                }
+                Construction::Record(fields) => (
+                    fields.iter().map(|(name, _)| name.clone()).collect(),
+                    fields.len(),
+                ),
+                Construction::Case { case, fields } => {
+                    let mut shape = vec![format!("case:{case}")];
+                    shape.extend(fields.iter().map(|(name, _)| name.clone()));
+                    (shape, fields.len())
+                }
+                Construction::Wrapper(_) => (vec!["wrapper".to_owned()], 1),
+                Construction::Dict(_) => return terms.opaque(),
+            };
+            let operands = take(count, stack);
+            if let Some(constant) =
+                folded(terms, vocabulary, value_type, construction, &operands)
+            {
+                return terms.intern(Data::Constant(constant));
+            }
+            terms.intern(Data::Construct(value_type.clone(), shape, operands))
+        }
+        Expr::Field { field, .. } => {
+            let record = take(1, stack)
+                .into_iter()
+                .next()
+                .unwrap_or_else(|| terms.opaque());
+            terms.intern(Data::Field(record, field.clone()))
+        }
+        _ => terms.opaque(),
+    }
+}
+
+/// The constant a construction of constants is, when its type states no
+/// invariant.
+fn folded(
+    terms: &Terms,
+    vocabulary: &Vocabulary<'_>,
+    value_type: &Type,
+    construction: &Construction,
+    operands: &[Term],
+) -> Option<Constant> {
+    if let Type::Declared(id, _) = value_type
+        && vocabulary.invariant_types.contains(id)
+    {
+        return None;
+    }
+    let values = operands
+        .iter()
+        .map(|term| {
+            terms
+                .constant(*term)
+                .map(|constant| constant.value().clone())
+        })
+        .collect::<Option<Vec<_>>>()?;
+    let names = |fields: &[(String, Node)]| {
+        fields
+            .iter()
+            .map(|(name, _)| name.clone())
+            .zip(values.iter().cloned())
+            .collect::<Vec<_>>()
+    };
+    let value = match construction {
+        Construction::Tuple(_) => Value::Tuple(values.clone()),
+        Construction::List(_) => Value::List(values.clone()),
+        Construction::Record(fields) => Value::Record(names(fields)),
+        Construction::Case { case, fields } => Value::Variant {
+            case: case.clone(),
+            fields: names(fields),
+        },
+        Construction::Wrapper(_) => Value::Wrapper(Box::new(values.first()?.clone())),
+        Construction::Dict(_) => return None,
+    };
+    Constant::new(value_type.clone(), value).ok()
+}
+
+/// One fact: a `Bool` term known to be `true` or `false`.
+#[derive(Clone, Debug)]
+struct Fact {
+    term: Term,
+    holds: bool,
+    evidence: Evidence,
+}
+
+/// The facts that hold at one program point.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct FactSet {
+    facts: Vec<Fact>,
+}
+
+impl FactSet {
+    /// Assumes that `term` is `holds`, by `evidence`, with what the Boolean
+    /// structure of rule 5 projects from it and the relations `inRange`
+    /// stands for.
+    pub(crate) fn assume(
+        &mut self,
+        terms: &mut Terms,
+        vocabulary: &Vocabulary<'_>,
+        term: Term,
+        holds: bool,
+        evidence: Evidence,
+    ) {
+        let mut pending = vec![(term, holds, evidence)];
+        while let Some((term, holds, evidence)) = pending.pop() {
+            if self
+                .facts
+                .iter()
+                .any(|fact| fact.term == term && fact.holds == holds)
+            {
+                continue;
+            }
+            self.facts.push(Fact {
+                term,
+                holds,
+                evidence: evidence.clone(),
+            });
+            if let Some((connective, operands)) = vocabulary.connective(terms, term) {
+                let projected = evidence.clone().with(BOOLEAN);
+                match (connective, holds, operands.as_slice()) {
+                    (Connective::Not, _, [operand]) => {
+                        pending.push((*operand, !holds, projected));
+                    }
+                    (Connective::And, true, [left, right])
+                    | (Connective::Or, false, [left, right]) => {
+                        pending.push((*right, holds, projected.clone()));
+                        pending.push((*left, holds, projected));
+                    }
+                    _ => {}
+                }
+                continue;
+            }
+            if let Some((None, call, operands)) = vocabulary.comparison(terms, term)
+                && holds
+                && let [value, low, high] = operands.as_slice()
+            {
+                let read = evidence.clone().with(INTEGER);
+                let below = vocabulary.relation_term(
+                    terms,
+                    &call,
+                    Relation::LessOrEqual,
+                    *low,
+                    *value,
+                );
+                let above = vocabulary.relation_term(
+                    terms,
+                    &call,
+                    Relation::LessOrEqual,
+                    *value,
+                    *high,
+                );
+                for relation in [above, below].into_iter().flatten() {
+                    pending.push((relation, true, read.clone()));
+                }
+            }
+        }
+    }
+
+    /// The evidence that `term` is `holds`, when it is a fact.
+    pub(crate) fn lookup(&self, term: Term, holds: bool) -> Option<&Evidence> {
+        self.facts
+            .iter()
+            .find(|fact| fact.term == term && fact.holds == holds)
+            .map(|fact| &fact.evidence)
+    }
+}
+
+/// How many relations one saturation derives at most.
+const RELATIONS: usize = 4096;
+
+/// The relations over values of the integer type of `like` that the facts
+/// and the constants among `extra` give, closed under `INT-1` to `INT-8`.
+fn relations(
+    terms: &Terms,
+    vocabulary: &Vocabulary<'_>,
+    facts: &FactSet,
+    like: &ContractCall,
+    extra: &[Term],
+) -> HashMap<(Relation, Term, Term), Evidence> {
+    let mut known: HashMap<(Relation, Term, Term), Evidence> = HashMap::new();
+    let mut order: Vec<(Relation, Term, Term)> = Vec::new();
+    let add = |known: &mut HashMap<(Relation, Term, Term), Evidence>,
+               order: &mut Vec<(Relation, Term, Term)>,
+               key: (Relation, Term, Term),
+               evidence: Evidence| {
+        if known.len() < RELATIONS && !known.contains_key(&key) {
+            known.insert(key, evidence);
+            order.push(key);
+            true
+        } else {
+            false
+        }
+    };
+    let mut constants = BTreeSet::new();
+    for fact in &facts.facts {
+        let Some((Some(relation), call, operands)) =
+            vocabulary.comparison(terms, fact.term)
+        else {
+            continue;
+        };
+        if call.receiver != like.receiver {
+            continue;
+        }
+        let [left, right] = operands.as_slice() else {
+            continue;
+        };
+        let (relation, evidence) = if fact.holds {
+            (relation, fact.evidence.clone())
+        } else if relation == Relation::Equal {
+            (Relation::NotEqual, fact.evidence.clone())
+        } else {
+            (relation.negation(), fact.evidence.clone().with(INTEGER))
+        };
+        add(&mut known, &mut order, (relation, *left, *right), evidence);
+        constants.extend([*left, *right]);
+    }
+    constants.extend(extra.iter().copied());
+    // INT-8: two integer constants compare by evaluation.
+    let constants = constants
+        .into_iter()
+        .filter_map(|term| {
+            let constant = terms.constant(term)?;
+            (constant.value_type() == &like.receiver)
+                .then(|| integer(constant.value()))
+                .flatten()
+                .map(|value| (term, value))
+        })
+        .collect::<Vec<_>>();
+    for (left, a) in &constants {
+        for (right, b) in &constants {
+            if left == right {
+                continue;
+            }
+            let evidence = Evidence::of(INTEGER).with(Rule::Int(8));
+            let holds = [
+                (Relation::Less, a < b),
+                (Relation::LessOrEqual, a <= b),
+                (Relation::Greater, a > b),
+                (Relation::GreaterOrEqual, a >= b),
+                (Relation::Equal, a == b),
+                (Relation::NotEqual, a != b),
+            ];
+            for (relation, holds) in holds {
+                if holds {
+                    add(
+                        &mut known,
+                        &mut order,
+                        (relation, *left, *right),
+                        evidence.clone(),
+                    );
+                }
+            }
+        }
+    }
+    loop {
+        let mut grew = false;
+        let snapshot = order.clone();
+        let derive = |premises: &[&(Relation, Term, Term)], fact: u8| {
+            premises
+                .iter()
+                .fold(Evidence::default(), |evidence, premise| {
+                    evidence.and(known.get(premise).unwrap_or(&Evidence::default()))
+                })
+                .with(INTEGER)
+                .with(Rule::Int(fact))
+        };
+        let mut found: Vec<((Relation, Term, Term), Evidence)> = Vec::new();
+        for first in &snapshot {
+            let (relation, x, y) = *first;
+            let single: &[(Relation, Term, Term)] = match relation {
+                Relation::Less => &[
+                    (Relation::NotEqual, x, y),
+                    (Relation::LessOrEqual, x, y),
+                    (Relation::Greater, y, x),
+                ],
+                Relation::Greater => &[
+                    (Relation::NotEqual, x, y),
+                    (Relation::GreaterOrEqual, x, y),
+                    (Relation::Less, y, x),
+                ],
+                Relation::Equal => &[
+                    (Relation::Equal, y, x),
+                    (Relation::LessOrEqual, x, y),
+                    (Relation::GreaterOrEqual, x, y),
+                ],
+                _ => &[],
+            };
+            let fact = match relation {
+                Relation::Less => 1,
+                Relation::Greater => 2,
+                _ => 3,
+            };
+            for key in single {
+                found.push((*key, derive(&[first], fact)));
+            }
+            // `x ≥ y` is `y ≤ x` and `x > y` is `y < x`: the defining
+            // relations read in either direction.
+            let converse = match relation {
+                Relation::Less => Some(Relation::Greater),
+                Relation::Greater => Some(Relation::Less),
+                Relation::LessOrEqual => Some(Relation::GreaterOrEqual),
+                Relation::GreaterOrEqual => Some(Relation::LessOrEqual),
+                Relation::Equal | Relation::NotEqual => None,
+            };
+            if let Some(converse) = converse {
+                let evidence =
+                    known.get(first).cloned().unwrap_or_default().with(INTEGER);
+                found.push(((converse, y, x), evidence));
+            }
+            for second in &snapshot {
+                let (other, y2, z) = *second;
+                if relation == Relation::LessOrEqual
+                    && other == Relation::LessOrEqual
+                    && y2 == y
+                    && z == x
+                {
+                    // INT-4: x ≤ y and y ≤ x.
+                    found.push(((Relation::Equal, x, y), derive(&[first, second], 4)));
+                }
+                if relation == Relation::LessOrEqual
+                    && other == Relation::NotEqual
+                    && y2 == x
+                    && z == y
+                {
+                    found.push(((Relation::Less, x, y), derive(&[first, second], 5)));
+                }
+                if y2 != y {
+                    continue;
+                }
+                match (relation, other) {
+                    (Relation::Less, Relation::LessOrEqual)
+                    | (Relation::LessOrEqual, Relation::Less) => {
+                        found.push((
+                            (Relation::Less, x, z),
+                            derive(&[first, second], 6),
+                        ));
+                    }
+                    (Relation::LessOrEqual, Relation::LessOrEqual) => {
+                        found.push((
+                            (Relation::LessOrEqual, x, z),
+                            derive(&[first, second], 7),
+                        ));
+                    }
+                    _ => {}
+                }
+            }
+        }
+        for (key, evidence) in found {
+            grew |= add(&mut known, &mut order, key, evidence);
+        }
+        if !grew {
+            break;
+        }
+    }
+    known
+}
+
+/// Decides a comparison goal by the integer facts: the evidence that the
+/// comparison `term` is `holds`.
+fn compare(
+    terms: &Terms,
+    vocabulary: &Vocabulary<'_>,
+    facts: &FactSet,
+    term: Term,
+    holds: bool,
+) -> Option<Evidence> {
+    let (relation, call, operands) = vocabulary.comparison(terms, term)?;
+    let known = relations(terms, vocabulary, facts, &call, &operands);
+    let found = |relation: Relation, left: Term, right: Term| {
+        known.get(&(relation, left, right)).cloned()
+    };
+    match (relation, operands.as_slice()) {
+        (Some(relation), [left, right]) => {
+            let wanted = if holds { relation } else { relation.negation() };
+            let evidence = found(wanted, *left, *right)?;
+            Some(if holds || relation == Relation::Equal {
+                evidence
+            } else {
+                evidence.with(INTEGER)
+            })
+        }
+        (None, [value, low, high]) => {
+            if holds {
+                let below = found(Relation::LessOrEqual, *low, *value)?;
+                let above = found(Relation::LessOrEqual, *value, *high)?;
+                Some(below.and(&above).with(INTEGER))
+            } else {
+                found(Relation::Greater, *low, *value)
+                    .or_else(|| found(Relation::Greater, *value, *high))
+                    .map(|evidence| evidence.with(INTEGER))
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Reads a call of a certified function whose body takes its value apart
+/// by a `match` on one parameter whose case a fact or the argument fixes:
+/// the `Bool` the selected arm returns, with its evidence.
+fn read_through(
+    terms: &mut Terms,
+    vocabulary: &Vocabulary<'_>,
+    facts: &FactSet,
+    term: Term,
+) -> Option<(bool, Evidence)> {
+    let Some(Data::Call(Callee::Function(function, _), operands)) = terms.get(term)
+    else {
+        return None;
+    };
+    let operands = operands.clone();
+    let readable = vocabulary.certified.get(function)?;
+    let mut body = readable.body;
+    loop {
+        match &body.expr {
+            Expr::Return(inner) => body = inner,
+            Expr::Sequence(nodes) if nodes.len() == 1 => body = nodes.first()?,
+            _ => break,
+        }
+    }
+    let Expr::Match { subject, arms, .. } = &body.expr else {
+        return None;
+    };
+    let Expr::Variable { slot, .. } = subject.expr else {
+        return None;
+    };
+    let argument = *operands.get(slot)?;
+    let (case, evidence) = match terms.case_of(argument) {
+        Some(case) => (case.to_owned(), Evidence::default()),
+        None => {
+            let (case, evidence) =
+                facts
+                    .facts
+                    .iter()
+                    .find_map(|fact| match terms.get(fact.term) {
+                        Some(Data::IsCase(of, case))
+                            if *of == argument && fact.holds =>
+                        {
+                            Some((case.clone(), fact.evidence.clone()))
+                        }
+                        _ => None,
+                    })?;
+            (case, evidence)
+        }
+    };
+    let arm = arms.iter().find(|arm| match &arm.pattern {
+        Pattern::Discard | Pattern::Bind(_) => true,
+        Pattern::Case {
+            case: written,
+            fields,
+        } => {
+            *written == case
+                && fields
+                    .iter()
+                    .all(|(_, p)| matches!(p, Pattern::Discard | Pattern::Bind(_)))
+        }
+        _ => false,
+    })?;
+    let mut value = &arm.body;
+    loop {
+        match &value.expr {
+            Expr::Return(inner) => value = inner,
+            Expr::Sequence(nodes) if nodes.len() == 1 => value = nodes.first()?,
+            _ => break,
+        }
+    }
+    let truth = match &value.expr {
+        Expr::Literal(constant) => truth(constant.value())?,
+        Expr::Global(global) => truth(vocabulary.globals.get(global)?.value())?,
+        _ => return None,
+    };
+    Some((truth, evidence.reading(&readable.identity)))
+}
+
+/// The evidence that the `Bool` term `goal` is `true` under `facts`, by the
+/// facts themselves, the Boolean structure of rule 5, the integer facts of
+/// rule 6, and the case facts of rule 3.
+pub(crate) fn prove(
+    terms: &mut Terms,
+    vocabulary: &Vocabulary<'_>,
+    facts: &FactSet,
+    goal: Term,
+) -> Option<Evidence> {
+    // Each term's evidence of being `true` and of being `false`.
+    let mut decided: HashMap<Term, (Option<Evidence>, Option<Evidence>)> =
+        HashMap::new();
+    let mut pending = vec![(goal, false)];
+    while let Some((term, expanded)) = pending.pop() {
+        if decided.contains_key(&term) {
+            continue;
+        }
+        let structure = vocabulary.connective(terms, term);
+        if let (Some((_, operands)), false) = (&structure, expanded) {
+            pending.push((term, true));
+            for operand in operands.iter().rev() {
+                pending.push((*operand, false));
+            }
+            continue;
+        }
+        let direct = (
+            facts.lookup(term, true).cloned(),
+            facts.lookup(term, false).cloned(),
+        );
+        let derived = match structure {
+            Some((connective, operands)) => {
+                let side = |operand: Option<&Term>, holds: bool| {
+                    operand.and_then(|operand| {
+                        let (yes, no) = decided.get(operand)?;
+                        if holds { yes.clone() } else { no.clone() }
+                    })
+                };
+                let both = |left: Option<Evidence>, right: Option<Evidence>| {
+                    Some(left?.and(&right?).with(BOOLEAN))
+                };
+                let either = |left: Option<Evidence>, right: Option<Evidence>| {
+                    left.or(right).map(|evidence| evidence.with(BOOLEAN))
+                };
+                let (a, b) = (operands.first(), operands.get(1));
+                match connective {
+                    Connective::Not => (
+                        side(a, false).map(|evidence| evidence.with(BOOLEAN)),
+                        side(a, true).map(|evidence| evidence.with(BOOLEAN)),
+                    ),
+                    Connective::And => (
+                        both(side(a, true), side(b, true)),
+                        either(side(a, false), side(b, false)),
+                    ),
+                    Connective::Or => (
+                        either(side(a, true), side(b, true)),
+                        both(side(a, false), side(b, false)),
+                    ),
+                    Connective::Xor => (
+                        either(
+                            both(side(a, true), side(b, false)),
+                            both(side(a, false), side(b, true)),
+                        ),
+                        either(
+                            both(side(a, true), side(b, true)),
+                            both(side(a, false), side(b, false)),
+                        ),
+                    ),
+                }
+            }
+            None => leaf(terms, vocabulary, facts, term),
+        };
+        decided.insert(term, (direct.0.or(derived.0), direct.1.or(derived.1)));
+    }
+    decided.remove(&goal).and_then(|(yes, _)| yes)
+}
+
+/// What decides a term with no Boolean structure: its constant, the integer
+/// facts, or a read through a certified function under a case fact.
+fn leaf(
+    terms: &mut Terms,
+    vocabulary: &Vocabulary<'_>,
+    facts: &FactSet,
+    term: Term,
+) -> (Option<Evidence>, Option<Evidence>) {
+    if let Some(holds) = terms
+        .constant(term)
+        .and_then(|constant| truth(constant.value()))
+    {
+        let evidence = Some(Evidence::of(CONSTANTS));
+        return if holds {
+            (evidence, None)
+        } else {
+            (None, evidence)
+        };
+    }
+    let mut yes = compare(terms, vocabulary, facts, term, true);
+    let mut no = compare(terms, vocabulary, facts, term, false);
+    if yes.is_none()
+        && no.is_none()
+        && let Some((holds, evidence)) = read_through(terms, vocabulary, facts, term)
+    {
+        if holds {
+            yes = Some(evidence);
+        } else {
+            no = Some(evidence);
+        }
+    }
+    (yes, no)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rules(evidence: &Evidence) -> Vec<String> {
+        evidence.identifiers()
+    }
+
+    #[test]
+    fn identifiers_put_the_integer_facts_after_guard_6() {
+        let evidence = Evidence::of(BRANCH)
+            .with(Rule::Int(1))
+            .with(INTEGER)
+            .with(BOOLEAN)
+            .with(Rule::Int(6));
+        assert_eq!(
+            rules(&evidence),
+            vec!["GUARD-3", "GUARD-6", "INT-1", "INT-6", "GUARD-5"]
+        );
+    }
+
+    #[test]
+    fn a_term_is_stored_once_and_a_part_of_a_construction_is_its_operand() {
+        let mut terms = Terms::default();
+        let x = terms.intern(Data::Slot(0, 0));
+        let again = terms.intern(Data::Slot(0, 0));
+        assert_eq!(x, again);
+        let wrapped = terms.intern(Data::Construct(
+            Type::I32,
+            vec!["wrapper".to_owned()],
+            vec![x],
+        ));
+        assert_eq!(terms.intern(Data::Repr(wrapped)), x);
+        let record = terms.intern(Data::Construct(
+            Type::I32,
+            vec!["a".to_owned(), "b".to_owned()],
+            vec![x, wrapped],
+        ));
+        assert_eq!(terms.intern(Data::Field(record, "b".to_owned())), wrapped);
+        assert_ne!(terms.opaque(), terms.opaque());
+    }
+}

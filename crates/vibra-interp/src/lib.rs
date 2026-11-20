@@ -64,6 +64,30 @@ pub struct Limits {
     pub memory: MemoryBudget,
 }
 
+/// A published limit profile: its name and the limits of one compile-time
+/// evaluation under it.
+///
+/// `docs/spec/05-tooling.md`, "Limits".
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LimitProfile {
+    /// The profile's name, as a report names it.
+    pub name: &'static str,
+    /// The limits of one compile-time evaluation.
+    pub compile_time: Limits,
+}
+
+impl LimitProfile {
+    /// `m1Default`: 10,000,000 reductions for one compile-time evaluation,
+    /// with the default memory budget.
+    pub const M1_DEFAULT: Self = Self {
+        name: "m1Default",
+        compile_time: Limits {
+            reductions: 10_000_000,
+            memory: MemoryBudget::DEFAULT,
+        },
+    };
+}
+
 /// The limit an [`evaluate`] reached.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Limit {

@@ -8,6 +8,7 @@ use super::{check_source, interpret};
 mod bodies;
 mod callables;
 mod contracts;
+mod discharge;
 mod interfaces;
 mod testing;
 
