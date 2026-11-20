@@ -154,6 +154,90 @@ fn a_default_is_a_constant_expression() {
     assert_eq!(run(source).as_deref(), Ok(value("i32", "3i32").as_str()));
 }
 
+/// A dict of constants is a constant expression: its default holds its
+/// entries in canonical key order, and a later duplicate key replaces the
+/// earlier value (`docs/spec/02-type-system.md`, "Constant expressions and
+/// constant patterns", "Dict keys, equality, and order").
+#[test]
+fn a_dict_is_a_labelled_default() {
+    let entries = |keys: &str, pairs: &str| {
+        format!(
+            "{{format: @value.v2 typeInfo: {{kind: @list arguments: [{{kind: @tuple \
+             arguments: [{keys} @i32]}}]}} value: {{kind: @list values: [{pairs}]}}}}"
+        )
+    };
+    let source = "fn main returns r: List({{I32 Atom} I32}) do return Iter.collect(t()) endfn\n\
+                  fn t labelled {d: Dict({I32 Atom} I32) be \
+                  [{2i32 @b}: 1i32 {1i32 @z}: 2i32 {2i32 @a}: 3i32 {2i32 @b}: 4i32]} \
+                  returns r: Dict({I32 Atom} I32) do return d endfn\n";
+    let key = "{kind: @tuple values: [";
+    let expected = entries(
+        "{kind: @tuple arguments: [@i32 @atom]}",
+        &format!(
+            "{{kind: @tuple values: [{key}1i32 @z]}} 2i32]}} \
+             {{kind: @tuple values: [{key}2i32 @a]}} 3i32]}} \
+             {{kind: @tuple values: [{key}2i32 @b]}} 4i32]}}"
+        ),
+    );
+    assert_eq!(run(source).as_deref(), Ok(expected.as_str()));
+    let source = "fn main returns r: List({Bool I32}) do return Iter.collect(t()) endfn\n\
+                  fn t labelled {d: Dict(Bool I32) be [true: 1i32 false: 2i32]} \
+                  returns r: Dict(Bool I32) do return d endfn\n";
+    let bool_type = "{kind: @declared path: @std.bool.Bool seed: \
+                     \"sha256:4268661a9b49c6b0bb8e217b87210f192a927e613ae076c3286270365f3334c7\" \
+                     arguments: []}";
+    let case =
+        |name: &str| format!("{{kind: @enum typeInfo: {bool_type} variant: @{name}}}");
+    let expected = entries(
+        bool_type,
+        &format!(
+            "{{kind: @tuple values: [{} 2i32]}} {{kind: @tuple values: [{} 1i32]}}",
+            case("false"),
+            case("true")
+        ),
+    );
+    assert_eq!(run(source).as_deref(), Ok(expected.as_str()));
+    // A written argument replaces the default, and a lookup finds by key.
+    let source = "fn main returns r: I32 do return I32.add(get() get(d: [@x: 9i32])) endfn\n\
+                  fn get labelled {d: Dict(Atom I32) be [@y: 1i32 @x: 2i32 @y: 3i32]} \
+                  returns r: I32 do return match d(@x) case Option.some(value: v) v \
+                  case Option.none() 0i32 endmatch endfn\n";
+    assert_eq!(run(source).as_deref(), Ok(value("i32", "11i32").as_str()));
+}
+
+#[test]
+fn a_dict_default_holds_only_constants() {
+    let source = "fn main returns r: U64 do return List.length(Dict.entries(t())) endfn\n\
+                  fn k returns r: U8 do return 1u8 endfn\n\
+                  fn t labelled {d: Dict(U8 U8) be [k(): 1u8]} \
+                  returns r: Dict(U8 U8) do return d endfn\n";
+    assert_eq!(
+        faults(source),
+        [(DiagnosticCode::TypeNotConstant, at(source, "[k(): 1u8]", 0))]
+    );
+}
+
+/// A declared key type is ordered by its own `Ordered` implementation, which
+/// only an evaluation applies; the checker does not run it to fold a default.
+#[test]
+fn a_dict_default_keyed_by_its_own_order_is_unavailable() {
+    let source = "type Key of U8 impl Ordered fn compare takes {left: Self right: Self} \
+                  returns order: Ordering do let Key(l) be left endlet \
+                  let Key(r) be right endlet return Ordered.compare(r l) endfn endimpl endtype\n\
+                  fn main returns r: U64 do return List.length(Dict.entries(t())) endfn\n\
+                  fn t labelled {d: Dict(Key U8) be [Key(1u8): 1u8 Key(2u8): 2u8]} \
+                  returns r: Dict(Key U8) do return d endfn\n";
+    let result = check_source(SOURCE, source);
+    assert!(result.only_unavailable(), "{:#?}", result.diagnostics());
+    assert_eq!(
+        faults(source),
+        [(
+            DiagnosticCode::ToolUnavailable,
+            at(source, "[Key(1u8): 1u8 Key(2u8): 2u8]", 0)
+        )]
+    );
+}
+
 #[test]
 fn a_fn_type_has_its_labels() {
     let source = format!(

@@ -410,6 +410,7 @@ fn skip_faulty_stdlib(program: &mut Program<'_>, pass: &Pass) {
 /// constant when that one is, so the values are folded in rounds until no
 /// more are found.
 fn constants(
+    program: &Program<'_>,
     provisional: &Layout,
     first: &Pass,
     layout: &Layout,
@@ -428,7 +429,7 @@ fn constants(
             if let Some(value) = checked
                 .node
                 .as_ref()
-                .and_then(|node| fold(node, &known).ok())
+                .and_then(|node| fold(node, &known, &|id| program.library_of(id)).ok())
             {
                 known.insert(global, value);
                 grew = true;
@@ -458,7 +459,7 @@ pub(crate) fn check_program(
     let first = check_bodies(&program, documents, &provisional);
     skip_faulty_stdlib(&mut program, &first);
     let mut layout = layout(&program);
-    layout.constants = constants(&provisional, &first, &layout);
+    layout.constants = constants(&program, &provisional, &first, &layout);
     layout.constants_known = true;
     drop(first);
     let pass = check_bodies(&program, documents, &layout);

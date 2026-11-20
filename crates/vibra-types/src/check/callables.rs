@@ -3,9 +3,10 @@
 //!
 //! `docs/spec/02-type-system.md`, "Constant expressions and constant
 //! patterns": a labelled default is a constant expression, a literal, an
-//! atom, `void`, a construction, tuple, record, or list of constants, or the
-//! name of a module value whose initializer is one; a function call never is.
-//! [`fold`] reads the value of such an expression from its checked node.
+//! atom, `void`, a construction, tuple, record, list, or dict of constants,
+//! or the name of a module value whose initializer is one; a function call
+//! never is. [`fold`] reads the value of such an expression from its checked
+//! node, a dict's entries in canonical key order.
 //!
 //! "Generics": a generic anonymous callable bound by `let` stays generic, and
 //! anywhere else it is instantiated from its written expected type. The
@@ -21,11 +22,13 @@
 //! Every walk here uses an explicit work list, so no host stack grows with
 //! the depth of the program.
 
+use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use vibra_ir::{
-    CallTarget, Construction, Expr as IrExpr, NamedTypes, Node, Type, Value,
+    CallTarget, Construction, Expr as IrExpr, Library, NamedTypes, Node, Type, TypeId,
+    Value,
 };
 
 /// Why a default has no constant value.
@@ -33,8 +36,8 @@ use vibra_ir::{
 pub(crate) enum NotConstant {
     /// The expression is not a constant expression.
     Expression,
-    /// It is one, but holds a dict, whose canonical key order this checker
-    /// does not compute.
+    /// It is one, but holds a dict whose key type is ordered by its own
+    /// `Ordered` implementation, which only an evaluation can apply.
     Dict,
     /// It names a module value whose constant is not known yet.
     Pending,
@@ -42,16 +45,19 @@ pub(crate) enum NotConstant {
 
 enum Fold<'n> {
     Visit(&'n Node),
-    /// Builds the value of a construction from the values of its operands,
-    /// the last ones on the value stack.
-    Build(&'n Construction),
+    /// Builds the value of a construction of the given type from the values
+    /// of its operands, the last ones on the value stack.
+    Build(&'n Construction, &'n Type),
 }
 
 /// The value of the constant expression `node` lowers, reading a module
 /// value through `constants`, the constant of each global index known so far.
+/// `library` names the library type an identity plays, which fixes the key
+/// order of a dict.
 pub(crate) fn fold(
     node: &Node,
     constants: &BTreeMap<usize, Value>,
+    library: &dyn Fn(&TypeId) -> Option<Library>,
 ) -> Result<Value, NotConstant> {
     let mut pending = vec![Fold::Visit(node)];
     let mut values: Vec<Value> = Vec::new();
@@ -64,8 +70,11 @@ pub(crate) fn fold(
                     Some(value) => values.push(value.clone()),
                     None => return Err(NotConstant::Pending),
                 },
-                IrExpr::Construct { construction, .. } => {
-                    pending.push(Fold::Build(construction));
+                IrExpr::Construct {
+                    construction,
+                    value_type,
+                } => {
+                    pending.push(Fold::Build(construction, value_type));
                     let operands: Vec<&Node> = match construction {
                         Construction::Tuple(nodes) | Construction::List(nodes) => {
                             nodes.iter().collect()
@@ -75,13 +84,16 @@ pub(crate) fn fold(
                             fields.iter().map(|(_, node)| node).collect()
                         }
                         Construction::Wrapper(inner) => vec![&**inner],
-                        Construction::Dict(_) => return Err(NotConstant::Dict),
+                        Construction::Dict(entries) => entries
+                            .iter()
+                            .flat_map(|(key, value)| [key, value])
+                            .collect(),
                     };
                     pending.extend(operands.into_iter().rev().map(Fold::Visit));
                 }
                 _ => return Err(NotConstant::Expression),
             },
-            Fold::Build(construction) => {
+            Fold::Build(construction, value_type) => {
                 let count = match construction {
                     Construction::Tuple(nodes) | Construction::List(nodes) => {
                         nodes.len()
@@ -89,7 +101,7 @@ pub(crate) fn fold(
                     Construction::Record(fields)
                     | Construction::Case { fields, .. } => fields.len(),
                     Construction::Wrapper(_) => 1,
-                    Construction::Dict(_) => return Err(NotConstant::Dict),
+                    Construction::Dict(entries) => entries.len() * 2,
                 };
                 let start = values
                     .len()
@@ -116,12 +128,144 @@ pub(crate) fn fold(
                     Construction::Wrapper(_) => Value::Wrapper(Box::new(
                         operands.into_iter().next().ok_or(NotConstant::Expression)?,
                     )),
-                    Construction::Dict(_) => return Err(NotConstant::Dict),
+                    Construction::Dict(_) => {
+                        let key = dict_key(value_type, library)
+                            .ok_or(NotConstant::Expression)?;
+                        Value::Dict(dict_entries(operands, key, library)?)
+                    }
                 });
             }
         }
     }
     values.pop().ok_or(NotConstant::Expression)
+}
+
+/// The key type of `ty`, a `Dict(K V)`.
+fn dict_key<'t>(
+    ty: &'t Type,
+    library: &dyn Fn(&TypeId) -> Option<Library>,
+) -> Option<&'t Type> {
+    match ty {
+        Type::Declared(id, arguments) if library(id) == Some(Library::Dict) => {
+            match arguments.as_slice() {
+                [key, _] => Some(key),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+/// The entries of a dict literal whose keys and values, in written order,
+/// are `operands`, in canonical key order (`docs/spec/02-type-system.md`,
+/// "Dict keys, equality, and order"): each key is placed by binary search,
+/// and a later duplicate key replaces the earlier value and keeps its place,
+/// as the evaluation of the literal does.
+pub(crate) fn dict_entries(
+    operands: Vec<Value>,
+    key: &Type,
+    library: &dyn Fn(&TypeId) -> Option<Library>,
+) -> Result<Vec<(Value, Value)>, NotConstant> {
+    let mut entries: Vec<(Value, Value)> = Vec::new();
+    let mut operands = operands.into_iter();
+    while let (Some(entry_key), Some(entry_value)) = (operands.next(), operands.next())
+    {
+        let (mut low, mut high) = (0, entries.len());
+        let mut found = None;
+        while low < high {
+            let middle = low + (high - low) / 2;
+            let probe = entries.get(middle).map(|(probe, _)| probe);
+            let order = match probe {
+                Some(probe) => canonical_order(&entry_key, probe, key, library)?,
+                None => return Err(NotConstant::Expression),
+            };
+            match order {
+                Ordering::Less => high = middle,
+                Ordering::Greater => low = middle + 1,
+                Ordering::Equal => {
+                    found = Some(middle);
+                    break;
+                }
+            }
+        }
+        match found.and_then(|at| entries.get_mut(at)) {
+            Some(entry) => entry.1 = entry_value,
+            None => entries.insert(low, (entry_key, entry_value)),
+        }
+    }
+    Ok(entries)
+}
+
+/// The canonical order of two constant keys of type `key`: `false` before
+/// `true`, numeric order for integers, scalar value for `Char`, by scalar
+/// for `Str`, by byte for `Bytes`, by the UTF-8 bytes of the spelling for
+/// atoms, and component-wise for tuples and, in canonical field order,
+/// records. A key type ordered by its own `Ordered` implementation is
+/// [`NotConstant::Dict`].
+fn canonical_order(
+    left: &Value,
+    right: &Value,
+    key: &Type,
+    library: &dyn Fn(&TypeId) -> Option<Library>,
+) -> Result<Ordering, NotConstant> {
+    let mut pending = vec![(left, right, key)];
+    while let Some((left, right, key)) = pending.pop() {
+        let order = match (left, right, key) {
+            (Value::I8(l), Value::I8(r), _) => l.cmp(r),
+            (Value::I16(l), Value::I16(r), _) => l.cmp(r),
+            (Value::I32(l), Value::I32(r), _) => l.cmp(r),
+            (Value::I64(l), Value::I64(r), _) => l.cmp(r),
+            (Value::U8(l), Value::U8(r), _) => l.cmp(r),
+            (Value::U16(l), Value::U16(r), _) => l.cmp(r),
+            (Value::U32(l), Value::U32(r), _) => l.cmp(r),
+            (Value::U64(l), Value::U64(r), _) => l.cmp(r),
+            (Value::Char(l), Value::Char(r), _) => l.cmp(r),
+            (Value::Atom(l), Value::Atom(r), _) => l.as_bytes().cmp(r.as_bytes()),
+            // UTF-8 byte order is scalar order.
+            (Value::Str(l), Value::Str(r), _) => l.as_bytes().cmp(r.as_bytes()),
+            (Value::Bytes(l), Value::Bytes(r), _) => l.cmp(r),
+            (
+                Value::Variant { case: l, .. },
+                Value::Variant { case: r, .. },
+                Type::Declared(id, _),
+            ) if library(id) == Some(Library::Bool) => {
+                (l == "true").cmp(&(r == "true"))
+            }
+            (Value::Tuple(l), Value::Tuple(r), Type::Tuple(types))
+                if l.len() == types.len() && r.len() == types.len() =>
+            {
+                // The first component is compared first: pushed last.
+                for ((l, r), ty) in l.iter().zip(r).zip(types).rev() {
+                    pending.push((l, r, ty));
+                }
+                continue;
+            }
+            (Value::Record(l), Value::Record(r), Type::Record(fields)) => {
+                let mut components = Vec::new();
+                for (name, ty) in fields.entries() {
+                    match (field(l, name), field(r, name)) {
+                        (Some(l), Some(r)) => components.push((l, r, ty)),
+                        _ => return Err(NotConstant::Expression),
+                    }
+                }
+                pending.extend(components.into_iter().rev());
+                continue;
+            }
+            (_, _, Type::Declared(..)) => return Err(NotConstant::Dict),
+            _ => return Err(NotConstant::Expression),
+        };
+        if order != Ordering::Equal {
+            return Ok(order);
+        }
+    }
+    Ok(Ordering::Equal)
+}
+
+/// The value of the field `name` among `fields`.
+fn field<'v>(fields: &'v [(String, Value)], name: &str) -> Option<&'v Value> {
+    fields
+        .iter()
+        .find_map(|(field, value)| (field == name).then_some(value))
 }
 
 /// `named` with every type replaced by `go`.

@@ -1,0 +1,12 @@
+id = "V2-SRC-CALLS-default-dict"
+rule = "V2-SRC-CALLS-default-dict"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#constant-expressions-and-constant-patterns: a dict of constants is a labelled default, held in canonical key order, and a later duplicate key replaces the earlier value"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

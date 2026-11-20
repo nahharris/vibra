@@ -1076,7 +1076,9 @@ a binder into a value match. Coverage treats a constant pattern as its
 expanded value.
 
 Labelled defaults are constant expressions. Two defaults are the same when
-they denote the same value.
+they denote the same value. The value of a constant dict is the value its
+literal evaluates to: its entries in canonical key order, where a later
+duplicate key replaces the earlier value.
 
 ### `try`
 

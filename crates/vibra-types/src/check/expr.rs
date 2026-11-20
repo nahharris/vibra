@@ -819,7 +819,8 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             }
             None => None,
         }?;
-        match fold(&node, &self.layout.constants) {
+        let program = self.program;
+        match fold(&node, &self.layout.constants, &|id| program.library_of(id)) {
             Ok(value) => {
                 if let Ok(constant) = Constant::new(ty.clone(), value) {
                     Some(constant)
@@ -829,7 +830,10 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                 }
             }
             Err(NotConstant::Dict) => {
-                self.unavailable(span, "a dict as a labelled default");
+                self.unavailable(
+                    span,
+                    "a dict default keyed by a type ordered by its own implementation",
+                );
                 None
             }
             Err(NotConstant::Pending) if !self.layout.constants_known => None,
@@ -838,8 +842,8 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                     DiagnosticCode::TypeNotConstant,
                     span,
                     "a labelled default must be a constant expression: a literal, an \
-                     atom, `void`, a construction, tuple, record, or list of constants, \
-                     or the name of a constant module value",
+                     atom, `void`, a construction, tuple, record, list, or dict of \
+                     constants, or the name of a constant module value",
                 );
                 None
             }
