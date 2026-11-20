@@ -683,10 +683,15 @@ fn v9_a_call_through_a_closure_value_binds_its_defaults() {
 /// Runs `body` as an entry of result type `value_type` and gives where its
 /// trap was written.
 fn trap_start_of(value_type: Type, body: Node) -> usize {
+    trap_start_among(Vec::new(), value_type, body)
+}
+
+/// [`trap_start_of`] in a set that also declares `types`.
+fn trap_start_among(types: Vec<TypeDefinition>, value_type: Type, body: Node) -> usize {
     let set = set_with(
         vec![function("main", signature(Vec::new(), value_type), body, 0)],
         Vec::new(),
-        Vec::new(),
+        types,
     );
     let error = run(&program(set, BASE), MemoryBudget::DEFAULT).unwrap_err();
     let vibra_interp::RuntimeError::Trap { origin, trap, .. } = error else {
@@ -745,4 +750,53 @@ fn products_evaluate_operands_in_written_order() {
     };
     assert_eq!(trap_start_of(table.clone(), entries(true)), 2);
     assert_eq!(trap_start_of(table.clone(), entries(false)), 3);
+}
+
+/// The operands of a declared record, a declared tuple, and a case run in
+/// written order, whatever the declaration order of the fields: `b` is
+/// declared after `a` and written before it. Of two operands that both
+/// trap, the first written traps.
+#[test]
+fn declared_constructions_evaluate_operands_in_written_order() {
+    let declared = |name: &str, body: TypeBody| {
+        TypeDefinition::new(
+            id(&format!("test.order.{name}")),
+            Vec::new(),
+            body,
+            None,
+            Visibility::Public,
+        )
+        .unwrap()
+    };
+    let fields = vec![("a".to_owned(), Type::I32), ("b".to_owned(), Type::I32)];
+    let types = vec![
+        declared("Pair", TypeBody::Record(fields.clone())),
+        declared("Duo", TypeBody::Tuple(vec![Type::I32, Type::I32])),
+        declared(
+            "Choice",
+            TypeBody::Variant(vec![vibra_ir::Case::new("both", fields)]),
+        ),
+    ];
+    let of = |name: &str| Type::Declared(id(&format!("test.order.{name}")), Vec::new());
+    let written = || {
+        vec![
+            ("b".to_owned(), trapping(2, int(2))),
+            ("a".to_owned(), trapping(3, int(1))),
+        ]
+    };
+    let pair = construct(of("Pair"), Construction::Record(written()));
+    assert_eq!(trap_start_among(types.clone(), of("Pair"), pair), 2);
+    let duo = construct(
+        of("Duo"),
+        Construction::Tuple(vec![trapping(2, int(1)), trapping(3, int(2))]),
+    );
+    assert_eq!(trap_start_among(types.clone(), of("Duo"), duo), 2);
+    let choice = construct(
+        of("Choice"),
+        Construction::Case {
+            case: "both".to_owned(),
+            fields: written(),
+        },
+    );
+    assert_eq!(trap_start_among(types, of("Choice"), choice), 2);
 }

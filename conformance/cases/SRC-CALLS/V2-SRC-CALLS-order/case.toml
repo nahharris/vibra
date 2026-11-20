@@ -2,7 +2,7 @@ id = "V2-SRC-CALLS-order"
 rule = "V2-SRC-CALLS-order"
 profile = "interpreterV2"
 operation = "interpret"
-description = "06-runtime.md#evaluation: tuple operands are evaluated in written order"
+description = "06-runtime.md#evaluation: each tuple operand lands in its own slot; V2-SRC-CALLS-order-observed shows the order the operands run in"
 
 [inputs]
 source = "main.vib"

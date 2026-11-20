@@ -509,3 +509,4 @@ V2-TYPE-GENERIC-expanding-interface-value	active	02-type-system.md#generics
 V2-TYPE-INTERFACE-expected-positional	active	02-type-system.md#dispatch
 V2-TYPE-INTERFACE-expected-positional-none	active	02-type-system.md#dispatch
 V2-TYPE-INTERFACE-expected-positional-destination	active	02-type-system.md#dispatch
+V2-SRC-CALLS-order-observed	active	06-runtime.md#evaluation

@@ -2,7 +2,7 @@ id = "V2-SRC-CALLS-evaluation-order"
 rule = "V2-SRC-CALLS-evaluation-order"
 profile = "interpreterV2"
 operation = "interpret"
-description = "06-runtime.md#evaluation: record operands are evaluated in written order; the value lists the fields canonically"
+description = "06-runtime.md#evaluation: record operands written out of name order land in their own fields, and the value lists the fields canonically; V2-SRC-CALLS-order-observed shows the order the operands run in"
 
 [inputs]
 source = "main.vib"

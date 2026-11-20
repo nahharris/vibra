@@ -1,0 +1,12 @@
+type Pair of {a: Void b: Void}
+  visibility @public
+endtype
+
+type Duo of {Void Void}
+  visibility @public
+endtype
+
+type Choice
+  case both {a: Void b: Void}
+  visibility @public
+endtype
