@@ -1,10 +1,12 @@
-//! Interfaces and implementations: overlap is decided per module, and the
-//! integer types carry their comparisons and conversions.
+//! Interfaces and implementations: overlap is decided per module, the
+//! integer types carry their comparisons and conversions, an implementation
+//! is bounded only as its enclosing declaration is, and a `proc` member is
+//! outside this checker.
 
 use vibra_diagnostics::{ByteSpan, DiagnosticCode};
 use vibra_resolve::{PackageId, ResolveInput, SourceModule, SourceUnit, UnitKind};
 
-use super::faults;
+use super::{at, faults};
 use crate::check::check_workspace;
 use crate::stdlib::load_stdlib;
 
@@ -216,4 +218,90 @@ fn every_integer_and_char_is_equatable_and_ordered() {
     }
     let found = faults(&source);
     assert!(found.is_empty(), "{found:?}");
+}
+
+#[test]
+fn an_implementation_is_bounded_only_as_its_enclosing_type() {
+    // An `impl` has no `given`: a parameter of a generic type has no bound
+    // inside its implementation, so a member it lacks is refuted there.
+    let source = "type Box(T) of {item: T} impl Equatable \
+                  fn equal takes {left: Self right: Self} returns r: Bool \
+                  do return Equatable.equal(left.item right.item) endfn endimpl endtype\n";
+    assert_eq!(
+        faults(source),
+        vec![(
+            DiagnosticCode::TypeUnsatisfiedBound,
+            at(source, "left.item", 0)
+        )]
+    );
+    let source = "type Box(T) of {item: T} impl Equatable \
+                  fn equal takes {left: Self right: Self} returns r: Bool \
+                  do return Bool.true() endfn endimpl endtype\n\
+                  fn f returns r: Bool do return Equatable.equal(Box(item: 1u8) Box(item: 2u8)) \
+                  endfn\n";
+    assert_eq!(faults(source), Vec::new());
+    // The bound an implementation needs is written on its type, and a type
+    // with a bounded parameter is outside this checker.
+    let source = "type Box(T) of {item: T} given {T: Equatable} impl Equatable \
+                  fn equal takes {left: Self right: Self} returns r: Bool \
+                  do return Equatable.equal(left.item right.item) endfn endimpl endtype\n";
+    let codes = faults(source)
+        .into_iter()
+        .map(|(code, _)| code)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        codes,
+        vec![
+            DiagnosticCode::ToolUnavailable,
+            DiagnosticCode::ToolUnavailable
+        ]
+    );
+}
+
+#[test]
+fn a_proc_member_is_unavailable_wherever_it_is_written() {
+    // A `proc` builds a plan when applied, so checking it as a `fn` would
+    // run its body; it is unavailable as a member of a type, an interface,
+    // or an implementation, whatever the member it supplies.
+    let log = "interface Log proc append takes {log: Self entry: Str} returns r: U8 \
+               endproc endinterface\n";
+    let pick =
+        "interface Pick fn pick takes {x: Self} returns r: U8 endfn endinterface\n";
+    for (source, member) in [
+        (
+            "type Box of U8 proc run takes {b: Self} returns r: U8 do return 1u8 endproc \
+             endtype\n"
+                .to_owned(),
+            "proc run",
+        ),
+        (
+            format!(
+                "{log}type Mem of U8 impl Log proc append takes {{log: Self entry: Str}} \
+                 returns r: U8 do return 1u8 endproc endimpl endtype\n"
+            ),
+            "proc append",
+        ),
+        (
+            format!(
+                "{log}type Mem of U8 impl Log fn append takes {{log: Self entry: Str}} \
+                 returns r: U8 do return 1u8 endfn endimpl endtype\n"
+            ),
+            "proc append",
+        ),
+        (
+            format!(
+                "{pick}type Box of U8 impl Pick proc pick takes {{x: Self}} returns r: U8 \
+                 do return 1u8 endproc endimpl endtype\n"
+            ),
+            "proc pick",
+        ),
+    ] {
+        let found = faults(&source);
+        assert_eq!(found.len(), 1, "{source}\n{found:?}");
+        assert!(
+            found.iter().all(|(code, span)| *code == DiagnosticCode::ToolUnavailable
+                && span.start() == at(&source, member, 0).start()),
+            "{source}\n{found:?}"
+        );
+    }
 }

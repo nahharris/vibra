@@ -698,12 +698,6 @@ fn sequences(out: &mut Vec<Vector>) {
                 pair(),
                 Outcome::Value(Value::bool(first == second)),
             );
-            push(
-                out,
-                C::StrCompare,
-                pair(),
-                Outcome::Order(order(first.chars().cmp(second.chars()))),
-            );
         }
     }
     for first in BYTE_STRINGS {
@@ -743,12 +737,6 @@ fn sequences(out: &mut Vec<Vector>) {
                 C::BytesEqual,
                 pair(),
                 Outcome::Value(Value::bool(first == second)),
-            );
-            push(
-                out,
-                C::BytesCompare,
-                pair(),
-                Outcome::Order(order(first.cmp(second))),
             );
         }
     }

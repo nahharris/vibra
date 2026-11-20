@@ -269,7 +269,7 @@ Resolution reads only the captured source graph.
 | Condition | Code and primary span |
 | --- | --- |
 | an argument that does not fit its slot, a wrong arity, an unknown, duplicate, or missing label; a constructor pattern of the wrong shape; an argument for a `Self` parameter outside the receiver slot that does not have the receiver's type, or that is supplied through an interface value | `@type.argumentMismatch`, the argument, the application, or the pattern |
-| a wrong type-argument count, an unknown or repeated label, a label in an `impl` target, or an interface value type with an open associated type | `@type.typeArgumentMismatch`, the label or the type application |
+| a wrong type-argument count, an unknown or repeated label, a label repeated in the inputs of a `Fn` or `Proc` type, a label in an `impl` target, or an interface value type with an open associated type | `@type.typeArgumentMismatch`, the label or the type application |
 | application of a value that is not applicable | `@type.notApplicable`, the callee |
 | a field read of a value without that field | `@type.unknownRecordField`, the field name |
 | a literal that does not fit its type | `@type.numericOutOfRange`, the literal |
@@ -291,7 +291,7 @@ Resolution reads only the captured source graph.
 | a destination-dispatched call with no written expected type | `@type.ambiguousDestination`, the application |
 | `From` and `TryFrom` sources of one receiver that unify | `@type.redundantConversion`, the later `impl` head, related to the earlier |
 | a receiver or destination with no implementation for the selected key; a call on a type parameter of a member its bound does not give; a label-bound parameter that fails its own bound | `@type.unsatisfiedBound`, the operand or the expected type, related to the interface or bound |
-| an implementation member whose signature differs from the contract; a widening whose label differs from the implementation's choice; a label-bound parameter fixed to two types; a deferred associated equality or a complete result that disagrees after selection; a destination-dispatched call whose expected type has no position for `Self` or gives `Self` two types, at the application | `@type.mismatch`, the differing type or expression |
+| a declared type or case named in value position without being applied, whatever is expected there; an implementation member whose signature differs from the contract; a widening whose label differs from the implementation's choice; a label-bound parameter fixed to two types; a deferred associated equality or a complete result that disagrees after selection; a destination-dispatched call whose expected type has no position for `Self` or gives `Self` two types, at the application | `@type.mismatch`, the differing type or expression |
 
 ### Binding, return and pattern diagnostics
 
@@ -318,7 +318,7 @@ Every row is an error with no automatic fix.
 | coverage the checker cannot decide for this type | `@pattern.unsupportedCoverage`, the `match` |
 | an arm that is repeated, already covered, or uninhabited | `@pattern.unreachableArm`, the arm's pattern |
 | a type argument the call does not determine, including one still undetermined when no bound is resolvable | `@type.ambiguousInference`, the application |
-| a type argument that does not meet its bound | `@type.unsatisfiedBound`, the actual type, related to the bound |
+| a type argument that does not meet its bound, written, inferred, or an `impl` target's argument; an argument of an interface at a call that does not meet its parameter's bound | `@type.unsatisfiedBound`, the actual type as written, or the operand or expected type that fixes it, related to the bound |
 | an `impl` for `Never` or for an anonymous type | `@name.wrongEntityKind`, the `impl` |
 
 - An explicit `return` in tail position is the normal spelling and is never

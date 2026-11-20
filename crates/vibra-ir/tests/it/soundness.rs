@@ -969,3 +969,108 @@ fn v11_deep_values_patterns_trees_and_types_are_handled_on_a_small_stack() {
     assert!(same);
     assert!(formatted);
 }
+
+// -- Defaults of a generic function -----------------------------------------
+
+/// `pad(T)` with the labelled parameter `tail: List(T)` whose default is
+/// `default`.
+fn padded(default: Constant) -> Result<Arc<CheckedModuleSet>, IrError> {
+    let record = SignatureRecord::new(
+        vec![Binder::new("T", None).unwrap()],
+        Type::function(FnType {
+            parameters: Vec::new(),
+            labels: named(vec![("tail", Type::list(Type::Binder(0)))]),
+            result: Type::I32,
+        }),
+    )
+    .unwrap();
+    let mut pad = function("pad", record, int(1), 1);
+    pad.defaults = vec![("tail".to_owned(), default)];
+    let mut parts = library_parts();
+    parts.functions.push(pad);
+    CheckedModuleSet::try_new(parts)
+}
+
+/// A constant is closed: a default whose label's type mentions a binder has
+/// that type with every binder `Never`, and no other.
+#[test]
+fn a_generic_default_is_closed_at_never() {
+    let empty =
+        |element: Type| Constant::new(Type::list(element), Value::List(Vec::new()));
+    assert!(padded(empty(Type::Never).unwrap()).is_ok());
+    assert!(matches!(
+        padded(empty(Type::I32).unwrap()),
+        Err(IrError::TypeMismatch { .. })
+    ));
+    assert!(empty(Type::Binder(0)).is_err());
+}
+
+/// `dict.fromList` keys its dict as a literal does: a closed key without
+/// `Ordered` is rejected, and an atom, which is ordered structurally, keys
+/// it.
+#[test]
+fn a_dict_built_from_a_list_needs_an_ordered_key() {
+    let build = |key: Type| {
+        let entry = Type::Tuple(vec![key.clone(), Type::I32]);
+        let body = node(Expr::Intrinsic {
+            intrinsic: CompilerIntrinsic::DictFromList,
+            type_arguments: vec![key.clone(), Type::I32],
+            arguments: vec![literal(Type::list(entry), Value::List(Vec::new()))],
+        });
+        let result = library_type(Library::Dict, vec![key, Type::I32]);
+        let mut parts = library_parts();
+        parts
+            .functions
+            .push(function("build", signature(Vec::new(), result), body, 0));
+        CheckedModuleSet::try_new(parts)
+    };
+    assert!(build(Type::Atom).is_ok());
+    assert!(matches!(build(Type::F64), Err(IrError::InvalidType(_))));
+}
+
+/// A function whose body is `dict.fromList` at its own binders keys no dict
+/// at a closed key without `Ordered`, wherever a call instantiates it.
+#[test]
+fn an_instantiation_of_a_dict_built_from_a_list_needs_an_ordered_key() {
+    let build = |key: Type| {
+        let entries = |key: Type| Type::list(Type::Tuple(vec![key, Type::Binder(1)]));
+        let generic = SignatureRecord::new(
+            vec![
+                Binder::new("K", None).unwrap(),
+                Binder::new("V", None).unwrap(),
+            ],
+            Type::function(FnType::new(
+                vec![entries(Type::Binder(0))],
+                library_type(Library::Dict, vec![Type::Binder(0), Type::Binder(1)]),
+            )),
+        )
+        .unwrap();
+        let convert = CheckedFunction::external(
+            "convert",
+            generic,
+            CompilerIntrinsic::DictFromList,
+            vec![Type::Binder(0), Type::Binder(1)],
+            origin(),
+        );
+        let entry = Type::Tuple(vec![key.clone(), Type::I32]);
+        let call = node(Expr::Call {
+            target: CallTarget::Direct {
+                function: 0,
+                type_arguments: vec![key.clone(), Type::I32],
+            },
+            arguments: positional(vec![literal(
+                Type::list(entry),
+                Value::List(Vec::new()),
+            )]),
+        });
+        let result = library_type(Library::Dict, vec![key, Type::I32]);
+        let mut parts = library_parts();
+        parts.functions.push(convert);
+        parts
+            .functions
+            .push(function("build", signature(Vec::new(), result), call, 0));
+        CheckedModuleSet::try_new(parts)
+    };
+    assert!(build(Type::Atom).is_ok());
+    assert!(matches!(build(Type::F64), Err(IrError::InvalidType(_))));
+}

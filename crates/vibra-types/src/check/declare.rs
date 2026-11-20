@@ -25,6 +25,7 @@
 //! it is converted; an applied type supplies exactly its head's parameters;
 //! and the key of a `Dict` implements `Ordered`.
 
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
@@ -32,9 +33,9 @@ use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 use vibra_ir::external::compiler::CompilerIntrinsic;
 use vibra_ir::{FnType, Library, NamedTypes, Type, TypeId};
 use vibra_syntax::source::{
-    Callable, Declaration, ExprForm, Given, Impl, InterfaceDecl, Module, ModuleLet,
-    Primary, SourceOptions, Suffix, Test, TypeBody, TypeDecl, TypeExpr, TypeForm,
-    Where,
+    Callable, CallableKind, Declaration, ExprForm, Given, Impl, Inputs, InterfaceDecl,
+    Module, ModuleLet, Primary, SourceOptions, Suffix, Test, TypeBody, TypeDecl,
+    TypeExpr, TypeForm, Where,
 };
 use vibra_syntax::{CstNode, Document, parse_source, parse_source_with};
 
@@ -369,6 +370,22 @@ pub(crate) struct ImplData {
     pub(crate) usable: bool,
 }
 
+/// A written application of the interface `interface` at `arguments`, in
+/// `module`: an interface type, an interface value type, a bound, or an
+/// `impl` target. Each argument MUST satisfy the bound of its interface
+/// parameter (`docs/spec/02-type-system.md`, "Generics"), which is decided
+/// once every implementation is known.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct BoundGoal {
+    pub(crate) module: usize,
+    pub(crate) interface: usize,
+    pub(crate) arguments: Vec<Type>,
+    /// Where each argument is written.
+    pub(crate) spans: Vec<ByteSpan>,
+    /// The whole application.
+    pub(crate) application: ByteSpan,
+}
+
 /// Where an `impl` is nested: in a type, or in an interface.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Host {
@@ -407,6 +424,10 @@ pub(crate) struct Program<'a> {
     pub(crate) library: Vec<(Library, Entity)>,
     /// The receiver of every written `impl Ordered`.
     pub(crate) ordered: Vec<Type>,
+    /// Every written application of a bounded interface, whose arguments
+    /// are checked against the interface's bounds once every implementation
+    /// is known.
+    pub(crate) goals: RefCell<Vec<BoundGoal>>,
     local_package: PackageName,
     embedded_package: PackageName,
 }
@@ -461,6 +482,7 @@ impl<'a> Program<'a> {
             diagnostics: Vec::new(),
             library: Vec::new(),
             ordered: Vec::new(),
+            goals: RefCell::new(Vec::new()),
             local_package: inputs.local.clone(),
             embedded_package: inputs.embedded.clone(),
         };
@@ -1086,6 +1108,9 @@ impl<'a> Program<'a> {
                 Type::record(fields).map_err(|_| NoType::Unsupported)
             }
             TypeForm::Fn { inputs, result } => {
+                if let Some(fault) = repeated_label(&inputs) {
+                    return Err(fault);
+                }
                 let parameters = inputs
                     .positional()
                     .into_iter()
@@ -1101,10 +1126,8 @@ impl<'a> Program<'a> {
                         ))
                     })
                     .collect::<Result<Vec<_>, NoType>>()?;
-                // Two inputs of one label have no rule of their own; such a
-                // type is left unsupported rather than given a meaning.
                 let labels =
-                    NamedTypes::new(labelled).map_err(|_| NoType::Unsupported)?;
+                    NamedTypes::new(labelled).map_err(|_| NoType::Unresolved)?;
                 let result = self.written_at(module, result, scope)?;
                 Ok(Type::function(FnType {
                     parameters,
@@ -1112,7 +1135,10 @@ impl<'a> Program<'a> {
                     result,
                 }))
             }
-            TypeForm::Proc { .. } | TypeForm::Intent { .. } => Err(NoType::Unsupported),
+            TypeForm::Proc { inputs, .. } => {
+                Err(repeated_label(&inputs).unwrap_or(NoType::Unsupported))
+            }
+            TypeForm::Intent { .. } => Err(NoType::Unsupported),
         }
     }
 
@@ -1463,8 +1489,10 @@ impl<'a> Program<'a> {
                 associated: &[],
             };
             let own = data.view.params().len();
-            // A guard is read with the body; a row is not supported yet.
+            // A guard is read with the body; a row and a procedure are not
+            // supported yet.
             let header = if data.view.performs().is_some()
+                || data.view.kind() == CallableKind::Proc
                 || (external.is_none() && data.view.body().is_none())
             {
                 Err(NoType::Unsupported)
@@ -1488,7 +1516,10 @@ impl<'a> Program<'a> {
             };
             let module = data.module;
             let span = data.view.construct().span();
-            let what = format!("the function `{}`", data.qualified);
+            let what = match data.view.kind() {
+                CallableKind::Proc => format!("the procedure `{}`", data.qualified),
+                CallableKind::Fn => format!("the function `{}`", data.qualified),
+            };
             match header {
                 Ok((signature, bounds)) => {
                     if let Some(data) = self.functions.get_mut(index) {
@@ -1773,6 +1804,26 @@ pub(crate) fn depth_fault(span: ByteSpan) -> NoType {
         span,
         format!("this type nests more than {} levels", Type::MAX_DEPTH),
     )))
+}
+
+/// The fault of a written `Fn` or `Proc` type whose inputs repeat a label:
+/// `@type.typeArgumentMismatch` at the second occurrence
+/// (`docs/spec/02-type-system.md`, "Callable types").
+fn repeated_label(inputs: &Inputs<'_>) -> Option<NoType> {
+    let labelled = inputs.labelled();
+    let mut seen = BTreeSet::new();
+    let (name, _) = labelled
+        .iter()
+        .find(|(name, _)| !seen.insert(name.text()))?;
+    Some(NoType::Fault(Box::new(Diagnostic::new(
+        DiagnosticCode::TypeTypeArgumentMismatch,
+        name.span(),
+        format!(
+            "the label `{}` is written twice; each label of a callable type names \
+             one input",
+            name.text()
+        ),
+    ))))
 }
 
 /// The diagnostic `code` of [`Program::key_fault`] for `key` at `span`.

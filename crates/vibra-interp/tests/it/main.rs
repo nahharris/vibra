@@ -252,12 +252,13 @@ pub fn global(name: &str, value_type: Type, initializer: Node) -> CheckedGlobal 
 }
 
 /// The parts every set starts from: the library types, `Ordered`, and its
-/// implementation for `Str` by the row `str.compare`, which is function 0.
+/// implementation for `I32` by the row `i32.compare`, which is function 0.
+/// A dict a test builds is keyed by `I32` or by a structural type.
 pub fn base_parts() -> ModuleSetParts {
     let compare = CheckedFunction::external(
         "compare",
-        signature(vec![str_type(), str_type()], ordering_type()),
-        CompilerIntrinsic::StrCompare,
+        signature(vec![Type::I32, Type::I32], ordering_type()),
+        CompilerIntrinsic::Integer(IntegerType::I32, IntegerOp::Compare),
         Vec::new(),
         origin(),
     );
@@ -266,7 +267,7 @@ pub fn base_parts() -> ModuleSetParts {
         types: library_definitions(),
         interfaces: vec![ordered_interface()],
         functions: vec![compare],
-        implementations: vec![ordered_for(str_type(), 0)],
+        implementations: vec![ordered_for(Type::I32, 0)],
         ..ModuleSetParts::default()
     }
 }

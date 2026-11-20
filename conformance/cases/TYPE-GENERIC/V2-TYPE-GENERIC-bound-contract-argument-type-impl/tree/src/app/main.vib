@@ -1,0 +1,16 @@
+interface Feed(S)
+  given {S: Ordered}
+  fn feed
+    takes {x: Self item: S}
+    returns r: U8
+  endfn
+endinterface
+
+type Plain of U8 endtype
+type Box of U8
+  impl Feed(U8)
+    fn feed takes {x: Self item: U8} returns r: U8 do return 1u8 endfn
+  endimpl
+endtype
+
+fn f returns r: U8 do return Feed.feed(Box(0u8) Plain(1u8)) endfn

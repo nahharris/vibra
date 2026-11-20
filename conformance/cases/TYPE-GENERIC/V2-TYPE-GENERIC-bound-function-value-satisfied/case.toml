@@ -1,0 +1,12 @@
+id = "V2-TYPE-GENERIC-bound-function-value-satisfied"
+rule = "V2-TYPE-GENERIC-bound-function-value-satisfied"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#functions-as-values: a generic function named as a value at type arguments that meet its bounds is accepted"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

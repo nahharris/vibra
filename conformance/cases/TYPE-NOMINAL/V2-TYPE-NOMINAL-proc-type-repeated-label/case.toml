@@ -1,0 +1,18 @@
+id = "V2-TYPE-NOMINAL-proc-type-repeated-label"
+rule = "V2-TYPE-NOMINAL-proc-type-repeated-label"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#callable-types: a label written twice in the inputs of a Proc type is @type.typeArgumentMismatch at the second"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.typeArgumentMismatch"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 35, end = 40 }

@@ -292,7 +292,9 @@ already exist, so no value contains itself.
 `Fn({A B} R)` is the type of a pure function with required positional types
 `A` and `B` and result `R`. Labelled parameters follow the positional ones in
 the input vector: `Fn({I32 verbose: Bool} Bool)`. Defaults belong to the
-function value and are not part of its type.
+function value and are not part of its type. Each label names one input: a
+label written twice in the input vector of a `Fn` or `Proc` type is
+`@type.typeArgumentMismatch` at the second.
 
 `Proc({A} R {Row})` is the type of a procedure, and `Intent(R {Row})` the
 type of a plan; the [effects chapter](03-effects.md) defines both. A row is a
@@ -423,7 +425,11 @@ selects it.
 ## Functions as values
 
 A `fn` or `proc` path in expression position is a first-class value of its
-callable type. Constructors, field reads, and lookups are not.
+callable type. Constructors, field reads, and lookups are not. A declared
+type or case named in value position without being applied is
+`@type.mismatch` at the name, whether a function value, another type, or no
+type is expected there; as an argument it does not fit its slot. An
+anonymous `fn` wraps a constructor where a function value is needed.
 
 A contract member named as a value is instantiated from its written expected
 callable type, which fixes the receiver exactly as a call's operands would;
@@ -651,7 +657,12 @@ So `impl From(I16)` in `type Cents` has the key `From`, `Cents`, `I16`, and
 one receiver may implement `From(I16)` and `From(I8)`. An implementation
 written in a generic interface covers every application of that interface
 to its receiver. A key may be open in the parameters of its enclosing
-declaration and in nothing else. A target admits no label
+declaration and in nothing else. The arguments written in a target inside a
+`type` are type arguments of the interface, so each MUST implement its
+parameter's bound, where a parameter of the enclosing type has no bound:
+`impl Feed(Plain)`, where `Feed(S)` has `given {S: Ordered}` and `Plain`
+implements no `Ordered`, is `@type.unsatisfiedBound` at `Plain`, related to
+the bound. A target admits no label
 (`@type.typeArgumentMismatch` at the label), so a key is always visibly
 positional. Two keys of the same interface whose receivers and positional
 arguments unify [overlap](#overlap): the later implementation is
@@ -827,7 +838,12 @@ selected.
    select the implementations of this interface whose key unifies with them
    without fixing a type parameter in scope. None is
    `@type.unsatisfiedBound` at the receiver operand or the expected type,
-   related to the interface. More than one, which happens only when a
+   related to the interface, unless a positional constraint fixes a
+   parameter of the interface to a type that does not implement that
+   parameter's bound: the call is then `@type.unsatisfiedBound` at the
+   operand or the expected type that fixes it, related to the bound. A
+   parameter that only the expected type fixes is checked against its bound
+   once it is fixed, like any other. More than one, which happens only when a
    positional argument is still undetermined, is
    `@type.ambiguousImplementation` at the application.
 5. **Checking.** The selected implementation's substitution, or the
@@ -1072,7 +1088,18 @@ a binder into a value match. Coverage treats a constant pattern as its
 expanded value.
 
 Labelled defaults are constant expressions. Two defaults are the same when
-they denote the same value.
+they denote the same value. The value of a constant dict is the value its
+literal evaluates to: its entries in canonical key order, where a later
+duplicate key replaces the earlier value.
+
+A default is checked at its label's type with the callable's type parameters
+in it, so a default whose type mentions a type parameter is valid exactly
+when it checks at that type for every instantiation, as `[]` at `List(T)`
+and `Option.none()` at `Option(T)` do. Such a value holds nothing of the
+parameter's type, and at each instantiation of the callable the default is
+that value at the instantiated label type. A default that holds a value
+where the parameter's type is required, such as `[1i32]` at `List(T)`, is
+`@type.mismatch` at that value.
 
 ### `try`
 

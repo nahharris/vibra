@@ -1,0 +1,19 @@
+id = "V2-TYPE-GENERIC-bound-member-value"
+rule = "V2-TYPE-GENERIC-bound-member-value"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#functions-as-values: a contract member named as a value checks its own type parameters against their bounds"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.unsatisfiedBound"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 310, end = 331 }
+related = [{ source = "src/app/main.vib", span = { start = 87, end = 94 } }]

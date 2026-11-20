@@ -336,8 +336,7 @@ pub enum CompilerIntrinsic {
     StrLength,
     /// `str.equal`.
     StrEqual,
-    /// `str.compare`.
-    StrCompare,
+
     /// `str.slice`.
     StrSlice,
     /// `str.toChars`.
@@ -354,8 +353,7 @@ pub enum CompilerIntrinsic {
     BytesConcat,
     /// `bytes.equal`.
     BytesEqual,
-    /// `bytes.compare`.
-    BytesCompare,
+
     /// `bytes.slice`.
     BytesSlice,
     /// `bytes.toList`.
@@ -364,6 +362,9 @@ pub enum CompilerIntrinsic {
     BytesFromList,
     /// `dict.entries`.
     DictEntries,
+    /// `dict.fromList`: the dict of a list of entries, in canonical key
+    /// order, where a later duplicate key replaces the earlier value.
+    DictFromList,
     /// `dict.next`: the first entry in key order and the remainder.
     DictNext,
     /// `list.length`.
@@ -597,7 +598,6 @@ impl CompilerIntrinsic {
             Self::StrConcat
             | Self::StrLength
             | Self::StrEqual
-            | Self::StrCompare
             | Self::StrSlice
             | Self::StrToChars
             | Self::StrFromChars
@@ -606,11 +606,10 @@ impl CompilerIntrinsic {
             Self::BytesLength
             | Self::BytesConcat
             | Self::BytesEqual
-            | Self::BytesCompare
             | Self::BytesSlice
             | Self::BytesToList
             | Self::BytesFromList => "bytes",
-            Self::DictEntries | Self::DictNext => "dict",
+            Self::DictEntries | Self::DictFromList | Self::DictNext => "dict",
             Self::ListLength
             | Self::ListAppend
             | Self::ListConcat
@@ -639,14 +638,13 @@ impl CompilerIntrinsic {
                 "length".to_owned()
             }
             Self::StrEqual | Self::BytesEqual | Self::AssertEqual => "equal".to_owned(),
-            Self::StrCompare | Self::BytesCompare => "compare".to_owned(),
             Self::StrSlice | Self::BytesSlice | Self::ListSlice => "slice".to_owned(),
             Self::StrToChars => "toChars".to_owned(),
             Self::StrFromChars => "fromChars".to_owned(),
             Self::StrToUtf8 => "toUtf8".to_owned(),
             Self::StrFromUtf8 => "fromUtf8".to_owned(),
             Self::BytesToList => "toList".to_owned(),
-            Self::BytesFromList => "fromList".to_owned(),
+            Self::BytesFromList | Self::DictFromList => "fromList".to_owned(),
             Self::DictEntries => "entries".to_owned(),
             Self::DictNext | Self::ListNext => "next".to_owned(),
             Self::ListAppend => "append".to_owned(),
@@ -675,7 +673,7 @@ impl CompilerIntrinsic {
     #[must_use]
     pub const fn generics(self) -> &'static [&'static str] {
         match self {
-            Self::DictEntries | Self::DictNext => &["K", "V"],
+            Self::DictEntries | Self::DictFromList | Self::DictNext => &["K", "V"],
             Self::ListFold => &["T", "A"],
             Self::ListLength
             | Self::ListAppend
@@ -750,7 +748,6 @@ impl CompilerIntrinsic {
             Self::StrConcat => (vec![str_type(), str_type()], str_type()),
             Self::StrLength => (vec![str_type()], core(Type::U64)),
             Self::StrEqual => (vec![str_type(), str_type()], boolean()),
-            Self::StrCompare => (vec![str_type(), str_type()], ordering()),
             Self::StrSlice => (
                 vec![str_type(), core(Type::U64), core(Type::U64)],
                 option(str_type()),
@@ -762,7 +759,6 @@ impl CompilerIntrinsic {
             Self::BytesLength => (vec![bytes()], core(Type::U64)),
             Self::BytesConcat => (vec![bytes(), bytes()], bytes()),
             Self::BytesEqual => (vec![bytes(), bytes()], boolean()),
-            Self::BytesCompare => (vec![bytes(), bytes()], ordering()),
             Self::BytesSlice => (
                 vec![bytes(), core(Type::U64), core(Type::U64)],
                 option(bytes()),
@@ -772,6 +768,10 @@ impl CompilerIntrinsic {
             Self::DictEntries => (
                 vec![dict()],
                 list(RowType::Tuple(vec![generic(0), generic(1)])),
+            ),
+            Self::DictFromList => (
+                vec![list(RowType::Tuple(vec![generic(0), generic(1)]))],
+                dict(),
             ),
             Self::DictNext => (
                 vec![dict()],
@@ -857,7 +857,6 @@ impl CompilerIntrinsic {
             Self::StrConcat,
             Self::StrLength,
             Self::StrEqual,
-            Self::StrCompare,
             Self::StrSlice,
             Self::StrToChars,
             Self::StrFromChars,
@@ -866,11 +865,11 @@ impl CompilerIntrinsic {
             Self::BytesLength,
             Self::BytesConcat,
             Self::BytesEqual,
-            Self::BytesCompare,
             Self::BytesSlice,
             Self::BytesToList,
             Self::BytesFromList,
             Self::DictEntries,
+            Self::DictFromList,
             Self::DictNext,
             Self::ListLength,
             Self::ListAppend,

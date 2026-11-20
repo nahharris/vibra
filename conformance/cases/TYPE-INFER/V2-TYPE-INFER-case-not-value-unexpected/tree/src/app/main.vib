@@ -1,0 +1,2 @@
+type Shape case empty case dot {x: I32} endtype
+fn f returns r: I32 do let g be Shape.dot endlet return 1i32 endfn

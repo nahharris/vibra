@@ -285,6 +285,96 @@ fn invariants(
     }
 }
 
+/// The `@type.unsatisfiedBound` of every written application of a bounded
+/// interface whose argument does not satisfy its parameter's bound: an
+/// interface type, an interface value type, a bound, and an `impl` target,
+/// the standard library's included. Each is decided where it is written,
+/// with the type parameters and bounds in scope there.
+fn written_bounds(
+    program: &Program<'_>,
+    documents: &[Document],
+    layout: &Layout,
+) -> Vec<Diagnostic> {
+    let goals = program.goals.borrow().clone();
+    let mut diagnostics: Vec<Diagnostic> = Vec::new();
+    for goal in &goals {
+        let Some(text) = documents.get(goal.module).and_then(Document::text) else {
+            continue;
+        };
+        let scope = scope_at(program, goal.module, goal.application);
+        let mut checker = BodyChecker::new(program, layout, goal.module, text);
+        checker.written_bounds(goal, scope);
+        for diagnostic in checker.diagnostics {
+            if !diagnostics.contains(&diagnostic) {
+                diagnostics.push(diagnostic);
+            }
+        }
+    }
+    diagnostics
+}
+
+/// The type parameters, bounds, `Self`, and associated names in scope at
+/// `span` of `module`: those of the innermost function, interface member,
+/// interface, or type written around it; none at module level.
+fn scope_at(program: &Program<'_>, module: usize, span: ByteSpan) -> CallableScope {
+    let inside =
+        |outer: ByteSpan| outer.start() <= span.start() && span.end() <= outer.end();
+    let function = program
+        .functions
+        .iter()
+        .filter(|data| data.module == module && inside(data.view.node().span()))
+        .min_by_key(|data| data.view.node().span().len());
+    if let Some(data) = function {
+        return CallableScope {
+            binders: data.binders.clone(),
+            bounds: data.bounds.clone(),
+            self_type: data.self_type.clone(),
+            associated: data.associated.clone(),
+            self_interface: data.contract,
+            result_span: None,
+        };
+    }
+    let interface = program
+        .interfaces
+        .iter()
+        .enumerate()
+        .find(|(_, data)| data.module == module && inside(data.view.node().span()));
+    if let Some((index, data)) = interface {
+        let member = data
+            .view
+            .members()
+            .into_iter()
+            .find(|view| inside(view.node().span()))
+            .and_then(|view| view.name())
+            .and_then(|name| data.member(name.text()));
+        let (binders, bounds) = match member {
+            Some(member) => (member.binders.clone(), member.bounds.clone()),
+            None => (data.params.clone(), data.bounds.clone()),
+        };
+        return CallableScope {
+            binders,
+            bounds,
+            self_type: Some(Type::SelfType),
+            associated: data.own_associated(),
+            self_interface: Some(index),
+            result_span: None,
+        };
+    }
+    let owner = program
+        .types
+        .iter()
+        .find(|data| data.module == module && inside(data.view.node().span()));
+    match owner {
+        Some(data) => CallableScope {
+            binders: data.params.clone(),
+            bounds: vec![None; data.params.len()],
+            self_type: data.self_type(),
+            ..CallableScope::default()
+        },
+        None => CallableScope::default(),
+    }
+}
+
 /// The diagnostics of the labelled defaults of every abstract member of an
 /// interface outside the embedded library, each checked once as a constant
 /// of its label's type with the interface's parameters and `Self` open.
@@ -653,7 +743,7 @@ fn constants(
                 .node
                 .as_ref()
                 .filter(|node| !fallible_construction(program, node))
-                .and_then(|node| fold(node, &known).ok())
+                .and_then(|node| fold(node, &known, &|id| program.library_of(id)).ok())
             {
                 known.insert(global, value);
                 grew = true;
@@ -725,6 +815,7 @@ pub(crate) fn check_program(
         };
         key(left).cmp(&key(right))
     });
+    diagnostics.extend(written_bounds(&program, documents, &layout));
     diagnostics.extend(initializer_cycles(&program, &pass.references));
     diagnostics.extend(expanding_instantiations(&program, &pass.instantiations));
     diagnostics.sort_by(|left, right| {

@@ -967,14 +967,18 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         }?;
         // A construction of a type whose `where` has an `else` is no
         // constant expression.
-        let folded = if fallible_construction(self.program, &node) {
+        let program = self.program;
+        let folded = if fallible_construction(program, &node) {
             Err(NotConstant::Expression)
         } else {
-            fold(&node, &self.layout.constants)
+            fold(&node, &self.layout.constants, &|id| program.library_of(id))
         };
         match folded {
             Ok(value) => {
-                if let Ok(constant) = Constant::new(ty.clone(), value) {
+                // The default checked at `ty`, binders included, so it holds
+                // nothing at a binder's position; the checked IR keeps a
+                // constant closed, at `ty` with every binder `Never`.
+                if let Ok(constant) = Constant::new(ty.at_never(), value) {
                     Some(constant)
                 } else {
                     self.unavailable(span, "a labelled default of an open type");
@@ -982,7 +986,10 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                 }
             }
             Err(NotConstant::Dict) => {
-                self.unavailable(span, "a dict as a labelled default");
+                self.unavailable(
+                    span,
+                    "a dict default keyed by a type ordered by its own implementation",
+                );
                 None
             }
             Err(NotConstant::Pending) if !self.layout.constants_known => None,
@@ -991,8 +998,8 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                     DiagnosticCode::TypeNotConstant,
                     span,
                     "a labelled default must be a constant expression: a literal, an \
-                     atom, `void`, a construction, tuple, record, or list of constants, \
-                     or the name of a constant module value",
+                     atom, `void`, a construction, tuple, record, list, or dict of \
+                     constants, or the name of a constant module value",
                 );
                 None
             }
@@ -1745,19 +1752,16 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                 let expected = state.ctx.expected().cloned();
                 self.generic_value(&generic, whole, expected.as_ref())
             }
-            Head::Case(..) | Head::Type(_) if is_callable(state.ctx.expected()) => {
-                self.not_a_function(whole, state.ctx.expected());
-                Out::error()
-            }
-            Head::Case(..) => {
-                self.unavailable(whole, "a constructor used as a value");
+            Head::Case(..) | Head::Type(_) => {
+                let expected = state.ctx.expected().cloned();
+                self.not_a_function(whole, expected.as_ref());
                 Out::error()
             }
             Head::Contract(interface, member) => {
                 let expected = state.ctx.expected().cloned();
                 self.contract_value(interface, &member, whole, expected.as_ref())
             }
-            Head::Type(_) | Head::Static => {
+            Head::Static => {
                 self.unavailable(whole, "a type used as a value");
                 Out::error()
             }
@@ -1766,23 +1770,25 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         Step::Done(out)
     }
 
-    /// Reports a constructor written at `span` where a function value of
-    /// `expected` is: a constructor is not a function value.
+    /// Reports a declared type or case named at `span` in value position
+    /// without being applied: a constructor is not a value, whatever is
+    /// `expected`.
     fn not_a_function(&mut self, span: ByteSpan, expected: Option<&Type>) {
         let code = if self.argument == Some(span) {
             DiagnosticCode::TypeArgumentMismatch
         } else {
             DiagnosticCode::TypeMismatch
         };
-        let expected = expected.map(ToString::to_string).unwrap_or_default();
-        self.report(
-            code,
-            span,
-            format!(
+        let message = match expected {
+            Some(expected) => format!(
                 "expected `{expected}`, found a constructor, which is not a function \
                  value; an anonymous `fn` wraps one"
             ),
-        );
+            None => "found a constructor, which is not a function value; apply it, \
+                     or wrap it in an anonymous `fn`"
+                .to_owned(),
+        };
+        self.report(code, span, message);
     }
 
     /// Starts the anonymous callable `view` written at `span`: reads its
@@ -2400,6 +2406,22 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                 if unify(&pattern, expected, &mut trial) {
                     assignment = trial;
                 }
+            }
+            // The expected type fixes the type arguments, so a breach of a
+            // bound is reported where that type is written.
+            let source = self.written_span(span).unwrap_or(span);
+            let mut resolved = vec![false; data.binders.len()];
+            let sources = vec![Some(source); data.binders.len()];
+            if !self.resolve_bounds(
+                &data.bounds,
+                data.module,
+                &mut assignment,
+                &mut resolved,
+                &sources,
+                span,
+                true,
+            ) {
+                return Out::error();
             }
             let missing = data
                 .binders
@@ -4589,11 +4611,6 @@ fn place(nodes: &mut Vec<Option<Node>>, at: usize, node: Option<Node>) {
         Some(slot) => *slot = node,
         None => nodes.push(node),
     }
-}
-
-/// Whether `expected` is a callable type.
-const fn is_callable(expected: Option<&Type>) -> bool {
-    matches!(expected, Some(Type::Fn(_)))
 }
 
 /// Matches `pattern`, in which a [`Type::Binder`] below `assignment.len()`

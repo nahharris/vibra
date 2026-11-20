@@ -1,0 +1,18 @@
+interface Has
+  type Item endtype
+  fn get
+    takes {x: Self}
+    returns r: Item
+  endfn
+endinterface
+
+type Plain of U8 endtype
+
+type Box of U8
+  impl Has
+    type Item of Plain endtype
+    fn get takes {x: Self} returns r: Plain do return Plain(1u8) endfn
+  endimpl
+endtype
+
+fn main returns r: U8 do let p: Plain be Has.get(Box(0u8)) endlet return 1u8 endfn

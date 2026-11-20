@@ -1,0 +1,19 @@
+id = "V2-TYPE-GENERIC-bound-contract-expected"
+rule = "V2-TYPE-GENERIC-bound-contract-expected"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#dispatch: an interface parameter only the expected type fixes is checked against its bound once fixed, at the expected type"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.unsatisfiedBound"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 403, end = 416 }
+related = [{ source = "src/app/main.vib", span = { start = 30, end = 37 } }]

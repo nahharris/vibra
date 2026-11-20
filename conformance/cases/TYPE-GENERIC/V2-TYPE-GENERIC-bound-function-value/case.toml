@@ -1,0 +1,19 @@
+id = "V2-TYPE-GENERIC-bound-function-value"
+rule = "V2-TYPE-GENERIC-bound-function-value"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#functions-as-values: a generic function named as a value checks the type arguments the expected type fixes against its bounds"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.unsatisfiedBound"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 249, end = 263 }
+related = [{ source = "src/app/main.vib", span = { start = 190, end = 197 } }]

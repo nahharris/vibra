@@ -478,7 +478,6 @@ fn sequence_row<'a>(intrinsic: CompilerIntrinsic, args: &[Val<'a>]) -> Option<Va
         }
         (C::StrLength, [Val(Repr::Str(a))]) => count(a.chars().count())?,
         (C::StrEqual, [Val(Repr::Str(a)), Val(Repr::Str(b))]) => Val::boolean(a == b),
-        (C::StrCompare, [Val(Repr::Str(a)), Val(Repr::Str(b))]) => ordering(a.cmp(b)),
         (C::StrSlice, [Val(Repr::Str(a)), start, end]) => {
             match range(a.chars().count(), start, end)? {
                 None => Val::none(),
@@ -514,9 +513,7 @@ fn sequence_row<'a>(intrinsic: CompilerIntrinsic, args: &[Val<'a>]) -> Option<Va
         (C::BytesEqual, [Val(Repr::Bytes(a)), Val(Repr::Bytes(b))]) => {
             Val::boolean(a == b)
         }
-        (C::BytesCompare, [Val(Repr::Bytes(a)), Val(Repr::Bytes(b))]) => {
-            ordering(a.cmp(b))
-        }
+
         (C::BytesSlice, [Val(Repr::Bytes(a)), start, end]) => {
             match range(a.len(), start, end)? {
                 None => Val::none(),

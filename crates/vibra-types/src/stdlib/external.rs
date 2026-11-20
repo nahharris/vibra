@@ -269,6 +269,7 @@ const fn conversion_destination(row: CompilerIntrinsic) -> Option<&'static str> 
         | CompilerIntrinsic::Float(_, FloatOp::ToStr) => Some("str"),
         CompilerIntrinsic::Integer(integer, IntegerOp::Parse) => Some(integer.owner()),
         CompilerIntrinsic::Float(float, FloatOp::Parse) => Some(float.owner()),
+        CompilerIntrinsic::DictFromList => Some("dict"),
         _ => None,
     }
 }

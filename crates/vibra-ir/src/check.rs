@@ -602,6 +602,7 @@ impl Checker<'_> {
             for argument in type_arguments {
                 self.check_type(argument)?;
             }
+            self.check_built_dict(intrinsic, type_arguments)?;
             if row.parameters.len() != arguments.len() {
                 return Err(IrError::ArityMismatch {
                     what: "arguments",
@@ -620,6 +621,11 @@ impl Checker<'_> {
         }
         if let Some(operand) = frame.next_operand(input)? {
             return Ok(Next::Operand(operand));
+        }
+        if intrinsic == CompilerIntrinsic::DictFromList
+            && let Some(facts) = sink.facts()
+        {
+            facts.calls.extend(ordered_targets(&self.tables));
         }
         if sink.facts().is_some() {
             let mut callees = Vec::new();

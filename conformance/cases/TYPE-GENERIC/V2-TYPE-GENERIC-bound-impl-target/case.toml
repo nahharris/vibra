@@ -1,0 +1,19 @@
+id = "V2-TYPE-GENERIC-bound-impl-target"
+rule = "V2-TYPE-GENERIC-bound-impl-target"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#implementations: an argument of an impl target that does not implement its parameter's bound is @type.unsatisfiedBound at the argument, related to the bound"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.unsatisfiedBound"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 169, end = 174 }
+related = [{ source = "src/app/main.vib", span = { start = 30, end = 37 } }]
