@@ -64,7 +64,7 @@ fn the_standard_library_checks_clean() {
             "{names:?}"
         );
     }
-    assert!(!result.notes().is_empty());
+    assert!(result.notes().is_empty(), "{:#?}", result.notes());
 }
 
 #[test]

@@ -225,7 +225,7 @@ fn a_test_reaching_an_unsupported_form_is_unavailable_and_the_others_run()
 -> Result<(), String> {
     let app = format!(
         "{MATH}\nfn viaClosure\n  takes {{}}\n  returns r: I32\n  visibility @public\n  \
-         do\n    let f be Equatable.equal endlet\n    \
+         do\n    let f: Fn({{I32 I32}} Bool) be Ordered.less endlet\n    \
          return 1i32\nendfn\n"
     );
     let tests = "use @std.assert enduse\n\nuse @app.math enduse\n\n\

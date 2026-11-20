@@ -12,18 +12,18 @@ use std::sync::Arc;
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 use vibra_ir::{
-    Binder, Case, CheckedFunction, CheckedGlobal, CheckedModuleSet, FnType,
+    Binder, Bound, Case, CheckedFunction, CheckedGlobal, CheckedModuleSet, FnType,
     FunctionBody, Implementation, ImplementationRecord, InterfaceDefinition,
     InterfaceKey, InterfaceMember, LibraryTypes, ModuleSetParts, NamedTypes,
     SignatureRecord, SourceOrigin, Type, TypeBody, TypeDefinition, Value, Visibility,
-    encode_type,
+    encode_open_type, encode_type,
 };
 use vibra_syntax::Document;
 
 use super::callables::fold;
 use super::cycle::initializer_cycles;
-use super::declare::{Entity, Program, TypeData, TypeKind};
-use super::expr::{BodyChecker, Checked, Layout, Reference, Target};
+use super::declare::{BoundData, Entity, FnData, Program, TypeKind};
+use super::expr::{BodyChecker, CallableScope, Checked, Layout, Reference, Target};
 use super::generics::{Instantiation, expanding_instantiations};
 use super::testing::{self, TestFaults};
 use super::{CheckResult, CheckedTest};
@@ -89,10 +89,14 @@ fn check_bodies(
         ) else {
             continue;
         };
-        let self_type = data
-            .owner
-            .and_then(|owner| program.types.get(owner))
-            .and_then(TypeData::self_type);
+        let scope = CallableScope {
+            binders: data.binders.clone(),
+            bounds: data.bounds.clone(),
+            self_type: data.self_type.clone(),
+            associated: data.associated.clone(),
+            self_interface: data.contract,
+            result_span: data.view.result().map(|(_, written)| written.span()),
+        };
         let mut checker = BodyChecker::new(program, layout, data.module, text);
         let patterns = data
             .view
@@ -101,14 +105,7 @@ fn check_bodies(
             .map(|(pattern, _)| pattern)
             .collect::<Vec<_>>();
         let labelled = data.view.labelled();
-        let checked = checker.callable(
-            signature,
-            &patterns,
-            &labelled,
-            &data.binders,
-            self_type,
-            body,
-        );
+        let checked = checker.callable(signature, &patterns, &labelled, scope, body);
         pass.functions.insert(index, checked);
         pass.instantiations
             .extend(checker.instantiations.drain(..).map(
@@ -140,7 +137,8 @@ fn check_bodies(
             continue;
         };
         let mut checker = BodyChecker::new(program, layout, data.module, text);
-        let checked = checker.initializer(ty, value);
+        let written = data.view.written_type().map(|written| written.span());
+        let checked = checker.initializer(ty, value, written);
         pass.values.insert(index, checked);
         pass.faults.insert(
             Target::Value(index),
@@ -606,23 +604,40 @@ fn assemble(
             continue;
         }
         let Some(id) = data.id.clone() else { continue };
+        let associated = data
+            .associated
+            .iter()
+            .map(|(name, _)| name.clone())
+            .collect::<Vec<_>>();
         let mut members = Vec::new();
         for member in &data.members {
-            let signature = SignatureRecord::interface_member(
-                Vec::new(),
-                member.receiver.and_then(|slot| u64::try_from(slot).ok()),
-                Type::function(member.signature.clone()),
-                Vec::new(),
-            )
-            .map_err(|error| error.to_string())?;
+            let signature = member_record(
+                program,
+                &member.binders,
+                &member.bounds,
+                member.receiver,
+                member.signature.clone(),
+                &associated,
+            )?;
+            // A default body the checker skipped leaves its member out of
+            // the checked interface: nothing can call it.
+            let default = match member.default {
+                Some(function) => {
+                    match layout.functions.get(function).copied().flatten() {
+                        Some(at) => Some(at),
+                        None => continue,
+                    }
+                }
+                None => None,
+            };
             members.push(InterfaceMember {
                 name: member.name.clone(),
                 signature,
-                default: None,
+                default,
             });
         }
         interfaces.push(
-            InterfaceDefinition::new(id, Vec::new(), Vec::new(), members)
+            InterfaceDefinition::new(id, data.params.clone(), associated, members)
                 .map_err(|error| error.to_string())?,
         );
     }
@@ -664,7 +679,7 @@ fn assemble(
                 data.qualified
             ));
         };
-        let record = signature_record(&data.binders, signature)?;
+        let record = function_record(program, data, signature)?;
         let origin = origin(program, data.module, data.view.construct().span());
         let function = match data.external {
             Some(intrinsic) => CheckedFunction::external(
@@ -718,7 +733,12 @@ fn assemble(
         lowered_tests.insert(*index, functions.len());
         functions.push(CheckedFunction {
             name: data.qualified.clone(),
-            signature: signature_record(&[], FnType::new(Vec::new(), Type::Void))?,
+            signature: signature_record(
+                program,
+                &[],
+                &[],
+                FnType::new(Vec::new(), Type::Void),
+            )?,
             defaults: Vec::new(),
             body: FunctionBody::Expr(Box::new(body)),
             entry_guard: None,
@@ -729,15 +749,10 @@ fn assemble(
     }
     let mut implementations = Vec::new();
     for data in &program.impls {
-        let owner_module = program.types.get(data.owner).map(|owner| owner.module);
-        if !owner_module.is_some_and(in_scope) {
+        if !in_scope(data.module) || !data.usable {
             continue;
         }
-        let Some(interface) = program
-            .interfaces
-            .get(data.interface)
-            .and_then(|i| i.id.clone())
-        else {
+        let Some(record) = implementation_record(program, data)? else {
             continue;
         };
         let mut members = Vec::new();
@@ -749,13 +764,6 @@ fn assemble(
             };
             members.push((name.clone(), at));
         }
-        let record = ImplementationRecord::new(
-            Vec::new(),
-            InterfaceKey::new(interface, Vec::new()),
-            data.receiver.clone(),
-            NamedTypes::empty(),
-        )
-        .map_err(|error| error.to_string())?;
         implementations.push(
             Implementation::new(record, members).map_err(|error| error.to_string())?,
         );
@@ -795,19 +803,126 @@ fn assemble(
     })
 }
 
-/// The signature record of a function with the type parameters `binders`,
-/// each bounded by `Any`.
+/// The checked IR bound of `bound`.
+fn bound_of(program: &Program<'_>, bound: &BoundData) -> Result<Bound, String> {
+    let interface = program
+        .interfaces
+        .get(bound.interface)
+        .and_then(|data| data.id.clone())
+        .ok_or_else(|| "a bound names an unsupported interface".to_owned())?;
+    Ok(Bound {
+        contract: InterfaceKey::new(interface, bound.arguments.clone()),
+        choices: NamedTypes::new(bound.choices.clone())
+            .map_err(|error| error.to_string())?,
+    })
+}
+
+/// The binders `names`, each with its bound in `bounds`.
+fn binders_of(
+    program: &Program<'_>,
+    names: &[String],
+    bounds: &[Option<BoundData>],
+) -> Result<Vec<Binder>, String> {
+    names
+        .iter()
+        .enumerate()
+        .map(|(at, name)| {
+            let bound = match bounds.get(at).and_then(Option::as_ref) {
+                Some(bound) => Some(bound_of(program, bound)?),
+                None => None,
+            };
+            Binder::new(name.clone(), bound).map_err(|error| error.to_string())
+        })
+        .collect()
+}
+
+/// The signature record of a function with the type parameters `binders`
+/// and their bounds.
 fn signature_record(
+    program: &Program<'_>,
     binders: &[String],
+    bounds: &[Option<BoundData>],
     signature: FnType,
 ) -> Result<SignatureRecord, String> {
-    let binders = binders
-        .iter()
-        .map(|name| Binder::new(name.clone(), None))
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| error.to_string())?;
+    let binders = binders_of(program, binders, bounds)?;
     SignatureRecord::new(binders, Type::function(signature))
         .map_err(|error| error.to_string())
+}
+
+/// The signature record of a member of an interface with the associated
+/// types `associated`.
+fn member_record(
+    program: &Program<'_>,
+    binders: &[String],
+    bounds: &[Option<BoundData>],
+    receiver: Option<usize>,
+    signature: FnType,
+    associated: &[String],
+) -> Result<SignatureRecord, String> {
+    let binders = binders_of(program, binders, bounds)?;
+    SignatureRecord::interface_member(
+        binders,
+        receiver.and_then(|slot| u64::try_from(slot).ok()),
+        Type::function(signature),
+        associated.to_vec(),
+    )
+    .map_err(|error| error.to_string())
+}
+
+/// The signature record of the function `data`: the member's record for a
+/// default body, an ordinary one otherwise.
+fn function_record(
+    program: &Program<'_>,
+    data: &FnData<'_>,
+    signature: FnType,
+) -> Result<SignatureRecord, String> {
+    let Some(interface) = data
+        .contract
+        .and_then(|index| program.interfaces.get(index))
+    else {
+        return signature_record(program, &data.binders, &data.bounds, signature);
+    };
+    let associated = interface
+        .associated
+        .iter()
+        .map(|(name, _)| name.clone())
+        .collect::<Vec<_>>();
+    let receiver = interface
+        .member(&data.name)
+        .and_then(|member| member.receiver);
+    member_record(
+        program,
+        &data.binders,
+        &data.bounds,
+        receiver,
+        signature,
+        &associated,
+    )
+}
+
+/// The implementation record of `data`, when its interface is supported.
+fn implementation_record(
+    program: &Program<'_>,
+    data: &super::declare::ImplData,
+) -> Result<Option<ImplementationRecord>, String> {
+    let Some(interface) = program
+        .interfaces
+        .get(data.interface)
+        .and_then(|interface| interface.id.clone())
+    else {
+        return Ok(None);
+    };
+    let binders = binders_of(program, &data.binders, &data.bounds)?;
+    let choices =
+        NamedTypes::new(data.choices.clone()).map_err(|error| error.to_string())?;
+    ImplementationRecord::new(
+        binders,
+        InterfaceKey::new(interface, data.arguments.clone()),
+        data.receiver.clone(),
+        choices,
+    )
+    .map(Some)
+    .map_err(|error| error.to_string())
 }
 
 /// The first function with no parameter that the first local module
@@ -859,7 +974,7 @@ fn types_document(program: &Program<'_>) -> Option<String> {
             continue;
         }
         let signature = data.signature.clone()?;
-        let record = signature_record(&data.binders, signature).ok()?;
+        let record = function_record(program, data, signature).ok()?;
         callables.push((
             data.identity.clone(),
             format!(
@@ -869,6 +984,17 @@ fn types_document(program: &Program<'_>) -> Option<String> {
             ),
         ));
     }
+    let mut implementations = Vec::new();
+    for data in &program.impls {
+        if !local(data.module) || !data.usable {
+            continue;
+        }
+        let record = implementation_record(program, data).ok()??;
+        let contract = record.contract().encode().ok()?;
+        let receiver = encode_open_type(record.receiver()).ok()?;
+        implementations.push(((contract, receiver), record.encode().ok()?));
+    }
+    implementations.sort();
     values.sort();
     callables.sort();
     let join = |entries: Vec<(String, String)>| {
@@ -879,8 +1005,13 @@ fn types_document(program: &Program<'_>) -> Option<String> {
             .join(" ")
     };
     Some(format!(
-        "{{format: @types.v2 moduleValues: [{}] callables: [{}] implementations: [] obligations: []}}\n",
+        "{{format: @types.v2 moduleValues: [{}] callables: [{}] implementations: [{}] obligations: []}}\n",
         join(values),
-        join(callables)
+        join(callables),
+        implementations
+            .into_iter()
+            .map(|(_, text)| text)
+            .collect::<Vec<_>>()
+            .join(" ")
     ))
 }
