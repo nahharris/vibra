@@ -1,7 +1,6 @@
 assert.equal	T	{T T}	Void
 assert.false		{Bool}	Void
 assert.true		{Bool}	Void
-bytes.compare		{Bytes Bytes}	Ordering
 bytes.concat		{Bytes Bytes}	Bytes
 bytes.equal		{Bytes Bytes}	Bool
 bytes.fromList		{List(U8)}	Bytes
@@ -137,7 +136,6 @@ list.fold	T A	{List(T) A Fn({A T} A)}	A
 list.length	T	{List(T)}	U64
 list.next	T	{List(T)}	Option({T List(T)})
 list.slice	T	{List(T) U64 U64}	Option(List(T))
-str.compare		{Str Str}	Ordering
 str.concat		{Str Str}	Str
 str.equal		{Str Str}	Bool
 str.fromChars		{List(Char)}	Str

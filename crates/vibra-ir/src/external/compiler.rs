@@ -336,8 +336,7 @@ pub enum CompilerIntrinsic {
     StrLength,
     /// `str.equal`.
     StrEqual,
-    /// `str.compare`.
-    StrCompare,
+
     /// `str.slice`.
     StrSlice,
     /// `str.toChars`.
@@ -354,8 +353,7 @@ pub enum CompilerIntrinsic {
     BytesConcat,
     /// `bytes.equal`.
     BytesEqual,
-    /// `bytes.compare`.
-    BytesCompare,
+
     /// `bytes.slice`.
     BytesSlice,
     /// `bytes.toList`.
@@ -600,7 +598,6 @@ impl CompilerIntrinsic {
             Self::StrConcat
             | Self::StrLength
             | Self::StrEqual
-            | Self::StrCompare
             | Self::StrSlice
             | Self::StrToChars
             | Self::StrFromChars
@@ -609,7 +606,6 @@ impl CompilerIntrinsic {
             Self::BytesLength
             | Self::BytesConcat
             | Self::BytesEqual
-            | Self::BytesCompare
             | Self::BytesSlice
             | Self::BytesToList
             | Self::BytesFromList => "bytes",
@@ -642,7 +638,6 @@ impl CompilerIntrinsic {
                 "length".to_owned()
             }
             Self::StrEqual | Self::BytesEqual | Self::AssertEqual => "equal".to_owned(),
-            Self::StrCompare | Self::BytesCompare => "compare".to_owned(),
             Self::StrSlice | Self::BytesSlice | Self::ListSlice => "slice".to_owned(),
             Self::StrToChars => "toChars".to_owned(),
             Self::StrFromChars => "fromChars".to_owned(),
@@ -753,7 +748,6 @@ impl CompilerIntrinsic {
             Self::StrConcat => (vec![str_type(), str_type()], str_type()),
             Self::StrLength => (vec![str_type()], core(Type::U64)),
             Self::StrEqual => (vec![str_type(), str_type()], boolean()),
-            Self::StrCompare => (vec![str_type(), str_type()], ordering()),
             Self::StrSlice => (
                 vec![str_type(), core(Type::U64), core(Type::U64)],
                 option(str_type()),
@@ -765,7 +759,6 @@ impl CompilerIntrinsic {
             Self::BytesLength => (vec![bytes()], core(Type::U64)),
             Self::BytesConcat => (vec![bytes(), bytes()], bytes()),
             Self::BytesEqual => (vec![bytes(), bytes()], boolean()),
-            Self::BytesCompare => (vec![bytes(), bytes()], ordering()),
             Self::BytesSlice => (
                 vec![bytes(), core(Type::U64), core(Type::U64)],
                 option(bytes()),
@@ -864,7 +857,6 @@ impl CompilerIntrinsic {
             Self::StrConcat,
             Self::StrLength,
             Self::StrEqual,
-            Self::StrCompare,
             Self::StrSlice,
             Self::StrToChars,
             Self::StrFromChars,
@@ -873,7 +865,6 @@ impl CompilerIntrinsic {
             Self::BytesLength,
             Self::BytesConcat,
             Self::BytesEqual,
-            Self::BytesCompare,
             Self::BytesSlice,
             Self::BytesToList,
             Self::BytesFromList,

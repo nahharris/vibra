@@ -257,21 +257,22 @@ fn v4_an_input_interface_or_function_value_fits_its_type() {
 // -- V8: dicts come in in key order --------------------------------------------
 
 fn table() -> Type {
-    dict(str_type(), Type::U8)
+    dict(Type::I32, Type::U8)
 }
 
-fn entries(keys: &[(&str, u8)]) -> Value {
+fn entries(keys: &[(i32, u8)]) -> Value {
     Value::Dict(
         keys.iter()
-            .map(|(key, value)| (Value::Str((*key).to_owned()), Value::U8(*value)))
+            .map(|(key, value)| (Value::I32(*key), Value::U8(*value)))
             .collect(),
     )
 }
 
-fn lookup_b(collection: Node) -> Node {
+/// The lookup of the key `2`.
+fn lookup_two(collection: Node) -> Node {
     node(Expr::Lookup {
         collection: Box::new(collection),
-        key: Box::new(text("b")),
+        key: Box::new(int(2)),
     })
 }
 
@@ -280,18 +281,19 @@ fn lookup_b(collection: Node) -> Node {
 #[test]
 fn v8_an_input_dict_out_of_key_order_is_an_invalid_host_value() {
     let set = set_with(Vec::new(), Vec::new(), Vec::new());
-    let find =
-        |input: Value| evaluate(&set, &lookup_b(var(0, table())).expr, &[input], SMALL);
+    let find = |input: Value| {
+        evaluate(&set, &lookup_two(var(0, table())).expr, &[input], SMALL)
+    };
     assert_eq!(
-        find(entries(&[("b", 20), ("a", 10)])),
+        find(entries(&[(2, 20), (1, 10)])),
         Evaluation::Defect(Trap::InvalidHostValue)
     );
     assert_eq!(
-        find(entries(&[("a", 1), ("a", 2)])),
+        find(entries(&[(1, 1), (1, 2)])),
         Evaluation::Defect(Trap::InvalidHostValue)
     );
     assert_eq!(
-        find(entries(&[("a", 10), ("b", 20)])),
+        find(entries(&[(1, 10), (2, 20)])),
         Evaluation::Value(some_value(Value::U8(20)))
     );
 }
@@ -300,14 +302,15 @@ fn v8_an_input_dict_out_of_key_order_is_an_invalid_host_value() {
 #[test]
 fn v8_a_constant_dict_out_of_key_order_is_rejected() {
     let set = set_with(Vec::new(), Vec::new(), Vec::new());
-    let find =
-        |value: Value| evaluate(&set, &lookup_b(lit(table(), value)).expr, &[], SMALL);
+    let find = |value: Value| {
+        evaluate(&set, &lookup_two(lit(table(), value)).expr, &[], SMALL)
+    };
     assert_eq!(
-        find(entries(&[("b", 20), ("a", 10)])),
+        find(entries(&[(2, 20), (1, 10)])),
         Evaluation::Defect(Trap::InvalidCheckedProgram)
     );
     assert_eq!(
-        find(entries(&[("a", 10), ("b", 20)])),
+        find(entries(&[(1, 10), (2, 20)])),
         Evaluation::Value(some_value(Value::U8(20)))
     );
 }

@@ -81,7 +81,6 @@ macro_rules! vector_rows {
 }
 
 vector_rows! {
-    bytes_compare => "bytes.compare",
     bytes_concat => "bytes.concat",
     bytes_equal => "bytes.equal",
     bytes_length => "bytes.length",
@@ -206,7 +205,6 @@ vector_rows! {
     i8_to_u32 => "i8.toU32",
     i8_to_u64 => "i8.toU64",
     i8_to_u8 => "i8.toU8",
-    str_compare => "str.compare",
     str_concat => "str.concat",
     str_equal => "str.equal",
     str_from_utf8 => "str.fromUtf8",
@@ -438,11 +436,17 @@ fn bytes_from_list() {
     );
 }
 
+/// The keys `1` and `2`, holding `1u8` and `2u8`, keyed by `I32`, whose
+/// `Ordered` implementation the base parts bind.
 fn two_entries() -> Value {
     Value::Dict(vec![
-        (text_value("a"), Value::U8(1)),
-        (text_value("b"), Value::U8(2)),
+        (Value::I32(1), Value::U8(1)),
+        (Value::I32(2), Value::U8(2)),
     ])
+}
+
+fn entry(key: i32, value: u8) -> Value {
+    Value::Tuple(vec![Value::I32(key), Value::U8(value)])
 }
 
 #[test]
@@ -450,13 +454,10 @@ fn dict_entries() {
     assert_eq!(
         apply(
             CompilerIntrinsic::DictEntries,
-            vec![str_type(), Type::U8],
-            vec![(dict(str_type(), Type::U8), two_entries())]
+            vec![Type::I32, Type::U8],
+            vec![(dict(Type::I32, Type::U8), two_entries())]
         ),
-        Evaluation::Value(Value::List(vec![
-            Value::Tuple(vec![text_value("a"), Value::U8(1)]),
-            Value::Tuple(vec![text_value("b"), Value::U8(2)]),
-        ]))
+        Evaluation::Value(Value::List(vec![entry(1, 1), entry(2, 2)]))
     );
 }
 
@@ -464,22 +465,20 @@ fn dict_entries() {
 /// replaces the earlier value, as in a dict literal.
 #[test]
 fn dict_from_list() {
-    let pair =
-        |key: &str, value: u8| Value::Tuple(vec![text_value(key), Value::U8(value)]);
-    let entries = Type::list(Type::Tuple(vec![str_type(), Type::U8]));
+    let entries = Type::list(Type::Tuple(vec![Type::I32, Type::U8]));
     let build = |pairs: Vec<Value>| {
         apply(
             CompilerIntrinsic::DictFromList,
-            vec![str_type(), Type::U8],
+            vec![Type::I32, Type::U8],
             vec![(entries.clone(), Value::List(pairs))],
         )
     };
     assert_eq!(
-        build(vec![pair("b", 2), pair("a", 1)]),
+        build(vec![entry(2, 2), entry(1, 1)]),
         Evaluation::Value(two_entries())
     );
     assert_eq!(
-        build(vec![pair("b", 9), pair("a", 1), pair("b", 2)]),
+        build(vec![entry(2, 9), entry(1, 1), entry(2, 2)]),
         Evaluation::Value(two_entries())
     );
     assert_eq!(
@@ -487,29 +486,29 @@ fn dict_from_list() {
         Evaluation::Value(Value::Dict(Vec::new()))
     );
 }
+
 #[test]
 fn dict_next() {
     assert_eq!(
         apply(
             CompilerIntrinsic::DictNext,
-            vec![str_type(), Type::U8],
-            vec![(dict(str_type(), Type::U8), two_entries())]
+            vec![Type::I32, Type::U8],
+            vec![(dict(Type::I32, Type::U8), two_entries())]
         ),
         Evaluation::Value(some_value(Value::Tuple(vec![
-            Value::Tuple(vec![text_value("a"), Value::U8(1)]),
-            Value::Dict(vec![(text_value("b"), Value::U8(2))]),
+            entry(1, 1),
+            Value::Dict(vec![(Value::I32(2), Value::U8(2))]),
         ])))
     );
     assert_eq!(
         apply(
             CompilerIntrinsic::DictNext,
-            vec![str_type(), Type::U8],
-            vec![(dict(str_type(), Type::U8), Value::Dict(Vec::new()))]
+            vec![Type::I32, Type::U8],
+            vec![(dict(Type::I32, Type::U8), Value::Dict(Vec::new()))]
         ),
         Evaluation::Value(none_value())
     );
 }
-
 #[test]
 fn list_length() {
     assert_eq!(

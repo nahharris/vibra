@@ -19,7 +19,7 @@ fn the_snapshot_is_the_table() {
         .map(|intrinsic| intrinsic.row().snapshot_line() + "\n")
         .collect::<String>();
     assert_eq!(rendered, SNAPSHOT);
-    assert_eq!(SNAPSHOT.lines().count(), 240);
+    assert_eq!(SNAPSHOT.lines().count(), 238);
 }
 
 #[test]
