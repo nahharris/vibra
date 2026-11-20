@@ -457,12 +457,14 @@ Inference is local:
   ceiling.
 
 Inference MUST NOT invent a parameter or result type, a generic bound, an
-interface implementation, a numeric conversion, an effect ceiling, or an
-error conversion, and never uses a later use to type an earlier binding.
-`Never` is never inferred. When no unique type follows for a literal, an
-empty `[]` or `[:]`, an absent `Option`, or a generic argument, the checker
-reports `@type.ambiguousInference` with one note per missing constraint and
-the places where a written type would supply it.
+interface implementation, a numeric conversion, an effect ceiling, or an error
+conversion, and never uses a later use to type an earlier binding. Inference
+never invents `Never`, but a written type that fixes a type argument to `Never`
+binds it: `Result.ok(value: void)` checked against a written `Result(Void
+Never)` is accepted. When no unique type follows for a literal, an empty `[]` or
+`[:]`, an absent `Option`, or a generic argument, the checker reports
+`@type.ambiguousInference` with one note per missing constraint and the places
+where a written type would supply it.
 
 There are no call-site type arguments. A call whose type arguments its
 operands and written expected type do not determine is rejected.
