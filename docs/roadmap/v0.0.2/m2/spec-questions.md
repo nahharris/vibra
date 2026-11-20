@@ -517,6 +517,48 @@ persistent format that several steps share.
   against the snapshot. The snapshot is corrected.
 - **Depends.** Step 02. Row "registry snapshot" of its matrix.
 
+### Q26. The import cycle between `@std.fs` and `@std.policy`
+
+- **Anchor.** [03 Scope policies](../../../spec/03-effects.md#scope-policies),
+  [03 Narrowing](../../../spec/03-effects.md#narrowing),
+  [04 The standard library](../../../spec/04-programs-and-packages.md#the-standard-library),
+  [04 Modules and imports](../../../spec/04-programs-and-packages.md#modules-and-imports).
+- **Question.** `FsPolicy` (`@std.policy`) has a `prefix: RelativePath`,
+  and `RelativePath` is in `@std.fs`; the six `Dir…` interfaces of
+  `@std.fs` declare `restrict` with a `policy: FsPolicy`. Each module
+  needs the other, and "Imports MUST NOT form a cycle". Which declaration
+  moves?
+- **Program.** `stdlib/src/std/fs.vib` with `use @std.policy enduse` and
+  `stdlib/src/std/policy.vib` with `use @std.fs.RelativePath enduse`:
+  `@module.importCycle`.
+- **Recommended answer.** `FsPolicy`, `NameTest`, `FileDepth`, `DirDepth`,
+  `FileAction`, and `DirAction` are declared in `@std.fs`. `@std.policy`
+  keeps `ScopeError` and `GrantLimits` and imports nothing, so every
+  operation module imports it. The embedded library gets no exemption from
+  the cycle rule.
+- **Depends.** Steps 18, 19, 21, 22. Every case that imports a policy
+  type; rows `V2-TYPE-INTERFACE-std-policy-types`,
+  `V2-TYPE-INTERFACE-std-fs-policy-types`.
+
+### Q27. A malformed `effects` list
+
+- **Anchor.** [04 Targets](../../../spec/04-programs-and-packages.md#targets),
+  [07 Contract, effect and authority diagnostics](../../../spec/07-diagnostics-and-conformance.md#contract-effect-and-authority-diagnostics).
+- **Question.** `effects` is "a list of entity references to operation
+  interfaces, without repeats". The registry's rows for
+  `@effect.invalidReference` and `@effect.duplicateRoot` speak of "a row".
+  Which codes does a project get for an `effects` entry that resolves to
+  nothing, resolves to something that is not an operation interface, or
+  repeats?
+- **Document.** `effects: [@std.fs.DirReadText @std.fs.DirReadText]`;
+  `effects: [@std.fs.FsError]`; `effects: [@std.fs.Nope]`.
+- **Recommended answer.** The list is a row in data form:
+  `@effect.invalidReference` at an entry that is not an operation
+  interface, including one that resolves to nothing, and
+  `@effect.duplicateRoot` at a later repeat, related to the first.
+- **Depends.** Step 25. Rows `V2-EFFECT-target-effects-not-interface`,
+  `V2-EFFECT-target-effects-unknown`, `V2-EFFECT-target-effects-repeat`.
+
 ## Where the tree contradicts the M2 chapters
 
 These are not open questions. Each is a place where the code as it stands
