@@ -6,7 +6,9 @@
 //! expressions and constant patterns". A pattern is typed against the type
 //! of the value it takes apart. A constructor pattern whose shape does not
 //! fit the constructor it names is `@type.argumentMismatch` at the pattern;
-//! any other pattern that does not fit its type is `@type.mismatch`. Each
+//! any other pattern that does not fit its type is `@type.mismatch`. A
+//! constant pattern expands to the pattern of its value; a value that is or
+//! holds a float, `void`, or a dict is `@pattern.invalidConstant`. Each
 //! pattern also yields the shape [`Pat`] that coverage reads.
 //!
 //! Patterns nest without bound, so a pattern is first walked top-down with

@@ -9,7 +9,9 @@
 //! rest. One search for evidence serves dispatch, bounds, and widening, in
 //! the order the checked IR tries it: a bound in scope, `Self` in a default
 //! member, the one implementation whose key matches, and the structural
-//! `Equatable` and `Ordered` of atoms, tuples, and records.
+//! `Equatable` and `Ordered` of atoms, tuples, and records. A contract
+//! member read as a value is the implementation's function when it supplies
+//! the member, and otherwise a closure that makes the contract call.
 
 use std::sync::Arc;
 

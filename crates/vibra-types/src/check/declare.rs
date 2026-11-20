@@ -17,8 +17,8 @@
 //! abstract and default members, and their implementations in a type or in
 //! the interface;
 //! and, in the embedded standard library, the intrinsic scalar types and
-//! `List(T)` with their external members. A guarded member of an interface
-//! or an implementation is `@tool.unavailable`, as is any other declaration
+//! `List(T)` with their external members. A procedure or a member that
+//! performs operations is `@tool.unavailable`, as is any other declaration
 //! of a local module, over the declaration; one of the standard library is
 //! skipped with a note.
 //!
