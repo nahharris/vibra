@@ -96,7 +96,7 @@ the vertical-slice rule.
 | 19 | [check-interfaces](steps/19-check-interfaces.md) | vertical | 18 | 08, 23, 24, 25, 26, 27 | `vibra-types`, `vibra-ir`, `vibra-cli`, `stdlib/`, `conformance/cases` | landed |
 | 20 | [stdlib-pure](steps/20-stdlib-pure.md) | vertical | 19 | 08, 23, 24, 25, 26, 27 | `stdlib/`, `vibra-types`, `vibra-resolve`, `conformance/cases` | landed |
 | 21 | [guards-with-else](steps/21-guards-with-else.md) | vertical | 20 | 08, 23, 24, 25, 26, 27 | `vibra-types`, `vibra-interp`, `vibra-conformance`, `conformance/cases` | in progress |
-| 22 | [discharge](steps/22-discharge.md) | vertical | 21 | 08, 23, 24, 25, 26, 27 | `vibra-types`, `conformance/cases` | planned |
+| 22 | [discharge](steps/22-discharge.md) | vertical | 21 | 08, 23, 24, 25, 26, 27 | `vibra-types`, `conformance/cases` | in progress |
 | 23 | [tests-and-assertions](steps/23-tests-and-assertions.md) | vertical | 17 | 18 to 22, 24, 25, 27 | `vibra-workspace`, `vibra-types`, `vibra-interp`, `vibra-conformance`, `stdlib/`, `conformance/cases` | landed |
 | 24 | [cli-skeleton](steps/24-cli-skeleton.md) | vertical | 02 | 03 to 23, 27 | `vibra-schema`, `vibra-cli` (new) | landed |
 | 25 | [cli-fmt-check](steps/25-cli-fmt-check.md) | vertical | 08, 15, 24 | 16 to 23, 27 | `vibra-cli`, `vibra-schema`, `vibra-workspace`, `vibra-conformance`, `conformance/cases` | landed |

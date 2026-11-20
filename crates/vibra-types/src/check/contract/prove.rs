@@ -18,6 +18,11 @@
 //! `requires` its parameter types alone do not establish is
 //! `@contract.obligationLost` at the conversion.
 //!
+//! An implementation member carries its contract member's guards, checked
+//! under its substitution where it is lowered: a bare `requires` is a fact
+//! of its body, and a bare `ensures` is reported at the `return` that does
+//! not establish it, related to the contract member.
+//!
 //! Every walk is a work list, so no host stack grows with the depth of a
 //! program.
 
