@@ -34,6 +34,7 @@ use vibra_ir::{
     Pattern, Type, TypeId, Value,
 };
 
+use super::super::callables::substitute;
 use super::super::ctfe::{Evaluator, Outcome};
 use super::super::declare::{Entity, TypeKind};
 use super::super::obligation::{Obligation, ObligationKind, ObligationStatus};
@@ -805,7 +806,7 @@ impl<'v> Prover<'v> {
         evaluator: &mut Evaluator<'_>,
     ) -> Option<Found> {
         let Expr::Construct {
-            value_type: Type::Declared(id, _),
+            value_type: Type::Declared(id, arguments),
             construction,
         } = &node.expr
         else {
@@ -828,9 +829,17 @@ impl<'v> Prover<'v> {
             return Some(found(Verdict::Unsupported));
         }
         let entry = invariant.entry;
-        let unfolded = invariant.body.clone();
+        // A generic type's predicate is read at the construction's type
+        // arguments.
+        let unfolded = invariant
+            .body
+            .as_ref()
+            .map(|(body, name)| (instantiated(body, arguments), name.clone()));
         let named = invariant.named.clone();
-        let representation = invariant.representation.clone();
+        let representation = invariant
+            .representation
+            .as_ref()
+            .map(|representation| representation.instantiate(arguments));
         let (term, substituted) =
             facts::build(&mut self.terms, &self.vocabulary, env, node);
         let repr = self.terms.intern(Data::Repr(term));
@@ -861,7 +870,7 @@ impl<'v> Prover<'v> {
             let decided = match self.decided.get(&key) {
                 Some(decided) => decided.clone(),
                 None => {
-                    let call = predicate_call(entry, constant, node);
+                    let call = predicate_call(entry, arguments, constant, node);
                     let decided = match evaluator.evaluate(&call) {
                         Outcome::Value(value) => match facts::truth(&value) {
                             Some(holds) => {
@@ -906,12 +915,12 @@ impl<'v> Prover<'v> {
                 let mut goals = Vec::new();
                 if let Some(entry) = entry {
                     goals.push(self.terms.intern(Data::Call(
-                        Callee::Function(entry, Vec::new()),
+                        Callee::Function(entry, arguments.clone()),
                         vec![repr],
                     )));
                 }
                 let mut read = Evidence::default();
-                if let Some((predicate, _)) = unfolded {
+                if let Some((predicate, _)) = &unfolded {
                     let mut callee = Env::new(self.activation(), false);
                     callee.bind(0, repr, false);
                     let (goal, _) = facts::build(
@@ -925,7 +934,7 @@ impl<'v> Prover<'v> {
                         read = read.reading(named);
                     }
                 }
-                match self.establish(facts, &goals) {
+                match self.establish_except(facts, &goals, Some(term)) {
                     Some(evidence) => {
                         Verdict::Passed(prefixed(substituted, evidence).and(&read))
                     }
@@ -1089,8 +1098,23 @@ impl<'v> Prover<'v> {
     /// invariants (`GUARD-2`) and certified results (`GUARD-7`) of the terms
     /// the goal is built from.
     fn establish(&mut self, facts: &FactSet, goals: &[Term]) -> Option<Evidence> {
+        self.establish_except(facts, goals, None)
+    }
+
+    /// [`Self::establish`], with no invariant read of `constructing`: the
+    /// construction whose own `where` is the goal is no value yet.
+    fn establish_except(
+        &mut self,
+        facts: &FactSet,
+        goals: &[Term],
+        constructing: Option<Term>,
+    ) -> Option<Evidence> {
         let mut local = facts.clone();
         let mut seen = BTreeSet::new();
+        if let Some(term) = constructing {
+            seen.insert(term);
+            self.result_facts(&mut local, term);
+        }
         for goal in goals {
             for term in self.terms.subterms(*goal) {
                 if !seen.insert(term) {
@@ -1107,10 +1131,10 @@ impl<'v> Prover<'v> {
 
     /// Assumes the invariant of the type of `term`, when it states one.
     fn invariant_facts(&mut self, facts: &mut FactSet, term: Term) {
-        let Some(Type::Declared(id, _)) = self.terms.type_of(term) else {
+        let Some(Type::Declared(id, arguments)) = self.terms.type_of(term) else {
             return;
         };
-        let id = id.clone();
+        let (id, arguments) = (id.clone(), arguments.clone());
         let Some((_, invariant)) = self.invariants.get(&id) else {
             return;
         };
@@ -1119,12 +1143,15 @@ impl<'v> Prover<'v> {
             evidence = evidence.reading(named);
         }
         let entry = invariant.entry;
-        let body = invariant.body.as_ref().map(|(body, _)| *body);
+        let body = invariant
+            .body
+            .as_ref()
+            .map(|(body, _)| instantiated(body, &arguments));
         let repr = self.terms.intern(Data::Repr(term));
         if let Some(entry) = entry {
             let call = self
                 .terms
-                .intern(Data::Call(Callee::Function(entry, Vec::new()), vec![repr]));
+                .intern(Data::Call(Callee::Function(entry, arguments), vec![repr]));
             facts.assume(
                 &mut self.terms,
                 &self.vocabulary,
@@ -1137,7 +1164,7 @@ impl<'v> Prover<'v> {
             let mut env = Env::new(self.activation(), false);
             env.bind(0, repr, false);
             let (predicate, _) =
-                facts::build(&mut self.terms, &self.vocabulary, &mut env, body);
+                facts::build(&mut self.terms, &self.vocabulary, &mut env, &body);
             facts.assume(&mut self.terms, &self.vocabulary, predicate, true, evidence);
         }
     }
@@ -1632,12 +1659,26 @@ fn first_read(
 }
 
 /// The call of the predicate at checked index `entry` over `constant`.
-fn predicate_call(entry: usize, constant: &Constant, at: &Node) -> Node {
+/// `body`, a predicate of a type, read at the type arguments `arguments`.
+fn instantiated(body: &Node, arguments: &[Type]) -> Node {
+    let mut body = body.clone();
+    if !arguments.is_empty() {
+        substitute(&mut body, arguments);
+    }
+    body
+}
+
+fn predicate_call(
+    entry: usize,
+    arguments: &[Type],
+    constant: &Constant,
+    at: &Node,
+) -> Node {
     Node::new(
         Expr::Call {
             target: CallTarget::Direct {
                 function: entry,
-                type_arguments: Vec::new(),
+                type_arguments: arguments.to_vec(),
             },
             arguments: Arguments {
                 positional: vec![Node::new(

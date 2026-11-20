@@ -19,6 +19,7 @@ use vibra_syntax::source::{Guard as GuardView, Where};
 
 use super::super::contract::fragment::{operands, reads_any};
 use super::super::contract::{CheckedGuard, CheckedInvariant, Guards, Predicate};
+use super::super::declare::TypeData;
 use super::*;
 
 /// The guards a callable declaration writes, and its result name.
@@ -375,19 +376,22 @@ impl<'a> BodyChecker<'_, 'a> {
             })
     }
 
-    /// Checks the `where` `section` of a type whose representation is
-    /// `representation`, outside any callable.
+    /// Checks the `where` `section` of the type `data`, whose representation
+    /// is `representation`, outside any callable, with the type's parameters
+    /// and their bounds in scope.
     pub(crate) fn invariant(
         &mut self,
         section: Where<'a>,
         representation: &Type,
+        data: &TypeData<'_>,
     ) -> InvariantCheck {
         self.locals.clear();
         self.slots.clear();
         self.frames.clear();
-        self.binders.clear();
         self.self_type = None;
         self.reset_scope();
+        self.binders.clone_from(&data.params);
+        self.bounds.clone_from(&data.bounds);
         self.result = None;
         let mut found = InvariantCheck::default();
         let consequence = section
@@ -419,20 +423,28 @@ impl<'a> BodyChecker<'_, 'a> {
             Some(IrExpr::Closure { closure, captures }) if captures.is_empty() => {
                 Some(Predicate::Anonymous(Arc::clone(closure)))
             }
+            // A generic predicate is applied at the type's own parameters.
             Some(IrExpr::Function {
                 function,
                 type_arguments,
-            }) if type_arguments.is_empty() => self
-                .layout
-                .functions
+            }) if type_arguments
                 .iter()
-                .position(|at| *at == Some(*function))
-                .map(Predicate::Named),
+                .enumerate()
+                .all(|(at, ty)| *ty == Type::Binder(at))
+                && type_arguments.len() == data.params.len() =>
+            {
+                self.layout
+                    .functions
+                    .iter()
+                    .position(|at| *at == Some(*function))
+                    .map(Predicate::Named)
+            }
             Some(_) => {
                 self.report(
                     DiagnosticCode::ContractUnsupportedPredicate,
                     span,
-                    "a `where` operand is an anonymous `fn` or the name of a `fn`",
+                    "a `where` operand is an anonymous `fn`, or the name of a `fn` \
+                     applied at the type's own parameters in order",
                 );
                 None
             }

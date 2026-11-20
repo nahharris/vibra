@@ -1,0 +1,19 @@
+id = "V2-CONTRACT-where-generic-unproved"
+rule = "V2-CONTRACT-where-generic-unproved"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#bare-guards: a construction of a generic type with a bare where that no rule establishes is @contract.unproved at the construction"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "unknown"
+
+[[expect.diagnostics]]
+code = "@contract.unproved"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 240, end = 270 }
+related = [{ source = "src/app/main.vib", span = { start = 5, end = 12 } }]

@@ -1,0 +1,14 @@
+type Flagged(T) of {flag: Bool item: T}
+  where isSet
+endtype
+
+fn isSet(T)
+  takes {f: {flag: Bool item: T}}
+  returns ok: Bool
+  do
+    return f.flag
+endfn
+fn main returns r: I32 do
+  let Flagged(flag: _ item: v) be Flagged(flag: Bool.true() item: 7i32) endlet
+  return v
+endfn

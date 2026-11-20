@@ -2166,15 +2166,6 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         let data = program.types.get(index)?;
         match data.kind {
             TypeKind::Wrapper(_) | TypeKind::Tuple(_) | TypeKind::Record(_)
-                if data.invariant && !data.params.is_empty() =>
-            {
-                self.unavailable(
-                    callee_span,
-                    "constructing a value of a generic type with an invariant",
-                );
-                None
-            }
-            TypeKind::Wrapper(_) | TypeKind::Tuple(_) | TypeKind::Record(_)
                 if data.id.is_some() =>
             {
                 Some(Callee::Construct(index))
@@ -3307,7 +3298,9 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                 // The constructor of a `where … else` returns a `Result`; the
                 // construction itself is of the type.
                 let value_type = match program.types.get(ty) {
-                    Some(data) if data.fallible => data.self_type(),
+                    Some(data) if data.fallible => {
+                        data.self_type().map(|own| own.instantiate(&type_arguments))
+                    }
                     _ => result.clone(),
                 };
                 let construction = match program.types.get(ty).map(|data| &data.kind) {

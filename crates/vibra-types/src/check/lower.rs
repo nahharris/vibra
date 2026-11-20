@@ -249,7 +249,8 @@ fn representation(kind: &TypeKind) -> Option<Type> {
     }
 }
 
-/// Checks the `where` of every type without parameters that states one.
+/// Checks the `where` of every type that states one, with the type's
+/// parameters and their bounds in scope.
 fn invariants(
     program: &Program<'_>,
     documents: &[Document],
@@ -257,7 +258,7 @@ fn invariants(
     pass: &mut Pass,
 ) {
     for (index, data) in program.types.iter().enumerate() {
-        if !data.invariant || !data.params.is_empty() {
+        if !data.invariant {
             continue;
         }
         let (Some(representation), Some(section), Some(text)) = (
@@ -268,7 +269,7 @@ fn invariants(
             continue;
         };
         let mut checker = BodyChecker::new(program, layout, data.module, text);
-        let found = checker.invariant(section, &representation);
+        let found = checker.invariant(section, &representation, data);
         if let Some(error) = found.error {
             pass.errors.insert(index, error);
         }
@@ -1321,7 +1322,12 @@ fn assemble(
             .map_or(data.view.construct().span(), |checked| checked.span);
         functions.push(CheckedFunction {
             name: format!("{}.where", data.name),
-            signature: signature_record(program, &[], &[], (**signature).clone())?,
+            signature: signature_record(
+                program,
+                &data.params,
+                &data.bounds,
+                (**signature).clone(),
+            )?,
             defaults: closure.defaults.clone(),
             body: FunctionBody::Expr(Box::new(closure.body.clone())),
             entry_guard: None,

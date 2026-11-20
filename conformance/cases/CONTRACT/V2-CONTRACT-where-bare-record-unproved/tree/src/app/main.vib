@@ -1,0 +1,17 @@
+type Pair of {flag: Bool item: I32}
+  where positive
+endtype
+
+fn positive
+  takes {p: {flag: Bool item: I32}}
+  returns ok: Bool
+  do
+    return Ordered.greater(p.item 0i32)
+endfn
+
+fn make
+  takes {flag: Bool item: I32}
+  returns made: Pair
+  do
+    return Pair(flag: flag item: item)
+endfn
