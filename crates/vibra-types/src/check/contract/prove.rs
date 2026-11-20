@@ -79,6 +79,9 @@ struct Guarded<'v> {
     ensures_certified: bool,
     result_name: String,
     result_type: Type,
+    /// For a member of an implementation whose guards are its contract
+    /// member's: the module of the interface and the contract member's name.
+    contract: Option<(usize, ByteSpan)>,
 }
 
 /// What the discharge reads of one type with a bare or a fallible `where`.
@@ -1361,7 +1364,32 @@ impl<'v> Prover<'v> {
             .iter()
             .filter(|exit| matches!(exit.verdict, Verdict::Unknown))
             .collect::<Vec<_>>();
+        // A contract's `ensures` is the implementation's obligation, stated
+        // at its name and reported at its `return`s.
+        let span = if data.contract.is_some() {
+            data.name
+        } else {
+            guard.span
+        };
         if !data.ensures_certified {
+        } else if let (Some(exit), Some((contract, _))) = (refuted, data.contract) {
+            let diagnostic = context.diagnostic(
+                DiagnosticCode::ContractRefuted,
+                module,
+                exit.span,
+                format!(
+                    "the bare `ensures` of the contract member `{}` is false of the \
+                     value this `return` returns",
+                    data.qualified
+                ),
+            );
+            let diagnostic = context.program().related(
+                diagnostic,
+                contract,
+                guard.span,
+                "the contract's `ensures`",
+            );
+            context.push(module, diagnostic);
         } else if let Some(exit) = refuted {
             let diagnostic = context.diagnostic(
                 DiagnosticCode::ContractRefuted,
@@ -1381,7 +1409,36 @@ impl<'v> Prover<'v> {
             );
             context.push(module, diagnostic);
         } else if limited {
-            context.limit(module, guard.span);
+            context.limit(module, span);
+        } else if let (Some(first), Some((contract, name))) =
+            (open.first(), data.contract)
+        {
+            let text = context.source_text(contract, guard.span);
+            let diagnostic = context.diagnostic(
+                DiagnosticCode::ContractUnproved,
+                module,
+                first.span,
+                format!(
+                    "this exit does not establish the predicate `{text}` of the bare \
+                     `ensures` of the contract member `{}` by the discharge rules",
+                    data.qualified
+                ),
+            );
+            let mut diagnostic = context.program().related(
+                diagnostic,
+                contract,
+                name,
+                "the contract member",
+            );
+            for exit in open.iter().skip(1) {
+                diagnostic = context.program().related(
+                    diagnostic,
+                    module,
+                    exit.span,
+                    "another exit that does not establish it",
+                );
+            }
+            context.push(module, unproved_notes(diagnostic));
         } else if !open.is_empty() {
             let text = context.source_text(module, guard.span);
             let diagnostic = context.diagnostic(
@@ -1417,7 +1474,7 @@ impl<'v> Prover<'v> {
             ObligationKind::Ensures,
             declaration,
             data.identity.clone(),
-            guard.span,
+            span,
             &verdicts,
         );
         context.reviewed.obligations.push(record);
@@ -1932,6 +1989,14 @@ fn guarded<'v>(
                     .map(|(name, _)| name.text().to_owned())
                     .unwrap_or_default(),
                 result_type: signature.result.clone(),
+                contract: data.implements.and_then(|interface| {
+                    let interface = program.interfaces.get(interface)?;
+                    let member =
+                        interface.view.members().into_iter().find(|member| {
+                            member.name().is_some_and(|name| name.text() == data.name)
+                        })?;
+                    Some((interface.module, member.name()?.span()))
+                }),
             },
         );
     }

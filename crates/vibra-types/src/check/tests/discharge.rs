@@ -521,3 +521,79 @@ fn a_discharged_guard_leaves_no_code() {
     assert!(guarded.module_set().is_some());
     assert_eq!(guarded.module_set(), plain.module_set());
 }
+
+/// `Sized`, whose member `size` has the guards `guards`, and the type `name`
+/// that implements it with the body `body`.
+fn sized(guards: &str, implementations: &[(&str, &str)]) -> String {
+    let mut source = format!(
+        "interface Sized fn size takes {{value: Self n: I32}} returns r: I32 {guards} endfn endinterface\n"
+    );
+    for (name, body) in implementations {
+        source.push_str(&format!(
+            "type {name} of I32 impl Sized fn size takes {{value: Self m: I32}} returns s: I32 do {body} endfn endimpl endtype\n"
+        ));
+    }
+    source
+}
+
+#[test]
+fn an_implementation_is_checked_under_the_contract_requires() {
+    let source = format!(
+        "{POS}{}",
+        sized(
+            "requires Ordered.greater(n 0i32)",
+            &[("Box", "return pos(m)")]
+        )
+    );
+    discharges(&source, &[], &[(REQUIRES, PASSED, &["GUARD-4"])]);
+}
+
+#[test]
+fn an_implementation_establishes_the_contract_ensures() {
+    let source = sized(
+        "ensures Ordered.greater(r 0i32)",
+        &[("Good", "return 1i32"), ("Bad", "return m")],
+    );
+    discharges(
+        &source,
+        &[(UNPROVED, "return m")],
+        &[
+            (ObligationKind::Ensures, PASSED, &["GUARD-1"]),
+            (ObligationKind::Ensures, UNKNOWN, &[]),
+        ],
+    );
+}
+
+#[test]
+fn a_contract_guard_with_else_runs_in_every_implementation() {
+    let source = format!(
+        "{}fn main returns r: {{I32 I32}} do let s: Sized be B(1i32) endlet return {{Sized.size(A(1i32) 0i32) Sized.size(s 0i32)}} endfn\n",
+        sized(
+            "requires Ordered.greater(n 0i32) else -1i32",
+            &[("A", "return m"), ("B", "return m")]
+        )
+    );
+    assert_eq!(faults(&source), []);
+    let ran = super::run(&source);
+    assert!(
+        ran.as_deref().is_ok_and(
+            |text| text.ends_with("value: {kind: @tuple values: [-1i32 -1i32]}}")
+        ),
+        "{ran:?}"
+    );
+}
+
+#[test]
+fn a_call_of_a_member_with_a_bare_requires_is_not_supported() {
+    let source = format!(
+        "{}fn main returns r: I32 do return Sized.size(A(1i32) 1i32) endfn\n",
+        sized("requires Ordered.greater(n 0i32)", &[("A", "return m")])
+    );
+    assert_eq!(
+        faults(&source),
+        [(
+            DiagnosticCode::ToolUnavailable,
+            at(&source, "Sized.size(A(1i32) 1i32)", 0)
+        )]
+    );
+}

@@ -104,6 +104,17 @@ impl<'a> BodyChecker<'_, 'a> {
         node: &Node,
         span: ByteSpan,
     ) {
+        if let IrExpr::Call {
+            target: CallTarget::Contract(call),
+            ..
+        } = &node.expr
+            && self.contract_requires_bare(call)
+        {
+            self.unavailable(
+                span,
+                "a call of a contract member whose `requires` is bare",
+            );
+        }
         match site {
             Some(Ok(function)) => {
                 let bare = self
@@ -128,6 +139,21 @@ impl<'a> BodyChecker<'_, 'a> {
             }
             None => {}
         }
+    }
+
+    /// Whether the contract member `call` calls has a bare `requires`.
+    fn contract_requires_bare(&self, call: &vibra_ir::ContractCall) -> bool {
+        self.program
+            .interfaces
+            .iter()
+            .find(|interface| interface.id.as_ref() == Some(&call.interface))
+            .and_then(|interface| {
+                interface.view.members().into_iter().find(|member| {
+                    member.name().is_some_and(|name| name.text() == call.member)
+                })
+            })
+            .and_then(|member| member.requires())
+            .is_some_and(|guard| guard.consequence().is_none())
     }
 
     /// Records the `let` pattern `pattern`, written at `span` without an

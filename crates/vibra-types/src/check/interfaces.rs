@@ -330,7 +330,7 @@ impl<'a> Program<'a> {
             for member in view.members() {
                 let Some(name) = member.name() else { continue };
                 let what = format!("the member `{interface_name}.{}`", name.text());
-                if !unguarded(&member) {
+                if member.performs().is_some() {
                     self.unsupported(module, member.construct().span(), &what);
                     continue;
                 }

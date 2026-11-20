@@ -726,6 +726,134 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         self.labelled_defaults(signature, labelled).1
     }
 
+    /// The guards `views` of an abstract contract member of type
+    /// `signature`, whose parameters are written as `patterns` and
+    /// `labelled`, checked once under `scope` with `Self` open, so that the
+    /// contract's own faults are reported where it is declared.
+    pub(crate) fn abstract_guards(
+        &mut self,
+        signature: &FnType,
+        patterns: &[Pattern<'a>],
+        labelled: &[Ident<'a>],
+        scope: CallableScope,
+        views: &GuardViews<'a>,
+    ) {
+        self.locals.clear();
+        self.slots.clear();
+        self.frames.clear();
+        self.gaps.clear();
+        self.binders = scope.binders;
+        self.self_type = scope.self_type;
+        self.bounds = scope.bounds;
+        self.associated = scope.associated;
+        self.self_interface = scope.self_interface;
+        self.result_span = scope.result_span;
+        self.result = Some(signature.result.clone());
+        self.slots.extend(signature.slot_types());
+        let _ = self.member_guards(signature, patterns, labelled, views);
+        // A contract guard is copied into each implementation, where an
+        // obligation it states would have no single site.
+        for site in std::mem::take(&mut self.sites) {
+            if let Site::Requires { span, .. } | Site::Where { span, .. } = site {
+                self.unavailable(
+                    span,
+                    "a bare-guard obligation inside a contract member's guard",
+                );
+            }
+        }
+    }
+
+    /// The guards `views` of the contract member that the callable just
+    /// checked implements, written in the module `module` whose source is
+    /// `text`, checked under the implementation's substitution: each
+    /// parameter name of the contract member denotes the implementation's
+    /// parameter in the same position, and each slot a guard binds comes
+    /// after the body's. The guards and the slot count, or `None` when one
+    /// has a fault; the faults themselves are the contract's, reported
+    /// where it is declared.
+    pub(crate) fn implementation_guards(
+        &mut self,
+        signature: &FnType,
+        patterns: &[Pattern<'a>],
+        labelled: &[Ident<'a>],
+        module: (usize, Arc<str>, &'a str),
+        views: &GuardViews<'a>,
+    ) -> Option<(Guards, usize)> {
+        let (module, source_id, text) = module;
+        let saved = (
+            std::mem::replace(&mut self.module, module),
+            std::mem::replace(&mut self.source_id, source_id),
+            std::mem::replace(&mut self.text, text),
+        );
+        let (diagnostics, sites) = (self.diagnostics.len(), self.sites.len());
+        let guards = self.member_guards(signature, patterns, labelled, views);
+        self.diagnostics.truncate(diagnostics);
+        self.sites.truncate(sites);
+        (self.module, self.source_id, self.text) = saved;
+        guards.map(|guards| (guards, self.slots.len()))
+    }
+
+    /// Checks the guards `views` of a contract member of type `signature`
+    /// whose parameter slots are the first of the current ones: each
+    /// positional parameter written as a name in `patterns` is bound to its
+    /// slot, and each labelled one in `labelled` to its label's. A pattern
+    /// that takes a parameter apart is not supported in a contract member
+    /// with a guard. The guards, or `None` when one has a fault.
+    fn member_guards(
+        &mut self,
+        signature: &FnType,
+        patterns: &[Pattern<'a>],
+        labelled: &[Ident<'a>],
+        views: &GuardViews<'a>,
+    ) -> Option<Guards> {
+        if views.requires.is_none() && views.ensures.is_none() {
+            return Some(Guards::default());
+        }
+        let mark = self.diagnostics.len();
+        self.locals.clear();
+        let frame = self.frames.len();
+        for (index, (ty, pattern)) in
+            signature.parameters.iter().zip(patterns).enumerate()
+        {
+            let span = pattern_span(*pattern, self.text);
+            let typed = self.type_pattern(*pattern, span, Some(ty));
+            match typed.lowered {
+                Some(IrPattern::Bind(fresh)) if fresh + 1 == self.slots.len() => {
+                    self.slots.pop();
+                    self.locals
+                        .extend(typed.bindings.into_iter().map(|local| Local {
+                            slot: index,
+                            ..local
+                        }));
+                }
+                Some(IrPattern::Discard) => {}
+                _ => {
+                    self.unavailable(
+                        span,
+                        "a parameter pattern that takes a value apart in a contract member with a guard",
+                    );
+                    return None;
+                }
+            }
+        }
+        let entries = signature.labels.entries();
+        for name in labelled {
+            let Some(at) = entries.iter().position(|(label, _)| label == name.text())
+            else {
+                continue;
+            };
+            self.locals.push(Local {
+                name: name.text().to_owned(),
+                slot: signature.parameters.len() + at,
+                ty: entries.get(at).map(|(_, ty)| ty.clone()),
+                frame,
+                generic: None,
+            });
+        }
+        let bound = self.slots.len()..self.slots.len();
+        let (failed, guards) = self.guards(views, signature, &[], &bound);
+        (!failed && self.diagnostics.len() == mark).then_some(guards)
+    }
     /// Binds the parameters of a callable of type `signature`, whose slots
     /// start at the current slot count: each positional one through its
     /// pattern, each labelled one written as `labelled` to its slot. Whether

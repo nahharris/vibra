@@ -97,7 +97,11 @@ fn check_bodies(
         faults: BTreeMap::new(),
         references: BTreeMap::new(),
         instantiations: Vec::new(),
-        contract: abstract_defaults(program, documents, layout),
+        contract: [
+            abstract_defaults(program, documents, layout),
+            abstract_guards(program, documents, layout),
+        ]
+        .concat(),
         invariants: BTreeMap::new(),
         errors: BTreeMap::new(),
         sites: Vec::new(),
@@ -131,9 +135,15 @@ fn check_bodies(
             .collect::<Vec<_>>();
         let labelled = data.view.labelled();
         let views = GuardViews::of(&data.view);
-        let checked =
+        let mut checked =
             checker.callable(signature, &patterns, &labelled, scope, &views, body);
         if let Some(interface) = data.implements {
+            if let Some((guards, slot_count)) =
+                contract_guards(program, documents, data, interface, &mut checker)
+            {
+                checked.guards = guards;
+                checked.slot_count = slot_count;
+            }
             let differing = differing_defaults(
                 program,
                 documents,
@@ -321,6 +331,130 @@ fn abstract_defaults(
         }
     }
     diagnostics
+}
+
+/// The diagnostics of the guards of every abstract member of an interface
+/// outside the embedded library, each checked once with the interface's
+/// parameters and `Self` open.
+fn abstract_guards(
+    program: &Program<'_>,
+    documents: &[Document],
+    layout: &Layout,
+) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+    for (index, interface) in program.interfaces.iter().enumerate() {
+        let module = program.modules.get(interface.module);
+        if module.is_none_or(|module| module.embedded) {
+            continue;
+        }
+        let Some(text) = documents.get(interface.module).and_then(Document::text)
+        else {
+            continue;
+        };
+        for view in interface.view.members() {
+            let views = GuardViews::of(&view);
+            let member = view
+                .name()
+                .and_then(|name| interface.member(name.text()))
+                .filter(|member| member.default.is_none());
+            let Some(member) =
+                member.filter(|_| views.requires.is_some() || views.ensures.is_some())
+            else {
+                continue;
+            };
+            let mut checker = BodyChecker::new(program, layout, interface.module, text);
+            let patterns = view
+                .takes()
+                .into_iter()
+                .map(|(pattern, _)| pattern)
+                .collect::<Vec<_>>();
+            let labelled = view
+                .labelled()
+                .into_iter()
+                .map(|(name, _, _)| name)
+                .collect::<Vec<_>>();
+            let scope = CallableScope {
+                binders: member.binders.clone(),
+                bounds: member.bounds.clone(),
+                self_type: Some(Type::SelfType),
+                associated: interface.own_associated(),
+                self_interface: Some(index),
+                result_span: None,
+            };
+            checker.abstract_guards(
+                &member.signature,
+                &patterns,
+                &labelled,
+                scope,
+                &views,
+            );
+            diagnostics.append(&mut checker.diagnostics);
+        }
+    }
+    diagnostics
+}
+
+/// The guards of the contract member that `data`, a member of an
+/// implementation of the interface `interface` whose body `checker` just
+/// checked, implements: the contract's guards checked under the
+/// implementation's substitution, and the slot count with them. `None`
+/// when the contract member has no guard. A contract guard that does not
+/// check under the substitution is `@tool.unavailable` at the member.
+fn contract_guards<'a>(
+    program: &Program<'a>,
+    documents: &'a [Document],
+    data: &FnData<'a>,
+    interface: usize,
+    checker: &mut BodyChecker<'_, 'a>,
+) -> Option<(super::contract::Guards, usize)> {
+    let interface_data = program.interfaces.get(interface)?;
+    let contract =
+        interface_data.view.members().into_iter().find(|member| {
+            member.name().is_some_and(|name| name.text() == data.name)
+        })?;
+    let views = GuardViews::of(&contract);
+    if views.requires.is_none() && views.ensures.is_none() {
+        return None;
+    }
+    let signature = data.signature.as_ref()?;
+    let text = documents
+        .get(interface_data.module)
+        .and_then(Document::text)?;
+    let source_id = program
+        .modules
+        .get(interface_data.module)?
+        .source_id
+        .clone();
+    let patterns = contract
+        .takes()
+        .into_iter()
+        .map(|(pattern, _)| pattern)
+        .collect::<Vec<_>>();
+    let labelled = contract
+        .labelled()
+        .into_iter()
+        .map(|(name, _, _)| name)
+        .collect::<Vec<_>>();
+    let found = checker.implementation_guards(
+        signature,
+        &patterns,
+        &labelled,
+        (interface_data.module, source_id, text),
+        &views,
+    );
+    if found.is_none() {
+        let span = data
+            .view
+            .name()
+            .map_or_else(|| data.view.construct().span(), |name| name.span());
+        checker.diagnostics.push(Diagnostic::new(
+            DiagnosticCode::ToolUnavailable,
+            span,
+            "the contract member's guards under this implementation's substitution are \
+             not supported by this checker yet",
+        ));
+    }
+    found
 }
 
 /// The `@type.mismatch` of each labelled default of `data`, a member of an
