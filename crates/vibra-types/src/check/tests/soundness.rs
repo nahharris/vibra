@@ -277,3 +277,166 @@ fn a_closure_over_the_budget_is_a_tool_limit_alone() {
         &[(REQUIRES, UNKNOWN)],
     );
 }
+
+// Siblings: each rule's soundness condition, with the program that would
+// be wrongly discharged were the condition dropped.
+
+const REFUTED: ObligationStatus = ObligationStatus::Refuted;
+
+/// `pos`, whose bare `requires` states that its argument is positive.
+const POS: &str = "fn pos takes {x: I32} returns r: I32 requires Ordered.greater(x 0i32) do return x endfn\n";
+
+#[test]
+fn constants_are_substituted_at_the_slots_their_labels_name() {
+    // GUARD-1: `less(a b)` at `b: 1 a: 2` is 2 < 1.
+    let source = "fn need labelled {a: I32 be 0i32 b: I32 be 0i32} returns r: I32 requires Ordered.less(a b) do return a endfn\n\
+         fn run returns r: I32 do return need(b: 1i32 a: 2i32) endfn\n";
+    decides(
+        source,
+        &[(DiagnosticCode::ContractRefuted, "Ordered.less(a b)")],
+        &[(REQUIRES, REFUTED)],
+    );
+    let source = "fn need labelled {a: I32 be 0i32 b: I32 be 0i32} returns r: I32 requires Ordered.less(a b) do return a endfn\n\
+         fn run returns r: I32 do return need(b: 2i32 a: 1i32) endfn\n";
+    decides(source, &[], &[(REQUIRES, PASSED)]);
+}
+
+#[test]
+fn an_earlier_arm_with_a_literal_gives_no_negative_case_fact() {
+    // GUARD-3: past `pick(value: 0)`, `x` may still be a `pick`.
+    let source = "type Pick case pick {value: I32} case empty endtype\n\
+         fn isEmpty takes {x: Pick} returns r: Bool do match x case Pick.empty() return true case Pick.pick(value: _) return false endmatch endfn\n\
+         fn need takes {x: Pick} returns r: I32 requires isEmpty(x) do return 0i32 endfn\n\
+         fn run takes {x: Pick} returns r: I32 do match x case Pick.pick(value: 0i32) return 1i32 case _ return need(x) endmatch endfn\n";
+    decides(source, &[(UNPROVED, "need(x)")], &[(REQUIRES, UNKNOWN)]);
+    // The arm of the case itself gives it.
+    let source = source.replace(
+        "case _ return need(x)",
+        "case Pick.empty() return need(x) case _ return 2i32",
+    );
+    decides(&source, &[], &[(REQUIRES, PASSED)]);
+}
+
+#[test]
+fn a_fact_is_about_a_binding_not_a_name() {
+    // GUARD-3 and GUARD-4 compare bindings. A name denotes one binding in
+    // its scope: a `let` or a pattern binder of a name in scope is
+    // `@name.redeclaration`, so no fact outlives the binding it names.
+    let redeclared = |source: &str| {
+        faults(source)
+            .iter()
+            .any(|(code, _)| *code == DiagnosticCode::NameRedeclaration)
+    };
+    let source = format!(
+        "{POS}fn f takes {{x: I32}} returns r: I32 do if Ordered.greater(x 0i32) then let x be I32.sub(x 1i32) endlet return pos(x) endif return 0i32 endfn\n"
+    );
+    assert!(redeclared(&source), "{source}");
+    let source = format!(
+        "{POS}fn f takes {{x: I32 o: Option(I32)}} returns r: I32 do if Ordered.greater(x 0i32) then match o case Option.some(value: x) return pos(x) case _ return 0i32 endmatch endif return 0i32 endfn\n"
+    );
+    assert!(redeclared(&source), "{source}");
+    // A binder of another name leaves the fact about `x`.
+    // The same name, unshadowed, is the same binding.
+    let source = format!(
+        "{POS}fn f takes {{x: I32 o: Option(I32)}} returns r: I32 do if Ordered.greater(x 0i32) then match o case Option.some(value: y) return pos(x) case _ return 0i32 endmatch endif return 0i32 endfn\n"
+    );
+    decides(&source, &[], &[(REQUIRES, PASSED)]);
+}
+
+#[test]
+fn only_a_bare_proven_ensures_with_a_discharged_requires_is_a_result_fact() {
+    let call = "fn f returns r: I32 do return pos(mk()) endfn\n";
+    // GUARD-7: a bare `ensures` proven of every exit.
+    let source = format!(
+        "{POS}fn mk returns r: I32 ensures Ordered.greater(r 0i32) do return 1i32 endfn\n{call}"
+    );
+    decides(&source, &[], &[(REQUIRES, PASSED), (ENSURES, PASSED)]);
+    // An `ensures … else` may return its consequence, which is not checked
+    // against the predicate.
+    let source = format!(
+        "{POS}fn mk takes {{x: I32}} returns r: I32 ensures Ordered.greater(r 0i32) else 0i32 do return x endfn\n\
+         fn f takes {{x: I32}} returns r: I32 do return pos(mk(x)) endfn\n"
+    );
+    decides(&source, &[(UNPROVED, "pos(mk(x))")], &[(REQUIRES, UNKNOWN)]);
+    // A `requires … else` may return its consequence, skipping the
+    // `ensures`.
+    let source = format!(
+        "{POS}fn mk takes {{x: I32}} returns r: I32 requires Ordered.greater(x 0i32) else 0i32 ensures Ordered.greater(r 0i32) do return x endfn\n\
+         fn f takes {{x: I32}} returns r: I32 do return pos(mk(x)) endfn\n"
+    );
+    decides(
+        &source,
+        &[(UNPROVED, "pos(mk(x))")],
+        &[(REQUIRES, UNKNOWN), (ENSURES, PASSED)],
+    );
+    // An `ensures` not established at every exit is no fact.
+    let source = format!(
+        "{POS}fn mk takes {{x: I32}} returns r: I32 ensures Ordered.greater(r 0i32) do return x endfn\n\
+         fn f takes {{x: I32}} returns r: I32 do return pos(mk(x)) endfn\n"
+    );
+    decides(
+        &source,
+        &[
+            (UNPROVED, "Ordered.greater(r 0i32)"),
+            (UNPROVED, "pos(mk(x))"),
+        ],
+        &[(REQUIRES, UNKNOWN), (ENSURES, UNKNOWN)],
+    );
+}
+
+#[test]
+fn constants_compare_by_the_value_of_their_own_type() {
+    // INT-8 over a signed and an unsigned width.
+    let gt = |ty: &str, fact: &str, goal: &str| {
+        format!(
+            "fn gtReq takes {{a: {ty} b: {ty}}} returns r: {ty} requires Ordered.greater(a b) do return a endfn\n\
+             fn f takes {{x: {ty}}} returns r: {ty} do if Ordered.greater(x {fact}) then return gtReq(x {goal}) endif return x endfn\n"
+        )
+    };
+    decides(&gt("I8", "-100i8", "-128i8"), &[], &[(REQUIRES, PASSED)]);
+    let source = gt("I8", "-100i8", "-50i8");
+    decides(
+        &source,
+        &[(UNPROVED, "gtReq(x -50i8)")],
+        &[(REQUIRES, UNKNOWN)],
+    );
+    decides(&gt("U8", "200u8", "100u8"), &[], &[(REQUIRES, PASSED)]);
+    let source = gt("U8", "100u8", "200u8");
+    decides(
+        &source,
+        &[(UNPROVED, "gtReq(x 200u8)")],
+        &[(REQUIRES, UNKNOWN)],
+    );
+}
+/// The number of dependencies of each obligation of `source`.
+fn dependency_counts(source: &str) -> Vec<usize> {
+    check_source(SOURCE, source)
+        .obligations()
+        .iter()
+        .map(|obligation| obligation.dependencies().len())
+        .collect()
+}
+
+#[test]
+fn a_module_value_the_discharge_reads_is_a_dependency() {
+    let program = |argument: &str, condition: &str| {
+        format!(
+            "let limit: I32 be 1i32 endlet\n\
+             fn ok takes {{x: I32}} returns r: Bool do return Ordered.greater(x 0i32) endfn\n\
+             fn need takes {{x: I32}} returns r: Void requires ok(x) do return void endfn\n\
+             fn run takes {{y: I32}} returns r: Void do if {condition} then return need({argument}) endif return void endfn\n"
+        )
+    };
+    // GUARD-1 reads `ok`; the argument `limit` is read for its value.
+    assert_eq!(dependency_counts(&program("1i32", "true")), [2]);
+    assert_eq!(dependency_counts(&program("limit", "true")), [3]);
+    // GUARD-3 reads the condition that names `limit`.
+    let source = program("y", "ok(y)");
+    assert_eq!(statuses(&source), [(REQUIRES, PASSED)]);
+    assert_eq!(dependency_counts(&source), [1]);
+    let source = "let limit: I32 be 0i32 endlet\n\
+         fn need takes {x: I32} returns r: Void requires Ordered.greater(x 0i32) do return void endfn\n\
+         fn run takes {y: I32} returns r: Void do if Ordered.greater(y limit) then return need(y) endif return void endfn\n";
+    assert_eq!(statuses(source), [(REQUIRES, PASSED)]);
+    assert_eq!(dependency_counts(source), [2]);
+}

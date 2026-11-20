@@ -496,6 +496,43 @@ pub(super) fn discharge(
 }
 
 impl<'v> Prover<'v> {
+    /// `evidence`, having read the values of the module values `globals`.
+    fn values_read(
+        &self,
+        mut evidence: Evidence,
+        globals: &BTreeSet<usize>,
+    ) -> Evidence {
+        for global in globals {
+            if let Some(identity) = self.readable.1.get(global) {
+                evidence = evidence.reading(identity);
+            }
+        }
+        evidence
+    }
+
+    /// `verdict`, its decision having read the values of the module values
+    /// `globals`.
+    fn with_values(&self, verdict: Verdict, globals: &BTreeSet<usize>) -> Verdict {
+        match verdict {
+            Verdict::Passed(evidence) => {
+                Verdict::Passed(self.values_read(evidence, globals))
+            }
+            Verdict::Refuted {
+                counterexample,
+                related,
+                mut reads,
+            } => {
+                reads.extend(self.values_read(Evidence::default(), globals).reads);
+                Verdict::Refuted {
+                    counterexample,
+                    related,
+                    reads,
+                }
+            }
+            other => other,
+        }
+    }
+
     /// The identities of the declarations a compile-time evaluation read.
     fn read(&self, reads: &Reads) -> BTreeSet<String> {
         let (functions, values) = &self.readable;
@@ -751,13 +788,13 @@ impl<'v> Prover<'v> {
                     }
                 }
                 Task::Assume(condition, holds) => {
-                    let (term, substituted) = facts::build(
+                    let (term, substituted, globals) = facts::build_reading(
                         &mut self.terms,
                         &self.vocabulary,
                         &mut env,
                         condition,
                     );
-                    let mut evidence = Evidence::default();
+                    let mut evidence = self.values_read(Evidence::default(), &globals);
                     if substituted {
                         evidence = evidence.with(SUBSTITUTION);
                     }
@@ -770,14 +807,14 @@ impl<'v> Prover<'v> {
                     );
                 }
                 Task::Bind(slot, value) => {
-                    let (term, _) = facts::build(
+                    let (term, _, globals) = facts::build_reading(
                         &mut self.terms,
                         &self.vocabulary,
                         &mut env,
                         value,
                     );
                     if let Some(slot) = slot {
-                        env.bind(slot, term, true);
+                        env.bind_reading(slot, term, true, globals);
                     }
                 }
                 Task::Arm(subject, arms, at) => {
@@ -859,9 +896,9 @@ impl<'v> Prover<'v> {
         arms: &[MatchArm],
         at: usize,
     ) {
-        let (subject, substituted) =
-            facts::build(&mut self.terms, &self.vocabulary, env, subject);
-        let mut evidence = Evidence::default();
+        let (subject, substituted, globals) =
+            facts::build_reading(&mut self.terms, &self.vocabulary, env, subject);
+        let mut evidence = self.values_read(Evidence::default(), &globals);
         if substituted {
             evidence = evidence.with(SUBSTITUTION);
         }
@@ -901,7 +938,9 @@ impl<'v> Prover<'v> {
         for (part, term) in facts::pattern_parts(&mut self.terms, &arm.pattern, subject)
         {
             match part {
-                Pattern::Bind(slot) => env.bind(*slot, term, false),
+                Pattern::Bind(slot) => {
+                    env.bind_reading(*slot, term, false, globals.clone())
+                }
                 Pattern::Case { case, .. } => {
                     self.case_fact(facts, term, case, true, &evidence);
                 }
@@ -1026,8 +1065,8 @@ impl<'v> Prover<'v> {
         if !data.requires_certified {
             return Some(found(Verdict::Unsupported));
         }
-        let (call, substituted) =
-            facts::build(&mut self.terms, &self.vocabulary, env, node);
+        let (call, substituted, globals) =
+            facts::build_reading(&mut self.terms, &self.vocabulary, env, node);
         let operands = match self.terms.get(call) {
             Some(Data::Call(_, operands)) => operands.clone(),
             _ => Vec::new(),
@@ -1116,7 +1155,7 @@ impl<'v> Prover<'v> {
         if matches!(verdict, Verdict::Passed(_)) {
             self.discharged.insert(call);
         }
-        Some(found(verdict))
+        Some(found(self.with_values(verdict, &globals)))
     }
 
     /// The obligation of a construction of a type whose `where` is bare.
@@ -1165,8 +1204,8 @@ impl<'v> Prover<'v> {
             .representation
             .as_ref()
             .map(|representation| representation.instantiate(arguments));
-        let (term, substituted) =
-            facts::build(&mut self.terms, &self.vocabulary, env, node);
+        let (term, substituted, globals) =
+            facts::build_reading(&mut self.terms, &self.vocabulary, env, node);
         let repr = self.terms.intern(Data::Repr(term));
         let constant = match (construction, &representation) {
             (Construction::Wrapper(_), _) => self.terms.constant(repr).cloned(),
@@ -1273,7 +1312,7 @@ impl<'v> Prover<'v> {
                 }
             }
         };
-        Some(found(verdict))
+        Some(found(self.with_values(verdict, &globals)))
     }
 
     /// The constant operands of the construction `term`.
@@ -1311,9 +1350,11 @@ impl<'v> Prover<'v> {
         let mut types = data.types.clone();
         let result_name = data.result_name.clone();
         let result_type = data.result_type.clone();
-        let (term, substituted) = match value {
-            Some(value) => facts::build(&mut self.terms, &self.vocabulary, env, value),
-            None => (self.terms.opaque(), false),
+        let (term, substituted, globals) = match value {
+            Some(value) => {
+                facts::build_reading(&mut self.terms, &self.vocabulary, env, value)
+            }
+            None => (self.terms.opaque(), false, BTreeSet::new()),
         };
         let mut slots = BTreeMap::new();
         slots.insert(slot, (term, span));
@@ -1373,7 +1414,7 @@ impl<'v> Prover<'v> {
         Some(Exit {
             function,
             span,
-            verdict,
+            verdict: self.with_values(verdict, &globals),
             through_try: value.is_none(),
         })
     }
@@ -1389,15 +1430,14 @@ impl<'v> Prover<'v> {
         else {
             return;
         };
-        let (term, _) =
-            facts::build(&mut self.terms, &self.vocabulary, env, &guard.predicate);
-        facts.assume(
+        let (term, _, globals) = facts::build_reading(
             &mut self.terms,
             &self.vocabulary,
-            term,
-            true,
-            Evidence::of(SUBSTITUTION),
+            env,
+            &guard.predicate,
         );
+        let evidence = self.values_read(Evidence::of(SUBSTITUTION), &globals);
+        facts.assume(&mut self.terms, &self.vocabulary, term, true, evidence);
     }
 
     /// Decides `predicate` by evaluation (`GUARD-1`) when every slot it

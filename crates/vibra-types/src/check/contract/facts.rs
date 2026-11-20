@@ -549,9 +549,18 @@ pub(crate) struct Env {
     /// Whether a slot nothing binds is that slot of the activation; when it
     /// is not, it is an opaque value.
     pub(crate) open: bool,
-    slots: BTreeMap<usize, (Term, bool)>,
-    undo: Vec<(usize, Option<(Term, bool)>)>,
+    slots: BTreeMap<usize, Binding>,
+    undo: Vec<(usize, Option<Binding>)>,
     rewrites: Vec<(Term, Term)>,
+}
+
+/// What a slot is bound to: its term, whether rule 4 substitutes it as an
+/// immutable `let` alias, and the module values read to build it.
+#[derive(Clone, Debug)]
+struct Binding {
+    term: Term,
+    alias: bool,
+    globals: BTreeSet<usize>,
 }
 
 /// A point of an [`Env`] and a [`FactSet`] to go back to.
@@ -575,7 +584,26 @@ impl Env {
     /// Binds `slot` to `term`; `alias` when the binding is an immutable
     /// `let` alias, which rule 4 substitutes.
     pub(crate) fn bind(&mut self, slot: usize, term: Term, alias: bool) {
-        let old = self.slots.insert(slot, (term, alias));
+        self.bind_reading(slot, term, alias, BTreeSet::new());
+    }
+
+    /// [`Self::bind`], the term built by reading the module values
+    /// `globals`, which every read of the slot reads too.
+    pub(crate) fn bind_reading(
+        &mut self,
+        slot: usize,
+        term: Term,
+        alias: bool,
+        globals: BTreeSet<usize>,
+    ) {
+        let old = self.slots.insert(
+            slot,
+            Binding {
+                term,
+                alias,
+                globals,
+            },
+        );
         self.undo.push((slot, old));
     }
 
@@ -703,7 +731,20 @@ pub(crate) fn build(
     env: &mut Env,
     node: &Node,
 ) -> (Term, bool) {
+    let (term, substituted, _) = build_reading(terms, vocabulary, env, node);
+    (term, substituted)
+}
+
+/// [`build`], with the global index of every constant module value whose
+/// value the term was built from, directly or through a bound slot.
+pub(crate) fn build_reading(
+    terms: &mut Terms,
+    vocabulary: &Vocabulary<'_>,
+    env: &mut Env,
+    node: &Node,
+) -> (Term, bool, BTreeSet<usize>) {
     let mut substituted = false;
+    let mut globals = BTreeSet::new();
     let mut stack: Vec<Term> = Vec::new();
     let mut marks: Vec<usize> = Vec::new();
     let mut pending = vec![Build::Visit(node)];
@@ -802,8 +843,14 @@ pub(crate) fn build(
                 _ => stack.push(terms.opaque()),
             },
             Build::Make(node) => {
-                let term =
-                    make(terms, vocabulary, env, node, &mut stack, &mut substituted);
+                let term = make(
+                    terms,
+                    vocabulary,
+                    env,
+                    node,
+                    &mut stack,
+                    (&mut substituted, &mut globals),
+                );
                 let term = match env.rewritten(term) {
                     Some(constant) => {
                         substituted = true;
@@ -846,7 +893,7 @@ pub(crate) fn build(
         }
     }
     let term = stack.pop().unwrap_or_else(|| terms.opaque());
-    (term, substituted)
+    (term, substituted, globals)
 }
 
 /// The term of `node`, whose operands' terms are the last ones on `stack`.
@@ -856,7 +903,7 @@ fn make(
     env: &Env,
     node: &Node,
     stack: &mut Vec<Term>,
-    substituted: &mut bool,
+    (substituted, globals): (&mut bool, &mut BTreeSet<usize>),
 ) -> Term {
     let take = |count: usize, stack: &mut Vec<Term>| {
         let start = stack.len().saturating_sub(count);
@@ -865,13 +912,17 @@ fn make(
     match &node.expr {
         Expr::Literal(constant) => terms.intern(Data::Constant(constant.clone())),
         Expr::Global(global) => match vocabulary.globals.get(global) {
-            Some(constant) => terms.intern(Data::Constant(constant.clone())),
+            Some(constant) => {
+                globals.insert(*global);
+                terms.intern(Data::Constant(constant.clone()))
+            }
             None => terms.opaque(),
         },
         Expr::Variable { slot, value_type } => match env.slots.get(slot) {
-            Some((term, alias)) => {
-                *substituted |= *alias;
-                *term
+            Some(binding) => {
+                *substituted |= binding.alias;
+                globals.extend(binding.globals.iter().copied());
+                binding.term
             }
             None if env.open => {
                 let term = terms.intern(Data::Slot(env.activation, *slot));

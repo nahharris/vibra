@@ -1,0 +1,13 @@
+id = "V2-CONTRACT-evaluation-reads-value"
+rule = "V2-CONTRACT-evaluation-reads-value"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "07-diagnostics-and-conformance.md#persistent-observations: the record of an obligation GUARD-1 proves over the value of a module value lists that module value in dependencies"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+types = "types.vibon"
