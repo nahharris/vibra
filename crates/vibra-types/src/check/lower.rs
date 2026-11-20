@@ -367,7 +367,7 @@ fn scope_at(program: &Program<'_>, module: usize, span: ByteSpan) -> CallableSco
     match owner {
         Some(data) => CallableScope {
             binders: data.params.clone(),
-            bounds: vec![None; data.params.len()],
+            bounds: data.bounds.clone(),
             self_type: data.self_type(),
             ..CallableScope::default()
         },
@@ -1114,9 +1114,9 @@ fn assemble(
             }
             None => None,
         };
-        let definition =
-            TypeDefinition::new(id, data.params.clone(), body, invariant, visibility)
-                .map_err(|error| error.to_string())?;
+        let binders = binders_of(program, &data.params, &data.bounds)?;
+        let definition = TypeDefinition::new(id, binders, body, invariant, visibility)
+            .map_err(|error| error.to_string())?;
         types.push(definition);
     }
     let mut interfaces = Vec::new();

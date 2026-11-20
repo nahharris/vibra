@@ -2566,6 +2566,8 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                 {
                     Some((data, case)) => {
                         binder_names.clone_from(&data.params);
+                        bounds.clone_from(&data.bounds);
+                        bound_module = data.module;
                         let params = match &case.fields {
                             Some(fields) => {
                                 labels = Some(
@@ -2586,6 +2588,8 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             Callee::Construct(ty) => match program.types.get(*ty) {
                 Some(data) => {
                     binder_names.clone_from(&data.params);
+                    bounds.clone_from(&data.bounds);
+                    bound_module = data.module;
                     let params = match &data.kind {
                         TypeKind::Record(fields) => {
                             labels = Some(
@@ -3576,10 +3580,14 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                         .as_ref()
                         .and_then(|expected| self.dict_arguments(expected))
                         .is_none();
-                    let key_fault = if inferred {
-                        self.program.key_fault(&key)
-                    } else {
-                        None
+                    let key_fault = match self.program.key_fault(&key) {
+                        Some(DiagnosticCode::TypeInvalidDictKey)
+                            if key.is_open() && !self.open_key_fault(&key) =>
+                        {
+                            None
+                        }
+                        fault if inferred => fault,
+                        _ => None,
                     };
                     match key_fault {
                         Some(code) => {

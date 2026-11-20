@@ -1,0 +1,13 @@
+type Index(K) of Dict(K I32)
+  given {K: Ordered}
+endtype
+
+fn main returns r: I32 do
+  let Index(d) be Index([1i32: 2i32]) endlet
+  match d(1i32)
+    case Option.some(value: v)
+      return v
+    case Option.none()
+      return 0i32
+  endmatch
+endfn

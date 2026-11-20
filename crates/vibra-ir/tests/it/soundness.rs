@@ -604,7 +604,10 @@ fn record_type(
 ) -> TypeDefinition {
     TypeDefinition::new(
         id(name),
-        parameters.iter().map(|name| (*name).to_owned()).collect(),
+        parameters
+            .iter()
+            .map(|name| vibra_ir::Binder::new(*name, None).unwrap())
+            .collect(),
         TypeBody::Record(
             fields
                 .into_iter()
@@ -1026,6 +1029,157 @@ fn a_dict_built_from_a_list_needs_an_ordered_key() {
     };
     assert!(build(Type::Atom).is_ok());
     assert!(matches!(build(Type::F64), Err(IrError::InvalidType(_))));
+}
+
+/// The bound `Ordered` of the parts [`ordered_parts`] gives.
+fn ordered_bound() -> Bound {
+    Bound {
+        contract: InterfaceKey::new(ordered_id(), Vec::new()),
+        choices: NamedTypes::empty(),
+    }
+}
+
+/// A bounded declared type is applied only at arguments that meet its
+/// bound: closed, or a binder whose own bound shows it, in a signature, a
+/// type body, and a global; and a bound refers only to the type's
+/// parameters.
+#[test]
+fn a_bounded_declared_type_is_applied_only_where_its_bound_holds() {
+    let sorted = || {
+        TypeDefinition::new(
+            id("test.t.Sorted"),
+            vec![Binder::new("T", Some(ordered_bound())).unwrap()],
+            TypeBody::Wrapper(Type::list(Type::Binder(0))),
+            None,
+            Visibility::Public,
+        )
+        .unwrap()
+    };
+    let at = |argument: Type| declared_at("test.t.Sorted", vec![argument]);
+    let taking = |binder: Option<Option<Bound>>, argument: Type| {
+        let mut parts = ordered_parts();
+        parts.types.push(sorted());
+        let binders = binder
+            .map(|bound| vec![Binder::new("T", bound).unwrap()])
+            .unwrap_or_default();
+        let record = SignatureRecord::new(
+            binders,
+            Type::function(FnType::new(vec![at(argument)], Type::I32)),
+        )
+        .unwrap();
+        parts.functions.push(function("f", record, int(0), 1));
+        CheckedModuleSet::try_new(parts)
+    };
+    assert!(taking(None, Type::Atom).is_ok());
+    assert!(taking(None, Type::list(Type::Atom)).is_ok());
+    assert!(matches!(
+        taking(None, Type::F32),
+        Err(IrError::InvalidExpression(_))
+    ));
+    assert!(taking(Some(Some(ordered_bound())), Type::Binder(0)).is_ok());
+    assert!(matches!(
+        taking(Some(None), Type::Binder(0)),
+        Err(IrError::InvalidExpression(_))
+    ));
+    let holding = |argument: Type| {
+        let mut parts = ordered_parts();
+        parts.types.push(sorted());
+        parts
+            .types
+            .push(record_type("test.t.Holder", &[], vec![("s", at(argument))]));
+        CheckedModuleSet::try_new(parts)
+    };
+    assert!(holding(Type::Atom).is_ok());
+    assert!(matches!(
+        holding(Type::F64),
+        Err(IrError::InvalidExpression(_))
+    ));
+    let held = |argument: Type| {
+        let mut parts = ordered_parts();
+        parts.types.push(sorted());
+        let value_type = at(argument.clone());
+        parts.globals.push(global(
+            "empty",
+            value_type.clone(),
+            node(Expr::Construct {
+                value_type,
+                construction: Construction::Wrapper(Box::new(node(Expr::Construct {
+                    value_type: Type::list(argument),
+                    construction: Construction::List(Vec::new()),
+                }))),
+            }),
+        ));
+        CheckedModuleSet::try_new(parts)
+    };
+    assert!(held(Type::Atom).is_ok());
+    assert!(matches!(
+        held(Type::F32),
+        Err(IrError::InvalidExpression(_))
+    ));
+    let outside = Bound {
+        contract: InterfaceKey::new(ordered_id(), vec![Type::Binder(3)]),
+        choices: NamedTypes::empty(),
+    };
+    assert!(
+        TypeDefinition::new(
+            id("test.t.Bad"),
+            vec![Binder::new("T", Some(outside)).unwrap()],
+            TypeBody::Wrapper(Type::Binder(0)),
+            None,
+            Visibility::Public,
+        )
+        .is_err()
+    );
+}
+
+/// A call of `dict.fromList` at a key that stays open in the caller keys a
+/// dict exactly when the caller's bound on that parameter shows `Ordered`.
+#[test]
+fn an_open_key_of_a_dict_built_from_a_list_reads_the_callers_bound() {
+    let build = |bound: Option<Bound>| {
+        let entries = |key: Type| Type::list(Type::Tuple(vec![key, Type::Binder(1)]));
+        let generic = SignatureRecord::new(
+            vec![
+                Binder::new("K", None).unwrap(),
+                Binder::new("V", None).unwrap(),
+            ],
+            Type::function(FnType::new(
+                vec![entries(Type::Binder(0))],
+                library_type(Library::Dict, vec![Type::Binder(0), Type::Binder(1)]),
+            )),
+        )
+        .unwrap();
+        let mut parts = ordered_parts();
+        let convert = parts.functions.len();
+        parts.functions.push(CheckedFunction::external(
+            "convert",
+            generic,
+            CompilerIntrinsic::DictFromList,
+            vec![Type::Binder(0), Type::Binder(1)],
+            origin(),
+        ));
+        let entry = Type::Tuple(vec![Type::Binder(0), Type::I32]);
+        let call = node(Expr::Call {
+            target: CallTarget::Direct {
+                function: convert,
+                type_arguments: vec![Type::Binder(0), Type::I32],
+            },
+            arguments: positional(vec![node(Expr::Construct {
+                value_type: Type::list(entry),
+                construction: Construction::List(Vec::new()),
+            })]),
+        });
+        let result = library_type(Library::Dict, vec![Type::Binder(0), Type::I32]);
+        let record = SignatureRecord::new(
+            vec![Binder::new("K", bound).unwrap()],
+            Type::function(FnType::new(Vec::new(), result)),
+        )
+        .unwrap();
+        parts.functions.push(function("build", record, call, 0));
+        CheckedModuleSet::try_new(parts)
+    };
+    assert!(build(Some(ordered_bound())).is_ok());
+    assert!(matches!(build(None), Err(IrError::InvalidType(_))));
 }
 
 /// A function whose body is `dict.fromList` at its own binders keys no dict

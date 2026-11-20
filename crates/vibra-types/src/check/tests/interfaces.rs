@@ -6,7 +6,7 @@
 use vibra_diagnostics::{ByteSpan, DiagnosticCode};
 use vibra_resolve::{PackageId, ResolveInput, SourceModule, SourceUnit, UnitKind};
 
-use super::{at, faults};
+use super::{at, faults, run, value};
 use crate::check::check_workspace;
 use crate::stdlib::load_stdlib;
 
@@ -240,22 +240,16 @@ fn an_implementation_is_bounded_only_as_its_enclosing_type() {
                   fn f returns r: Bool do return Equatable.equal(Box(item: 1u8) Box(item: 2u8)) \
                   endfn\n";
     assert_eq!(faults(source), Vec::new());
-    // The bound an implementation needs is written on its type, and a type
-    // with a bounded parameter is outside this checker.
-    let source = "type Box(T) of {item: T} given {T: Equatable} impl Equatable \
+    // The bound an implementation needs is written on its type, and the
+    // implementation passes the parameter through with that bound.
+    let source = "fn main returns r: U8 do \
+                  match Equatable.equal(Box(item: 1u8) Box(item: 1u8)) \
+                  case Bool.true() return 1u8 case Bool.false() return 0u8 endmatch endfn\n\
+                  type Box(T) of {item: T} given {T: Equatable} impl Equatable \
                   fn equal takes {left: Self right: Self} returns r: Bool \
                   do return Equatable.equal(left.item right.item) endfn endimpl endtype\n";
-    let codes = faults(source)
-        .into_iter()
-        .map(|(code, _)| code)
-        .collect::<Vec<_>>();
-    assert_eq!(
-        codes,
-        vec![
-            DiagnosticCode::ToolUnavailable,
-            DiagnosticCode::ToolUnavailable
-        ]
-    );
+    assert_eq!(faults(source), Vec::new());
+    assert_eq!(run(source).as_deref(), Ok(value("u8", "1u8").as_str()));
 }
 
 #[test]

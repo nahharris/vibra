@@ -1,0 +1,8 @@
+type Tree(T)
+  given {T: Ordered}
+  case leaf
+  case node {value: T}
+endtype
+type Plain of I32 endtype
+
+fn f returns r: I32 do let t be Tree.node(value: Plain(1i32)) endlet return 0i32 endfn

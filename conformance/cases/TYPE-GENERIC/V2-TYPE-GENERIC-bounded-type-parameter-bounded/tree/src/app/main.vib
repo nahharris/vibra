@@ -1,0 +1,5 @@
+type Sorted(T) of List(T)
+  given {T: Ordered}
+endtype
+type Plain of I32 endtype
+fn f(T) takes {s: Sorted(T)} returns r: I32 given {T: Ordered} do return 0i32 endfn

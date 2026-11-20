@@ -380,12 +380,11 @@ pub(crate) fn check_instantiations(tables: &Tables<'_>) -> Result<(), IrError> {
 }
 
 /// Checks that every instantiation of a function whose body is the row
-/// `dict.fromList`, at a closed key, keys its dict with a type that
-/// implements `Ordered`, as a dict literal's key must. The walk covers every
-/// function, guard, and global, and the members the evidence for each bound
-/// selects. A key that stays open is a type parameter of the caller, which
-/// the checker never leaves to an unbounded parameter outside the standard
-/// library's own `Dict`.
+/// `dict.fromList` keys its dict with a type that implements `Ordered`, as a
+/// dict literal's key must: a key that mentions a type parameter of the
+/// caller implements it under the bounds of the caller's parameters. The
+/// walk covers every function, guard, and global, and the members the
+/// evidence for each bound selects.
 ///
 /// # Errors
 ///
@@ -432,7 +431,16 @@ pub(crate) fn check_built_dicts(
             continue;
         };
         let key = key.instantiate(&found.arguments);
-        if key.is_closed() && !tables.is_dict_key(Evidence::default(), &key)? {
+        // A key that stays open is read under the bounds of the caller's
+        // type parameters.
+        let evidence = Evidence {
+            binders: tables
+                .functions
+                .get(found.caller)
+                .map_or(&[], |caller| caller.signature.binders()),
+            self_interface: None,
+        };
+        if !tables.is_dict_key(evidence, &key)? {
             return Err(IrError::InvalidType(format!(
                 "{key} does not implement `Ordered` and keys no dict built from a list"
             )));

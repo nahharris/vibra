@@ -17,7 +17,7 @@ use vibra_ir::{
 };
 
 use super::{BodyChecker, CallState, CallableScope, Out, Reference, Target, unify};
-use crate::check::declare::{BoundData, BoundGoal};
+use crate::check::declare::{BoundData, BoundGoal, GoalHead, key_diagnostic};
 use crate::check::interfaces::same_head;
 
 /// The most goals one search for evidence visits.
@@ -1264,16 +1264,31 @@ impl<'a> BodyChecker<'_, 'a> {
     /// `@type.unsatisfiedBound` at the argument, related to the bound
     /// (`docs/spec/02-type-system.md`, "Generics").
     pub(crate) fn written_bounds(&mut self, goal: &BoundGoal, scope: CallableScope) {
-        let Some(data) = self.program.interfaces.get(goal.interface) else {
-            return;
+        let (bounds, module) = match goal.head {
+            GoalHead::Interface(interface) => {
+                let Some(data) = self.program.interfaces.get(interface) else {
+                    return;
+                };
+                (&data.bounds, data.module)
+            }
+            GoalHead::Type(index) => {
+                let Some(data) = self.program.types.get(index) else {
+                    return;
+                };
+                (&data.bounds, data.module)
+            }
+            GoalHead::DictKey => {
+                self.bounds = scope.bounds;
+                self.self_type = scope.self_type;
+                self.self_interface = scope.self_interface;
+                self.written_key(goal);
+                return;
+            }
         };
-        if data.bounds.iter().all(Option::is_none)
-            || data.bounds.len() != goal.arguments.len()
-        {
+        if bounds.iter().all(Option::is_none) || bounds.len() != goal.arguments.len() {
             return;
         }
-        let bounds = data.bounds.clone();
-        let module = data.module;
+        let bounds = bounds.clone();
         self.binders = scope.binders;
         self.self_type = scope.self_type;
         self.bounds = scope.bounds;
@@ -1293,6 +1308,31 @@ impl<'a> BodyChecker<'_, 'a> {
             true,
         );
         self.instantiations.clear();
+    }
+
+    /// Checks the written open dict key of `goal`: it MUST implement
+    /// `Ordered` under the bounds in scope, or it is `@type.invalidDictKey`
+    /// at the key.
+    fn written_key(&mut self, goal: &BoundGoal) {
+        let (Some(key), Some(span)) = (goal.arguments.first(), goal.spans.first())
+        else {
+            return;
+        };
+        if self.open_key_fault(key) {
+            self.diagnostics.push(
+                key_diagnostic(DiagnosticCode::TypeInvalidDictKey, *span, key)
+                    .with_source_id(self.source_id.as_ref()),
+            );
+        }
+    }
+
+    /// Whether `key`, a type that mentions a type parameter, does not
+    /// implement `Ordered` under the bounds in scope.
+    pub(in crate::check) fn open_key_fault(&self, key: &Type) -> bool {
+        let Some(ordered) = self.program.prelude_interface("Ordered") else {
+            return true;
+        };
+        !matches!(self.evidence(key, ordered, &[]), Found::One(_))
     }
 
     /// Fixes the open type parameters of `pattern`, a written interface

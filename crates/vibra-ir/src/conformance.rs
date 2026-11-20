@@ -280,6 +280,44 @@ impl Tables<'_> {
         Ok(None)
     }
 
+    /// Checks that every application of a declared type in `ty` satisfies
+    /// the bounds of the type's parameters under `evidence`
+    /// (`docs/spec/02-type-system.md`, "Generics").
+    ///
+    /// # Errors
+    ///
+    /// An argument does not satisfy its parameter's bound, or the search
+    /// for the evidence visits more than [`GOAL_LIMIT`] goals.
+    pub(crate) fn check_applications(
+        &self,
+        evidence: Evidence<'_>,
+        ty: &Type,
+    ) -> Result<(), IrError> {
+        let mut applications = Vec::new();
+        ty.visit(&mut |inner| {
+            if let Type::Declared(id, arguments) = inner
+                && let Some(definition) = self.types.get(id)
+                && definition
+                    .parameters()
+                    .iter()
+                    .any(|binder| binder.bound().is_some())
+            {
+                applications.push((definition, arguments.clone()));
+            }
+        });
+        for (definition, arguments) in applications {
+            self.check_bounds(
+                evidence,
+                definition.parameters(),
+                &Substitution {
+                    binders: &arguments,
+                    ..Substitution::default()
+                },
+            )?;
+        }
+        Ok(())
+    }
+
     /// Checks that each bound of `binders` holds at its type in
     /// `substitution`, whose `binders` give one type for each of them.
     pub(crate) fn check_bounds(

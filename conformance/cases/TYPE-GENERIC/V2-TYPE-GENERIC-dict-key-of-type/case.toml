@@ -1,0 +1,12 @@
+id = "V2-TYPE-GENERIC-dict-key-of-type"
+rule = "V2-TYPE-GENERIC-dict-key-of-type"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#dict-keys-equality-and-order: a parameter of a declared type bounded by Ordered keys the dict of its representation"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

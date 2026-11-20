@@ -72,7 +72,7 @@ pub struct Invariant {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TypeDefinition {
     id: TypeId,
-    parameters: Vec<String>,
+    parameters: Vec<Binder>,
     body: TypeBody,
     invariant: Option<Invariant>,
     representation: Visibility,
@@ -102,23 +102,31 @@ fn check_distinct<'a>(
 
 impl TypeDefinition {
     /// The definition of the type `id` with the type parameters `parameters`,
-    /// whose body refers to them by binder position.
+    /// each with its bound, whose body refers to them by binder position.
     ///
     /// # Errors
     ///
     /// A parameter, field, or case name is not an identifier or is repeated;
-    /// a record or variant body is empty; a type in the body refers to a
-    /// binder out of range or holds `Self` or an association slot; or a
-    /// variant type has an invariant.
+    /// a type in a bound or in the body refers to a binder out of range or
+    /// holds `Self` or an association slot; a record or variant body is
+    /// empty; or a variant type has an invariant.
     pub fn new(
         id: TypeId,
-        parameters: Vec<String>,
+        parameters: Vec<Binder>,
         body: TypeBody,
         invariant: Option<Invariant>,
         representation: Visibility,
     ) -> Result<Self, IrError> {
-        check_distinct("type parameter", parameters.iter().map(String::as_str))?;
+        check_distinct("type parameter", parameters.iter().map(Binder::name))?;
         let scope = OpenScope::Binders(parameters.len());
+        for bound in parameters.iter().filter_map(Binder::bound) {
+            bound
+                .contract
+                .arguments
+                .iter()
+                .chain(bound.choices.entries().iter().map(|(_, ty)| ty))
+                .try_for_each(|ty| ty.validate(scope))?;
+        }
         match &body {
             TypeBody::Record(fields) => {
                 if fields.is_empty() {
@@ -176,9 +184,10 @@ impl TypeDefinition {
         &self.id
     }
 
-    /// The type parameters, in written order.
+    /// The type parameters with their bounds, in written order. Every
+    /// application of the type MUST satisfy them.
     #[must_use]
-    pub fn parameters(&self) -> &[String] {
+    pub fn parameters(&self) -> &[Binder] {
         &self.parameters
     }
 

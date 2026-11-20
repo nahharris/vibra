@@ -1,0 +1,26 @@
+fn main returns r: I32 do
+  let s be Sorted.single(3i32) endlet
+  return Sorted.first(s 0i32)
+endfn
+
+type Sorted(T) of List(T)
+  given {T: Ordered}
+  fn single
+    takes {item: T}
+    returns sorted: Sorted(T)
+    do
+      return Sorted([item])
+  endfn
+  fn first
+    takes {sorted: Self fallback: T}
+    returns head: T
+    do
+      let Sorted(items) be sorted endlet
+      match items(0u64)
+        case Option.some(value: v)
+          return Ordered.max(v fallback)
+        case Option.none()
+          return fallback
+      endmatch
+  endfn
+endtype

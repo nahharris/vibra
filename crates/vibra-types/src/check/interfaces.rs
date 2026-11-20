@@ -18,8 +18,8 @@ use vibra_syntax::source::{
 };
 
 use super::declare::{
-    BoundData, BoundGoal, Entity, FnData, Host, ImplData, InterfaceMemberData, NoType,
-    Program, Scope, TypeKind, unguarded,
+    BoundData, BoundGoal, Entity, FnData, GoalHead, Host, ImplData,
+    InterfaceMemberData, NoType, Program, Scope, TypeKind, unguarded,
 };
 
 /// An interface as applied: its index, its positional arguments, and the
@@ -167,12 +167,32 @@ impl<'a> Program<'a> {
         spans: Vec<ByteSpan>,
         application: ByteSpan,
     ) {
+        self.record_goal(
+            module,
+            GoalHead::Interface(interface),
+            arguments,
+            spans,
+            application,
+        );
+    }
+
+    /// Records that the written application `application` of `head` at
+    /// `arguments`, each written at its span of `spans`, must satisfy what
+    /// its head requires of them.
+    pub(crate) fn record_goal(
+        &self,
+        module: usize,
+        head: GoalHead,
+        arguments: &[Type],
+        spans: Vec<ByteSpan>,
+        application: ByteSpan,
+    ) {
         if arguments.is_empty() {
             return;
         }
         let goal = BoundGoal {
             module,
-            interface,
+            head,
             arguments: arguments.to_vec(),
             spans,
             application,
@@ -640,7 +660,12 @@ impl<'a> Program<'a> {
             positional.iter().map(TypeExpr::span).collect(),
             target.span(),
         );
-        let bounds = vec![None; binders.len()];
+        // An implementation declares no type parameter: it passes the
+        // type's through, bounded as the type bounds them.
+        let bounds = self
+            .types
+            .get(owner)
+            .map_or_else(|| vec![None; binders.len()], |data| data.bounds.clone());
         Some(ImplHead {
             module,
             owner: Some(owner),

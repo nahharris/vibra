@@ -1,0 +1,12 @@
+id = "V2-TYPE-GENERIC-bounded-type-implementation"
+rule = "V2-TYPE-GENERIC-bounded-type-implementation"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#bounds: an implementation in a bounded type passes the parameter through with its bound, so a conditional Ordered implementation serves dispatch and keys a dict"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"
