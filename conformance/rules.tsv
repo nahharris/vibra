@@ -372,6 +372,8 @@ V2-TYPE-CONTROL-try-wrong-carrier	active	02-type-system.md#try
 V2-TYPE-CONTROL-try-error-type	active	02-type-system.md#try
 V2-TYPE-CONTROL-try-in-fn-returning-plain	active	02-type-system.md#try
 V2-TYPE-CONTROL-try-expected-type	active	02-type-system.md#try
+V2-TYPE-CONTROL-try-expected-type-join	active	02-type-system.md#try
+V2-TYPE-CONTROL-try-expected-type-none	active	02-type-system.md#try
 V2-TYPE-CONTROL-unhandled-fallible	active	02-type-system.md#fallible-values
 V2-TYPE-CONTROL-discard-fallible	active	02-type-system.md#fallible-values
 V2-TYPE-CONTROL-option-not-fallible	active	02-type-system.md#fallible-values

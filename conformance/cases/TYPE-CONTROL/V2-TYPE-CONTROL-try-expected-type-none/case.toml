@@ -1,0 +1,18 @@
+id = "V2-TYPE-CONTROL-try-expected-type-none"
+rule = "V2-TYPE-CONTROL-try-expected-type-none"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#try: the try is the first branch of an if whose value nothing written types, so it has no expected type and the type argument of parse is undetermined"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.ambiguousInference"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 190, end = 201 }

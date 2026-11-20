@@ -1051,12 +1051,13 @@ each type.
 
 ### Joins
 
-`if` requires a `Bool` condition. When the value of an `if` or `match` is
-used, the branches that can complete MUST have one common type, which is the
-type of the form; branches of type `Never` are skipped, and a form all of
-whose branches have type `Never` has type `Never`. This is the only join the
-checker computes. It never searches for an interface that covers two
-differing types.
+`if` requires a `Bool` condition. When the value of an `if` or `match` is used,
+the branches that can complete MUST have one common type, which is the type of
+the form; branches of type `Never` are skipped, and a form all of whose branches
+have type `Never` has type `Never`. When the form has no expected type, the
+first branch that completes with a type fixes it, and each later branch is
+checked at that type as its expected type. This is the only join the checker
+computes. It never searches for an interface that covers two differing types.
 
 ### Coverage
 
@@ -1125,13 +1126,18 @@ innermost enclosing callable with that absence or error. Any other use is
 `@type.invalidTry`. `try` never converts an error type and is always invalid
 directly in a `test` body.
 
-When a `try` expression has a written expected type `T`, its operand is
-checked at the expected type `Option(T)` or `Result(T E)` of the enclosing
-carrier, so a destination-dispatched operand needs no extra annotation:
+When a `try` expression has an expected type `T`, whatever supplies it, a
+written type or the type an earlier branch fixed for a [join](#joins), its
+operand is checked at the expected type `Option(T)` or `Result(T E)` of the
+enclosing carrier, so a destination-dispatched operand needs no extra
+annotation:
 
 ```vibra
 let port: U16 be try TryFrom.convert(text) endlet
+let other be if quick then 80u16 else try TryFrom.convert(text) endif endlet
 ```
+
+A `try` with no expected type checks its operand with none.
 
 ### Fallible values
 
