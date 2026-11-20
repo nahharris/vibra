@@ -2431,6 +2431,12 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                     Some((names, signature, found)) => {
                         binder_names = names;
                         dispatch = Some(Box::new(found));
+                        if let Some((found, module)) =
+                            self.contract_bounds(*interface, member)
+                        {
+                            bounds = found;
+                            bound_module = module;
+                        }
                         flatten(&signature)
                     }
                     None => (None, None),
@@ -2870,11 +2876,12 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
     /// argument set aside is checked again.
     fn first_pass_done(&mut self, state: &mut CallState<'a>) {
         self.select(state);
-        self.call_bounds(state);
+        self.call_bounds(state, false);
     }
 
-    /// Resolves the bounds of the callee of `state`.
-    fn call_bounds(&mut self, state: &mut CallState<'a>) {
+    /// Resolves the bounds of the callee of `state`; `last` once no
+    /// argument is checked again.
+    fn call_bounds(&mut self, state: &mut CallState<'a>, last: bool) {
         if state.failed || state.bounds.iter().all(Option::is_none) {
             return;
         }
@@ -2887,6 +2894,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             &mut resolved,
             &state.sources,
             state.application,
+            last,
         );
         state.bounds = bounds;
         state.resolved = resolved;
@@ -2897,7 +2905,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
 
     fn finish_call(&mut self, mut state: CallState<'a>) -> Out {
         let program = self.program;
-        self.call_bounds(&mut state);
+        self.call_bounds(&mut state, true);
         let contract = if state.dispatch.is_some() && !state.failed {
             self.contract_call(&state)
         } else {
@@ -3058,12 +3066,31 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                         arguments,
                     })
             }
-            Callee::Value(node, _) => {
-                node.zip(lowered(self, written))
-                    .map(|(node, arguments)| IrExpr::Call {
+            Callee::Value(node, callee_type) => {
+                let arguments = lowered(self, written);
+                node.zip(arguments).map(|(node, arguments)| {
+                    // Arguments hoisted to keep their written order run
+                    // before the call, so the callee is bound first.
+                    let node = if hoisted.is_empty() {
+                        node
+                    } else {
+                        let value_type = Type::function(callee_type.as_ref().clone());
+                        let fresh = self.new_slot(Some(&value_type));
+                        let origin = node.origin.clone();
+                        hoisted.insert(0, (fresh, *node));
+                        Box::new(Node::new(
+                            IrExpr::Variable {
+                                slot: fresh,
+                                value_type,
+                            },
+                            origin,
+                        ))
+                    };
+                    IrExpr::Call {
                         target: CallTarget::Value(node),
                         arguments,
-                    })
+                    }
+                })
             }
             Callee::Generic(generic) => {
                 let closure = if complete && complete_arguments {

@@ -1,0 +1,12 @@
+id = "V2-TYPE-INTERFACE-expected-positional"
+rule = "V2-TYPE-INTERFACE-expected-positional"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#dispatch: the expected type constrains a parameter of the interface written in the result before selection, so it selects Read(U8)"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

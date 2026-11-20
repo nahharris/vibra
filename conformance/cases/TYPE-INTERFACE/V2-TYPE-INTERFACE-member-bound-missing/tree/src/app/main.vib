@@ -1,0 +1,20 @@
+fn main returns r: I32 do return 1i32 endfn
+
+interface Pick
+  fn pick(T)
+    takes {x: Self item: T}
+    returns r: T
+    given {T: Ordered}
+  endfn
+endinterface
+
+type Box of U8
+  impl Pick
+    fn pick(T)
+      takes {x: Self item: T}
+      returns r: T
+      do
+        return item
+    endfn
+  endimpl
+endtype

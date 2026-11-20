@@ -1,0 +1,12 @@
+id = "V2-TYPE-INTERFACE-expected-positional-destination"
+rule = "V2-TYPE-INTERFACE-expected-positional-destination"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#dispatch: in destination dispatch the expected type fixes both Self and a parameter of the interface in the result before selection"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

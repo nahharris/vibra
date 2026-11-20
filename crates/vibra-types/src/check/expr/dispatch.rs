@@ -141,6 +141,109 @@ pub(super) fn closed(ty: &Type, assignment: &[Option<Type>]) -> Option<Type> {
     Some(ty.instantiate(&binders))
 }
 
+/// The one type `expected` holds at every position of `pattern` written as
+/// each of the binders `0..params`, walking every position where the two
+/// have the same form; `None` for a binder with no such position or with
+/// two that disagree.
+fn positional_parts(
+    pattern: &Type,
+    expected: &Type,
+    params: usize,
+) -> Vec<Option<Type>> {
+    let mut found: Vec<Option<Type>> = vec![None; params];
+    let mut conflict = vec![false; params];
+    let mut pending = vec![(pattern, expected)];
+    while let Some((pattern, expected)) = pending.pop() {
+        if *expected == Type::Never {
+            continue;
+        }
+        if let Type::Binder(at) = pattern {
+            if let (Some(slot), Some(clash)) =
+                (found.get_mut(*at), conflict.get_mut(*at))
+            {
+                match slot {
+                    Some(seen) if seen != expected => *clash = true,
+                    Some(_) => {}
+                    None => *slot = Some(expected.clone()),
+                }
+            }
+            continue;
+        }
+        if same_head(pattern, expected) {
+            pending.extend(pattern.components().into_iter().zip(expected.components()));
+        }
+    }
+    found
+        .into_iter()
+        .zip(conflict)
+        .map(|(found, clash)| found.filter(|_| !clash))
+        .collect()
+}
+
+/// Fixes the binders of `pattern` from `actual` wherever the two have the
+/// same form, and leaves the rest as they are.
+fn match_part(pattern: &Type, actual: &Type, assignment: &mut [Option<Type>]) {
+    let mut pending = vec![(pattern, actual)];
+    while let Some((pattern, actual)) = pending.pop() {
+        if let Type::Binder(index) = pattern {
+            if let Some(slot @ None) = assignment.get_mut(*index) {
+                *slot = Some(actual.clone());
+            }
+            continue;
+        }
+        if same_head(pattern, actual) {
+            pending.extend(pattern.components().into_iter().zip(actual.components()));
+        }
+    }
+}
+
+/// Whether an implementation whose key has the positional `arguments`, open
+/// in `count` binders, may be the one chosen at activation for a call at
+/// `actual`, which is open in the `open` type parameters of the body, in
+/// `Self`, and in associated types.
+fn may_select(arguments: &[Type], count: usize, actual: &[Type], open: usize) -> bool {
+    let mut names = Vec::new();
+    for ty in actual {
+        ty.visit(&mut |inner| {
+            if let Type::Associated(name) = inner
+                && !names.contains(name)
+            {
+                names.push(name.clone());
+            }
+        });
+    }
+    let self_var = Type::Binder(open);
+    let choices = NamedTypes::new(names.into_iter().enumerate().map(|(at, name)| {
+        (
+            name,
+            Type::Binder(open.saturating_add(1).saturating_add(at)),
+        )
+    }));
+    let Ok(choices) = choices else {
+        return true;
+    };
+    let substitution = Substitution {
+        binders: &[],
+        self_type: Some(&self_var),
+        associated: Some(&choices),
+    };
+    let actual = actual
+        .iter()
+        .map(|ty| ty.substitute(&substitution))
+        .collect::<Vec<_>>();
+    let variables = open
+        .saturating_add(1)
+        .saturating_add(choices.entries().len());
+    crate::check::interfaces::unifiable(&actual, variables, arguments, count)
+}
+
+/// Whether `ty` mentions a type parameter.
+fn mentions_binder(ty: &Type) -> bool {
+    let mut found = false;
+    ty.visit(&mut |inner| found |= matches!(inner, Type::Binder(_)));
+    found
+}
+
 /// Whether the known types of `arguments` equal `fixed`.
 fn agree(fixed: &[Type], arguments: &[Option<Type>]) -> bool {
     fixed.len() == arguments.len()
@@ -241,6 +344,33 @@ impl<'a> BodyChecker<'_, 'a> {
             data.module,
             related,
             "the interface",
+        );
+    }
+
+    /// Reports that `actual` does not satisfy `bound`, a bound of a callee
+    /// of `module`, at `span`, related to the bound.
+    fn unsatisfied_bound(
+        &mut self,
+        span: ByteSpan,
+        actual: &Type,
+        bound: &BoundData,
+        module: usize,
+        detail: &str,
+    ) {
+        let name = self
+            .program
+            .interfaces
+            .get(bound.interface)
+            .map(|data| data.name.clone())
+            .unwrap_or_default();
+        let message = format!("`{actual}` does not satisfy the bound `{name}`{detail}");
+        self.report_related(
+            DiagnosticCode::TypeUnsatisfiedBound,
+            span,
+            message,
+            module,
+            bound.span,
+            "the bound",
         );
     }
 
@@ -502,6 +632,58 @@ impl<'a> BodyChecker<'_, 'a> {
         Some((names, signature, dispatch))
     }
 
+    /// The bounds of a call of `member` of `interface` over its type
+    /// parameters numbered as the module docs say: the interface's, then the
+    /// member's own, written in the interface's module; `Self` and the
+    /// associated types have none.
+    pub(super) fn contract_bounds(
+        &self,
+        interface: usize,
+        member: &str,
+    ) -> Option<(Vec<Option<BoundData>>, usize)> {
+        let data = self.program.interfaces.get(interface)?;
+        let declared = data.member(member)?;
+        let self_var = declared.binders.len();
+        let choices = NamedTypes::new(data.associated.iter().enumerate().map(
+            |(at, (name, _))| {
+                (
+                    name.clone(),
+                    Type::Binder(self_var.saturating_add(1).saturating_add(at)),
+                )
+            },
+        ))
+        .ok()?;
+        let substitution = Substitution {
+            binders: &[],
+            self_type: Some(&Type::Binder(self_var)),
+            associated: Some(&choices),
+        };
+        let bounds = declared
+            .bounds
+            .iter()
+            .map(|bound| {
+                bound.clone().map(|bound| BoundData {
+                    arguments: bound
+                        .arguments
+                        .iter()
+                        .map(|ty| ty.substitute(&substitution))
+                        .collect(),
+                    choices: bound
+                        .choices
+                        .iter()
+                        .map(|(name, ty)| (name.clone(), ty.substitute(&substitution)))
+                        .collect(),
+                    ..bound
+                })
+            })
+            .chain(std::iter::repeat_n(
+                None,
+                data.associated.len().saturating_add(1),
+            ))
+            .collect();
+        Some((bounds, data.module))
+    }
+
     /// Starts the dispatch of a contract call once its arguments are bound:
     /// its receiver operand is checked first, or the written expected type
     /// fixes the receiver (destination dispatch).
@@ -661,6 +843,21 @@ impl<'a> BodyChecker<'_, 'a> {
         let Some(Some(receiver)) = state.assignment.get(var).cloned() else {
             return;
         };
+        // Step 2: the expected type constrains each parameter of the
+        // interface written in the result type before selection; the
+        // associated and member-local positions wait for step 5.
+        if let (Some(result), Some(expected)) = (&state.result, &dispatch.expected) {
+            for (at, found) in positional_parts(result, expected, params)
+                .into_iter()
+                .enumerate()
+            {
+                if let (Some(found), Some(slot @ None)) =
+                    (found, state.assignment.get_mut(at))
+                {
+                    *slot = Some(found);
+                }
+            }
+        }
         let arguments = (0..params)
             .map(|at| state.instance(&Type::Binder(at)))
             .collect::<Vec<_>>();
@@ -725,6 +922,13 @@ impl<'a> BodyChecker<'_, 'a> {
         if let (Some(result), Some(expected)) = (&state.result, &dispatch.expected) {
             let mut trial = state.assignment.clone();
             if unify(result, expected, &mut trial) {
+                let source = self.written_span(application).unwrap_or(application);
+                super::note_sources(
+                    &state.assignment,
+                    &trial,
+                    &mut state.sources,
+                    source,
+                );
                 state.assignment = trial;
             }
         }
@@ -831,9 +1035,56 @@ impl<'a> BodyChecker<'_, 'a> {
                 target: Target::Function(function),
                 span: state.callee_span,
             });
-            if matches!(dispatch.view, Some(View::Selected(..))) && !binders.is_empty()
+            if !binders.is_empty()
+                && matches!(
+                    dispatch.view,
+                    Some(View::Selected(..) | View::Evidence | View::Public)
+                )
             {
                 self.instantiations.push((function, binders, application));
+            }
+        }
+        // Through scoped evidence or an interface value the implementation
+        // is chosen at activation: the call instantiates the member of every
+        // implementation that can be chosen there.
+        if matches!(dispatch.view, Some(View::Evidence | View::Public)) {
+            let open = self.binders.len();
+            for implementation in &program.impls {
+                if implementation.interface != dispatch.interface
+                    || !implementation.usable
+                    || !may_select(
+                        &implementation.arguments,
+                        implementation.binders.len(),
+                        &arguments,
+                        open,
+                    )
+                {
+                    continue;
+                }
+                let Some(function) = implementation
+                    .members
+                    .iter()
+                    .find(|(name, _)| *name == dispatch.member)
+                    .map(|(_, function)| *function)
+                else {
+                    continue;
+                };
+                let mut binders = vec![None; implementation.binders.len()];
+                for (pattern, actual) in implementation.arguments.iter().zip(&arguments)
+                {
+                    match_part(pattern, actual, &mut binders);
+                }
+                // A parameter of the implementation that no interface
+                // argument gives is fixed by the receiver alone, which
+                // carries no type parameter of this body to it.
+                let mut binders = binders
+                    .into_iter()
+                    .map(|bound| bound.unwrap_or(Type::Never))
+                    .collect::<Vec<_>>();
+                binders.extend(member_arguments.iter().cloned());
+                if !binders.is_empty() {
+                    self.instantiations.push((function, binders, application));
+                }
             }
         }
         Some(ContractCall {
@@ -859,6 +1110,7 @@ impl<'a> BodyChecker<'_, 'a> {
         resolved: &mut [bool],
         sources: &[Option<ByteSpan>],
         application: ByteSpan,
+        last: bool,
     ) -> bool {
         loop {
             let mut progress = false;
@@ -878,59 +1130,80 @@ impl<'a> BodyChecker<'_, 'a> {
                 else {
                     continue;
                 };
-                if let Some(done) = resolved.get_mut(at) {
-                    *done = true;
-                }
-                progress = true;
                 let span = sources.get(at).copied().flatten().unwrap_or(application);
                 let known = arguments.iter().cloned().map(Some).collect::<Vec<_>>();
                 let evidence = match self.evidence(&actual, bound.interface, &known) {
                     Found::One(evidence) => evidence,
                     Found::None | Found::Many => {
-                        let name = self
-                            .program
-                            .interfaces
-                            .get(bound.interface)
-                            .map(|data| data.name.clone())
-                            .unwrap_or_default();
-                        let message =
-                            format!("`{actual}` does not satisfy the bound `{name}`");
-                        self.report_related(
-                            DiagnosticCode::TypeUnsatisfiedBound,
-                            span,
-                            message,
-                            module,
-                            bound.span,
-                            "the bound",
-                        );
+                        if let Some(done) = resolved.get_mut(at) {
+                            *done = true;
+                        }
+                        self.unsatisfied_bound(span, &actual, bound, module, "");
                         return false;
                     }
                 };
-                for (label, pattern) in &bound.choices {
-                    let Some(Some(chosen)) = evidence
+                let choice = |label: &str| {
+                    evidence
                         .choices
                         .iter()
                         .find(|(name, _)| name == label)
-                        .map(|(_, chosen)| chosen.clone())
-                    else {
-                        continue;
-                    };
-                    let mut trial = assignment.to_vec();
-                    if unify(pattern, &chosen, &mut trial) {
-                        assignment.clone_from_slice(&trial);
-                    } else {
-                        let wanted = closed(pattern, assignment)
-                            .map_or_else(String::new, |ty| {
-                                format!(", but the call needs `{ty}`")
-                            });
-                        self.report(
-                            DiagnosticCode::TypeMismatch,
-                            span,
-                            format!(
-                                "the implementation for `{actual}` chooses `{chosen}` for `{label}`{wanted}"
-                            ),
-                        );
-                        return false;
+                        .and_then(|(_, chosen)| chosen.clone())
+                };
+                // A choice the evidence leaves open equals no type the call
+                // can name; while the parameter it is compared with may still
+                // be fixed by an argument checked again, the bound waits.
+                let waits = !last
+                    && bound.choices.iter().any(|(label, pattern)| {
+                        choice(label).is_none() && closed(pattern, assignment).is_none()
+                    });
+                if waits {
+                    continue;
+                }
+                if let Some(done) = resolved.get_mut(at) {
+                    *done = true;
+                }
+                progress = true;
+                for (label, pattern) in &bound.choices {
+                    let linked = mentions_binder(pattern);
+                    match choice(label) {
+                        Some(chosen) if linked => {
+                            let mut trial = assignment.to_vec();
+                            if unify(pattern, &chosen, &mut trial) {
+                                assignment.clone_from_slice(&trial);
+                            } else {
+                                let wanted = closed(pattern, assignment)
+                                    .map_or_else(String::new, |ty| {
+                                        format!(", but the call needs `{ty}`")
+                                    });
+                                self.report(
+                                    DiagnosticCode::TypeMismatch,
+                                    span,
+                                    format!(
+                                        "the implementation for `{actual}` chooses `{chosen}` for `{label}`{wanted}"
+                                    ),
+                                );
+                                return false;
+                            }
+                        }
+                        Some(chosen) if chosen == *pattern => {}
+                        Some(chosen) => {
+                            let detail = format!(
+                                ": its implementation chooses `{chosen}` for `{label}`"
+                            );
+                            self.unsatisfied_bound(
+                                span, &actual, bound, module, &detail,
+                            );
+                            return false;
+                        }
+                        None => {
+                            let detail = format!(
+                                ": its evidence leaves `{label}` open, and an open choice equals no other type"
+                            );
+                            self.unsatisfied_bound(
+                                span, &actual, bound, module, &detail,
+                            );
+                            return false;
+                        }
                     }
                 }
                 if let View::Selected(index, binders) = &evidence.view

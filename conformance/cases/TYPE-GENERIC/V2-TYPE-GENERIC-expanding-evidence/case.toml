@@ -1,0 +1,19 @@
+id = "V2-TYPE-GENERIC-expanding-evidence"
+rule = "V2-TYPE-GENERIC-expanding-evidence"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#generics: a contract call on a bounded type parameter instantiates the member of each implementation that can be selected, so a cycle through it that expands is rejected, at the expanding call"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.expandingInstantiation"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 388, end = 402 }
+related = [{ source = "src/app/main.vib", span = { start = 248, end = 263 } }]

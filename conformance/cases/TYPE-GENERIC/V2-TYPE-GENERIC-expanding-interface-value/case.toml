@@ -1,0 +1,18 @@
+id = "V2-TYPE-GENERIC-expanding-interface-value"
+rule = "V2-TYPE-GENERIC-expanding-interface-value"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#generics: a call through an interface value instantiates the member of each implementation the value can hold, so a member that reaches itself that way at a larger member argument expands without end, at the call"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.expandingInstantiation"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 309, end = 326 }

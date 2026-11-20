@@ -1,0 +1,19 @@
+id = "V2-TYPE-INTERFACE-member-bound-call"
+rule = "V2-TYPE-INTERFACE-member-bound-call"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#bounds: a contract call whose member-local type argument does not implement the member bound is @type.unsatisfiedBound at the argument, related to the bound"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.unsatisfiedBound"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 67, end = 77 }
+related = [{ source = "src/app/main.vib", span = { start = 196, end = 203 } }]

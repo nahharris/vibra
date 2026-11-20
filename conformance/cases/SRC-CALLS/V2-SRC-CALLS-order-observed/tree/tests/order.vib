@@ -1,0 +1,31 @@
+use @std.assert enduse
+
+use @app.shapes enduse
+
+test "tuple" do
+  let _ be {assert.equal(1i32 2i32) assert.equal(3i32 4i32)} endlet
+endtest
+
+test "record" do
+  let _ be {b: assert.equal(1i32 2i32) a: assert.equal(3i32 4i32)} endlet
+endtest
+
+test "declared record" do
+  let _ be shapes.Pair(b: assert.equal(1i32 2i32) a: assert.equal(3i32 4i32)) endlet
+endtest
+
+test "declared tuple" do
+  let _ be shapes.Duo(assert.equal(1i32 2i32) assert.equal(3i32 4i32)) endlet
+endtest
+
+test "case" do
+  let _ be shapes.Choice.both(b: assert.equal(1i32 2i32) a: assert.equal(3i32 4i32)) endlet
+endtest
+
+test "list" do
+  let _ be [assert.equal(1i32 2i32) assert.equal(3i32 4i32)] endlet
+endtest
+
+test "dict" do
+  let _: Dict(Str Void) be ["y": assert.equal(1i32 2i32) "x": assert.equal(3i32 4i32)] endlet
+endtest

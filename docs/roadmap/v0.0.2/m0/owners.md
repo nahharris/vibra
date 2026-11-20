@@ -234,7 +234,7 @@ intrinsic registry".
 
 | Form | Step | Cases | Diagnostics | Schema |
 | --- | --- | --- | --- | --- |
-| Evaluation order | 13 / 15, 16 | `V2-SRC-CALLS-order`, `V2-SRC-CALLS-evaluation-order` | none | `@value.v2` |
+| Evaluation order | 13 / 15, 16 | `V2-SRC-CALLS-order-observed`, `V2-SRC-CALLS-order`, `V2-SRC-CALLS-evaluation-order` | none | `@value.v2` |
 | Module-value initialization | 13 / 15, 23 | `V2-TYPE-CONTROL-module-value`, `V2-TYPE-CONTROL-initializer-cycle`, `V2-PROJECT-test-fresh-state` | `@type.initializerCycle` | `@value.v2` |
 | Callable contract execution | 13 / 21 | `V2-CONTRACT-requires-else-*`, `V2-CONTRACT-ensures-else*` | none | `@value.v2` |
 | Generic instantiation | 13 / 16, 19 | `V2-TYPE-GENERIC-pair`, `V2-TYPE-INTERFACE-generic-twice` | none | `@value.v2` |

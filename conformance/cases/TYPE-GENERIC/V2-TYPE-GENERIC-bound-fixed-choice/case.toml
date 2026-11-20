@@ -1,0 +1,12 @@
+id = "V2-TYPE-GENERIC-bound-fixed-choice"
+rule = "V2-TYPE-GENERIC-bound-fixed-choice"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#bounds: a bound that fixes an associated type is satisfied by a parameter whose own bound fixes it to the same type"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
