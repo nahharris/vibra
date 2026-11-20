@@ -77,7 +77,31 @@ fn nested_and_product_shapes_are_spelled() {
     assert_eq!(uncovered(source), ["{a: _ b: Bool.false()}"]);
     let source = "fn f takes {l: List(I32)} returns r: I32 do return match l \
                   case [] 0i32 case [a] a endmatch endfn\n";
-    assert_eq!(uncovered(source), ["_"]);
+    assert_eq!(uncovered(source), ["[_ _]"]);
+}
+
+/// A fixed-length list pattern never covers its list type, so the note names
+/// the shortest length no arm covers in list spelling, never a `_` that
+/// would include a covered length; a length an arm covers only in part comes
+/// first, and a list of an uninhabited element has only the empty length.
+#[test]
+fn a_list_witness_names_an_uncovered_length() {
+    let list = |arms: &str| {
+        format!(
+            "fn f takes {{xs: List(U8)}} returns r: U8 do return match xs {arms} endmatch endfn\n"
+        )
+    };
+    assert_eq!(uncovered(&list("case [] 0u8")), ["[_]"]);
+    assert_eq!(uncovered(&list("case [] 0u8 case [x] x")), ["[_ _]"]);
+    assert_eq!(uncovered(&list("case [x] x")), ["[]"]);
+    assert_eq!(uncovered(&list("case [] 0u8 case [1u8] 1u8")), ["[_]"]);
+    assert_eq!(uncovered(&list("case [] 0u8 case [x _ _] x")), ["[_]"]);
+    let source = "fn f takes {xs: List(List(U8))} returns r: U8 do return match xs \
+                  case [] 0u8 case [[]] 1u8 endmatch endfn\n";
+    assert_eq!(uncovered(source), ["[[_]]"]);
+    let source = "fn f takes {xs: List(Never)} returns r: U8 do return match xs \
+                  case [] 0u8 endmatch endfn\n";
+    assert_eq!(uncovered(source), Vec::<String>::new());
 }
 
 /// An arm is related to the earliest arm by which the arms before it cover

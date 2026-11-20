@@ -423,7 +423,29 @@ impl<'p, 'a> Coverage<'p, 'a> {
                 }
                 inhabited
             }
-            Space::List(_) | Space::Open => {
+            // Lists of every length below the shortest one no row names,
+            // and that one, whose rows are the default matrix: if no length
+            // up to it leaves a witness, every longer length is covered by
+            // the same rows. A list of an uninhabited element is empty.
+            Space::List(element) => {
+                if self.is_uninhabited(element) {
+                    vec![Ctor::List(0)]
+                } else {
+                    let named = problem
+                        .rows
+                        .iter()
+                        .filter_map(|row| match row.last().map(AsRef::as_ref) {
+                            Some(Pat::Ctor(Ctor::List(length), _)) => Some(*length),
+                            _ => None,
+                        })
+                        .collect::<std::collections::BTreeSet<_>>();
+                    let missing = (0..=named.len())
+                        .find(|length| !named.contains(length))
+                        .unwrap_or(named.len());
+                    (0..=missing).map(Ctor::List).collect()
+                }
+            }
+            Space::Open => {
                 let mut columns = problem.columns;
                 columns.pop();
                 let mut query = problem.query;
