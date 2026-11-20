@@ -1,0 +1,19 @@
+id = "V2-TYPE-INTERFACE-member-value-default-unsatisfied"
+rule = "V2-TYPE-INTERFACE-member-value-default-unsatisfied"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#functions-as-values: a default member named as a value at a receiver with no implementation is @type.unsatisfiedBound, related to the interface"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.unsatisfiedBound"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 83, end = 91 }
+related = [{ source = "src/app/main.vib", span = { start = 127, end = 130 } }]

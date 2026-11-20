@@ -11,15 +11,19 @@
 //! member, the one implementation whose key matches, and the structural
 //! `Equatable` and `Ordered` of atoms, tuples, and records.
 
+use std::sync::Arc;
+
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 use vibra_ir::{
-    ContractCall, Expr as IrExpr, FnType, Library, NamedTypes, Node, Substitution, Type,
+    Arguments, CallTarget, ClosureBody, Constant, ContractCall, Expr as IrExpr, FnType,
+    Library, NamedTypes, Node, Substitution, Type,
 };
 
 use super::{
     BodyChecker, CallState, CallableScope, Out, Reference, Target, unify,
     unify_expected,
 };
+use crate::check::callables::mark_tail;
 use crate::check::declare::{BoundData, BoundGoal, GoalHead, key_diagnostic};
 use crate::check::interfaces::same_head;
 
@@ -985,11 +989,29 @@ impl<'a> BodyChecker<'_, 'a> {
         state: &CallState<'a>,
     ) -> Option<ContractCall> {
         let dispatch = state.dispatch.as_ref()?;
+        self.contract_target(
+            dispatch,
+            &|ty| state.instance(ty),
+            state.application,
+            state.callee_span,
+        )
+    }
+
+    /// The contract call `dispatch` makes once `instance` closes its
+    /// variables, applied at `application` with its callee at
+    /// `callee_span`, recording what it refers to and instantiates.
+    fn contract_target(
+        &mut self,
+        dispatch: &Dispatch,
+        instance: &dyn Fn(&Type) -> Option<Type>,
+        application: ByteSpan,
+        callee_span: ByteSpan,
+    ) -> Option<ContractCall> {
         let program = self.program;
         let data = program.interfaces.get(dispatch.interface)?;
         let interface = data.id.clone()?;
         let declared = data.member(&dispatch.member)?;
-        let instance = |at: usize| state.instance(&Type::Binder(at));
+        let instance = |at: usize| instance(&Type::Binder(at));
         let receiver = instance(dispatch.self_var())?;
         let arguments = (0..dispatch.params)
             .map(instance)
@@ -1007,7 +1029,6 @@ impl<'a> BodyChecker<'_, 'a> {
                 .collect::<Option<Vec<_>>>()?,
         )
         .ok()?;
-        let application = state.application;
         let target = match &dispatch.view {
             Some(View::Selected(index, binders)) => {
                 let implementation = program.impls.get(*index)?;
@@ -1049,7 +1070,7 @@ impl<'a> BodyChecker<'_, 'a> {
             }
             self.references.push(Reference {
                 target: Target::Function(function),
-                span: state.callee_span,
+                span: callee_span,
             });
             if !binders.is_empty()
                 && matches!(
@@ -1499,8 +1520,12 @@ impl<'a> BodyChecker<'_, 'a> {
     }
 
     /// A contract member named as a value: instantiated from the expected
-    /// callable type, which fixes the receiver and selects the
-    /// implementation whose member it denotes.
+    /// callable type, which fixes the receiver exactly as a call's operands
+    /// would. A member the selected implementation supplies is that
+    /// function's value; any other, a default member or one reached through
+    /// a bound, an interface value, or a structural comparison, is the
+    /// closure that calls the member with its own arguments, carrying the
+    /// contract's labelled defaults.
     pub(super) fn contract_value(
         &mut self,
         interface: usize,
@@ -1508,7 +1533,7 @@ impl<'a> BodyChecker<'_, 'a> {
         span: ByteSpan,
         expected: Option<&Type>,
     ) -> Out {
-        let Some((names, signature, dispatch)) =
+        let Some((names, signature, mut dispatch)) =
             self.contract_signature(interface, member, span)
         else {
             return Out::error();
@@ -1554,13 +1579,6 @@ impl<'a> BodyChecker<'_, 'a> {
                 return Out::error();
             }
         };
-        let View::Selected(index, binders) = &evidence.view else {
-            self.unavailable(
-                span,
-                "an interface member used as a value without an implementation",
-            );
-            return Out::error();
-        };
         for (at, argument) in evidence.arguments.iter().enumerate() {
             if let (Some(argument), Some(slot)) = (argument, assignment.get_mut(at))
                 && slot.is_none()
@@ -1600,16 +1618,25 @@ impl<'a> BodyChecker<'_, 'a> {
             );
             return Out::error();
         }
-        let supplied = self.program.impls.get(*index).and_then(|implementation| {
-            implementation
-                .members
-                .iter()
-                .find(|(name, _)| name == member)
-                .map(|(_, function)| *function)
-        });
-        let Some(function) = supplied else {
-            self.unavailable(span, "a default member used as a value");
-            return Out::error();
+        let supplied = match &evidence.view {
+            View::Selected(index, binders) => self
+                .program
+                .impls
+                .get(*index)
+                .and_then(|implementation| {
+                    implementation
+                        .members
+                        .iter()
+                        .find(|(name, _)| name == member)
+                        .map(|(_, function)| *function)
+                })
+                .map(|function| (function, binders.clone())),
+            _ => None,
+        };
+        let Some((function, binders)) = supplied else {
+            dispatch.view = Some(evidence.view.clone());
+            let node = self.member_closure(&dispatch, &assignment, &ty, span);
+            return Out { ty: Some(ty), node };
         };
         let Some(mut type_arguments) =
             binders.iter().cloned().collect::<Option<Vec<_>>>()
@@ -1648,5 +1675,119 @@ impl<'a> BodyChecker<'_, 'a> {
                     )
                 });
         Out { ty: Some(ty), node }
+    }
+
+    /// The closure of type `ty` that calls the contract member `dispatch`
+    /// at the closed `assignment` with its own arguments, for the member
+    /// named as a value at `span`.
+    fn member_closure(
+        &mut self,
+        dispatch: &Dispatch,
+        assignment: &[Option<Type>],
+        ty: &Type,
+        span: ByteSpan,
+    ) -> Option<Node> {
+        let Type::Fn(callable) = ty else {
+            return None;
+        };
+        let call =
+            self.contract_target(dispatch, &|ty| closed(ty, assignment), span, span)?;
+        let defaults = self.member_defaults(dispatch, callable)?;
+        let slot_types = callable.slot_types();
+        let read = |this: &Self, slot: usize| {
+            let value_type = slot_types.get(slot)?.clone();
+            Some(this.node(IrExpr::Variable { slot, value_type }, span))
+        };
+        let positional = (0..callable.parameters.len())
+            .map(|slot| read(self, slot))
+            .collect::<Option<Vec<_>>>()?;
+        let labelled = callable
+            .labels
+            .entries()
+            .iter()
+            .enumerate()
+            .map(|(at, (name, _))| {
+                Some((name.clone(), read(self, callable.parameters.len() + at)?))
+            })
+            .collect::<Option<Vec<_>>>()?;
+        let mut body = self.node(
+            IrExpr::Call {
+                target: CallTarget::Contract(Box::new(call)),
+                arguments: Arguments {
+                    positional,
+                    labelled,
+                },
+            },
+            span,
+        );
+        mark_tail(&mut body);
+        let closure = ClosureBody {
+            value_type: ty.clone(),
+            slot_count: slot_types.len(),
+            captures: Vec::new(),
+            defaults,
+            body,
+        };
+        Some(self.node(
+            IrExpr::Closure {
+                closure: Arc::new(closure),
+                captures: Vec::new(),
+            },
+            span,
+        ))
+    }
+
+    /// The contract's labelled defaults of the member `dispatch`, at the
+    /// label types of `callable`, its type where it is named as a value.
+    /// They are checked as the contract is, in the interface's module, and
+    /// their faults are reported there.
+    fn member_defaults(
+        &self,
+        dispatch: &Dispatch,
+        callable: &FnType,
+    ) -> Option<Vec<(String, Constant)>> {
+        if callable.labels.is_empty() {
+            return Some(Vec::new());
+        }
+        let program = self.program;
+        let interface = program.interfaces.get(dispatch.interface)?;
+        let declared = interface.member(&dispatch.member)?;
+        let view = interface.view.members().into_iter().find(|view| {
+            view.name()
+                .is_some_and(|name| name.text() == dispatch.member)
+        })?;
+        let text = program.modules.get(interface.module)?.text?;
+        let patterns = view
+            .takes()
+            .into_iter()
+            .map(|(pattern, _)| pattern)
+            .collect::<Vec<_>>();
+        let scope = CallableScope {
+            binders: declared.binders.clone(),
+            bounds: declared.bounds.clone(),
+            self_type: Some(Type::SelfType),
+            associated: interface.own_associated(),
+            self_interface: Some(dispatch.interface),
+            result_span: None,
+        };
+        let mut checker =
+            BodyChecker::new(program, self.layout, interface.module, text);
+        let found = checker.contract_defaults(
+            &declared.signature,
+            &patterns,
+            &view.labelled(),
+            scope,
+        );
+        callable
+            .labels
+            .entries()
+            .iter()
+            .map(|(name, label)| {
+                let (_, value) = found.iter().find(|(known, _)| known == name)?;
+                Constant::new(label.at_never(), value.value().clone())
+                    .ok()
+                    .map(|constant| (name.clone(), constant))
+            })
+            .collect()
     }
 }

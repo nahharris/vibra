@@ -1,0 +1,18 @@
+id = "V2-TYPE-INTERFACE-member-value-default-mismatch"
+rule = "V2-TYPE-INTERFACE-member-value-default-mismatch"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#functions-as-values: a default member named as a value at a callable type its signature does not fit is @type.mismatch"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.mismatch"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 49, end = 57 }

@@ -730,3 +730,8 @@ V2-TYPE-CONTROL-match-constant-dict	active	02-type-system.md#constant-expression
 V2-TYPE-CONTROL-match-constant-holds-float	active	02-type-system.md#constant-expressions-and-constant-patterns
 V2-TYPE-CONTROL-match-constant-function	active	02-type-system.md#constant-expressions-and-constant-patterns
 V2-TYPE-CONTROL-match-constant-where-else	active	02-type-system.md#constant-expressions-and-constant-patterns
+V2-TYPE-INTERFACE-member-value-default	active	02-type-system.md#functions-as-values
+V2-TYPE-INTERFACE-member-value-bound	active	02-type-system.md#functions-as-values
+V2-TYPE-INTERFACE-member-value-structural	active	02-type-system.md#functions-as-values
+V2-TYPE-INTERFACE-member-value-default-unsatisfied	active	02-type-system.md#functions-as-values
+V2-TYPE-INTERFACE-member-value-default-mismatch	active	02-type-system.md#functions-as-values
