@@ -785,3 +785,35 @@ fn a_where_operand_is_a_function_value() {
         Ok(super::value("i32", "1i32").as_str())
     );
 }
+
+/// A member of an implementation is identified by its block's identity,
+/// `.`, and its name: the `@types.v2` callables list it, and the obligation
+/// of its copied guard belongs to it.
+#[test]
+fn an_implementation_member_has_its_blocks_identity_and_its_name() {
+    let contract = sized("ensures Ordered.greater(r 0i32)", &[("A", "return m")]);
+    let source = format!(
+        "{contract}fn main returns r: I32 do return Sized.size(A(1i32) 1i32) endfn\n"
+    );
+    let block = vibra_resolve::implementation_identity(
+        super::super::SOURCE_PACKAGE,
+        super::super::SOURCE_VERSION,
+        super::super::SOURCE_MODULE,
+        "A",
+        "Sized",
+    );
+    let member = format!("{}.size", block.as_str());
+    let checked = check_source(SOURCE, &source);
+    let ensures = checked
+        .obligations()
+        .iter()
+        .find(|obligation| obligation.kind() == ObligationKind::Ensures)
+        .map(|obligation| obligation.declaration().to_owned());
+    assert_eq!(ensures.as_deref(), Some(member.as_str()));
+    let document = checked.types_document().unwrap_or_default();
+    assert!(
+        document.contains(&format!("callables: [{{declaration: \"{member}\""))
+            || document.contains(&format!(" {{declaration: \"{member}\" signature:")),
+        "{document}"
+    );
+}

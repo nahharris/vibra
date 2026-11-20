@@ -682,9 +682,13 @@ The records are those of the local package: the embedded standard library
 contributes none, though a `to` may name one of its identities. A module
 has no declaration record; its identity, which an import's `to` names, is
 the hash of its [anchor](02-type-system.md#declared-types).
-An `impl` block has no anchor, so neither it nor its members have a
-declaration record. A declaration's span is its whole form, an import's the
-whole `use`, and a reference's the bytes of its path.
+An `impl` block has no declaration record. Each member of one has a record
+whose `identity` is the block's identity, `.`, and the member's name; whose
+`anchor` is the block's, with the kind `@impl` and the block's target as
+`name`; whose `member` (`Str`) is the member's name; and whose `access` is
+that of the type or interface the block is nested in. A declaration's span
+is its whole form, an import's the whole `use`, and a reference's the bytes
+of its path.
 
 ```vibon
 {

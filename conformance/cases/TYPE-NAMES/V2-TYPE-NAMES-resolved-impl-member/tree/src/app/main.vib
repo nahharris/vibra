@@ -1,0 +1,11 @@
+interface Sized
+  fn size takes {value: Self} returns r: I32 endfn
+endinterface
+
+type A of I32
+  impl Sized
+    fn size takes {value: Self} returns r: I32 do return 1i32 endfn
+  endimpl
+endtype
+
+fn main returns r: I32 do return Sized.size(A(2i32)) endfn

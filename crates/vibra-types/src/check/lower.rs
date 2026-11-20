@@ -1765,10 +1765,7 @@ fn types_document(program: &Program<'_>, obligations: &[Obligation]) -> Option<S
     }
     let mut callables = Vec::new();
     for (index, data) in program.functions.iter().enumerate() {
-        if !local(data.module)
-            || !program.supported_fn(index)
-            || data.implements.is_some()
-        {
+        if !local(data.module) || !program.supported_fn(index) {
             continue;
         }
         let signature = data.signature.clone()?;

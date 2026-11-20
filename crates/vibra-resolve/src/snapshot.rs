@@ -3,7 +3,8 @@
 //! `docs/spec/07-diagnostics-and-conformance.md`, "Persistent observations":
 //! `@resolved.v2` is the closed record of `format`, `package`, `modules`
 //! sorted by `path`, `declarations` sorted by `identity` (each with
-//! `identity`, `anchor`, `access`, and `span`), `imports` sorted by span
+//! `identity`, `anchor`, `access`, and `span`, and a member of an `impl`
+//! block with `member` after its block's anchor), `imports` sorted by span
 //! (each with `span`, `path`, `name`, and `to` when the import resolved), and
 //! `references` sorted by span (each with `span` and `to`). A span is the
 //! record `{sourceId start end}`; an absent optional field is omitted.
@@ -53,6 +54,9 @@ impl ResolvedModule {
 pub struct ResolvedDeclaration {
     pub(crate) identity: DeclarationId,
     pub(crate) anchor: Anchor,
+    /// For a member of an `impl` block, the name of the block, which its
+    /// anchor has in place of the member's, with the kind `@impl`.
+    pub(crate) implementation: Option<String>,
     pub(crate) access: Access,
     pub(crate) source_id: String,
     pub(crate) span: ByteSpan,
@@ -65,10 +69,19 @@ impl ResolvedDeclaration {
         &self.identity
     }
 
-    /// The anchor the identity hashes.
+    /// The anchor the identity hashes; for a member of an `impl` block, the
+    /// package, module, and owner of its block, with the member's kind and
+    /// name.
     #[must_use]
     pub const fn anchor(&self) -> &Anchor {
         &self.anchor
+    }
+
+    /// For a member of an `impl` block, the block's name: its target, as
+    /// [`crate::implementation_name`] writes it.
+    #[must_use]
+    pub fn implementation(&self) -> Option<&str> {
+        self.implementation.as_deref()
     }
 
     /// Who may name the declaration from another module.
@@ -337,11 +350,27 @@ impl Resolution {
             if !anchor.owner().is_empty() {
                 let _ = write!(out, " owner: {}", canonical_string(anchor.owner()));
             }
+            match &declaration.implementation {
+                Some(target) => {
+                    let _ = write!(
+                        out,
+                        " kind: @impl name: {}}} member: {}",
+                        canonical_string(target),
+                        canonical_string(anchor.name()),
+                    );
+                }
+                None => {
+                    let _ = write!(
+                        out,
+                        " kind: {} name: {}}}",
+                        anchor.kind().as_atom(),
+                        canonical_string(anchor.name()),
+                    );
+                }
+            }
             let _ = write!(
                 out,
-                " kind: {} name: {}}} access: {} span: {}}}",
-                anchor.kind().as_atom(),
-                canonical_string(anchor.name()),
+                " access: {} span: {}}}",
                 declaration.access.as_atom(),
                 span_record(&declaration.source_id, declaration.span)
             );

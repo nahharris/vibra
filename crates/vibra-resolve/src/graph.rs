@@ -6,7 +6,8 @@
 //! members included, has an anchor identity; its owner path is the dotted
 //! member path within the module. A field has no anchor kind and an `impl`
 //! block has no name, so neither is a declaration: an `impl` is identified
-//! by its target and its receiver ("Namespaces and resolution").
+//! by its target and the type or interface it is nested in, and its members
+//! through it ("Declared types").
 
 use std::collections::BTreeMap;
 

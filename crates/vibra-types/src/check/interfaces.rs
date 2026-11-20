@@ -963,6 +963,15 @@ impl<'a> Program<'a> {
         let choices_complete = declared_associated
             .iter()
             .all(|(name, _)| chosen.iter().any(|(chosen, _, _)| chosen == name));
+        let target = block.target().map_or("", |target| {
+            let span = target.span();
+            self.modules
+                .get(module)
+                .and_then(|data| data.text)
+                .and_then(|text| text.get(span.start()..span.end()))
+                .unwrap_or_default()
+        });
+        let implementation = self.implementation_identity(module, &host, target);
         let mut members: Vec<(String, usize)> = Vec::new();
         let mut seen: Vec<(String, ByteSpan)> = Vec::new();
         for member in block.members() {
@@ -1166,7 +1175,7 @@ impl<'a> Program<'a> {
                 contract: None,
                 name: name.text().to_owned(),
                 view: member,
-                identity: String::new(),
+                identity: format!("{implementation}.{}", name.text()),
                 qualified: format!("{dotted}.{host}.{key}.{}", name.text()),
                 binders: member_binders,
                 bounds: all_bounds,

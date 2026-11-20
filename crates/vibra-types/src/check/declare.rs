@@ -1512,6 +1512,34 @@ impl<'a> Program<'a> {
         ))
     }
 
+    /// The identity of the `impl` block nested in `owner` in the module
+    /// `module` whose target is written `target`: see
+    /// [`vibra_resolve::implementation_identity`].
+    pub(crate) fn implementation_identity(
+        &self,
+        module: usize,
+        owner: &str,
+        target: &str,
+    ) -> String {
+        let Some(data) = self.modules.get(module) else {
+            return String::new();
+        };
+        let package = if data.embedded {
+            &self.embedded_package
+        } else {
+            &self.local_package
+        };
+        vibra_resolve::implementation_identity(
+            &package.name,
+            &package.version,
+            &data.path,
+            owner,
+            target,
+        )
+        .as_str()
+        .to_owned()
+    }
+
     pub(crate) fn identity_of(
         &self,
         module: &str,

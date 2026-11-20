@@ -180,6 +180,15 @@ package `hello` version `0.1.0`, module `@hello.main`, no owner, kind
 `@proc`, name `main` gives
 `sha256:213e3a01ef10d7c10032616f8ab0da9a97fb729b9f98d723f4beb3158a25e2ad`.
 
+An `impl` block is no declaration, but it has an identity hashed the same
+way: its anchor has its module's package, version, and path, the type or
+interface it is nested in as owner path, the kind `@impl`, and its target as
+the name. The target is its source text with every run of white space
+dropped next to `(`, `)`, `{`, `}`, and `:`, and shortened to one space
+elsewhere, so `Iter( U8 )` and `Iter(U8)` name one block. A member of an
+`impl` block is identified by the block's identity followed by `.` and the
+member's name.
+
 | Body | Declares | Constructor | Pattern |
 | --- | --- | --- | --- |
 | `of {name: T …}` | declared record | `User(name: n id: i)` | `User(name: p)` |
@@ -425,10 +434,10 @@ required; a path that resolves to another kind is `@name.wrongEntityKind`
 and names what it found. Tooling MUST return the resolved kind and identity,
 never a dotted string.
 
-An `impl` block has no name. Its identity is the pair of its applied
-interface target and its receiver type, and a member's identity adds the
-contract member. Nothing addresses an implementation at a use site; dispatch
-selects it.
+An `impl` block has no name. It is keyed by the pair of its applied
+interface target and its receiver type, and it and its members have the
+identities of [Declared types](#declared-types). Nothing addresses an
+implementation at a use site; dispatch selects it.
 
 ## Functions as values
 

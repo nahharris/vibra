@@ -129,34 +129,91 @@ impl Anchor {
     /// The identity this anchor hashes to.
     #[must_use]
     pub fn identity(&self) -> DeclarationId {
-        let mut hasher = Sha256::new();
-        hasher.update(DOMAIN);
-        hasher.update([0u8]);
-        for field in [
+        hash([
             self.package.as_str(),
             self.version.as_str(),
             self.module.as_str(),
             self.owner.as_str(),
             self.kind.as_atom(),
             self.name.as_str(),
-        ] {
-            let length = u64::try_from(field.len()).unwrap_or(u64::MAX);
-            hasher.update(length.to_be_bytes());
-            hasher.update(field.as_bytes());
-        }
-        let mut text = String::from("sha256:");
-        for byte in hasher.finalize() {
-            let _ = write!(text, "{byte:02x}");
-        }
-        DeclarationId(text)
+        ])
     }
+}
+
+/// The identity of the anchor of the six `fields`.
+fn hash(fields: [&str; 6]) -> DeclarationId {
+    let mut hasher = Sha256::new();
+    hasher.update(DOMAIN);
+    hasher.update([0u8]);
+    for field in fields {
+        let length = u64::try_from(field.len()).unwrap_or(u64::MAX);
+        hasher.update(length.to_be_bytes());
+        hasher.update(field.as_bytes());
+    }
+    let mut text = String::from("sha256:");
+    for byte in hasher.finalize() {
+        let _ = write!(text, "{byte:02x}");
+    }
+    DeclarationId(text)
+}
+
+/// The identity of an `impl` block: the hash of the anchor whose package,
+/// version, and module are its module's, whose owner is the type or
+/// interface it is nested in, whose kind is `@impl`, and whose name is
+/// [`implementation_name`] of its target.
+#[must_use]
+pub fn implementation_identity(
+    package: &str,
+    version: &str,
+    module: &str,
+    owner: &str,
+    target: &str,
+) -> DeclarationId {
+    hash([
+        package,
+        version,
+        module,
+        owner,
+        "@impl",
+        &implementation_name(target),
+    ])
 }
 
 /// A declaration identity: `sha256:` and 64 lower-case hexadecimal digits.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct DeclarationId(String);
 
+/// The name an `impl` block's anchor gives it: its target's source text
+/// `text` with every run of white space dropped next to `(`, `)`, `{`, `}`,
+/// and `:`, and shortened to one space elsewhere. `Iter( U8 )` and `Iter(U8)`
+/// name one implementation.
+#[must_use]
+pub fn implementation_name(text: &str) -> String {
+    let tight = |c: char| matches!(c, '(' | ')' | '{' | '}' | ':');
+    let mut name = String::with_capacity(text.len());
+    let mut space = false;
+    for c in text.trim().chars() {
+        if c.is_whitespace() {
+            space = true;
+            continue;
+        }
+        if space && !tight(c) && !name.ends_with(tight) && !name.is_empty() {
+            name.push(' ');
+        }
+        space = false;
+        name.push(c);
+    }
+    name
+}
+
 impl DeclarationId {
+    /// The identity of the member `name` of the implementation this
+    /// identity identifies: this identity, `.`, and the name.
+    #[must_use]
+    pub fn member(&self, name: &str) -> Self {
+        Self(format!("{}.{name}", self.0))
+    }
+
     /// The identity's text.
     #[must_use]
     pub fn as_str(&self) -> &str {

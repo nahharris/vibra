@@ -38,7 +38,10 @@ mod scope;
 mod snapshot;
 
 pub use graph::Access;
-pub use identity::{Anchor, DeclarationId, DeclarationKind};
+pub use identity::{
+    Anchor, DeclarationId, DeclarationKind, implementation_identity,
+    implementation_name,
+};
 pub use input::{
     EmbeddedUnit, PackageId, PreludeBinding, ResolveInput, SourceModule, SourceUnit,
     UnitKind,
@@ -49,6 +52,67 @@ pub use snapshot::{
 };
 
 use graph::{Graph, ImportTarget};
+
+/// The declaration record of every member of a local `impl` block. Its
+/// identity is its block's, `.`, and its name; its access is that of the
+/// type or interface the block is nested in.
+fn implementation_members(
+    graph: &Graph<'_>,
+    documents: &[vibra_syntax::Document],
+) -> Vec<snapshot::ResolvedDeclaration> {
+    let mut records = Vec::new();
+    for (module, data) in graph.modules.iter().enumerate() {
+        if data.embedded {
+            continue;
+        }
+        let text = documents
+            .get(module)
+            .and_then(vibra_syntax::Document::text)
+            .unwrap_or_default();
+        for block in &data.impls {
+            let (Some(owner), Some(target)) =
+                (graph.decls.get(block.owner), block.view.target())
+            else {
+                continue;
+            };
+            let span = target.span();
+            let written = text.get(span.start()..span.end()).unwrap_or_default();
+            let name = implementation_name(written);
+            let identity = implementation_identity(
+                data.package.name(),
+                data.package.version(),
+                &data.path,
+                &owner.name,
+                written,
+            );
+            for member in block.view.members() {
+                let Some(member_name) = member.name() else {
+                    continue;
+                };
+                let kind = match member.kind() {
+                    vibra_syntax::source::CallableKind::Fn => DeclarationKind::Fn,
+                    vibra_syntax::source::CallableKind::Proc => DeclarationKind::Proc,
+                };
+                records.push(snapshot::ResolvedDeclaration {
+                    identity: identity.member(member_name.text()),
+                    anchor: Anchor::new(
+                        data.package.name(),
+                        data.package.version(),
+                        data.path.clone(),
+                        owner.name.clone(),
+                        kind,
+                        member_name.text(),
+                    ),
+                    implementation: Some(name.clone()),
+                    access: owner.access,
+                    source_id: data.source_id.clone(),
+                    span: member.construct().span(),
+                });
+            }
+        }
+    }
+    records
+}
 
 /// Resolves every module of `input`.
 #[must_use]
@@ -109,10 +173,12 @@ pub fn resolve(input: &ResolveInput) -> Resolution {
             .map(|decl| snapshot::ResolvedDeclaration {
                 identity: decl.identity.clone(),
                 anchor: decl.anchor.clone(),
+                implementation: None,
                 access: decl.access,
                 source_id: graph.source_id(decl.module).to_owned(),
                 span: decl.span,
             })
+            .chain(implementation_members(&graph, &documents))
             .collect(),
         imports,
         references: references
