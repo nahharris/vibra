@@ -735,3 +735,10 @@ V2-TYPE-INTERFACE-member-value-bound	active	02-type-system.md#functions-as-value
 V2-TYPE-INTERFACE-member-value-structural	active	02-type-system.md#functions-as-values
 V2-TYPE-INTERFACE-member-value-default-unsatisfied	active	02-type-system.md#functions-as-values
 V2-TYPE-INTERFACE-member-value-default-mismatch	active	02-type-system.md#functions-as-values
+V2-SRC-CALLS-literal-argument-mismatch	active	02-type-system.md#application
+V2-SRC-CALLS-literal-argument-numeric	active	02-type-system.md#application
+V2-SRC-CALLS-literal-list-element-argument	active	02-type-system.md#application
+V2-SRC-CALLS-literal-dict-value-argument	active	02-type-system.md#application
+V2-SRC-CALLS-literal-initializer-mismatch	active	02-type-system.md#application
+V2-SRC-CALLS-literal-list-initializer-mismatch	active	02-type-system.md#application
+V2-SRC-CALLS-literal-argument-fits	active	02-type-system.md#application

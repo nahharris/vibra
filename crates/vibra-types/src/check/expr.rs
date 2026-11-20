@@ -187,6 +187,9 @@ struct ProductState<'a> {
     types: Vec<Option<Type>>,
     nodes: Vec<Option<Node>>,
     span: ByteSpan,
+    /// Whether a list or dict literal is an argument, so that an element
+    /// that does not fit is an argument that does not fit its slot.
+    argument: bool,
     failed: bool,
 }
 
@@ -3449,6 +3452,8 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             },
             _ => (None, None),
         };
+        let argument = matches!(product, Product::List | Product::Dict)
+            && self.argument == Some(span);
         let child = Task::Product(Box::new(ProductState {
             product,
             operands,
@@ -3459,6 +3464,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             types: Vec::new(),
             nodes: Vec::new(),
             span,
+            argument,
             failed: false,
         }));
         Step::Child(Task::Postfix(state), child)
@@ -3493,13 +3499,13 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                     match slot {
                         Some(Some(expected)) => {
                             let expected = expected.clone();
-                            let node = self.conform(
-                                &expected,
-                                &actual,
-                                out.node,
-                                span,
-                                DiagnosticCode::TypeMismatch,
-                            );
+                            let code = if state.argument {
+                                DiagnosticCode::TypeArgumentMismatch
+                            } else {
+                                DiagnosticCode::TypeMismatch
+                            };
+                            let node =
+                                self.conform(&expected, &actual, out.node, span, code);
                             (Some(actual), node)
                         }
                         Some(slot) => {
@@ -3539,10 +3545,18 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                 Product::Dict if at.is_multiple_of(2) => state.element.clone(),
                 Product::Dict => state.value.clone(),
             };
+            // An element of a list or dict literal argument is in argument
+            // position too.
+            if state.argument {
+                self.argument = Some(expr_span(&operand));
+            }
             return Step::Child(
                 Task::Product(state),
                 Task::Expr(operand, Ctx::Value(expected)),
             );
+        }
+        if state.argument {
+            self.argument = Some(state.span);
         }
         Step::Done(self.finish_product(*state))
     }

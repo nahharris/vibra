@@ -1,0 +1,3 @@
+fn g takes {x: I32} returns r: I32 do return x endfn
+
+fn f returns r: I32 do return g(1.5) endfn

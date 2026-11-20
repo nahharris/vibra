@@ -1,0 +1,18 @@
+id = "V2-SRC-CALLS-literal-dict-value-argument"
+rule = "V2-SRC-CALLS-literal-dict-value-argument"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#application: a value of a dict literal argument is in argument position, so a literal value that does not fit is @type.argumentMismatch at the value"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.argumentMismatch"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 105, end = 108 }

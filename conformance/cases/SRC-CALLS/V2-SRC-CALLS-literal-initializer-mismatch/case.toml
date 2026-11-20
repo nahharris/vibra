@@ -1,0 +1,18 @@
+id = "V2-SRC-CALLS-literal-initializer-mismatch"
+rule = "V2-SRC-CALLS-literal-initializer-mismatch"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#application: a literal outside argument position that does not fit its written type is @type.mismatch"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.mismatch"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 39, end = 42 }

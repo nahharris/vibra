@@ -1,0 +1,18 @@
+id = "V2-SRC-CALLS-literal-argument-mismatch"
+rule = "V2-SRC-CALLS-literal-argument-mismatch"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#application: a literal argument that does not fit its slot is @type.argumentMismatch at the literal, like any other argument"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.argumentMismatch"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 86, end = 89 }
