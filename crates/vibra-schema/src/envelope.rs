@@ -161,17 +161,20 @@ pub enum ObligationKind {
 pub struct ObligationRecord {
     /// `requires`, `ensures`, or `where`.
     pub kind: ObligationKind,
-    /// The identity of the declaration that carries the guard.
+    /// The identity of the declaration that contains the site.
     pub declaration: String,
-    /// The identity of the predicate.
+    /// The identity of the guarded declaration.
     pub predicate_identity: String,
-    /// The predicate's span.
+    /// The site: the call or the construction, and for an `ensures` its
+    /// predicate.
     pub source: SpanDocument,
     /// `passed`, `refuted`, `unknown`, or `unsupported`.
     pub status: Status,
     /// The discharge rules used, in order.
     pub rule_ids: Vec<String>,
-    /// The checked inputs the obligation depends on.
+    /// The identities of the guarded declaration and of every declaration
+    /// whose checked body or value the discharge read, sorted, without
+    /// declaration.
     pub dependencies: Vec<String>,
     /// The canonical VIBON text of the refuting values, or `null`.
     pub counterexample: Option<String>,
