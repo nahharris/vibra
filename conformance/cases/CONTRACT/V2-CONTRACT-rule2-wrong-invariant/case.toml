@@ -1,0 +1,19 @@
+id = "V2-CONTRACT-rule2-wrong-invariant"
+rule = "V2-CONTRACT-rule2-wrong-invariant"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#bare-guards: GUARD-2: an invariant that states another predicate establishes nothing"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "unknown"
+
+[[expect.diagnostics]]
+code = "@contract.unproved"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 321, end = 329 }
+related = [{ source = "src/app/main.vib", span = { start = 150, end = 153 } }]

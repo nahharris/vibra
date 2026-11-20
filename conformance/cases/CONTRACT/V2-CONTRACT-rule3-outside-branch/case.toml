@@ -1,0 +1,19 @@
+id = "V2-CONTRACT-rule3-outside-branch"
+rule = "V2-CONTRACT-rule3-outside-branch"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#bare-guards: GUARD-3: a condition holds only inside the branch it dominates, not after endif"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "unknown"
+
+[[expect.diagnostics]]
+code = "@contract.unproved"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 183, end = 189 }
+related = [{ source = "src/app/main.vib", span = { start = 3, end = 6 } }]

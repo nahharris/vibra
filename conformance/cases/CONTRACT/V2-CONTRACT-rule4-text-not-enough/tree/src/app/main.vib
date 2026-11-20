@@ -1,0 +1,4 @@
+use @app.other enduse
+fn gt takes {a: I32 b: I32} returns r: Bool do return Ordered.greater(a b) endfn
+fn posGt takes {x: I32} returns r: I32 requires gt(x 0i32) do return x endfn
+fn f takes {y: I32} returns r: I32 do if other.gt(y 0i32) then return posGt(y) else return 0i32 endif endfn

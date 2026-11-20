@@ -1,0 +1,19 @@
+id = "V2-CONTRACT-no-user-ordered-fact"
+rule = "V2-CONTRACT-no-user-ordered-fact"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "07-diagnostics-and-conformance.md#integer-facts: a comparison that selects a program's own implementation is an ordinary call and carries no integer fact"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "unknown"
+
+[[expect.diagnostics]]
+code = "@contract.unproved"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 688, end = 702 }
+related = [{ source = "src/app/main.vib", span = { start = 494, end = 503 } }]

@@ -1,0 +1,20 @@
+id = "V2-CONTRACT-obligations-snapshot"
+rule = "V2-CONTRACT-obligations-snapshot"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "07-diagnostics-and-conformance.md#persistent-observations: the types snapshot lists one obligation for the call of the bare requires, unknown with no rules, and none for the guards with else"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "unknown"
+types = "types.vibon"
+
+[[expect.diagnostics]]
+code = "@contract.unproved"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 131, end = 135 }
+related = [{ source = "src/app/main.vib", span = { start = 3, end = 4 } }]

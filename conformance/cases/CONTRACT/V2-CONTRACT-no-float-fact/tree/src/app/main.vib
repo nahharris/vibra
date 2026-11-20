@@ -1,0 +1,2 @@
+fn sameReq takes {a: F64 b: F64} returns r: F64 requires F64.equal(a b) do return a endfn
+fn f takes {a: F64 b: F64} returns r: F64 do if F64.equal(a b) then return sameReq(b a) else return a endif endfn

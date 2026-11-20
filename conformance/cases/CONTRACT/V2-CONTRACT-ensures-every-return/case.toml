@@ -1,0 +1,19 @@
+id = "V2-CONTRACT-ensures-every-return"
+rule = "V2-CONTRACT-ensures-every-return"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#bare-guards: a bare ensures holds at every exit: the return it is not established at is related"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "unknown"
+
+[[expect.diagnostics]]
+code = "@contract.unproved"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 45, end = 68 }
+related = [{ source = "src/app/main.vib", span = { start = 3, end = 6 } }, { source = "src/app/main.vib", span = { start = 118, end = 126 } }]

@@ -1,0 +1,2 @@
+fn geReq takes {a: I32 b: I32} returns r: I32 requires Ordered.greaterOrEqual(a b) do return a endfn
+fn f takes {x: I32 y: I32 z: I32} returns r: I32 do if Ordered.inRange(x 1i32 9i32) then return geReq(x 1i32) else return 0i32 endif endfn

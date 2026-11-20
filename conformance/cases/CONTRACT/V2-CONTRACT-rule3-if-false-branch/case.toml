@@ -1,0 +1,19 @@
+id = "V2-CONTRACT-rule3-if-false-branch"
+rule = "V2-CONTRACT-rule3-if-false-branch"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#bare-guards: GUARD-3: in the else branch the negation of the condition holds, not the condition"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "unknown"
+
+[[expect.diagnostics]]
+code = "@contract.unproved"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 182, end = 188 }
+related = [{ source = "src/app/main.vib", span = { start = 3, end = 6 } }]

@@ -1,0 +1,19 @@
+id = "V2-CONTRACT-ensures-bare-through-try"
+rule = "V2-CONTRACT-ensures-bare-through-try"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#bare-guards: the err exit of a try is an exit of the body, at which a bare ensures must hold too"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "unknown"
+
+[[expect.diagnostics]]
+code = "@contract.unproved"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 220, end = 227 }
+related = [{ source = "src/app/main.vib", span = { start = 156, end = 157 } }, { source = "src/app/main.vib", span = { start = 240, end = 245 } }]

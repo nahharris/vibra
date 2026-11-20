@@ -1,0 +1,1 @@
+fn two takes {y: I32} returns r: I32 ensures Ordered.greater(r 0i32) do if Ordered.greater(y 0i32) then return y else return y endif endfn

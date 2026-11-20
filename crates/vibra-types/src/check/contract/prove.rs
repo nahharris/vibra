@@ -1364,8 +1364,8 @@ impl<'v> Prover<'v> {
             .iter()
             .filter(|exit| matches!(exit.verdict, Verdict::Unknown))
             .collect::<Vec<_>>();
-        // A contract's `ensures` is the implementation's obligation, stated
-        // at its name and reported at its `return`s.
+        // A contract's `ensures` is reported at the implementation's
+        // `return`s; a limit is reported at the implementation's name.
         let span = if data.contract.is_some() {
             data.name
         } else {
@@ -1474,9 +1474,21 @@ impl<'v> Prover<'v> {
             ObligationKind::Ensures,
             declaration,
             data.identity.clone(),
-            span,
+            guard.span,
             &verdicts,
         );
+        // The site of an `ensures` is its predicate, which a contract
+        // member writes in the interface's module.
+        let record = match data
+            .contract
+            .and_then(|(contract, _)| context.program().modules.get(contract))
+        {
+            Some(interface) => Obligation {
+                source_id: interface.source_id.to_string(),
+                ..record
+            },
+            None => record,
+        };
         context.reviewed.obligations.push(record);
     }
 }

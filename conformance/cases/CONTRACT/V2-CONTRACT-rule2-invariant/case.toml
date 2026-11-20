@@ -1,0 +1,12 @@
+id = "V2-CONTRACT-rule2-invariant"
+rule = "V2-CONTRACT-rule2-invariant"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#bare-guards: GUARD-2: a value of a type whose bare where states the predicate establishes it"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

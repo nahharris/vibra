@@ -1,0 +1,2 @@
+fn eqReq takes {a: I32 b: I32} returns r: I32 requires Equatable.equal(a b) do return a endfn
+fn f takes {x: I32 y: I32 z: I32} returns r: I32 do if Ordered.lessOrEqual(x y) then return eqReq(x y) else return 0i32 endif endfn

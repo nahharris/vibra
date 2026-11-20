@@ -1,0 +1,28 @@
+fn main returns r: {I32 I32} do let s: Sized be B(1i32) endlet return {Sized.size(A(1i32) 0i32) Sized.size(s 0i32)} endfn
+interface Sized
+  fn size
+    takes {value: Self n: I32}
+    returns r: I32
+    requires Ordered.greater(n 0i32) else -1i32
+  endfn
+endinterface
+type A of I32
+  impl Sized
+    fn size
+      takes {value: Self m: I32}
+      returns s: I32
+      do
+        return m
+    endfn
+  endimpl
+endtype
+type B of I32
+  impl Sized
+    fn size
+      takes {value: Self m: I32}
+      returns s: I32
+      do
+        return m
+    endfn
+  endimpl
+endtype
