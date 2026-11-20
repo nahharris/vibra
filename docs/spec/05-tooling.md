@@ -151,7 +151,13 @@ constant evaluation uses the same interface: a required constant or
 obligation that is not established within the limits fails its check. The
 published limit profile is `m1Default`. It allows one compile-time
 evaluation 10,000,000 reductions, a reduction being the evaluation of one
-checked node.
+checked node, and the discharge of one obligation 100,000 attempted
+derivations of
+[integer facts](07-diagnostics-and-conformance.md#integer-facts), a
+derivation being one application of one fact to one premise or one pair of
+premises, or one comparison of two constants, whether or not its conclusion
+is new. A discharge that this limit stops before the rules reach a verdict
+is reported as [Bare guards](02-type-system.md#bare-guards) states.
 
 ### Initialization and project operations
 

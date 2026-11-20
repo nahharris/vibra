@@ -36,11 +36,13 @@ use vibra_ir::{
 };
 
 use super::super::callables::substitute;
-use super::super::ctfe::{Evaluator, Outcome};
+use vibra_interp::Reads;
+
+use super::super::ctfe::{Evaluator, Outcome, PROFILE};
 use super::super::declare::{Entity, TypeKind};
 use super::super::obligation::{Obligation, ObligationKind, ObligationStatus};
 use super::facts::{
-    self, BRANCH, CONSTANTS, Callee, Connective, Data, Env, Evidence, FactSet,
+    self, BRANCH, Budget, CONSTANTS, Callee, Connective, Data, Env, Evidence, FactSet,
     INVARIANT, RESULT, Readable, SUBSTITUTION, Term, Terms, Vocabulary,
 };
 use super::fragment::{Standing, operands};
@@ -140,9 +142,14 @@ enum Verdict {
     Refuted {
         counterexample: Option<String>,
         related: ByteSpan,
+        /// The declarations the refuting evaluation read.
+        reads: BTreeSet<String>,
     },
     Unknown,
+    /// A compile-time evaluation reached the reduction limit.
     Limit,
+    /// The proof budget stopped the rules before a verdict.
+    Budget,
     Unsupported,
 }
 
@@ -196,10 +203,23 @@ struct Declaration {
     implementation: Option<ByteSpan>,
 }
 
+/// What the rules other than `GUARD-1` decided of one obligation.
+#[derive(Clone, Debug)]
+enum Proof {
+    /// It holds, by this evidence.
+    Proven(Evidence),
+    /// The rules examined it and could not establish it.
+    Unknown,
+    /// The proof budget stopped the rules before a verdict.
+    Limit,
+}
+
 /// What `GUARD-1` decided once, by owner, site, and kind.
 #[derive(Clone, Debug)]
 enum Decided {
-    Truth(bool, Option<String>),
+    /// The truth, the counterexample of a false one, and the identities of
+    /// the declarations the evaluation read.
+    Truth(bool, Option<String>, BTreeSet<String>),
     Limit,
     Open,
 }
@@ -236,6 +256,10 @@ struct Prover<'v> {
     /// decided from, by interface and member name: the default body, or
     /// the abstract member's own guards.
     contracts: BTreeMap<(TypeId, String), usize>,
+    /// The identity of each function, by entry, and of each module value,
+    /// by global index, a compile-time evaluation may read, outside the
+    /// embedded standard library.
+    readable: (BTreeMap<usize, String>, BTreeMap<usize, String>),
 }
 
 /// A step of a walk.
@@ -309,6 +333,7 @@ pub(super) fn discharge(
         decided: BTreeMap::new(),
         members,
         contracts,
+        readable: readable(context),
     };
     let mut bodies = Vec::new();
     for (index, checked) in inputs.functions {
@@ -471,6 +496,60 @@ pub(super) fn discharge(
 }
 
 impl<'v> Prover<'v> {
+    /// `evidence`, having read the values of the module values `globals`.
+    fn values_read(
+        &self,
+        mut evidence: Evidence,
+        globals: &BTreeSet<usize>,
+    ) -> Evidence {
+        for global in globals {
+            if let Some(identity) = self.readable.1.get(global) {
+                evidence = evidence.reading(identity);
+            }
+        }
+        evidence
+    }
+
+    /// `verdict`, its decision having read the values of the module values
+    /// `globals`.
+    fn with_values(&self, verdict: Verdict, globals: &BTreeSet<usize>) -> Verdict {
+        match verdict {
+            Verdict::Passed(evidence) => {
+                Verdict::Passed(self.values_read(evidence, globals))
+            }
+            Verdict::Refuted {
+                counterexample,
+                related,
+                mut reads,
+            } => {
+                reads.extend(self.values_read(Evidence::default(), globals).reads);
+                Verdict::Refuted {
+                    counterexample,
+                    related,
+                    reads,
+                }
+            }
+            other => other,
+        }
+    }
+
+    /// The identities of the declarations a compile-time evaluation read.
+    fn read(&self, reads: &Reads) -> BTreeSet<String> {
+        let (functions, values) = &self.readable;
+        reads
+            .functions
+            .iter()
+            .filter_map(|entry| functions.get(entry))
+            .chain(
+                reads
+                    .module_values
+                    .iter()
+                    .filter_map(|global| values.get(global)),
+            )
+            .cloned()
+            .collect()
+    }
+
     fn declare(&mut self, owner: Owner, module: usize, identity: String) -> usize {
         self.declarations.push(Declaration {
             module,
@@ -536,17 +615,24 @@ impl<'v> Prover<'v> {
                         let outcome = node
                             .as_ref()
                             .and_then(|node| where_call(context, *ty, node))
-                            .map(|call| evaluator.evaluate(&call));
+                            .map(|call| evaluator.evaluate_reading(&call));
                         match outcome {
-                            Some(Outcome::LimitReached) => Verdict::Limit,
-                            Some(Outcome::Value(value)) => match facts::truth(&value) {
-                                Some(true) => Verdict::Passed(Evidence::of(CONSTANTS)),
-                                Some(false) => Verdict::Refuted {
-                                    counterexample: None,
-                                    related: *span,
-                                },
-                                None => Verdict::Unknown,
-                            },
+                            Some((Outcome::LimitReached, _)) => Verdict::Limit,
+                            Some((Outcome::Value(value), reads)) => {
+                                let reads = self.read(&reads);
+                                match facts::truth(&value) {
+                                    Some(true) => Verdict::Passed(evaluated(
+                                        Evidence::default(),
+                                        reads,
+                                    )),
+                                    Some(false) => Verdict::Refuted {
+                                        counterexample: None,
+                                        related: *span,
+                                        reads,
+                                    },
+                                    None => Verdict::Unknown,
+                                }
+                            }
                             _ => Verdict::Unknown,
                         }
                     } else {
@@ -702,13 +788,13 @@ impl<'v> Prover<'v> {
                     }
                 }
                 Task::Assume(condition, holds) => {
-                    let (term, substituted) = facts::build(
+                    let (term, substituted, globals) = facts::build_reading(
                         &mut self.terms,
                         &self.vocabulary,
                         &mut env,
                         condition,
                     );
-                    let mut evidence = Evidence::default();
+                    let mut evidence = self.values_read(Evidence::default(), &globals);
                     if substituted {
                         evidence = evidence.with(SUBSTITUTION);
                     }
@@ -721,14 +807,14 @@ impl<'v> Prover<'v> {
                     );
                 }
                 Task::Bind(slot, value) => {
-                    let (term, _) = facts::build(
+                    let (term, _, globals) = facts::build_reading(
                         &mut self.terms,
                         &self.vocabulary,
                         &mut env,
                         value,
                     );
                     if let Some(slot) = slot {
-                        env.bind(slot, term, true);
+                        env.bind_reading(slot, term, true, globals);
                     }
                 }
                 Task::Arm(subject, arms, at) => {
@@ -810,9 +896,9 @@ impl<'v> Prover<'v> {
         arms: &[MatchArm],
         at: usize,
     ) {
-        let (subject, substituted) =
-            facts::build(&mut self.terms, &self.vocabulary, env, subject);
-        let mut evidence = Evidence::default();
+        let (subject, substituted, globals) =
+            facts::build_reading(&mut self.terms, &self.vocabulary, env, subject);
+        let mut evidence = self.values_read(Evidence::default(), &globals);
         if substituted {
             evidence = evidence.with(SUBSTITUTION);
         }
@@ -852,7 +938,9 @@ impl<'v> Prover<'v> {
         for (part, term) in facts::pattern_parts(&mut self.terms, &arm.pattern, subject)
         {
             match part {
-                Pattern::Bind(slot) => env.bind(*slot, term, false),
+                Pattern::Bind(slot) => {
+                    env.bind_reading(*slot, term, false, globals.clone())
+                }
                 Pattern::Case { case, .. } => {
                     self.case_fact(facts, term, case, true, &evidence);
                 }
@@ -977,8 +1065,8 @@ impl<'v> Prover<'v> {
         if !data.requires_certified {
             return Some(found(Verdict::Unsupported));
         }
-        let (call, substituted) =
-            facts::build(&mut self.terms, &self.vocabulary, env, node);
+        let (call, substituted, globals) =
+            facts::build_reading(&mut self.terms, &self.vocabulary, env, node);
         let operands = match self.terms.get(call) {
             Some(Data::Call(_, operands)) => operands.clone(),
             _ => Vec::new(),
@@ -990,10 +1078,14 @@ impl<'v> Prover<'v> {
                 slots.insert(at, (*term, written.origin.span()));
             }
         }
-        for (at, (label, written)) in arguments.labelled.iter().enumerate() {
+        // The term's labelled operands are in the callee's slot order.
+        for (place, at) in facts::label_order(arguments).into_iter().enumerate() {
+            let Some((label, written)) = arguments.labelled.get(at) else {
+                continue;
+            };
             let (Some(slot), Some(term)) = (
                 data.labels.iter().position(|name| name == label),
-                operands.get(arguments.positional.len() + at),
+                operands.get(arguments.positional.len() + place),
             ) else {
                 continue;
             };
@@ -1030,12 +1122,14 @@ impl<'v> Prover<'v> {
             evaluator,
         );
         let verdict = match decided {
-            Decided::Truth(true, _) => {
-                Verdict::Passed(prefixed(substituted, Evidence::of(CONSTANTS)))
-            }
-            Decided::Truth(false, counterexample) => Verdict::Refuted {
+            Decided::Truth(true, _, reads) => Verdict::Passed(evaluated(
+                prefixed(substituted, Evidence::default()),
+                reads,
+            )),
+            Decided::Truth(false, counterexample, reads) => Verdict::Refuted {
                 counterexample,
                 related: first_read(predicate, &slots).unwrap_or(span),
+                reads,
             },
             Decided::Limit => Verdict::Limit,
             Decided::Open => {
@@ -1050,15 +1144,18 @@ impl<'v> Prover<'v> {
                     predicate,
                 );
                 match self.establish(facts, &[goal]) {
-                    Some(evidence) => Verdict::Passed(prefixed(substituted, evidence)),
-                    None => Verdict::Unknown,
+                    Proof::Proven(evidence) => {
+                        Verdict::Passed(prefixed(substituted, evidence))
+                    }
+                    Proof::Unknown => Verdict::Unknown,
+                    Proof::Limit => Verdict::Budget,
                 }
             }
         };
         if matches!(verdict, Verdict::Passed(_)) {
             self.discharged.insert(call);
         }
-        Some(found(verdict))
+        Some(found(self.with_values(verdict, &globals)))
     }
 
     /// The obligation of a construction of a type whose `where` is bare.
@@ -1107,8 +1204,8 @@ impl<'v> Prover<'v> {
             .representation
             .as_ref()
             .map(|representation| representation.instantiate(arguments));
-        let (term, substituted) =
-            facts::build(&mut self.terms, &self.vocabulary, env, node);
+        let (term, substituted, globals) =
+            facts::build_reading(&mut self.terms, &self.vocabulary, env, node);
         let repr = self.terms.intern(Data::Repr(term));
         let constant = match (construction, &representation) {
             (Construction::Wrapper(_), _) => self.terms.constant(repr).cloned(),
@@ -1138,7 +1235,9 @@ impl<'v> Prover<'v> {
                 Some(decided) => decided.clone(),
                 None => {
                     let call = predicate_call(entry, arguments, constant, node);
-                    let decided = match evaluator.evaluate(&call) {
+                    let (outcome, reads) = evaluator.evaluate_reading(&call);
+                    let reads = self.read(&reads);
+                    let decided = match outcome {
                         Outcome::Value(value) => match facts::truth(&value) {
                             Some(holds) => {
                                 let name = unfolded
@@ -1152,7 +1251,7 @@ impl<'v> Prover<'v> {
                                         )
                                     })
                                     .flatten();
-                                Decided::Truth(holds, counterexample)
+                                Decided::Truth(holds, counterexample, reads)
                             }
                             None => Decided::Open,
                         },
@@ -1164,14 +1263,17 @@ impl<'v> Prover<'v> {
                 }
             };
             verdict = match decided {
-                Decided::Truth(true, _) => Some(Verdict::Passed(prefixed(
-                    substituted,
-                    Evidence::of(CONSTANTS),
+                Decided::Truth(true, _, reads) => Some(Verdict::Passed(evaluated(
+                    prefixed(substituted, Evidence::default()),
+                    reads,
                 ))),
-                Decided::Truth(false, counterexample) => Some(Verdict::Refuted {
-                    counterexample,
-                    related: span,
-                }),
+                Decided::Truth(false, counterexample, reads) => {
+                    Some(Verdict::Refuted {
+                        counterexample,
+                        related: span,
+                        reads,
+                    })
+                }
                 Decided::Limit => Some(Verdict::Limit),
                 Decided::Open => None,
             };
@@ -1202,14 +1304,15 @@ impl<'v> Prover<'v> {
                     }
                 }
                 match self.establish_except(facts, &goals, Some(term)) {
-                    Some(evidence) => {
+                    Proof::Proven(evidence) => {
                         Verdict::Passed(prefixed(substituted, evidence).and(&read))
                     }
-                    None => Verdict::Unknown,
+                    Proof::Unknown => Verdict::Unknown,
+                    Proof::Limit => Verdict::Budget,
                 }
             }
         };
-        Some(found(verdict))
+        Some(found(self.with_values(verdict, &globals)))
     }
 
     /// The constant operands of the construction `term`.
@@ -1247,9 +1350,11 @@ impl<'v> Prover<'v> {
         let mut types = data.types.clone();
         let result_name = data.result_name.clone();
         let result_type = data.result_type.clone();
-        let (term, substituted) = match value {
-            Some(value) => facts::build(&mut self.terms, &self.vocabulary, env, value),
-            None => (self.terms.opaque(), false),
+        let (term, substituted, globals) = match value {
+            Some(value) => {
+                facts::build_reading(&mut self.terms, &self.vocabulary, env, value)
+            }
+            None => (self.terms.opaque(), false, BTreeSet::new()),
         };
         let mut slots = BTreeMap::new();
         slots.insert(slot, (term, span));
@@ -1277,12 +1382,14 @@ impl<'v> Prover<'v> {
             Decided::Open
         };
         let verdict = match decided {
-            Decided::Truth(true, _) => {
-                Verdict::Passed(prefixed(substituted, Evidence::of(CONSTANTS)))
-            }
-            Decided::Truth(false, counterexample) => Verdict::Refuted {
+            Decided::Truth(true, _, reads) => Verdict::Passed(evaluated(
+                prefixed(substituted, Evidence::default()),
+                reads,
+            )),
+            Decided::Truth(false, counterexample, reads) => Verdict::Refuted {
                 counterexample,
                 related: span,
+                reads,
             },
             Decided::Limit => Verdict::Limit,
             Decided::Open => {
@@ -1296,15 +1403,18 @@ impl<'v> Prover<'v> {
                     &guard.predicate,
                 );
                 match self.establish(facts, &[goal]) {
-                    Some(evidence) => Verdict::Passed(prefixed(substituted, evidence)),
-                    None => Verdict::Unknown,
+                    Proof::Proven(evidence) => {
+                        Verdict::Passed(prefixed(substituted, evidence))
+                    }
+                    Proof::Unknown => Verdict::Unknown,
+                    Proof::Limit => Verdict::Budget,
                 }
             }
         };
         Some(Exit {
             function,
             span,
-            verdict,
+            verdict: self.with_values(verdict, &globals),
             through_try: value.is_none(),
         })
     }
@@ -1320,15 +1430,14 @@ impl<'v> Prover<'v> {
         else {
             return;
         };
-        let (term, _) =
-            facts::build(&mut self.terms, &self.vocabulary, env, &guard.predicate);
-        facts.assume(
+        let (term, _, globals) = facts::build_reading(
             &mut self.terms,
             &self.vocabulary,
-            term,
-            true,
-            Evidence::of(SUBSTITUTION),
+            env,
+            &guard.predicate,
         );
+        let evidence = self.values_read(Evidence::of(SUBSTITUTION), &globals);
+        facts.assume(&mut self.terms, &self.vocabulary, term, true, evidence);
     }
 
     /// Decides `predicate` by evaluation (`GUARD-1`) when every slot it
@@ -1355,9 +1464,12 @@ impl<'v> Prover<'v> {
             };
             values.insert(slot, constant.clone());
         }
-        let decided = match evaluator.evaluate(&with_constants(predicate, &values)) {
+        let (outcome, reads) =
+            evaluator.evaluate_reading(&with_constants(predicate, &values));
+        let reads = self.read(&reads);
+        let decided = match outcome {
             Outcome::Value(value) => match facts::truth(&value) {
-                Some(true) => Decided::Truth(true, None),
+                Some(true) => Decided::Truth(true, None, reads),
                 Some(false) => {
                     let named = values
                         .iter()
@@ -1373,7 +1485,7 @@ impl<'v> Prover<'v> {
                             (name, constant)
                         })
                         .collect::<Vec<_>>();
-                    Decided::Truth(false, counterexample(evaluator, &named))
+                    Decided::Truth(false, counterexample(evaluator, &named), reads)
                 }
                 None => Decided::Open,
             },
@@ -1384,10 +1496,10 @@ impl<'v> Prover<'v> {
         decided
     }
 
-    /// The evidence that one of `goals` holds under `facts`, with the
-    /// invariants (`GUARD-2`) and certified results (`GUARD-7`) of the terms
-    /// the goal is built from.
-    fn establish(&mut self, facts: &FactSet, goals: &[Term]) -> Option<Evidence> {
+    /// Whether one of `goals` holds under `facts`, with the invariants
+    /// (`GUARD-2`) and certified results (`GUARD-7`) of the terms the goal
+    /// is built from.
+    fn establish(&mut self, facts: &FactSet, goals: &[Term]) -> Proof {
         self.establish_except(facts, goals, None)
     }
 
@@ -1398,7 +1510,7 @@ impl<'v> Prover<'v> {
         facts: &FactSet,
         goals: &[Term],
         constructing: Option<Term>,
-    ) -> Option<Evidence> {
+    ) -> Proof {
         let mut local = facts.clone();
         let mut seen = BTreeSet::new();
         if let Some(term) = constructing {
@@ -1414,9 +1526,22 @@ impl<'v> Prover<'v> {
                 self.result_facts(&mut local, term);
             }
         }
-        goals.iter().find_map(|goal| {
-            facts::prove(&mut self.terms, &self.vocabulary, &local, *goal)
-        })
+        // One budget serves the whole proof of the obligation.
+        let mut budget = Budget::new(PROFILE.proof_derivations);
+        let found = goals.iter().find_map(|goal| {
+            facts::prove(
+                &mut self.terms,
+                &self.vocabulary,
+                &local,
+                *goal,
+                &mut budget,
+            )
+        });
+        match found {
+            Some(evidence) => Proof::Proven(evidence),
+            None if budget.exhausted() => Proof::Limit,
+            None => Proof::Unknown,
+        }
     }
 
     /// Assumes the invariant of the type of `term`, when it states one.
@@ -1513,7 +1638,10 @@ impl<'v> Prover<'v> {
             &mut env,
             &guard.predicate,
         );
-        self.establish(&FactSet::default(), &[goal]).is_some()
+        matches!(
+            self.establish(&FactSet::default(), &[goal]),
+            Proof::Proven(_)
+        )
     }
 
     /// Reports every obligation and writes its record.
@@ -1648,6 +1776,7 @@ impl<'v> Prover<'v> {
                 context.push(guard_module, diagnostic);
             }
             Verdict::Limit => context.limit(guard_module, guard_span),
+            Verdict::Budget => context.proof_limit(guard_module, guard_span),
             Verdict::Passed(_) | Verdict::Unsupported => {}
         }
         let record = record(
@@ -1718,6 +1847,9 @@ impl<'v> Prover<'v> {
         let limited = exits
             .iter()
             .any(|exit| matches!(exit.verdict, Verdict::Limit));
+        let budgeted = exits
+            .iter()
+            .any(|exit| matches!(exit.verdict, Verdict::Budget));
         let open = exits
             .iter()
             .filter(|exit| matches!(exit.verdict, Verdict::Unknown))
@@ -1768,6 +1900,8 @@ impl<'v> Prover<'v> {
             context.push(module, diagnostic);
         } else if limited {
             context.limit(module, span);
+        } else if budgeted {
+            context.proof_limit(module, span);
         } else if let (Some(first), Some((contract, name))) =
             (open.first(), data.contract)
         {
@@ -1873,19 +2007,22 @@ fn record(
     let mut evidence = Evidence::default();
     let mut status = ObligationStatus::Passed;
     let mut counterexample = None;
+    let mut refuting = BTreeSet::new();
     for verdict in verdicts {
         match verdict {
             Verdict::Passed(found) => evidence = evidence.and(found),
             Verdict::Refuted {
                 counterexample: found,
+                reads,
                 ..
             } => {
                 if status != ObligationStatus::Refuted {
                     counterexample.clone_from(found);
                 }
                 status = ObligationStatus::Refuted;
+                refuting.extend(reads.iter().cloned());
             }
-            Verdict::Unknown | Verdict::Limit => {
+            Verdict::Unknown | Verdict::Limit | Verdict::Budget => {
                 if status == ObligationStatus::Passed {
                     status = ObligationStatus::Unknown;
                 }
@@ -1908,6 +2045,8 @@ fn record(
     dependencies.insert(predicate.clone());
     if status == ObligationStatus::Passed {
         dependencies.extend(evidence.reads.iter().cloned());
+    } else if status == ObligationStatus::Refuted {
+        dependencies.extend(refuting);
     }
     dependencies.remove(&declaration.identity);
     Obligation {
@@ -1926,6 +2065,13 @@ fn record(
         dependencies: dependencies.into_iter().collect(),
         counterexample: counterexample.filter(|_| status == ObligationStatus::Refuted),
     }
+}
+
+/// `evidence`, then `GUARD-1`, having read the declarations `reads`.
+fn evaluated(evidence: Evidence, reads: BTreeSet<String>) -> Evidence {
+    let mut evidence = evidence.with(CONSTANTS);
+    evidence.reads.extend(reads);
+    evidence
 }
 
 /// `evidence`, after `GUARD-4` when the goal was formed by a substitution.
@@ -2277,7 +2423,12 @@ fn vocabulary<'v>(context: &Context<'v, '_>) -> Vocabulary<'v> {
         if !checked.defaults.is_empty() {
             vocabulary.defaults.insert(at, checked.defaults.clone());
         }
+        // A callable with a guard is never read through: its result is
+        // not its body's when a guard with `else` fails, and its facts
+        // come only from its proven `ensures` (`GUARD-7`).
         if context.standings.get(at) == Some(&Standing::Certified)
+            && checked.guards.entry.is_none()
+            && checked.guards.exit.is_none()
             && let (Some(body), Some(data)) =
                 (checked.node.as_ref(), program.functions.get(*index))
         {
@@ -2291,6 +2442,37 @@ fn vocabulary<'v>(context: &Context<'v, '_>) -> Vocabulary<'v> {
         }
     }
     vocabulary
+}
+
+/// The identity of each function, by entry, and of each module value, by
+/// global index, outside the embedded standard library: the declarations
+/// whose checked body or value an obligation record lists when a
+/// compile-time evaluation reads them.
+fn readable(
+    context: &Context<'_, '_>,
+) -> (BTreeMap<usize, String>, BTreeMap<usize, String>) {
+    let inputs = context.inputs;
+    let program = inputs.program;
+    let embedded =
+        |module: usize| program.modules.get(module).is_none_or(|data| data.embedded);
+    let functions = program
+        .functions
+        .iter()
+        .enumerate()
+        .filter(|(_, data)| !embedded(data.module))
+        .filter_map(|(index, data)| {
+            let entry = inputs.layout.functions.get(index).copied().flatten()?;
+            Some((entry, data.identity.clone()))
+        })
+        .collect();
+    let values = (0..program.values.len())
+        .filter_map(|index| {
+            let global = inputs.layout.globals.get(index).copied().flatten()?;
+            let (module, identity) = context.owner(Owner::Value(index))?;
+            (!embedded(module)).then_some((global, identity))
+        })
+        .collect();
+    (functions, values)
 }
 
 /// What the discharge reads of each local or library function with a
@@ -2565,12 +2747,21 @@ fn invariants<'v>(
             continue;
         };
         let Some(id) = data.id.clone() else { continue };
+        // A predicate with a guard is not unfolded: when a guard with
+        // `else` fails its result is not its body's.
         let (body, named) = match &invariant.predicate {
-            Predicate::Anonymous(closure) => (Some((&closure.body, None)), None),
+            Predicate::Anonymous(closure) => (
+                (closure.entry_guard.is_none() && closure.exit_guard.is_none())
+                    .then_some((&closure.body, None)),
+                None,
+            ),
             Predicate::Named(function) => {
                 let body = inputs
                     .functions
                     .get(function)
+                    .filter(|checked| {
+                        checked.guards.entry.is_none() && checked.guards.exit.is_none()
+                    })
                     .and_then(|checked| checked.node.as_ref());
                 let function_data = program.functions.get(*function);
                 let name = function_data.and_then(|data| {

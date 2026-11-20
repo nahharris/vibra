@@ -1,0 +1,12 @@
+id = "V2-CONTRACT-label-order-matching"
+rule = "V2-CONTRACT-label-order-matching"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#bare-guards: GUARD-4: lt(a: y b: x) and lt(b: x a: y) bind the same argument to each label, whatever order the labels are written in"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

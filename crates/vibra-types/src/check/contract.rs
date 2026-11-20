@@ -339,24 +339,41 @@ impl Context<'_, '_> {
     }
 
     /// Reports `@tool.limitExceeded` at the predicate at `span` of the
+    /// module `module` when the proof budget stopped the discharge rules
+    /// before a verdict: the obligation's status is unknown.
+    fn proof_limit(&mut self, module: usize, span: ByteSpan) {
+        let message = format!(
+            "deciding this predicate by the integer facts reached the proof limit \
+             of the limit profile `{}` ({} attempted derivations); the \
+             obligation's status is unknown",
+            super::ctfe::PROFILE.name,
+            super::ctfe::PROFILE.proof_derivations
+        );
+        self.limit_message(module, span, message);
+    }
+
+    /// Reports `@tool.limitExceeded` at the predicate at `span` of the
     /// module `module`, once, with what follows from it, `outcome`.
     fn limit_reached(&mut self, module: usize, span: ByteSpan, outcome: &str) {
+        let message = format!(
+            "evaluating this predicate over constant operands reached the \
+             reduction limit of the limit profile `{}` ({} \
+             reductions); {outcome}",
+            super::ctfe::PROFILE.name,
+            super::ctfe::PROFILE.compile_time.reductions
+        );
+        self.limit_message(module, span, message);
+    }
+
+    /// Reports `@tool.limitExceeded` with `message` at the predicate at
+    /// `span` of the module `module`, once.
+    fn limit_message(&mut self, module: usize, span: ByteSpan, message: String) {
         if self.limited.contains(&(module, span)) {
             return;
         }
         self.limited.push((module, span));
-        let diagnostic = self.diagnostic(
-            DiagnosticCode::ToolLimitExceeded,
-            module,
-            span,
-            format!(
-                "evaluating this predicate over constant operands reached the \
-                 reduction limit of the limit profile `{}` ({} \
-                 reductions); {outcome}",
-                super::ctfe::PROFILE.name,
-                super::ctfe::PROFILE.compile_time.reductions
-            ),
-        );
+        let diagnostic =
+            self.diagnostic(DiagnosticCode::ToolLimitExceeded, module, span, message);
         self.push(module, diagnostic);
     }
 

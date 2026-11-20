@@ -24,7 +24,9 @@ mod machine;
 mod types;
 mod value;
 
-pub use evaluate::{evaluate, run, run_test};
+pub use evaluate::{evaluate, evaluate_reading, run, run_test};
+
+use std::collections::BTreeSet;
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 use vibra_ir::{ObservedValue, SourceOrigin, Trap, Type, Value};
@@ -64,8 +66,9 @@ pub struct Limits {
     pub memory: MemoryBudget,
 }
 
-/// A published limit profile: its name and the limits of one compile-time
-/// evaluation under it.
+/// A published limit profile: its name, the limits of one compile-time
+/// evaluation under it, and the derivations the proof of one obligation
+/// may attempt.
 ///
 /// `docs/spec/05-tooling.md`, "Limits".
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -74,17 +77,24 @@ pub struct LimitProfile {
     pub name: &'static str,
     /// The limits of one compile-time evaluation.
     pub compile_time: Limits,
+    /// The most derivations of integer facts the discharge of one
+    /// obligation may attempt. A derivation is one application of one
+    /// integer fact to one premise or one pair of premises, or one
+    /// comparison of two constants, whether or not its conclusion is new.
+    pub proof_derivations: u64,
 }
 
 impl LimitProfile {
     /// `m1Default`: 10,000,000 reductions for one compile-time evaluation,
-    /// with the default memory budget.
+    /// with the default memory budget, and 100,000 attempted derivations
+    /// for the proof of one obligation.
     pub const M1_DEFAULT: Self = Self {
         name: "m1Default",
         compile_time: Limits {
             reductions: 10_000_000,
             memory: MemoryBudget::DEFAULT,
         },
+        proof_derivations: 100_000,
     };
 }
 
@@ -106,6 +116,16 @@ pub enum Evaluation {
     LimitReached(Limit),
     /// The evaluation trapped.
     Defect(Trap),
+}
+
+/// What one [`evaluate_reading`] read of its module set, by index: the
+/// functions whose bodies it entered and the module values it read.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Reads {
+    /// The functions entered, by their index in the module set.
+    pub functions: BTreeSet<usize>,
+    /// The module values read, by their index in the module set.
+    pub module_values: BTreeSet<usize>,
 }
 
 /// What an execution measured. None of it is observable by the program.

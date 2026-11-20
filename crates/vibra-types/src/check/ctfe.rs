@@ -13,7 +13,7 @@
 
 use std::sync::Arc;
 
-use vibra_interp::{Evaluation, LimitProfile};
+use vibra_interp::{Evaluation, LimitProfile, Reads};
 use vibra_ir::{CheckedModuleSet, Node, Type, Value};
 
 use super::contract::fragment::{Facts, Standing, reads_slots, walk};
@@ -103,18 +103,28 @@ impl<'e> Evaluator<'e> {
 
     /// Evaluates `node`, a certified expression that reads no slot.
     pub(crate) fn evaluate(&mut self, node: &Node) -> Outcome {
+        self.evaluate_reading(node).0
+    }
+
+    /// [`Self::evaluate`], with the functions, by entry, and the module
+    /// values, by global index, whose checked body or value the evaluation
+    /// read.
+    pub(crate) fn evaluate_reading(&mut self, node: &Node) -> (Outcome, Reads) {
         if reads_slots(node) || !self.certified(node) {
-            return Outcome::Unevaluated;
+            return (Outcome::Unevaluated, Reads::default());
         }
         let Some(set) = self.set() else {
-            return Outcome::Unevaluated;
+            return (Outcome::Unevaluated, Reads::default());
         };
         self.evaluated += 1;
-        match vibra_interp::evaluate(&set, &node.expr, &[], PROFILE.compile_time) {
+        let (evaluation, reads) =
+            vibra_interp::evaluate_reading(&set, &node.expr, &[], PROFILE.compile_time);
+        let outcome = match evaluation {
             Evaluation::Value(value) => Outcome::Value(value),
             Evaluation::LimitReached(_) => Outcome::LimitReached,
             Evaluation::Defect(_) => Outcome::Unevaluated,
-        }
+        };
+        (outcome, reads)
     }
 }
 

@@ -11,6 +11,7 @@ mod callables;
 mod contracts;
 mod discharge;
 mod interfaces;
+mod soundness;
 mod testing;
 
 const SOURCE: &str = "main.vib";

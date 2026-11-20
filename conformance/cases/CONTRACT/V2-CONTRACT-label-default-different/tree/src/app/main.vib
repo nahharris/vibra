@@ -1,0 +1,12 @@
+fn lt labelled {a: I32 be 0i32 b: I32 be 0i32} returns r: Bool
+  do return Ordered.less(a b)
+endfn
+fn need takes {x: I32 y: I32} returns r: Void
+  requires lt(a: 1i32 b: x)
+  do return void
+endfn
+fn run takes {x: I32 y: I32} returns r: Void
+  do
+    if lt(b: x) then return need(x y) endif
+    return void
+endfn

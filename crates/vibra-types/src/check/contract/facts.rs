@@ -20,8 +20,8 @@ use std::sync::Arc;
 
 use vibra_diagnostics::ByteSpan;
 use vibra_ir::{
-    CallTarget, Constant, Construction, ContractCall, Expr, NamedTypes, Node, Pattern,
-    Type, TypeId, Value,
+    Arguments, CallTarget, Constant, Construction, ContractCall, Expr, NamedTypes,
+    Node, Pattern, Type, TypeId, Value,
 };
 
 /// A discharge rule or an integer fact, as an obligation record lists it.
@@ -146,8 +146,9 @@ pub(crate) enum Data {
     Slot(usize, usize),
     /// A constant.
     Constant(Constant),
-    /// A call and its arguments: the positional ones, then the labelled
-    /// ones in the callee's order.
+    /// A call and its arguments in the callee's parameter-slot order: the
+    /// positional ones, then one for each label in the callee's order, an
+    /// omitted label holding its default.
     Call(Callee, Vec<Term>),
     /// A construction of the type, with its shape (`case:` and the case
     /// name for a case, `wrapper` for a wrapper, then the field names) and
@@ -548,9 +549,18 @@ pub(crate) struct Env {
     /// Whether a slot nothing binds is that slot of the activation; when it
     /// is not, it is an opaque value.
     pub(crate) open: bool,
-    slots: BTreeMap<usize, (Term, bool)>,
-    undo: Vec<(usize, Option<(Term, bool)>)>,
+    slots: BTreeMap<usize, Binding>,
+    undo: Vec<(usize, Option<Binding>)>,
     rewrites: Vec<(Term, Term)>,
+}
+
+/// What a slot is bound to: its term, whether rule 4 substitutes it as an
+/// immutable `let` alias, and the module values read to build it.
+#[derive(Clone, Debug)]
+struct Binding {
+    term: Term,
+    alias: bool,
+    globals: BTreeSet<usize>,
 }
 
 /// A point of an [`Env`] and a [`FactSet`] to go back to.
@@ -574,7 +584,26 @@ impl Env {
     /// Binds `slot` to `term`; `alias` when the binding is an immutable
     /// `let` alias, which rule 4 substitutes.
     pub(crate) fn bind(&mut self, slot: usize, term: Term, alias: bool) {
-        let old = self.slots.insert(slot, (term, alias));
+        self.bind_reading(slot, term, alias, BTreeSet::new());
+    }
+
+    /// [`Self::bind`], the term built by reading the module values
+    /// `globals`, which every read of the slot reads too.
+    pub(crate) fn bind_reading(
+        &mut self,
+        slot: usize,
+        term: Term,
+        alias: bool,
+        globals: BTreeSet<usize>,
+    ) {
+        let old = self.slots.insert(
+            slot,
+            Binding {
+                term,
+                alias,
+                globals,
+            },
+        );
         self.undo.push((slot, old));
     }
 
@@ -702,7 +731,20 @@ pub(crate) fn build(
     env: &mut Env,
     node: &Node,
 ) -> (Term, bool) {
+    let (term, substituted, _) = build_reading(terms, vocabulary, env, node);
+    (term, substituted)
+}
+
+/// [`build`], with the global index of every constant module value whose
+/// value the term was built from, directly or through a bound slot.
+pub(crate) fn build_reading(
+    terms: &mut Terms,
+    vocabulary: &Vocabulary<'_>,
+    env: &mut Env,
+    node: &Node,
+) -> (Term, bool, BTreeSet<usize>) {
     let mut substituted = false;
+    let mut globals = BTreeSet::new();
     let mut stack: Vec<Term> = Vec::new();
     let mut marks: Vec<usize> = Vec::new();
     let mut pending = vec![Build::Visit(node)];
@@ -801,8 +843,14 @@ pub(crate) fn build(
                 _ => stack.push(terms.opaque()),
             },
             Build::Make(node) => {
-                let term =
-                    make(terms, vocabulary, env, node, &mut stack, &mut substituted);
+                let term = make(
+                    terms,
+                    vocabulary,
+                    env,
+                    node,
+                    &mut stack,
+                    (&mut substituted, &mut globals),
+                );
                 let term = match env.rewritten(term) {
                     Some(constant) => {
                         substituted = true;
@@ -845,7 +893,7 @@ pub(crate) fn build(
         }
     }
     let term = stack.pop().unwrap_or_else(|| terms.opaque());
-    (term, substituted)
+    (term, substituted, globals)
 }
 
 /// The term of `node`, whose operands' terms are the last ones on `stack`.
@@ -855,7 +903,7 @@ fn make(
     env: &Env,
     node: &Node,
     stack: &mut Vec<Term>,
-    substituted: &mut bool,
+    (substituted, globals): (&mut bool, &mut BTreeSet<usize>),
 ) -> Term {
     let take = |count: usize, stack: &mut Vec<Term>| {
         let start = stack.len().saturating_sub(count);
@@ -864,13 +912,17 @@ fn make(
     match &node.expr {
         Expr::Literal(constant) => terms.intern(Data::Constant(constant.clone())),
         Expr::Global(global) => match vocabulary.globals.get(global) {
-            Some(constant) => terms.intern(Data::Constant(constant.clone())),
+            Some(constant) => {
+                globals.insert(*global);
+                terms.intern(Data::Constant(constant.clone()))
+            }
             None => terms.opaque(),
         },
         Expr::Variable { slot, value_type } => match env.slots.get(slot) {
-            Some((term, alias)) => {
-                *substituted |= *alias;
-                *term
+            Some(binding) => {
+                *substituted |= binding.alias;
+                globals.extend(binding.globals.iter().copied());
+                binding.term
             }
             None if env.open => {
                 let term = terms.intern(Data::Slot(env.activation, *slot));
@@ -882,60 +934,46 @@ fn make(
         Expr::Call { target, arguments } | Expr::TailCall { target, arguments } => {
             let count = arguments.positional.len() + arguments.labelled.len();
             let mut operands = take(count, stack);
-            let callee = match target {
+            // A label not written holds the callee's default: a function's
+            // or a closure's. A contract call's default depends on the
+            // implementation the receiver selects, so it stays unknown here.
+            let (callee, defaults) = match target {
                 CallTarget::Direct {
                     function,
                     type_arguments,
-                } => {
-                    // A label not written holds the callee's default.
-                    let defaults = vocabulary.defaults.get(function);
-                    for (at, (label, written)) in arguments.labelled.iter().enumerate()
-                    {
-                        if !matches!(written.expr, Expr::Default(_)) {
-                            continue;
-                        }
-                        let default = defaults
-                            .and_then(|defaults| {
-                                defaults.iter().find(|(name, _)| name == label)
-                            })
-                            .map(|(_, constant)| constant.clone());
-                        if let (Some(default), Some(slot)) =
-                            (default, operands.get_mut(arguments.positional.len() + at))
-                        {
-                            *slot = terms.intern(Data::Constant(default));
-                        }
-                    }
-                    Callee::Function(*function, type_arguments.clone())
-                }
-                CallTarget::Contract(call) => Callee::Contract(call.clone()),
+                } => (
+                    Callee::Function(*function, type_arguments.clone()),
+                    vocabulary.defaults.get(function),
+                ),
+                CallTarget::Contract(call) => (Callee::Contract(call.clone()), None),
                 CallTarget::Value(_) => {
                     let callee = stack.pop().unwrap_or_else(|| terms.opaque());
                     let Some(Data::Closure(closure)) = terms.get(callee).cloned()
                     else {
                         return terms.opaque();
                     };
-                    // A label not written holds the closure's default.
-                    let defaults = vocabulary.defaults.get(&closure);
-                    for (at, (label, written)) in arguments.labelled.iter().enumerate()
-                    {
-                        if !matches!(written.expr, Expr::Default(_)) {
-                            continue;
-                        }
-                        let default = defaults
-                            .and_then(|defaults| {
-                                defaults.iter().find(|(name, _)| name == label)
-                            })
-                            .map(|(_, constant)| constant.clone());
-                        if let (Some(default), Some(slot)) =
-                            (default, operands.get_mut(arguments.positional.len() + at))
-                        {
-                            *slot = terms.intern(Data::Constant(default));
-                        }
-                    }
-                    Callee::Function(closure, Vec::new())
+                    (
+                        Callee::Function(closure, Vec::new()),
+                        vocabulary.defaults.get(&closure),
+                    )
                 }
             };
-            terms.intern(Data::Call(callee, operands))
+            for (at, (label, written)) in arguments.labelled.iter().enumerate() {
+                if !matches!(written.expr, Expr::Default(_)) {
+                    continue;
+                }
+                let default = defaults
+                    .and_then(|defaults| {
+                        defaults.iter().find(|(name, _)| name == label)
+                    })
+                    .map(|(_, constant)| constant.clone());
+                if let (Some(default), Some(slot)) =
+                    (default, operands.get_mut(arguments.positional.len() + at))
+                {
+                    *slot = terms.intern(Data::Constant(default));
+                }
+            }
+            terms.intern(Data::Call(callee, in_slot_order(arguments, operands)))
         }
         Expr::Closure { closure, .. } => {
             let origin = &closure.body.origin;
@@ -993,6 +1031,41 @@ fn make(
         }
         _ => terms.opaque(),
     }
+}
+
+/// The written place of each labelled argument of `arguments`, in the
+/// callee's parameter-slot order: the labels sorted by their UTF-8 bytes,
+/// as the callee's signature and every activation order them.
+pub(crate) fn label_order(arguments: &Arguments) -> Vec<usize> {
+    let mut order = (0..arguments.labelled.len()).collect::<Vec<_>>();
+    order.sort_by(|left, right| {
+        let label = |at: &usize| {
+            arguments
+                .labelled
+                .get(*at)
+                .map_or(&[][..], |(label, _)| label.as_bytes())
+        };
+        label(left).cmp(label(right))
+    });
+    order
+}
+
+/// `written`, the operands of a call in written order (the positional
+/// ones, then the labelled ones as written), in the callee's parameter-slot
+/// order: one layout serves the matching of predicates, the keys of calls,
+/// the reading of a body, and the facts of a callee's `ensures`.
+fn in_slot_order(arguments: &Arguments, mut written: Vec<Term>) -> Vec<Term> {
+    let positional = arguments.positional.len();
+    if written.len() != positional + arguments.labelled.len() {
+        return written;
+    }
+    let labelled = written.split_off(positional);
+    written.extend(
+        label_order(arguments)
+            .into_iter()
+            .filter_map(|at| labelled.get(at).copied()),
+    );
+    written
 }
 
 /// The constant a construction of constants is, when its type states no
@@ -1128,31 +1201,76 @@ impl FactSet {
     }
 }
 
-/// How many relations one saturation derives at most.
-const RELATIONS: usize = 4096;
+/// What the proof of one obligation may still spend. Each attempted
+/// derivation of an integer fact costs one, whether or not its conclusion
+/// is new: one application of a fact to one premise or one pair of
+/// premises, and one comparison of two constants.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Budget {
+    left: u64,
+    exhausted: bool,
+}
+
+impl Budget {
+    /// A budget of `derivations` attempts.
+    pub(crate) const fn new(derivations: u64) -> Self {
+        Self {
+            left: derivations,
+            exhausted: false,
+        }
+    }
+
+    /// Spends one attempt: `false`, and the budget exhausted, when none is
+    /// left.
+    const fn spend(&mut self) -> bool {
+        if self.left == 0 {
+            self.exhausted = true;
+            false
+        } else {
+            self.left -= 1;
+            true
+        }
+    }
+
+    /// Whether an attempt was refused: a verdict the proof did not reach
+    /// may have been stopped by the budget.
+    pub(crate) const fn exhausted(&self) -> bool {
+        self.exhausted
+    }
+}
+
+/// The relations known between values of one integer type, each with the
+/// evidence that first established it.
+type Known = HashMap<(Relation, Term, Term), Evidence>;
 
 /// The relations over values of the integer type of `like` that the facts
-/// and the constants among `extra` give, closed under `INT-1` to `INT-8`.
+/// and the constants among `extra` give, closed under `INT-1` to `INT-8`;
+/// `None` when `budget` runs out before the closure is complete. No
+/// relation is dropped: the closure is complete or there is none.
 fn relations(
     terms: &Terms,
     vocabulary: &Vocabulary<'_>,
     facts: &FactSet,
     like: &ContractCall,
     extra: &[Term],
-) -> HashMap<(Relation, Term, Term), Evidence> {
-    let mut known: HashMap<(Relation, Term, Term), Evidence> = HashMap::new();
+    budget: &mut Budget,
+) -> Option<Known> {
+    let mut known = Known::new();
     let mut order: Vec<(Relation, Term, Term)> = Vec::new();
-    let add = |known: &mut HashMap<(Relation, Term, Term), Evidence>,
+    // The places in `order` of the relations whose left operand is a term.
+    let mut by_left: HashMap<Term, Vec<usize>> = HashMap::new();
+    let add = |known: &mut Known,
                order: &mut Vec<(Relation, Term, Term)>,
+               by_left: &mut HashMap<Term, Vec<usize>>,
                key: (Relation, Term, Term),
                evidence: Evidence| {
-        if known.len() < RELATIONS && !known.contains_key(&key) {
-            known.insert(key, evidence);
-            order.push(key);
-            true
-        } else {
-            false
+        if known.contains_key(&key) {
+            return false;
         }
+        by_left.entry(key.1).or_default().push(order.len());
+        known.insert(key, evidence);
+        order.push(key);
+        true
     };
     let mut constants = BTreeSet::new();
     for fact in &facts.facts {
@@ -1174,7 +1292,13 @@ fn relations(
         } else {
             (relation.negation(), fact.evidence.clone().with(INTEGER))
         };
-        add(&mut known, &mut order, (relation, *left, *right), evidence);
+        add(
+            &mut known,
+            &mut order,
+            &mut by_left,
+            (relation, *left, *right),
+            evidence,
+        );
         constants.extend([*left, *right]);
     }
     constants.extend(extra.iter().copied());
@@ -1194,6 +1318,9 @@ fn relations(
             if left == right {
                 continue;
             }
+            if !budget.spend() {
+                return None;
+            }
             let evidence = Evidence::of(INTEGER).with(Rule::Int(8));
             let holds = [
                 (Relation::Less, a < b),
@@ -1208,6 +1335,7 @@ fn relations(
                     add(
                         &mut known,
                         &mut order,
+                        &mut by_left,
                         (relation, *left, *right),
                         evidence.clone(),
                     );
@@ -1216,8 +1344,12 @@ fn relations(
         }
     }
     loop {
-        let mut grew = false;
-        let snapshot = order.clone();
+        // Each round derives from the relations known when it starts, in
+        // the order they became known; a conclusion is kept with the
+        // evidence of its first derivation.
+        let count = order.len();
+        let mut found: Vec<((Relation, Term, Term), Evidence)> = Vec::new();
+        let mut seen: BTreeSet<(Relation, Term, Term)> = BTreeSet::new();
         let derive = |premises: &[&(Relation, Term, Term)], fact: u8| {
             premises
                 .iter()
@@ -1227,8 +1359,15 @@ fn relations(
                 .with(INTEGER)
                 .with(Rule::Int(fact))
         };
-        let mut found: Vec<((Relation, Term, Term), Evidence)> = Vec::new();
-        for first in &snapshot {
+        let mut keep =
+            |key: (Relation, Term, Term),
+             evidence: &dyn Fn() -> Evidence,
+             found: &mut Vec<((Relation, Term, Term), Evidence)>| {
+                if !known.contains_key(&key) && seen.insert(key) {
+                    found.push((key, evidence()));
+                }
+            };
+        for first in order.iter().take(count) {
             let (relation, x, y) = *first;
             let single: &[(Relation, Term, Term)] = match relation {
                 Relation::Less => &[
@@ -1254,7 +1393,10 @@ fn relations(
                 _ => 3,
             };
             for key in single {
-                found.push((*key, derive(&[first], fact)));
+                if !budget.spend() {
+                    return None;
+                }
+                keep(*key, &|| derive(&[first], fact), &mut found);
             }
             // `x ≥ y` is `y ≤ x` and `x > y` is `y < x`: the defining
             // relations read in either direction.
@@ -1266,11 +1408,34 @@ fn relations(
                 Relation::Equal | Relation::NotEqual => None,
             };
             if let Some(converse) = converse {
-                let evidence =
-                    known.get(first).cloned().unwrap_or_default().with(INTEGER);
-                found.push(((converse, y, x), evidence));
+                if !budget.spend() {
+                    return None;
+                }
+                keep(
+                    (converse, y, x),
+                    &|| known.get(first).cloned().unwrap_or_default().with(INTEGER),
+                    &mut found,
+                );
             }
-            for second in &snapshot {
+            // The second premise of INT-4, INT-6, and INT-7 starts at `y`;
+            // that of INT-5 at `x`.
+            let mut seconds = by_left
+                .get(&y)
+                .into_iter()
+                .chain(by_left.get(&x))
+                .flatten()
+                .copied()
+                .filter(|at| *at < count)
+                .collect::<Vec<_>>();
+            seconds.sort_unstable();
+            seconds.dedup();
+            for at in seconds {
+                let Some(second) = order.get(at) else {
+                    continue;
+                };
+                if !budget.spend() {
+                    return None;
+                }
                 let (other, y2, z) = *second;
                 if relation == Relation::LessOrEqual
                     && other == Relation::LessOrEqual
@@ -1278,14 +1443,22 @@ fn relations(
                     && z == x
                 {
                     // INT-4: x ≤ y and y ≤ x.
-                    found.push(((Relation::Equal, x, y), derive(&[first, second], 4)));
+                    keep(
+                        (Relation::Equal, x, y),
+                        &|| derive(&[first, second], 4),
+                        &mut found,
+                    );
                 }
                 if relation == Relation::LessOrEqual
                     && other == Relation::NotEqual
                     && y2 == x
                     && z == y
                 {
-                    found.push(((Relation::Less, x, y), derive(&[first, second], 5)));
+                    keep(
+                        (Relation::Less, x, y),
+                        &|| derive(&[first, second], 5),
+                        &mut found,
+                    );
                 }
                 if y2 != y {
                     continue;
@@ -1293,30 +1466,36 @@ fn relations(
                 match (relation, other) {
                     (Relation::Less, Relation::LessOrEqual)
                     | (Relation::LessOrEqual, Relation::Less) => {
-                        found.push((
+                        keep(
                             (Relation::Less, x, z),
-                            derive(&[first, second], 6),
-                        ));
+                            &|| derive(&[first, second], 6),
+                            &mut found,
+                        );
                     }
                     (Relation::LessOrEqual, Relation::LessOrEqual) => {
-                        found.push((
+                        keep(
                             (Relation::LessOrEqual, x, z),
-                            derive(&[first, second], 7),
-                        ));
+                            &|| derive(&[first, second], 7),
+                            &mut found,
+                        );
                     }
                     _ => {}
                 }
             }
         }
+        let mut grew = false;
         for (key, evidence) in found {
-            grew |= add(&mut known, &mut order, key, evidence);
+            grew |= add(&mut known, &mut order, &mut by_left, key, evidence);
         }
         if !grew {
-            break;
+            return Some(known);
         }
     }
-    known
 }
+
+/// The closures already computed in one proof, by receiver and the
+/// constants of the goal: `None` for one the budget stopped.
+type Closures = HashMap<(String, Vec<Term>), Option<Known>>;
 
 /// Decides a comparison goal by the integer facts: the evidence that the
 /// comparison `term` is `holds`.
@@ -1326,9 +1505,15 @@ fn compare(
     facts: &FactSet,
     term: Term,
     holds: bool,
+    (budget, closures): (&mut Budget, &mut Closures),
 ) -> Option<Evidence> {
     let (relation, call, operands) = vocabulary.comparison(terms, term)?;
-    let known = relations(terms, vocabulary, facts, &call, &operands);
+    let key = (format!("{:?}", call.receiver), operands.clone());
+    if !closures.contains_key(&key) {
+        let closed = relations(terms, vocabulary, facts, &call, &operands, budget);
+        closures.insert(key.clone(), closed);
+    }
+    let known = closures.get(&key)?.as_ref()?;
     let found = |relation: Relation, left: Term, right: Term| {
         known.get(&(relation, left, right)).cloned()
     };
@@ -1357,9 +1542,202 @@ fn compare(
     }
 }
 
-/// Reads a call of a certified function whose body takes its value apart
-/// by a `match` on one parameter whose case a fact or the argument fixes:
-/// the `Bool` the selected arm returns, with its evidence.
+/// What is known of a pattern over a subject.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ArmOutcome {
+    /// The pattern cannot match the subject.
+    Disjoint,
+    /// The pattern matches the subject.
+    Matches,
+    /// Neither is known.
+    Possible,
+}
+
+/// Whether `pattern` matches `subject` under `facts`, with the evidence of
+/// each case fact used added to `evidence`. A part of the subject known to
+/// be of another case, or a constant other than a literal, makes the
+/// pattern disjoint; a part nothing decides makes it possible.
+fn arm_outcome(
+    terms: &mut Terms,
+    facts: &FactSet,
+    pattern: &Pattern,
+    subject: Term,
+    evidence: &mut Evidence,
+) -> ArmOutcome {
+    let mut outcome = ArmOutcome::Matches;
+    let mut used = Evidence::default();
+    let mut pending = vec![(pattern, subject)];
+    while let Some((pattern, term)) = pending.pop() {
+        if let Some(constant) = terms.constant(term) {
+            match value_outcome(pattern, constant.value()) {
+                ArmOutcome::Disjoint => return ArmOutcome::Disjoint,
+                ArmOutcome::Possible => outcome = ArmOutcome::Possible,
+                ArmOutcome::Matches => {}
+            }
+            continue;
+        }
+        match pattern {
+            Pattern::Discard | Pattern::Bind(_) => {}
+            Pattern::Wrapper(inner) => {
+                let repr = terms.intern(Data::Repr(term));
+                pending.push((inner, repr));
+            }
+            Pattern::Record(fields) => {
+                for (name, inner) in fields {
+                    let field = terms.intern(Data::Field(term, name.clone()));
+                    pending.push((inner, field));
+                }
+            }
+            Pattern::Tuple(items) => {
+                for (at, inner) in items.iter().enumerate() {
+                    let item = terms.intern(Data::Item(term, at));
+                    pending.push((inner, item));
+                }
+            }
+            Pattern::Case { case, fields } => {
+                match known_case(terms, facts, term, case) {
+                    Some((true, found)) => {
+                        used = used.and(&found);
+                        for (name, inner) in fields {
+                            let field = terms.intern(Data::CaseField(
+                                term,
+                                case.clone(),
+                                name.clone(),
+                            ));
+                            pending.push((inner, field));
+                        }
+                    }
+                    Some((false, found)) => {
+                        *evidence = std::mem::take(evidence).and(&found);
+                        return ArmOutcome::Disjoint;
+                    }
+                    None => outcome = ArmOutcome::Possible,
+                }
+            }
+            Pattern::Literal(constant) => {
+                let disjoint = match constant.value() {
+                    Value::Variant { case, .. } => {
+                        known_case(terms, facts, term, case).filter(|(is, _)| !is)
+                    }
+                    _ => None,
+                };
+                if let Some((_, found)) = disjoint {
+                    *evidence = std::mem::take(evidence).and(&found);
+                    return ArmOutcome::Disjoint;
+                }
+                outcome = ArmOutcome::Possible;
+            }
+            Pattern::List(_) => outcome = ArmOutcome::Possible,
+        }
+    }
+    if outcome == ArmOutcome::Matches {
+        *evidence = std::mem::take(evidence).and(&used);
+    }
+    outcome
+}
+
+/// Whether `term` is of the case `case` (`true`) or of another (`false`),
+/// when its construction or a case fact tells, with that fact's evidence.
+fn known_case(
+    terms: &Terms,
+    facts: &FactSet,
+    term: Term,
+    case: &str,
+) -> Option<(bool, Evidence)> {
+    if let Some(known) = terms.case_of(term) {
+        return Some((known == case, Evidence::default()));
+    }
+    facts
+        .facts
+        .iter()
+        .find_map(|fact| match terms.get(fact.term) {
+            Some(Data::IsCase(of, known)) if *of == term => {
+                if fact.holds {
+                    Some((known == case, fact.evidence.clone()))
+                } else if known == case {
+                    Some((false, fact.evidence.clone()))
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        })
+}
+
+/// Whether `pattern` matches the constant `value`. A shape the pattern
+/// does not take apart is not decided.
+fn value_outcome(pattern: &Pattern, value: &Value) -> ArmOutcome {
+    let mut outcome = ArmOutcome::Matches;
+    let mut pending = vec![(pattern, value)];
+    while let Some((pattern, value)) = pending.pop() {
+        let decided = match (pattern, value) {
+            (Pattern::Discard | Pattern::Bind(_), _) => true,
+            (Pattern::Literal(constant), _) => {
+                if constant.value() != value {
+                    return ArmOutcome::Disjoint;
+                }
+                true
+            }
+            (Pattern::Wrapper(inner), Value::Wrapper(held)) => {
+                pending.push((inner, held));
+                true
+            }
+            (Pattern::Tuple(items), Value::Tuple(values))
+            | (Pattern::List(items), Value::List(values)) => {
+                if items.len() != values.len() {
+                    if matches!(pattern, Pattern::List(_)) {
+                        return ArmOutcome::Disjoint;
+                    }
+                    false
+                } else {
+                    pending.extend(items.iter().zip(values));
+                    true
+                }
+            }
+            (Pattern::Record(fields), Value::Record(values)) => {
+                named_parts(fields, values, &mut pending)
+            }
+            (
+                Pattern::Case { case, fields },
+                Value::Variant {
+                    case: held,
+                    fields: values,
+                },
+            ) => {
+                if case != held {
+                    return ArmOutcome::Disjoint;
+                }
+                named_parts(fields, values, &mut pending)
+            }
+            _ => false,
+        };
+        if !decided {
+            outcome = ArmOutcome::Possible;
+        }
+    }
+    outcome
+}
+
+/// Pairs each field pattern of `fields` with the value of that name in
+/// `values`; `false` when a name is missing.
+fn named_parts<'p>(
+    fields: &'p [(String, Pattern)],
+    values: &'p [(String, Value)],
+    pending: &mut Vec<(&'p Pattern, &'p Value)>,
+) -> bool {
+    for (name, inner) in fields {
+        let Some((_, value)) = values.iter().find(|(held, _)| held == name) else {
+            return false;
+        };
+        pending.push((inner, value));
+    }
+    true
+}
+
+/// Reads a call of a certified function with no guard whose body takes its
+/// value apart by a `match` on one parameter: the `Bool` the first arm that
+/// runs returns, with its evidence, when every earlier arm is known not to
+/// match and that arm is known to match.
 fn read_through(
     terms: &mut Terms,
     vocabulary: &Vocabulary<'_>,
@@ -1387,38 +1765,21 @@ fn read_through(
         return None;
     };
     let argument = *operands.get(slot)?;
-    let (case, evidence) = match terms.case_of(argument) {
-        Some(case) => (case.to_owned(), Evidence::default()),
-        None => {
-            let (case, evidence) =
-                facts
-                    .facts
-                    .iter()
-                    .find_map(|fact| match terms.get(fact.term) {
-                        Some(Data::IsCase(of, case))
-                            if *of == argument && fact.holds =>
-                        {
-                            Some((case.clone(), fact.evidence.clone()))
-                        }
-                        _ => None,
-                    })?;
-            (case, evidence)
+    // The first arm that runs: every earlier arm is known not to match it,
+    // and it is known to match. An arm that may match stops the reading.
+    let mut evidence = Evidence::default();
+    let mut selected = None;
+    for arm in arms {
+        match arm_outcome(terms, facts, &arm.pattern, argument, &mut evidence) {
+            ArmOutcome::Disjoint => {}
+            ArmOutcome::Matches => {
+                selected = Some(arm);
+                break;
+            }
+            ArmOutcome::Possible => return None,
         }
-    };
-    let arm = arms.iter().find(|arm| match &arm.pattern {
-        Pattern::Discard | Pattern::Bind(_) => true,
-        Pattern::Case {
-            case: written,
-            fields,
-        } => {
-            *written == case
-                && fields
-                    .iter()
-                    .all(|(_, p)| matches!(p, Pattern::Discard | Pattern::Bind(_)))
-        }
-        _ => false,
-    })?;
-    let mut value = &arm.body;
+    }
+    let mut value = &selected?.body;
     loop {
         match &value.expr {
             Expr::Return(inner) => value = inner,
@@ -1436,13 +1797,17 @@ fn read_through(
 
 /// The evidence that the `Bool` term `goal` is `true` under `facts`, by the
 /// facts themselves, the Boolean structure of rule 5, the integer facts of
-/// rule 6, and the case facts of rule 3.
+/// rule 6, and the case facts of rule 3. Each attempted derivation of an
+/// integer fact spends one of `budget`; a goal not established once it is
+/// exhausted may have been stopped by it.
 pub(crate) fn prove(
     terms: &mut Terms,
     vocabulary: &Vocabulary<'_>,
     facts: &FactSet,
     goal: Term,
+    budget: &mut Budget,
 ) -> Option<Evidence> {
+    let mut closures = Closures::new();
     // Each term's evidence of being `true` and of being `false`.
     let mut decided: HashMap<Term, (Option<Evidence>, Option<Evidence>)> =
         HashMap::new();
@@ -1503,7 +1868,7 @@ pub(crate) fn prove(
                     ),
                 }
             }
-            None => leaf(terms, vocabulary, facts, term),
+            None => leaf(terms, vocabulary, facts, term, (budget, &mut closures)),
         };
         decided.insert(term, (direct.0.or(derived.0), direct.1.or(derived.1)));
     }
@@ -1517,6 +1882,7 @@ fn leaf(
     vocabulary: &Vocabulary<'_>,
     facts: &FactSet,
     term: Term,
+    (budget, closures): (&mut Budget, &mut Closures),
 ) -> (Option<Evidence>, Option<Evidence>) {
     if let Some(holds) = terms
         .constant(term)
@@ -1529,8 +1895,8 @@ fn leaf(
             (None, evidence)
         };
     }
-    let mut yes = compare(terms, vocabulary, facts, term, true);
-    let mut no = compare(terms, vocabulary, facts, term, false);
+    let mut yes = compare(terms, vocabulary, facts, term, true, (budget, closures));
+    let mut no = compare(terms, vocabulary, facts, term, false, (budget, closures));
     if yes.is_none()
         && no.is_none()
         && let Some((holds, evidence)) = read_through(terms, vocabulary, facts, term)

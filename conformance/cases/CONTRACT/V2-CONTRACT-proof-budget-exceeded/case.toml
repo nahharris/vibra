@@ -1,0 +1,17 @@
+id = "V2-CONTRACT-proof-budget-exceeded"
+rule = "V2-CONTRACT-proof-budget-exceeded"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#bare-guards: a closure of integer facts that needs more derivations than the limit profile m1Default allows one obligation is @tool.limitExceeded alone at the predicate, and the outcome unknown"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "unknown"
+[[expect.diagnostics]]
+code = "@tool.limitExceeded"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 57, end = 81 }

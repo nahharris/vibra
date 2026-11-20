@@ -1,0 +1,22 @@
+type Pick
+  case pick {value: I32}
+  case empty
+endtype
+fn ok takes {x: Pick} returns r: Bool
+  do
+    match x
+      case Pick.pick(value: _) return true
+      case Pick.empty() return false
+    endmatch
+endfn
+fn need takes {x: Pick} returns r: Void
+  requires ok(x)
+  do return void
+endfn
+fn run takes {x: Pick} returns r: Void
+  do
+    match x
+      case Pick.pick(value: _) return need(x)
+      case Pick.empty() return void
+    endmatch
+endfn

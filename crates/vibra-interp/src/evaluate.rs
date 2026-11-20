@@ -14,7 +14,8 @@ use crate::machine::{Halt, Machine, Mode, Resolved, Target};
 use crate::types::type_of_expr;
 use crate::value::Val;
 use crate::{
-    Evaluation, Execution, Limit, Limits, MemoryBudget, RuntimeError, TestExecution,
+    Evaluation, Execution, Limit, Limits, MemoryBudget, Reads, RuntimeError,
+    TestExecution,
 };
 
 fn runtime_error(
@@ -172,13 +173,25 @@ pub fn evaluate(
     inputs: &[Value],
     limits: Limits,
 ) -> Evaluation {
+    evaluate_reading(set, expr, inputs, limits).0
+}
+
+/// [`evaluate`], with what the evaluation read of `set`: every function it
+/// entered and every module value it read, whatever its outcome.
+#[must_use]
+pub fn evaluate_reading(
+    set: &CheckedModuleSet,
+    expr: &Expr,
+    inputs: &[Value],
+    limits: Limits,
+) -> (Evaluation, Reads) {
     let defect = Evaluation::Defect(Trap::InvalidCheckedProgram);
     let origin = SourceOrigin::new("", ByteSpan::empty_at(0));
     if expr.check_type_depth().is_err() {
-        return defect;
+        return (defect, Reads::default());
     }
     let Ok(value_type) = type_of_expr(set, expr) else {
-        return defect;
+        return (defect, Reads::default());
     };
     let mut machine =
         Machine::new(set, Mode::Evaluate, limits.memory.bytes, limits.reductions);
@@ -192,11 +205,12 @@ pub fn evaluate(
         .and_then(|()| machine.prelude(crate::machine::Step::Root(expr, &origin)))
         .and_then(|step| machine.execute(step))
         .and_then(|value| to_neutral(set, &value, &value_type));
-    match outcome {
+    let evaluation = match outcome {
         Ok(value) => Evaluation::Value(value),
         Err(Halt::Reductions) => Evaluation::LimitReached(Limit::Reductions),
         Err(Halt::Memory) => Evaluation::LimitReached(Limit::Memory),
         Err(Halt::HostValue(_)) => Evaluation::Defect(Trap::InvalidHostValue),
         Err(_) => defect,
-    }
+    };
+    (evaluation, machine.reads)
 }
