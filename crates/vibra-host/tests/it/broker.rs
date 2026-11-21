@@ -9,10 +9,11 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use vibra_host::SplitMix64;
-use vibra_host::broker::{Context, Counters, GrantOrigin, RootGrant};
+use vibra_host::broker::{Context, Counters, RootGrant};
 use vibra_host::driver::{Completion, Measured, Progress, ResourceId};
 use vibra_host::policy::{self, Policy};
 use vibra_host::recipe::{LeafName, Limits};
+use vibra_host::trace::GrantOrigin;
 use vibra_ir::Value;
 use vibra_ir::authority::{
     GrantLimits, GrantToken, HostArgument, HostCompletion, HostContext, HostErrorCase,
@@ -21,6 +22,7 @@ use vibra_ir::authority::{
 use vibra_ir::external::host::{HostInterface, HostOp};
 
 use crate::scripted::{Event, Scripted, Step, Tweak};
+use crate::trace::header;
 
 const NOTES: ResourceId = ResourceId(1);
 const OTHER: ResourceId = ResourceId(2);
@@ -296,7 +298,7 @@ fn a_permitted_read_completes_with_a_receipt_and_charges_its_size() {
     let script = Scripted::new();
     script.file(&["a.txt"], "hello");
     let mut driver = script.clone();
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let notes = root(&mut cx, HostInterface::DirReadText);
     assert_eq!(read(&mut cx, notes, &["a.txt"]), Ok((text("hello"), true)));
     assert_eq!(script.calls().len(), 1);
@@ -309,7 +311,7 @@ fn atk_forged_token() {
     let script = Scripted::new();
     script.file(&["a.txt"], "hello");
     let mut driver = script.clone();
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let notes = root(&mut cx, HostInterface::DirReadText);
     let forged = GrantToken::new(notes.context(), 99, notes.generation());
     assert!(invalid(read(&mut cx, forged, &["a.txt"])));
@@ -322,8 +324,8 @@ fn atk_foreign_grant() {
     script.file(&["a.txt"], "hello");
     let mut first = script.clone();
     let mut second = script.clone();
-    let mut here = Context::new(&mut first);
-    let mut there = Context::new(&mut second);
+    let mut here = Context::new(&mut first, header());
+    let mut there = Context::new(&mut second, header());
     let _ = root(&mut here, HostInterface::DirReadText);
     let foreign = root(&mut there, HostInterface::DirReadText);
     assert!(invalid(read(&mut here, foreign, &["a.txt"])));
@@ -335,7 +337,7 @@ fn atk_stale_grant() {
     let script = Scripted::new();
     script.file(&["a.txt"], "hello");
     let mut driver = script.clone();
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let notes = root(&mut cx, HostInterface::DirReadText);
     cx.release_for_tests(NOTES);
     assert!(invalid(read(&mut cx, notes, &["a.txt"])));
@@ -347,7 +349,7 @@ fn atk_stale_derived_grant() {
     let script = Scripted::new();
     script.file(&["d", "a.txt"], "hello");
     let mut driver = script.clone();
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let notes = root(&mut cx, HostInterface::DirReadText);
     let restricted = granted(restrict(
         &mut cx,
@@ -374,7 +376,7 @@ fn atk_stale_derived_grant() {
 fn wrong_operation_for_the_grant() {
     let script = Scripted::new();
     let mut driver = script.clone();
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let notes = root(&mut cx, HostInterface::DirReadText);
     assert!(invalid(write(&mut cx, notes, &["a.txt"], "x")));
     assert!(script.calls().is_empty());
@@ -385,7 +387,7 @@ fn denied_before_the_adapter() {
     let script = Scripted::new();
     script.file(&["out", "a.txt"], "hello");
     let mut driver = script.clone();
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let inside = with_policy(
         &mut cx,
         HostInterface::DirReadText,
@@ -404,7 +406,7 @@ fn atk_policy_ancestor_dropped() {
     let script = Scripted::new();
     script.file(&["a.bin"], "binary");
     let mut driver = script.clone();
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let text_only = with_policy(
         &mut cx,
         HostInterface::DirReadText,
@@ -427,7 +429,7 @@ fn atk_narrow_broader_policy() {
     let script = Scripted::new();
     script.file(&["out", "a"], "outside");
     let mut driver = script.clone();
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let inside = with_policy(
         &mut cx,
         HostInterface::DirReadText,
@@ -450,7 +452,7 @@ fn atk_narrow_other_resource() {
     let script = Scripted::new();
     script.file(&["a.txt"], "hello");
     let mut driver = script.clone();
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let first = root(&mut cx, HostInterface::DirReadText);
     let second = cx
         .root_for_tests(RootGrant {
@@ -487,7 +489,7 @@ fn the_parent_stays_valid() {
     let script = Scripted::new();
     script.file(&["b.bin"], "B");
     let mut driver = script.clone();
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let notes = root(&mut cx, HostInterface::DirReadText);
     let _ = granted(restrict(
         &mut cx,
@@ -502,7 +504,7 @@ fn sub_rebases() {
     let script = Scripted::new();
     script.file(&["reports", "a.txt"], "report");
     let mut driver = script.clone();
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let notes = root(&mut cx, HostInterface::DirReadText);
     let reports = granted(sub(&mut cx, notes, &["reports"]));
     assert_eq!(
@@ -519,7 +521,7 @@ fn sub_rebases() {
 fn sub_of_a_missing_directory() {
     let script = Scripted::new();
     let mut driver = script.clone();
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let notes = root(&mut cx, HostInterface::DirReadText);
     assert!(matches!(sub(&mut cx, notes, &["nope"]), Narrowed::Grant(_)));
     assert!(script.state().log.is_empty());
@@ -529,7 +531,7 @@ fn sub_of_a_missing_directory() {
 fn restrict_empty_suffix_is_an_invalid_policy() {
     let script = Scripted::new();
     let mut driver = script.clone();
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let notes = root(&mut cx, HostInterface::DirReadText);
     assert_eq!(
         restrict(&mut cx, notes, &files(&[], &["read"], suffix(""))),
@@ -553,7 +555,7 @@ fn at_depth_64(cx: &mut Context<'_>, notes: GrantToken) -> GrantToken {
 fn restrict_too_complex() {
     let script = Scripted::new();
     let mut driver = script.clone();
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let notes = root(&mut cx, HostInterface::DirReadText);
     let deep = at_depth_64(&mut cx, notes);
     assert_eq!(
@@ -568,7 +570,7 @@ fn restrict_too_complex() {
 fn sub_too_complex() {
     let script = Scripted::new();
     let mut driver = script.clone();
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let notes = root(&mut cx, HostInterface::DirReadText);
     let deep = at_depth_64(&mut cx, notes);
     assert_eq!(
@@ -582,7 +584,7 @@ fn limit_keeps_the_smaller() {
     let script = Scripted::new();
     script.file(&["a.txt"], "a");
     let mut driver = script.clone();
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let notes = root(&mut cx, HostInterface::DirReadText);
     let five = limit(&mut cx, notes, invocations(Some(5)));
     let nine = limit(&mut cx, five, invocations(Some(9)));
@@ -600,7 +602,7 @@ fn limit_with_none_leaves_the_bound() {
     let script = Scripted::new();
     script.file(&["a.txt"], "a");
     let mut driver = script.clone();
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let notes = bounded(
         &mut cx,
         HostInterface::DirReadText,
@@ -620,7 +622,7 @@ fn siblings_share_the_parent() {
     let script = Scripted::new();
     script.file(&["a.txt"], "a");
     let mut driver = script.clone();
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let parent = bounded(
         &mut cx,
         HostInterface::DirReadText,
@@ -642,7 +644,7 @@ fn a_childs_own_limit() {
     let script = Scripted::new();
     script.file(&["a.txt"], "a");
     let mut driver = script.clone();
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let parent = root(&mut cx, HostInterface::DirReadText);
     let child = limit(&mut cx, parent, invocations(Some(1)));
     assert_eq!(read(&mut cx, child, &["a.txt"]), Ok((text("a"), true)));
@@ -658,7 +660,7 @@ fn limit_exceeded_dispatches_nothing() {
     let script = Scripted::new();
     script.file(&["a.txt"], "a");
     let mut driver = script.clone();
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let notes = bounded(
         &mut cx,
         HostInterface::DirReadText,
@@ -678,7 +680,7 @@ fn read_over_the_byte_limit() {
     let script = Scripted::new();
     script.file(&["a.txt"], "hello");
     let mut driver = script.clone();
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let notes = bounded(
         &mut cx,
         HostInterface::DirReadText,
@@ -700,7 +702,7 @@ fn atk_counter_size_refusal_holds_no_invocation() {
     script.file(&["five.txt"], "fives");
     script.file(&["four.txt"], "four");
     let mut driver = script.clone();
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let notes = bounded(
         &mut cx,
         HostInterface::DirReadText,
@@ -721,7 +723,7 @@ fn result_above_the_room() {
     let script = Scripted::new();
     script.file(&["a.txt"], "hello");
     let mut driver = script.clone();
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let notes = root(&mut cx, HostInterface::DirReadText);
     let at = names(&["a.txt"]);
     let arguments = [HostArgument::Path(&at)];
@@ -738,7 +740,7 @@ fn read_at_the_byte_limit() {
     script.file(&["a.txt"], "hello");
     script.file(&["b.txt"], "b");
     let mut driver = script.clone();
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let notes = bounded(
         &mut cx,
         HostInterface::DirReadText,
@@ -755,7 +757,7 @@ fn read_at_the_byte_limit() {
 fn write_reserves_its_size() {
     let script = Scripted::new();
     let mut driver = script.clone();
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let out = bounded(
         &mut cx,
         HostInterface::DirWriteText,
@@ -773,7 +775,7 @@ fn metadata_counts_an_invocation_only() {
     let script = Scripted::new();
     script.file(&["a.txt"], "hello");
     let mut driver = script.clone();
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let stat = cx
         .root_for_tests(grant(
             HostInterface::DirStat,
@@ -802,7 +804,7 @@ fn atk_counter_overflow() {
     let script = Scripted::new();
     script.file(&["a.txt"], "hello");
     let mut driver = script.clone();
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let notes = root(&mut cx, HostInterface::DirReadText);
     let near = u64::MAX - 1;
     cx.preset_for_tests(notes, [near, near, near]);
@@ -818,7 +820,7 @@ fn atk_counter_overflow() {
 fn atk_counter_refund_unknown() {
     let script = Scripted::new();
     let mut driver = script.clone();
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let out = bounded(
         &mut cx,
         HostInterface::DirWriteText,
@@ -846,7 +848,7 @@ fn atk_counter_refund_unknown() {
 fn atk_counter_partial_known() {
     let script = Scripted::new();
     let mut driver = script.clone();
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let out = bounded(
         &mut cx,
         HostInterface::DirWriteText,
@@ -878,7 +880,7 @@ fn atk_counter_partial_known() {
 fn atk_counter_partial_unknown() {
     let script = Scripted::new();
     let mut driver = script.clone();
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let out = bounded(
         &mut cx,
         HostInterface::DirWriteText,
@@ -907,7 +909,7 @@ fn atk_counter_partial_unknown() {
 fn settlement_reaches_every_ancestor() {
     let script = Scripted::new();
     let mut driver = script.clone();
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let parent = bounded(
         &mut cx,
         HostInterface::DirWriteText,
@@ -945,7 +947,7 @@ fn settlement_reaches_every_ancestor() {
 fn progress_above_the_reservation() {
     let script = Scripted::new();
     let mut driver = script.clone();
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let out = root(&mut cx, HostInterface::DirWriteText);
     script.tweak(Tweak {
         completion: Some(completed(VOID, Measured::Known(0), Measured::Known(7))),
@@ -962,7 +964,7 @@ fn atk_counter_invalid_text_charged() {
     script.file(&["bad.txt"], "\u{7f}bad!");
     script.file(&["b.txt"], "b");
     let mut driver = script.clone();
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let notes = bounded(
         &mut cx,
         HostInterface::DirReadText,
@@ -990,7 +992,7 @@ fn atk_counter_invalid_text_charged() {
 fn atk_counter_reservation_all_or_none() {
     let script = Scripted::new();
     let mut driver = script.clone();
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let out = bounded(
         &mut cx,
         HostInterface::DirWriteText,
@@ -1009,7 +1011,7 @@ fn refund_when_known_unused() {
     let script = Scripted::new();
     script.file(&["a.txt"], "hello");
     let mut driver = script.clone();
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let notes = bounded(
         &mut cx,
         HostInterface::DirReadText,
@@ -1036,7 +1038,7 @@ fn gate_real_name_fails() {
     let script = Scripted::new();
     script.file(&["a.txt"], "hello");
     let mut driver = script.clone();
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let notes = text_only(&mut cx);
     script.tweak(Tweak {
         real_names: Some(names(&["A.TXT"])),
@@ -1055,7 +1057,7 @@ fn atk_driver_ignores_gate() {
     let script = Scripted::new();
     script.file(&["a.txt"], "hello");
     let mut driver = script.clone();
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let notes = text_only(&mut cx);
     // A driver that reports the byte it read, and one that also hides it,
     // so that only the gate's refusal stands against it.
@@ -1088,7 +1090,7 @@ fn atk_driver_ignores_gate() {
 fn atk_gate_create_on_real_parent() {
     let script = Scripted::new();
     let mut driver = script.clone();
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let out = with_policy(
         &mut cx,
         HostInterface::DirWriteText,
@@ -1114,7 +1116,7 @@ fn gate_found_action() {
     let script = Scripted::new();
     script.file(&["a.txt"], "old");
     let mut driver = script.clone();
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let out = with_policy(
         &mut cx,
         HostInterface::DirWriteText,
@@ -1132,7 +1134,7 @@ fn gate_a_write_either_way() {
     let script = Scripted::new();
     script.file(&["old.txt"], "old");
     let mut driver = script.clone();
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let out = with_policy(
         &mut cx,
         HostInterface::DirWriteText,
@@ -1148,7 +1150,7 @@ fn gate_a_write_either_way() {
 fn write_with_neither_action() {
     let script = Scripted::new();
     let mut driver = script.clone();
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let out = with_policy(
         &mut cx,
         HostInterface::DirWriteText,
@@ -1166,7 +1168,7 @@ fn gate_hard_link() {
     let script = Scripted::new();
     script.file(&["a.txt"], "old");
     let mut driver = script.clone();
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let out = root(&mut cx, HostInterface::DirWriteText);
     script.tweak(Tweak {
         links: Some(Some(2)),
@@ -1184,7 +1186,7 @@ fn atk_gate_replace_without_link_count() {
     let script = Scripted::new();
     script.file(&["a.txt"], "old");
     let mut driver = script.clone();
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let out = root(&mut cx, HostInterface::DirWriteText);
     script.tweak(Tweak {
         links: Some(None),
@@ -1205,7 +1207,7 @@ fn read_of_a_hard_link() {
     let script = Scripted::new();
     script.file(&["a.txt"], "linked");
     let mut driver = script.clone();
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let notes = root(&mut cx, HostInterface::DirReadText);
     script.tweak(Tweak {
         links: Some(Some(2)),
@@ -1230,7 +1232,7 @@ fn env_name_inside_the_set() {
         .env
         .insert("HOME".to_owned(), "/home/h".to_owned());
     let mut driver = script.clone();
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let env = variables(&mut cx, &["HOME"]);
     assert_eq!(
         run(
@@ -1252,7 +1254,7 @@ fn env_name_outside_the_set() {
         .env
         .insert("PATH".to_owned(), "/bin".to_owned());
     let mut driver = script.clone();
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let env = variables(&mut cx, &["HOME"]);
     assert_eq!(
         run(
@@ -1280,7 +1282,7 @@ fn stdin_known_size_within() {
     let script = Scripted::new();
     script.stdin("abc", true);
     let mut driver = script.clone();
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let input = streams(&mut cx, HostInterface::StdinBytes, Some(3));
     assert_eq!(
         stdin(&mut cx, HostOp::IoStdinBytes, input, 3),
@@ -1294,7 +1296,7 @@ fn stdin_known_size_over() {
     let script = Scripted::new();
     script.stdin("abc", true);
     let mut driver = script.clone();
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let input = streams(&mut cx, HostInterface::StdinBytes, Some(2));
     assert_eq!(
         stdin(&mut cx, HostOp::IoStdinBytes, input, 3),
@@ -1313,7 +1315,7 @@ fn stdin_known_size_below_the_count() {
     let script = Scripted::new();
     script.stdin("abc", true);
     let mut driver = script.clone();
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let input = streams(&mut cx, HostInterface::StdinBytes, Some(3));
     assert_eq!(
         stdin(&mut cx, HostOp::IoStdinBytes, input, 10),
@@ -1327,7 +1329,7 @@ fn stdin_known_size_empty_at_zero() {
     let script = Scripted::new();
     script.stdin("", true);
     let mut driver = script.clone();
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let input = streams(&mut cx, HostInterface::StdinBytes, Some(0));
     assert_eq!(
         stdin(&mut cx, HostOp::IoStdinBytes, input, 1),
@@ -1340,7 +1342,7 @@ fn stdin_unsized_within_the_count() {
     let script = Scripted::new();
     script.stdin("abc", false);
     let mut driver = script.clone();
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let input = streams(&mut cx, HostInterface::StdinBytes, Some(10));
     assert_eq!(
         stdin(&mut cx, HostOp::IoStdinBytes, input, 10),
@@ -1360,7 +1362,7 @@ fn stdin_unsized_a_short_count() {
     let script = Scripted::new();
     script.stdin("abc", false);
     let mut driver = script.clone();
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let input = streams(&mut cx, HostInterface::StdinBytes, Some(2));
     assert_eq!(
         stdin(&mut cx, HostOp::IoStdinBytes, input, 2),
@@ -1375,7 +1377,7 @@ fn stdin_unsized_a_count_above_the_bound() {
     let script = Scripted::new();
     script.stdin("abc", false);
     let mut driver = script.clone();
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let input = streams(&mut cx, HostInterface::StdinBytes, Some(2));
     assert_eq!(
         stdin(&mut cx, HostOp::IoStdinBytes, input, 3),
@@ -1391,7 +1393,7 @@ fn stdin_unsized_nothing_remains() {
     let script = Scripted::new();
     script.stdin("abc", false);
     let mut driver = script.clone();
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let input = streams(&mut cx, HostInterface::StdinBytes, Some(2));
     assert_eq!(
         stdin(&mut cx, HostOp::IoStdinBytes, input, 3),
@@ -1415,7 +1417,7 @@ fn stdin_unsized_a_remaining_bound_below_the_count() {
     let script = Scripted::new();
     script.stdin("abcd", false);
     let mut driver = script.clone();
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let parent = streams(&mut cx, HostInterface::StdinBytes, Some(5));
     cx.preset_for_tests(parent, [0, 3, 0]);
     let child = limit(&mut cx, parent, GrantLimits::default());
@@ -1431,7 +1433,7 @@ fn stdin_text_unsized_below_one_scalar() {
     let script = Scripted::new();
     script.stdin("abc", false);
     let mut driver = script.clone();
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let input = streams(&mut cx, HostInterface::StdinText, Some(2));
     assert_eq!(
         stdin(&mut cx, HostOp::IoStdinText, input, 16),
@@ -1449,7 +1451,7 @@ fn deep_ancestry() {
             let script = Scripted::new();
             script.file(&["a.txt"], "deep");
             let mut driver = script.clone();
-            let mut cx = Context::new(&mut driver);
+            let mut cx = Context::new(&mut driver, header());
             let mut grant = root(&mut cx, HostInterface::DirReadText);
             for _ in 0..10_000 {
                 grant = limit(&mut cx, grant, invocations(Some(3)));
@@ -1470,7 +1472,7 @@ fn a_call_while_an_event_is_pending() {
     let script = Scripted::new();
     script.file(&["a.txt"], "a");
     let mut driver = script.clone();
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let notes = root(&mut cx, HostInterface::DirReadText);
     let at = names(&["a.txt"]);
     let first = call(
@@ -1498,8 +1500,8 @@ fn a_receipt_of_another_context() {
     script.file(&["a.txt"], "a");
     let mut first = script.clone();
     let mut second = script.clone();
-    let mut here = Context::new(&mut first);
-    let mut there = Context::new(&mut second);
+    let mut here = Context::new(&mut first, header());
+    let mut there = Context::new(&mut second, header());
     let mine = root(&mut here, HostInterface::DirReadText);
     let theirs = root(&mut there, HostInterface::DirReadText);
     let at = names(&["a.txt"]);
@@ -1572,7 +1574,7 @@ fn ancestors(nodes: &[Node], from: usize) -> Vec<usize> {
 fn model_tree(random: &mut SplitMix64, seed: u64, tree: usize) {
     let script = Scripted::new();
     let mut driver = script.clone();
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let (root_invocations, root_input) = (maybe(random, 12), maybe(random, 20));
     let token = bounded(
         &mut cx,

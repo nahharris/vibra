@@ -41,59 +41,46 @@
 //! pending and returns a [`Receipt`]; the caller advances its continuation
 //! and then calls [`HostContext::commit`]. Nothing is appended inside
 //! `host`.
+//!
+//! # The trace
+//!
+//! The context keeps the run's [`AuditTrace`]. A root records the driver
+//! bound for its provider. A completed call (a typed denial of the gate
+//! included) builds its [`HostEvent`] and keeps it pending, with the
+//! policies its projection names; `commit` of that call's receipt appends
+//! both, once. A refusal of steps 1 to 3, and a size or `unsupported`
+//! refusal of the gate, have no receipt and record nothing. A pending event
+//! that is never committed is dropped with the context
+//! ([`Context::uncommitted`]).
 
 use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use vibra_ir::Value;
 use vibra_ir::authority::{
     GrantLimits, GrantToken, HostArgument, HostCompletion, HostContext, HostErrorCase,
     HostFault, HostReply, HostRequest, Issued, NarrowRequest, Narrowed, Receipt,
     ScopeErrorCase,
 };
 use vibra_ir::external::host::{HostErrorType, HostInterface, HostOp, TestWorldOp};
+use vibra_ir::{EntityRef, Value};
 
 use crate::driver::{
-    Action, Completion, Driver, Found, FoundAction, Gate, Measured, Operand, Progress,
-    Refused, Reserved, ResourceId,
+    Action, Completion, Driver, DriverIdentity, Found, FoundAction, Gate, Measured,
+    Operand, Progress, Refused, Reserved, ResourceId,
 };
 use crate::path::RelativeNames;
 use crate::policy::{
     self, DirAction, DirDepth, DirectoryRule, Expr, FileAction, FileDepth, FileRule,
     Join, NameTest, Policy, Request,
 };
-use crate::recipe::{LeafName, Limits};
+use crate::recipe::{LeafName, Limits, PROVIDERS, Provider};
+use crate::trace::{
+    self, AuditTrace, Event, GrantOrigin, GrantProjection, HostEvent, Phase,
+    StartupEvent, StartupFailure, StartupStatus, StdlibIdentity, TraceHeader,
+};
 
 /// The identity of the next context; each [`Context::new`] takes one.
 static NEXT_CONTEXT: AtomicU64 = AtomicU64::new(1);
-
-/// The atom every rule of a grant descending from a `TestWorld` directory
-/// grant names as its `root`.
-const TEST_WORLD_ROOT: &str = "@testWorld";
-
-/// Who issued a root grant: the origin record a lineage keeps.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum GrantOrigin {
-    /// `{kind: @binding leaf: …}`: a startup leaf of a target.
-    Binding {
-        /// The leaf.
-        leaf: LeafName,
-    },
-    /// `{kind: @testWorld}`: a member of a test's `TestWorld`.
-    TestWorld,
-}
-
-impl GrantOrigin {
-    /// The `root` of every rule a narrowing of a grant of this origin
-    /// contributes: the leaf, or `@testWorld`.
-    #[must_use]
-    pub fn policy_root(&self) -> &str {
-        match self {
-            Self::Binding { leaf } => leaf.as_str(),
-            Self::TestWorld => TEST_WORLD_ROOT,
-        }
-    }
-}
 
 /// A root grant as its issuer hands it to `Context::issue`.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -120,12 +107,20 @@ pub struct RootGrant {
 pub struct Lineage {
     resource: ResourceId,
     origin: GrantOrigin,
+    driver: DriverIdentity,
     root: u64,
     generation: u32,
     live: bool,
 }
 
 impl Lineage {
+    /// The driver bound for the root's provider: the `driver` of every
+    /// event of the lineage.
+    #[must_use]
+    pub const fn driver(&self) -> &DriverIdentity {
+        &self.driver
+    }
+
     /// The resource the root's issuer acquired.
     #[must_use]
     pub const fn resource(&self) -> ResourceId {
@@ -737,16 +732,36 @@ const fn charged(
     }
 }
 
-/// The run's broker: the grant table, the counters, and the pending event,
-/// over one driver.
+/// The event of a completed call, kept until its receipt is committed.
+#[derive(Debug)]
+struct Pending {
+    serial: u64,
+    event: HostEvent,
+    /// The effective policy the event's projection names, by its hash.
+    policy: Option<(String, Policy)>,
+}
+
+/// The provider that issues grants of `interface`: the provider table's
+/// grant types are disjoint.
+fn provider_of(interface: HostInterface) -> Option<Provider> {
+    PROVIDERS
+        .iter()
+        .find(|row| row.grant_types.contains(&interface))
+        .map(|row| row.provider)
+}
+
+/// The run's broker: the grant table, the counters, the pending event, and
+/// the trace, over one driver.
 pub struct Context<'d> {
     identity: u64,
     driver: &'d mut dyn Driver,
+    library: StdlibIdentity,
     slots: Vec<Slot>,
     lineages: Vec<Lineage>,
     roots: u64,
-    pending: Option<u64>,
+    pending: Option<Pending>,
     serial: u64,
+    trace: AuditTrace,
 }
 
 impl fmt::Debug for Context<'_> {
@@ -757,30 +772,52 @@ impl fmt::Debug for Context<'_> {
             .field("slots", &self.slots.len())
             .field("lineages", &self.lineages)
             .field("pending", &self.pending)
+            .field("trace", &self.trace)
             .finish_non_exhaustive()
     }
 }
 
 impl<'d> Context<'d> {
-    /// A context over `driver`, with an empty grant table and an identity
-    /// no other context of the process has.
-    pub fn new(driver: &'d mut dyn Driver) -> Self {
+    /// A context over `driver`, with an empty grant table, an identity no
+    /// other context of the process has, and the empty trace of `header`.
+    pub fn new(driver: &'d mut dyn Driver, header: TraceHeader) -> Self {
         Self {
             identity: NEXT_CONTEXT.fetch_add(1, Ordering::Relaxed),
             driver,
+            library: header.library.clone(),
             slots: Vec::new(),
             lineages: Vec::new(),
             roots: 0,
             pending: None,
             serial: 0,
+            trace: AuditTrace::new(header),
         }
+    }
+
+    /// The run's trace: every committed event, in completion order.
+    #[must_use]
+    pub const fn trace(&self) -> &AuditTrace {
+        &self.trace
+    }
+
+    /// The pending events not committed: the event of a completed call
+    /// whose receipt the caller has not committed. It is dropped with the
+    /// context, and the trace never holds it.
+    #[must_use]
+    pub fn uncommitted(&self) -> usize {
+        usize::from(self.pending.is_some())
     }
 
     /// Issues a root grant. Only startup and the test world call it.
     ///
+    /// The driver bound for the root's provider joins the trace's
+    /// `drivers`.
+    ///
     /// # Errors
     ///
-    /// [`HostFault::MemoryExhausted`] when the table cannot grow.
+    /// [`HostFault::MemoryExhausted`] when the table cannot grow;
+    /// `InvalidHostValue` when the driver has no identity for the provider
+    /// of the root's interface.
     #[cfg_attr(
         not(feature = "testing"),
         expect(
@@ -789,6 +826,14 @@ impl<'d> Context<'d> {
         )
     )]
     pub(crate) fn issue(&mut self, root: RootGrant) -> Result<GrantToken, HostFault> {
+        let driver = provider_of(root.interface)
+            .and_then(|provider| self.driver.identity(provider))
+            .ok_or_else(|| {
+                invalid(format!(
+                    "no driver is bound for a `{}` grant",
+                    root.interface.name()
+                ))
+            })?;
         self.lineages
             .try_reserve(1)
             .map_err(|_| HostFault::MemoryExhausted)?;
@@ -800,14 +845,136 @@ impl<'d> Context<'d> {
         };
         let token = self.add(root.interface, None, constraint, lineage, 0)?;
         self.roots = self.roots.saturating_add(1);
+        self.trace.bind_driver(driver.clone());
         self.lineages.push(Lineage {
             resource: root.resource,
             origin: root.origin,
+            driver,
             root: self.roots,
             generation: 0,
             live: true,
         });
         Ok(token)
+    }
+
+    /// Appends the `@startup` event of one processed leaf: its issuer, its
+    /// outcome, the projection of `grant` exactly when acquired, and the
+    /// failure exactly when the leaf stopped startup.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidHostValue` for a grant this context cannot accept, an event
+    /// pending, or fields that do not match the status.
+    #[cfg_attr(
+        not(feature = "testing"),
+        expect(dead_code, reason = "startup (step 28) calls it")
+    )]
+    pub(crate) fn startup_event(
+        &mut self,
+        leaf: LeafName,
+        provider: Provider,
+        status: StartupStatus,
+        grant: Option<GrantToken>,
+        failure: Option<StartupFailure>,
+    ) -> Result<(), HostFault> {
+        if self.pending.is_some() {
+            return Err(invalid("the event of the previous call is not committed"));
+        }
+        let (grant, policy) = match grant {
+            Some(token) => {
+                let slot = self.validate(token, None)?;
+                let (projection, policy) = self.projection(slot)?;
+                (Some(projection), policy)
+            }
+            None => (None, None),
+        };
+        let event = StartupEvent {
+            binding: leaf,
+            provider,
+            status,
+            grant,
+            failure,
+        };
+        if !event.is_consistent() {
+            return Err(invalid(
+                "the startup event's grant and failure do not match its status",
+            ));
+        }
+        self.record(Event::Startup(event), policy);
+        Ok(())
+    }
+
+    /// Appends `event` and the policy its projection names.
+    fn record(&mut self, event: Event, policy: Option<(String, Policy)>) {
+        if let Some((hash, policy)) = policy {
+            self.trace.policies.entry(hash).or_insert(policy);
+        }
+        self.trace.events.push(event);
+    }
+
+    /// The projection of `slot`, and its effective policy by its hash when
+    /// the ancestry has one.
+    fn projection(
+        &self,
+        slot: u32,
+    ) -> Result<(GrantProjection, Option<(String, Policy)>), HostFault> {
+        let lineage = self.lineage_of(slot)?;
+        let interface = self.slot(slot)?.interface;
+        let mut items = Vec::new();
+        let mut narrowings: usize = 0;
+        let mut smallest = Limits::default();
+        let least = |least: Option<u64>, bound: Option<u64>| match (least, bound) {
+            (Some(least), Some(bound)) => Some(least.min(bound)),
+            (least, bound) => least.or(bound),
+        };
+        for slot in ancestry(&self.slots, slot) {
+            if slot.constraint.is_narrowing_policy() {
+                narrowings = narrowings.saturating_add(1);
+            }
+            if let Some(policy) = slot.constraint.policy() {
+                items.push(policy.expression().clone());
+            }
+            if let Some(counters) = slot.constraint.counters() {
+                smallest = Limits {
+                    invocations: least(
+                        smallest.invocations,
+                        counters.invocations.bound,
+                    ),
+                    input_bytes: least(
+                        smallest.input_bytes,
+                        counters.input_bytes.bound,
+                    ),
+                    output_bytes: least(
+                        smallest.output_bytes,
+                        counters.output_bytes.bound,
+                    ),
+                };
+            }
+        }
+        let policy = if items.is_empty() {
+            None
+        } else {
+            let effective = Policy::new(&Expr::AllOf(items), narrowings)
+                .map_err(|_| invalid("the effective policy is over the limits"))?;
+            Some((policy::hash(&effective), effective))
+        };
+        let owner = interface.owner();
+        let rights = EntityRef::new(
+            owner.path().trim_start_matches('@'),
+            self.library
+                .seed(owner.module, trace::INTERFACE_KIND, owner.name),
+        )
+        .map_err(|fault| invalid(fault.to_string()))?;
+        let projection = GrantProjection {
+            issued_by: lineage.origin.clone(),
+            policy: policy
+                .as_ref()
+                .map_or_else(String::new, |(hash, _)| hash.clone()),
+            rights,
+            limits: (!smallest.is_unbounded()).then_some(smallest),
+            root: lineage.root,
+        };
+        Ok((projection, policy))
     }
 
     /// Makes every grant that descends from a root on `resource` unusable,
@@ -944,11 +1111,50 @@ impl<'d> Context<'d> {
         })
     }
 
-    /// Keeps the event of a completed call pending, under a new serial.
-    const fn pend(&mut self) -> Receipt {
+    /// Builds the `@host` event of a completed call of `request` through
+    /// `slot` with `reply`, and keeps it pending under a new serial.
+    ///
+    /// # Errors
+    ///
+    /// A reply that is not of the row's result type.
+    fn pend(
+        &mut self,
+        request: &HostRequest<'_>,
+        slot: u32,
+        reply: HostReply,
+    ) -> Result<HostCompletion, HostFault> {
+        let (grant, policy) = self.projection(slot)?;
+        let result =
+            trace::result_bytes(request.op, &reply, &self.library).map_err(invalid)?;
+        let event = HostEvent {
+            invocation: request.invocation,
+            parent: request.parent,
+            phase: if request.parent.is_none() {
+                Phase::Startup
+            } else {
+                Phase::Entry
+            },
+            op: request.op,
+            driver: self.lineage_of(slot)?.driver.clone(),
+            origin: request.origin.cloned(),
+            grant,
+            args: request
+                .arguments
+                .iter()
+                .map(|argument| trace::argument_bytes(argument, &self.library))
+                .collect(),
+            result,
+        };
         self.serial = self.serial.wrapping_add(1);
-        self.pending = Some(self.serial);
-        Receipt::new(self.identity, self.serial)
+        self.pending = Some(Pending {
+            serial: self.serial,
+            event,
+            policy,
+        });
+        Ok(HostCompletion {
+            reply,
+            receipt: Some(Receipt::new(self.identity, self.serial)),
+        })
     }
 
     /// Settles every byte reservation of a call, on the slot's counters and
@@ -1019,20 +1225,18 @@ impl<'d> Context<'d> {
     /// settles the reservation.
     fn finish(
         &mut self,
+        request: &HostRequest<'_>,
         slot: u32,
-        error: HostErrorType,
         reserved: Charge,
         answer: Option<Result<u64, Reason>>,
         completion: Completion,
     ) -> Result<HostCompletion, HostFault> {
+        let error = request.op.row().error;
         match (answer, completion) {
             (Some(Err(reason)), Completion::Refused) => match reason {
                 Reason::Denied => {
                     self.refund_bytes(slot, reserved);
-                    Ok(HostCompletion {
-                        reply: HostReply::Err(case(error, "denied")?),
-                        receipt: Some(self.pend()),
-                    })
+                    self.pend(request, slot, HostReply::Err(case(error, "denied")?))
                 }
                 Reason::Unsupported => {
                     self.refund_bytes(slot, reserved);
@@ -1092,10 +1296,7 @@ impl<'d> Context<'d> {
                     HostReply::Ok(_) => false,
                 };
                 self.settle(slot, reserved, progress, outcome_unknown)?;
-                Ok(HostCompletion {
-                    reply,
-                    receipt: Some(self.pend()),
-                })
+                self.pend(request, slot, reply)
             }
         }
     }
@@ -1548,15 +1749,18 @@ impl HostContext for Context<'_> {
                 "the driver asked its gate twice",
             ));
         }
-        self.finish(slot, error, reserved, answer, completion)
+        self.finish(&request, slot, reserved, answer, completion)
     }
 
     fn commit(&mut self, receipt: Receipt) -> Result<(), HostFault> {
-        if receipt.context() != self.identity || self.pending != Some(receipt.serial())
-        {
-            return Err(invalid("the receipt is not the pending event's"));
-        }
-        self.pending = None;
+        let identity = self.identity;
+        let pending = self
+            .pending
+            .take_if(|pending| {
+                receipt.context() == identity && pending.serial == receipt.serial()
+            })
+            .ok_or_else(|| invalid("the receipt is not the pending event's"))?;
+        self.record(Event::Host(pending.event), pending.policy);
         Ok(())
     }
 
@@ -1625,6 +1829,22 @@ impl Context<'_> {
     /// `Context::release`, for the tests.
     pub fn release_for_tests(&mut self, resource: ResourceId) {
         self.release(resource);
+    }
+
+    /// `Context::startup_event`, for the tests.
+    ///
+    /// # Errors
+    ///
+    /// As `startup_event`.
+    pub fn startup_event_for_tests(
+        &mut self,
+        leaf: LeafName,
+        provider: Provider,
+        status: StartupStatus,
+        grant: Option<GrantToken>,
+        failure: Option<StartupFailure>,
+    ) -> Result<(), HostFault> {
+        self.startup_event(leaf, provider, status, grant, failure)
     }
 
     /// The counters of the slot `grant` names, when it holds counters.

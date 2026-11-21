@@ -11,19 +11,22 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use vibra_diagnostics::DiagnosticCode;
-use vibra_host::broker::{Context, GrantOrigin, RootGrant};
+use vibra_host::broker::{Context, RootGrant};
 use vibra_host::driver::{
     Acquire, Action, Completion, Driver, DriverIdentity, Found, FoundAction, Gate,
     Measured, Progress, Refused, Reserved, Resolved, ResourceId,
 };
 use vibra_host::policy::{self, Policy};
 use vibra_host::recipe::{Limits, PROVIDERS, Provider};
+use vibra_host::trace::GrantOrigin;
 use vibra_host::world::{Clock, HostWorld, WORLD_FORMAT, WorldDriver, decode_world};
 use vibra_ir::authority::{
     GrantToken, HostArgument, HostContext, HostErrorCase, HostFault, HostFsKind,
     HostOk, HostReply, HostRequest,
 };
 use vibra_ir::external::host::{HostInterface, HostOp};
+
+use crate::trace::header;
 
 /// The chapter's example world.
 const W: &str = r#"{
@@ -424,7 +427,7 @@ fn clock_with_one_member() {
     );
     let mut driver = WorldDriver::new(&world);
     let ids = acquire_all(&mut driver, false);
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let wall = grant(&mut cx, HostInterface::WallClock, ids.wall);
     let monotonic = grant(&mut cx, HostInterface::MonotonicClock, ids.monotonic);
     assert_eq!(
@@ -536,7 +539,7 @@ fn implied_ancestors() {
     let world = decoded("{format: @hostWorld.v2 files: [\"/a/b/c.txt\": \"x\"]}");
     let mut driver = WorldDriver::new(&world);
     let ids = acquire_all(&mut driver, false);
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let stat = grant(&mut cx, HostInterface::DirStat, ids.root);
     assert_eq!(
         at(&mut cx, HostOp::FsMetadataStat, stat, &["a", "b"]),
@@ -556,7 +559,7 @@ fn implied_ancestors() {
 fn read_text() {
     let mut driver = WorldDriver::new(&w());
     let ids = acquire_all(&mut driver, true);
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let read = grant(&mut cx, HostInterface::DirReadText, ids.notes);
     assert_eq!(
         at(&mut cx, HostOp::FsReadText, read, &["a.txt"]),
@@ -568,7 +571,7 @@ fn read_text() {
 fn read_invalid_text() {
     let mut driver = WorldDriver::new(&w());
     let ids = acquire_all(&mut driver, true);
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let read = grant(&mut cx, HostInterface::DirReadText, ids.notes);
     assert_eq!(
         at(&mut cx, HostOp::FsReadText, read, &["raw.bin"]),
@@ -580,7 +583,7 @@ fn read_invalid_text() {
 fn read_bytes() {
     let mut driver = WorldDriver::new(&w());
     let ids = acquire_all(&mut driver, true);
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let read = grant(&mut cx, HostInterface::DirReadBytes, ids.notes);
     assert_eq!(
         at(&mut cx, HostOp::FsReadFile, read, &["raw.bin"]),
@@ -592,7 +595,7 @@ fn read_bytes() {
 fn absent_file() {
     let mut driver = WorldDriver::new(&w());
     let ids = acquire_all(&mut driver, true);
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let read = grant(&mut cx, HostInterface::DirReadText, ids.notes);
     assert_eq!(
         at(&mut cx, HostOp::FsReadText, read, &["no.txt"]),
@@ -609,7 +612,7 @@ fn absent_file() {
 fn read_a_directory() {
     let mut driver = WorldDriver::new(&w());
     let ids = acquire_all(&mut driver, true);
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let read = grant(&mut cx, HostInterface::DirReadText, ids.notes);
     assert_eq!(
         at(&mut cx, HostOp::FsReadText, read, &[]),
@@ -624,7 +627,7 @@ fn list() {
     );
     let mut driver = WorldDriver::new(&world);
     let notes = directory(&mut driver, "/notes");
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let list = grant(&mut cx, HostInterface::DirList, notes);
     assert_eq!(
         at(&mut cx, HostOp::FsReadEntries, list, &[]),
@@ -636,7 +639,7 @@ fn list() {
 fn list_a_file() {
     let mut driver = WorldDriver::new(&w());
     let ids = acquire_all(&mut driver, true);
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let list = grant(&mut cx, HostInterface::DirList, ids.notes);
     assert_eq!(
         at(&mut cx, HostOp::FsReadEntries, list, &["a.txt"]),
@@ -648,7 +651,7 @@ fn list_a_file() {
 fn stat() {
     let mut driver = WorldDriver::new(&w());
     let ids = acquire_all(&mut driver, true);
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let stat = grant(&mut cx, HostInterface::DirStat, ids.notes);
     assert_eq!(
         at(&mut cx, HostOp::FsMetadataStat, stat, &["a.txt"]),
@@ -666,7 +669,7 @@ fn write_creates() {
     let mut driver = WorldDriver::new(&world);
     let ids = acquire_all(&mut driver, true);
     {
-        let mut cx = Context::new(&mut driver);
+        let mut cx = Context::new(&mut driver, header());
         let writer = grant(&mut cx, HostInterface::DirWriteText, ids.notes);
         let read = grant(&mut cx, HostInterface::DirReadText, ids.notes);
         assert_eq!(write(&mut cx, writer, &["new.txt"], "fresh"), VOID);
@@ -680,7 +683,7 @@ fn write_creates() {
     assert_eq!(world.filesystem().file(&names(&["notes", "new.txt"])), None);
     let mut second = WorldDriver::new(&world);
     let notes = directory(&mut second, "/notes");
-    let mut cx = Context::new(&mut second);
+    let mut cx = Context::new(&mut second, header());
     let read = grant(&mut cx, HostInterface::DirReadText, notes);
     assert_eq!(
         at(&mut cx, HostOp::FsReadText, read, &["new.txt"]),
@@ -692,7 +695,7 @@ fn write_creates() {
 fn write_replaces() {
     let mut driver = WorldDriver::new(&w());
     let ids = acquire_all(&mut driver, true);
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let writer = grant(&mut cx, HostInterface::DirWriteText, ids.notes);
     let read = grant(&mut cx, HostInterface::DirReadText, ids.notes);
     assert_eq!(write(&mut cx, writer, &["a.txt"], "x"), VOID);
@@ -703,7 +706,7 @@ fn write_replaces() {
 fn write_without_a_parent() {
     let mut driver = WorldDriver::new(&w());
     let ids = acquire_all(&mut driver, true);
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let writer = grant(&mut cx, HostInterface::DirWriteText, ids.notes);
     let list = grant(&mut cx, HostInterface::DirList, ids.notes);
     assert_eq!(
@@ -726,7 +729,7 @@ fn a_refused_create_leaves_the_copy() {
         inner: &mut driver,
         log: Rc::clone(&log),
     };
-    let mut cx = Context::new(&mut recording);
+    let mut cx = Context::new(&mut recording, header());
     let list = grant(&mut cx, HostInterface::DirList, notes);
     let before = at(&mut cx, HostOp::FsReadEntries, list, &[]);
     let writer = root_grant(
@@ -771,7 +774,7 @@ fn a_refused_replace_leaves_the_copy() {
         inner: &mut driver,
         log: Rc::clone(&log),
     };
-    let mut cx = Context::new(&mut recording);
+    let mut cx = Context::new(&mut recording, header());
     let read = grant(&mut cx, HostInterface::DirReadText, notes);
     let writer = root_grant(
         &mut cx,
@@ -808,7 +811,7 @@ fn a_refused_replace_leaves_the_copy() {
 fn stdin_once() {
     let mut driver = WorldDriver::new(&w());
     let ids = acquire_all(&mut driver, true);
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let stdin = grant(&mut cx, HostInterface::StdinText, ids.stdin);
     assert_eq!(count(&mut cx, HostOp::IoStdinText, stdin, 16), text("x\ny"));
     assert_eq!(count(&mut cx, HostOp::IoStdinText, stdin, 16), text(""));
@@ -820,7 +823,7 @@ fn stdin_invalid_text() {
         decoded("{format: @hostWorld.v2 stdin: {kind: @bytes values: [255u8]}}");
     let mut driver = WorldDriver::new(&world);
     let ids = acquire_all(&mut driver, false);
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let stdin = grant(&mut cx, HostInterface::StdinText, ids.stdin);
     assert_eq!(
         count(&mut cx, HostOp::IoStdinText, stdin, 16),
@@ -838,7 +841,7 @@ fn stdin_reports_its_size() {
         inner: &mut driver,
         log: Rc::clone(&log),
     };
-    let mut cx = Context::new(&mut recording);
+    let mut cx = Context::new(&mut recording, header());
     // A grant whose input bound is below the size: the gate refuses at the
     // size the driver reported, and the stream yielded nothing.
     let small = root_grant(
@@ -881,7 +884,7 @@ fn stdin_reports_its_size() {
 fn stdin_by_count() {
     let mut driver = WorldDriver::new(&w());
     let ids = acquire_all(&mut driver, true);
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let stdin = grant(&mut cx, HostInterface::StdinBytes, ids.stdin);
     assert_eq!(
         count(&mut cx, HostOp::IoStdinBytes, stdin, 2),
@@ -895,7 +898,7 @@ fn stdin_by_count() {
 fn stdin_text_below_a_scalar() {
     let mut driver = WorldDriver::new(&w());
     let ids = acquire_all(&mut driver, true);
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let stdin = grant(&mut cx, HostInterface::StdinText, ids.stdin);
     let (result, due) = run(
         &mut cx,
@@ -915,7 +918,7 @@ fn stdin_text_takes_whole_scalars() {
     let world = decoded("{format: @hostWorld.v2 stdin: \"\u{20ac}a\"}");
     let mut driver = WorldDriver::new(&world);
     let ids = acquire_all(&mut driver, false);
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let stdin = grant(&mut cx, HostInterface::StdinText, ids.stdin);
     assert_eq!(
         count(&mut cx, HostOp::IoStdinText, stdin, 4),
@@ -926,7 +929,7 @@ fn stdin_text_takes_whole_scalars() {
     let world = decoded("{format: @hostWorld.v2 stdin: \"ab\u{20ac}\"}");
     let mut driver = WorldDriver::new(&world);
     let ids = acquire_all(&mut driver, false);
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let stdin = grant(&mut cx, HostInterface::StdinText, ids.stdin);
     assert_eq!(count(&mut cx, HostOp::IoStdinText, stdin, 4), text("ab"));
     assert_eq!(
@@ -940,7 +943,7 @@ fn stdout_order() {
     let mut driver = WorldDriver::new(&w());
     let ids = acquire_all(&mut driver, true);
     {
-        let mut cx = Context::new(&mut driver);
+        let mut cx = Context::new(&mut driver, header());
         let text_out = grant(&mut cx, HostInterface::StdoutText, ids.stdout);
         let bytes_out = grant(&mut cx, HostInterface::StdoutBytes, ids.stdout);
         let text_err = grant(&mut cx, HostInterface::StderrText, ids.stderr);
@@ -985,7 +988,7 @@ fn stdout_order() {
 fn variable_present_absent() {
     let mut driver = WorldDriver::new(&w());
     let ids = acquire_all(&mut driver, true);
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let vars = root_grant(
         &mut cx,
         HostInterface::EnvReadVar,
@@ -1020,7 +1023,7 @@ fn unholdable_name() {
     let world = decoded("{format: @hostWorld.v2 env: [\"A=B\": \"v\" \"\": \"w\"]}");
     let mut driver = WorldDriver::new(&world);
     let ids = acquire_all(&mut driver, false);
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let vars = root_grant(
         &mut cx,
         HostInterface::EnvReadVar,
@@ -1047,7 +1050,7 @@ fn unholdable_name() {
 fn arguments() {
     let mut driver = WorldDriver::new(&w());
     let ids = acquire_all(&mut driver, true);
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let args = grant(&mut cx, HostInterface::EnvReadArgs, ids.args);
     assert_eq!(
         none(&mut cx, HostOp::EnvReadArgs, args),
@@ -1063,7 +1066,7 @@ fn arguments() {
 fn wall_clock() {
     let mut driver = WorldDriver::new(&w());
     let ids = acquire_all(&mut driver, true);
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let wall = grant(&mut cx, HostInterface::WallClock, ids.wall);
     for _ in 0..2 {
         assert_eq!(
@@ -1077,7 +1080,7 @@ fn wall_clock() {
 fn monotonic_clock() {
     let mut driver = WorldDriver::new(&w());
     let ids = acquire_all(&mut driver, true);
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let monotonic = grant(&mut cx, HostInterface::MonotonicClock, ids.monotonic);
     for expected in [0, 1000, 2000] {
         assert_eq!(
@@ -1094,7 +1097,7 @@ fn monotonic_overflow() {
     );
     let mut driver = WorldDriver::new(&world);
     let ids = acquire_all(&mut driver, false);
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let monotonic = grant(&mut cx, HostInterface::MonotonicClock, ids.monotonic);
     assert_eq!(
         none(&mut cx, HostOp::TimeNowMonotonic, monotonic),
@@ -1130,7 +1133,7 @@ fn random_vector() {
     assert_eq!(second, [3, 241, 102, 178, 51, 227, 239, 40]);
     let mut driver = WorldDriver::new(&w());
     let ids = acquire_all(&mut driver, true);
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let random = grant(&mut cx, HostInterface::RandomBytes, ids.random);
     // 3 bytes take one output and discard its other 5 bytes; 8 take the next.
     assert_eq!(
@@ -1147,7 +1150,7 @@ fn random_vector() {
 fn random_zero() {
     let mut driver = WorldDriver::new(&w());
     let ids = acquire_all(&mut driver, true);
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let random = grant(&mut cx, HostInterface::RandomBytes, ids.random);
     assert_eq!(
         count(&mut cx, HostOp::RandomGenerateBytes, random, 0),
@@ -1184,7 +1187,7 @@ fn fixed_path_absent() {
 fn fixed_path_relative() {
     let mut driver = WorldDriver::new(&w());
     let notes = directory(&mut driver, "notes");
-    let mut cx = Context::new(&mut driver);
+    let mut cx = Context::new(&mut driver, header());
     let read = grant(&mut cx, HostInterface::DirReadText, notes);
     assert_eq!(
         at(&mut cx, HostOp::FsReadText, read, &["a.txt"]),
@@ -1218,7 +1221,7 @@ fn progress_is_measured() {
         inner: &mut driver,
         log: Rc::clone(&log),
     };
-    let mut cx = Context::new(&mut recording);
+    let mut cx = Context::new(&mut recording, header());
     let read = grant(&mut cx, HostInterface::DirReadText, notes);
     let writer = grant(&mut cx, HostInterface::DirWriteText, notes);
     assert_eq!(
@@ -1291,7 +1294,7 @@ fn atk_driver_error_not_fault() {
         inner: &mut driver,
         log: Rc::clone(&log),
     };
-    let mut cx = Context::new(&mut recording);
+    let mut cx = Context::new(&mut recording, header());
     let read = grant(&mut cx, HostInterface::DirReadText, ids.notes);
     let list = grant(&mut cx, HostInterface::DirList, ids.notes);
     let writer = grant(&mut cx, HostInterface::DirWriteText, ids.notes);
@@ -1426,7 +1429,7 @@ fn atk_no_redispatch_on_error() {
         inner: &mut driver,
         log: Rc::clone(&log),
     };
-    let mut cx = Context::new(&mut recording);
+    let mut cx = Context::new(&mut recording, header());
     let read = grant(&mut cx, HostInterface::DirReadText, notes);
     assert_eq!(
         at(&mut cx, HostOp::FsReadText, read, &["no.txt"]),
@@ -1444,7 +1447,7 @@ fn gate_before_content() {
         inner: &mut driver,
         log: Rc::clone(&log),
     };
-    let mut cx = Context::new(&mut recording);
+    let mut cx = Context::new(&mut recording, header());
     let read = root_grant(
         &mut cx,
         HostInterface::DirReadBytes,
