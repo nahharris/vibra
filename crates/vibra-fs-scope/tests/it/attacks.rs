@@ -1,32 +1,26 @@
-//! The attack cases of the effects chapter. Each asserts the specific typed
-//! denial and that the outside target was not read, created, or modified:
-//! the outside tree is snapshotted before and compared after, and where the
-//! secret file is the target it is held open with no sharing during the
-//! attack, so a denial cannot come after an open of its data.
+//! The attack and negative cases. Each asserts the specific typed result and
+//! reads the directories with `std::fs` afterwards: the outside tree, and `r`
+//! where the row says it is unchanged, are compared with a snapshot taken
+//! before. Where the secret file is the target it is held open with no
+//! sharing during the attack, so a denial cannot come after an open of its
+//! data.
 
 use std::fs;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread;
 
-use vibra_fs_scope::{ScopeError, ScopedDir};
+use vibra_fs_scope::{ScopeError, ScopedDir, check_name};
 
 use crate::{
-    SECRET, Sandbox, assert_denied, is_already_exists, is_denied_name,
-    is_denied_reparse, junction, not_run, short_name, symlink_dir, symlink_file,
+    SECRET, Sandbox, assert_denied, create, is_already_exists, is_denied_name,
+    is_denied_reparse, is_not_a_directory, is_not_a_file, is_not_found, junction,
+    not_run, read_opened, short_name, symlink_dir, symlink_file,
 };
 
-/// Runs every operation on `names` and asserts `expected` for each, with the
-/// secret locked and the outside tree unchanged.
-fn deny_all(
-    sandbox: &Sandbox,
-    names: &[&str],
-    expected: fn(&ScopeError) -> bool,
-    case: &str,
-) {
-    deny(sandbox, names, expected, expected, case);
-}
-
-/// As [`deny_all`], with the denial of a read and a replace in `opened` and
-/// that of a create in `created`. A create whose leaf is an existing link
-/// finds an existing entry, so it is `alreadyExists`, not `deniedReparse`.
+/// Runs read, replace, and create on `names` and asserts `opened` for a read
+/// and a replace and `created` for a create, with the secret locked and the
+/// outside tree unchanged.
 fn deny(
     sandbox: &Sandbox,
     names: &[&str],
@@ -43,7 +37,7 @@ fn deny(
         opened,
         &format!("{case}, replace"),
     );
-    assert_denied(root.create_new(names), created, &format!("{case}, create"));
+    assert_denied(create(&root, names), created, &format!("{case}, create"));
     drop(lock);
     assert_eq!(
         sandbox.outside_snapshot(),
@@ -53,149 +47,536 @@ fn deny(
     assert_eq!(fs::read(sandbox.secret()).unwrap(), SECRET);
 }
 
-// Links and reparse points.
+/// As [`deny`], with one expected denial for every operation.
+fn deny_all(
+    sandbox: &Sandbox,
+    names: &[&str],
+    expected: fn(&ScopeError) -> bool,
+    case: &str,
+) {
+    deny(sandbox, names, expected, expected, case);
+}
 
+// Row `ATK-fs-file-symlink`.
 #[test]
-fn file_symlink_to_outside_is_denied() {
+fn atk_fs_file_symlink() {
     let sandbox = Sandbox::new("filelink");
     if let Err(reason) =
         symlink_file(&sandbox.inside().join("link.txt"), &sandbox.secret())
     {
-        return not_run("file symlink to outside", &reason);
+        return not_run("ATK-fs-file-symlink", &reason);
     }
+    // A create of the link's own name finds an existing entry.
     deny(
         &sandbox,
         &["link.txt"],
         is_denied_reparse,
         is_already_exists,
-        "file symlink",
+        "ATK-fs-file-symlink",
     );
 }
 
+// Row "stat a link".
 #[test]
-fn directory_symlink_to_outside_is_denied() {
-    let sandbox = Sandbox::new("dirlink");
-    if let Err(reason) = symlink_dir(&sandbox.inside().join("link"), &sandbox.outside())
+fn stat_a_link() {
+    let sandbox = Sandbox::new("statlink");
+    if let Err(reason) =
+        symlink_file(&sandbox.inside().join("link.txt"), &sandbox.secret())
     {
-        return not_run("directory symlink to outside", &reason);
+        return not_run("stat a link", &reason);
+    }
+    let root = sandbox.root();
+    let lock = sandbox.lock_secret();
+    assert_denied(root.stat(&["link.txt"]), is_denied_reparse, "stat a link");
+    drop(lock);
+}
+
+// Row `ATK-fs-junction`.
+#[test]
+fn atk_fs_junction() {
+    let sandbox = Sandbox::new("junction");
+    fs::write(sandbox.outside().join("a.txt"), SECRET).unwrap();
+    if let Err(reason) = junction(&sandbox.inside().join("j"), &sandbox.outside()) {
+        return not_run("ATK-fs-junction", &reason);
     }
     deny_all(
         &sandbox,
-        &["link", "secret.txt"],
+        &["j", "a.txt"],
         is_denied_reparse,
-        "directory symlink",
+        "ATK-fs-junction",
     );
     deny_all(
         &sandbox,
-        &["link", "new.txt"],
+        &["j", "secret.txt"],
         is_denied_reparse,
-        "directory symlink, new name",
+        "ATK-fs-junction, the locked secret",
     );
     deny(
         &sandbox,
-        &["link"],
+        &["j"],
+        is_denied_reparse,
+        is_already_exists,
+        "ATK-fs-junction as the leaf",
+    );
+}
+
+// Row "list through a junction".
+#[test]
+fn list_through_a_junction() {
+    let sandbox = Sandbox::new("listjunction");
+    if let Err(reason) = junction(&sandbox.inside().join("j"), &sandbox.outside()) {
+        return not_run("list through a junction", &reason);
+    }
+    let root = sandbox.root();
+    assert_denied(
+        root.list(&["j"]),
+        is_denied_reparse,
+        "list through a junction",
+    );
+    assert_denied(root.stat(&["j"]), is_denied_reparse, "stat of a junction");
+}
+
+// Row "create below a link".
+#[test]
+fn create_below_a_link() {
+    let sandbox = Sandbox::new("createlink");
+    if let Err(reason) = junction(&sandbox.inside().join("j"), &sandbox.outside()) {
+        return not_run("create below a link", &reason);
+    }
+    let before = sandbox.outside_snapshot();
+    let root = sandbox.root();
+    assert_denied(
+        root.open_parent(&["j"]),
+        is_denied_reparse,
+        "create below a link",
+    );
+    assert_eq!(
+        sandbox.outside_snapshot(),
+        before,
+        "the outside is unchanged"
+    );
+}
+
+// Row "intermediate symlink".
+#[test]
+fn intermediate_symlink() {
+    let sandbox = Sandbox::new("midlink");
+    fs::write(sandbox.outside().join("a.txt"), SECRET).unwrap();
+    if let Err(reason) = symlink_dir(&sandbox.inside().join("d"), &sandbox.outside()) {
+        return not_run("intermediate symlink", &reason);
+    }
+    deny_all(
+        &sandbox,
+        &["d", "a.txt"],
+        is_denied_reparse,
+        "intermediate symlink",
+    );
+    deny(
+        &sandbox,
+        &["d"],
         is_denied_reparse,
         is_already_exists,
         "directory symlink as the leaf",
     );
 }
 
+// Row `ATK-fs-swapped-junction`. A second thread swaps `r/d` with a junction
+// to the outside directory, by renames, while the reads run. A read can also
+// fall in the moment between two renames, when no `r/d` exists: that is
+// `NotFound`.
 #[test]
-fn junction_to_outside_is_denied() {
-    let sandbox = Sandbox::new("junction");
-    if let Err(reason) = junction(&sandbox.inside().join("link"), &sandbox.outside()) {
-        return not_run("junction to outside", &reason);
-    }
-    deny_all(
-        &sandbox,
-        &["link", "secret.txt"],
-        is_denied_reparse,
-        "junction",
-    );
-    deny_all(
-        &sandbox,
-        &["link", "new.txt"],
-        is_denied_reparse,
-        "junction, new name",
-    );
-    deny(
-        &sandbox,
-        &["link"],
-        is_denied_reparse,
-        is_already_exists,
-        "junction as the leaf",
-    );
-}
-
-#[test]
-fn symlink_as_an_intermediate_component_is_denied() {
-    let sandbox = Sandbox::new("midlink");
-    fs::create_dir(sandbox.inside().join("real")).unwrap();
-    if let Err(reason) =
-        symlink_dir(&sandbox.inside().join("real").join("hop"), sandbox.base())
-    {
-        return not_run("symlink as an intermediate component", &reason);
-    }
-    deny_all(
-        &sandbox,
-        &["real", "hop", "outside", "secret.txt"],
-        is_denied_reparse,
-        "intermediate symlink",
-    );
-}
-
-#[test]
-fn a_directory_swapped_for_a_junction_between_opens_is_denied() {
+fn atk_fs_swapped_junction() {
     let sandbox = Sandbox::new("swap");
-    let data = sandbox.inside().join("data");
-    fs::create_dir(&data).unwrap();
-    fs::write(data.join("secret.txt"), b"inside data").unwrap();
+    let inside = sandbox.inside();
+    fs::create_dir(inside.join("d")).unwrap();
+    fs::write(inside.join("d").join("a.txt"), b"inside").unwrap();
+    fs::write(sandbox.outside().join("a.txt"), SECRET).unwrap();
+    if let Err(reason) = junction(&inside.join("j"), &sandbox.outside()) {
+        return not_run("ATK-fs-swapped-junction", &reason);
+    }
     let root = sandbox.root();
-    let mut first = root.open_read(&["data", "secret.txt"]).unwrap();
-    assert_eq!(first.read_all().unwrap(), b"inside data");
-    drop(first);
+    let stop = Arc::new(AtomicBool::new(false));
+    let swapper = {
+        let stop = Arc::clone(&stop);
+        let inside = inside.clone();
+        thread::spawn(move || {
+            let rename = |from: &str, to: &str| {
+                while fs::rename(inside.join(from), inside.join(to)).is_err() {
+                    if stop.load(Ordering::Relaxed) {
+                        return false;
+                    }
+                }
+                true
+            };
+            let mut swaps = 0_u64;
+            while !stop.load(Ordering::Relaxed) {
+                let done = rename("d", "real")
+                    && rename("j", "d")
+                    && rename("d", "j")
+                    && rename("real", "d");
+                if done {
+                    swaps += 1;
+                }
+            }
+            swaps
+        })
+    };
+    let (mut inside_reads, mut denied, mut missing) = (0_u32, 0_u32, 0_u32);
+    for _ in 0..10_000 {
+        match root.open_read(&["d", "a.txt"]) {
+            Ok(mut file) => {
+                let bytes = read_opened(&mut file);
+                assert_ne!(bytes, SECRET, "a read returned the outside content");
+                assert_eq!(bytes, b"inside");
+                inside_reads += 1;
+            }
+            Err(ScopeError::DeniedReparse) => denied += 1,
+            Err(ScopeError::NotFound) => missing += 1,
+            Err(other) => panic!("ATK-fs-swapped-junction: unexpected {other:?}"),
+        }
+    }
+    stop.store(true, Ordering::Relaxed);
+    let swaps = swapper.join().unwrap();
+    eprintln!(
+        "ATK-fs-swapped-junction: {inside_reads} inside, {denied} deniedReparse, \
+         {missing} notFound, {swaps} swaps"
+    );
+    assert!(
+        denied > 0 && inside_reads > 0,
+        "the race was not exercised: {inside_reads} inside, {denied} denied"
+    );
+}
 
-    fs::rename(&data, sandbox.inside().join("data-old")).unwrap();
-    if let Err(reason) = junction(&data, &sandbox.outside()) {
-        return not_run("directory swapped for a junction", &reason);
+// Row `ATK-fs-case-alias`: the alias opens, and the caller sees the real name.
+#[test]
+fn atk_fs_case_alias() {
+    let sandbox = Sandbox::new("case");
+    fs::write(sandbox.inside().join("Notes.TXT"), b"notes").unwrap();
+    fs::create_dir(sandbox.inside().join("Sub")).unwrap();
+    fs::write(sandbox.inside().join("Sub").join("x.txt"), b"x").unwrap();
+    let root = sandbox.root();
+    let file = root.open_read(&["notes.txt"]).unwrap();
+    assert_eq!(file.real_names(), ["Notes.TXT"]);
+    drop(file);
+    let replace = root.open_for_replace(&["NOTES.txt"]).unwrap();
+    assert_eq!(replace.real_names(), ["Notes.TXT"]);
+    drop(replace);
+    assert_eq!(
+        root.open_read(&["SUB", "X.TXT"]).unwrap().real_names(),
+        ["Sub", "x.txt"]
+    );
+    assert_eq!(root.stat(&["sub"]).unwrap().real_names, ["Sub"]);
+    assert_eq!(root.list(&["sUB"]).unwrap().real_names(), ["Sub"]);
+    assert_eq!(
+        fs::read(sandbox.inside().join("Notes.TXT")).unwrap(),
+        b"notes"
+    );
+}
+
+// Row `ATK-fs-short-name`: the 8.3 name opens, and the caller sees the long
+// name.
+#[test]
+fn atk_fs_short_name() {
+    let sandbox = Sandbox::new("shortname");
+    let long_dir = sandbox.inside().join("LongDirectoryName");
+    fs::create_dir(&long_dir).unwrap();
+    let long = sandbox.inside().join("longfilename.text");
+    fs::write(&long, b"long name").unwrap();
+    let short_file = match short_name(&long) {
+        Ok(short) => short,
+        Err(reason) => return not_run("ATK-fs-short-name", &reason),
+    };
+    let short_dir = match short_name(&long_dir) {
+        Ok(short) => short,
+        Err(reason) => return not_run("ATK-fs-short-name", &reason),
+    };
+    assert_ne!(short_file, "longfilename.text");
+    let root = sandbox.root();
+    let mut file = root.open_read(&[&short_file]).unwrap();
+    assert_eq!(file.real_names(), ["longfilename.text"]);
+    assert_eq!(read_opened(&mut file), b"long name");
+    drop(file);
+    let parent = root.open_parent(&[&short_dir]).unwrap();
+    assert_eq!(parent.real_names(), ["LongDirectoryName"]);
+    drop(parent);
+    // A create over the short name finds the long-named file.
+    let before = sandbox.inside_snapshot();
+    assert_denied(
+        create(&root, &[&short_file]),
+        is_already_exists,
+        "create over a short name",
+    );
+    assert_eq!(sandbox.inside_snapshot(), before);
+}
+
+// Row `ATK-fs-replace-no-truncate`.
+#[test]
+fn atk_fs_replace_no_truncate() {
+    let sandbox = Sandbox::new("notruncate");
+    let path = sandbox.inside().join("a.txt");
+    fs::write(&path, b"hello").unwrap();
+    let before = sandbox.inside_snapshot();
+    let root = sandbox.root();
+    let file = root.open_for_replace(&["a.txt"]).unwrap();
+    // A second, independent handle still reads the old bytes while the
+    // replace handle is open.
+    assert_eq!(fs::read(&path).unwrap(), b"hello");
+    drop(file);
+    assert_eq!(fs::read(&path).unwrap(), b"hello");
+    assert_eq!(sandbox.inside_snapshot(), before, "r is unchanged");
+}
+
+// Row `ATK-fs-create-over-alias`.
+#[test]
+fn atk_fs_create_over_alias() {
+    let sandbox = Sandbox::new("createalias");
+    fs::write(sandbox.inside().join("Notes.txt"), b"keep me").unwrap();
+    let before = sandbox.inside_snapshot();
+    let root = sandbox.root();
+    let parent = root.open_parent(&[]).unwrap();
+    assert_denied(
+        parent.create_new("NOTES.TXT"),
+        is_already_exists,
+        "ATK-fs-create-over-alias",
+    );
+    assert_denied(
+        create(&root, &["Notes.txt"]),
+        is_already_exists,
+        "create over the same name",
+    );
+    assert_eq!(sandbox.inside_snapshot(), before, "r is unchanged");
+}
+
+// Row `ATK-fs-create-parent-swapped`.
+#[test]
+fn atk_fs_create_parent_swapped() {
+    let sandbox = Sandbox::new("parentswap");
+    let inside = sandbox.inside();
+    fs::create_dir(inside.join("d")).unwrap();
+    let root = sandbox.root();
+    let parent = root.open_parent(&["d"]).unwrap();
+    assert_eq!(parent.real_names(), ["d"]);
+    fs::rename(inside.join("d"), inside.join("e")).unwrap();
+    if let Err(reason) = junction(&inside.join("d"), &sandbox.outside()) {
+        return not_run("ATK-fs-create-parent-swapped", &reason);
     }
     let before = sandbox.outside_snapshot();
-    let lock = sandbox.lock_secret();
+    let file = parent.create_new("n.txt").unwrap();
+    drop(file);
+    assert!(
+        inside.join("e").join("n.txt").is_file(),
+        "the file is r/e/n.txt"
+    );
+    assert_eq!(
+        sandbox.outside_snapshot(),
+        before,
+        "the outside is unchanged"
+    );
+}
+
+// Row "create with a refused leaf".
+#[test]
+fn create_with_a_refused_leaf() {
+    let sandbox = Sandbox::new("refusedleaf");
+    let before = sandbox.inside_snapshot();
+    let root = sandbox.root();
+    let parent = root.open_parent(&[]).unwrap();
+    assert_denied(parent.create_new("nul.txt"), is_denied_name, "nul.txt");
+    assert_eq!(sandbox.inside_snapshot(), before, "r is unchanged");
+}
+
+// Row `ATK-fs-root-renamed`.
+#[test]
+fn atk_fs_root_renamed() {
+    let sandbox = Sandbox::new("rename");
+    fs::write(sandbox.inside().join("a.txt"), b"held").unwrap();
+    let root = sandbox.root();
+
+    let moved = sandbox.base().join("moved");
+    fs::rename(sandbox.inside(), &moved).unwrap();
+    fs::create_dir(sandbox.inside()).unwrap();
+    fs::write(sandbox.inside().join("a.txt"), b"impostor").unwrap();
+
+    let mut file = root.open_read(&["a.txt"]).unwrap();
+    assert_eq!(read_opened(&mut file), b"held");
+    drop(file);
+    drop(create(&root, &["after.txt"]).unwrap());
+    assert!(moved.join("after.txt").exists());
+    assert!(!sandbox.inside().join("after.txt").exists());
+}
+
+// Row "list a file".
+#[test]
+fn list_a_file() {
+    let sandbox = Sandbox::new("listfile");
+    fs::write(sandbox.inside().join("a.txt"), b"hello").unwrap();
+    let root = sandbox.root();
+    assert_denied(root.list(&["a.txt"]), is_not_a_directory, "list a file");
     assert_denied(
-        root.open_read(&["data", "secret.txt"]),
-        is_denied_reparse,
-        "swapped junction, read through the same held root",
+        root.open_read(&["a.txt", "b.txt"]),
+        is_not_a_directory,
+        "a file as a parent",
     );
     assert_denied(
-        root.open_for_replace(&["data", "secret.txt"]),
-        is_denied_reparse,
-        "swapped junction, replace",
+        root.open_parent(&["a.txt"]),
+        is_not_a_directory,
+        "a file as a parent of a create",
+    );
+}
+
+// Row "read a directory".
+#[test]
+fn read_a_directory() {
+    let sandbox = Sandbox::new("readdir");
+    fs::create_dir(sandbox.inside().join("d")).unwrap();
+    let root = sandbox.root();
+    assert_denied(root.open_read(&["d"]), is_not_a_file, "read a directory");
+    assert_denied(
+        root.open_for_replace(&["d"]),
+        is_not_a_file,
+        "replace a directory",
     );
     assert_denied(
-        root.create_new(&["data", "new.txt"]),
-        is_denied_reparse,
-        "swapped junction, create",
+        create(&root, &["d"]),
+        is_already_exists,
+        "create over a directory",
     );
-    drop(lock);
-    assert_eq!(sandbox.outside_snapshot(), before);
-    assert_eq!(fs::read(sandbox.secret()).unwrap(), SECRET);
+}
+
+// Row "missing parent".
+#[test]
+fn missing_parent() {
+    let sandbox = Sandbox::new("missing");
+    let root = sandbox.root();
+    assert_denied(
+        root.open_read(&["no", "a.txt"]),
+        is_not_found,
+        "missing parent",
+    );
+    assert_denied(root.open_read(&["a.txt"]), is_not_found, "missing file");
+    assert_denied(
+        root.open_for_replace(&["no", "a.txt"]),
+        is_not_found,
+        "missing parent, replace",
+    );
+    assert_denied(
+        root.open_parent(&["no"]),
+        is_not_found,
+        "missing parent, create",
+    );
+    assert_denied(root.list(&["no"]), is_not_found, "missing directory, list");
+    assert_denied(root.stat(&["no"]), is_not_found, "missing entry, stat");
+    assert_eq!(fs::read_dir(sandbox.inside()).unwrap().count(), 0);
+}
+
+// Row "each reserved stem".
+#[test]
+fn each_reserved_stem() {
+    for name in [
+        "nul",
+        "NUL.txt",
+        "con .log",
+        "COM0",
+        "LPT9.x",
+        "CONIN$",
+        "COM\u{b9}",
+        "aux.tar.gz",
+    ] {
+        assert_denied(check_name(name), is_denied_name, name);
+    }
+}
+
+// Row "a stem in simple uppercase": U+0131 maps to `I`, so the stem is
+// `CONIN$`. Refused by the name check, and nothing is created.
+#[test]
+fn a_stem_in_simple_uppercase() {
+    let sandbox = Sandbox::new("dotlessi");
+    let before = sandbox.inside_snapshot();
+    let root = sandbox.root();
+    for name in ["CON\u{131}N$", "con\u{131}n$.txt"] {
+        assert_denied(check_name(name), is_denied_name, name);
+        let parent = root.open_parent(&[]).unwrap();
+        assert_denied(parent.create_new(name), is_denied_name, name);
+        assert_denied(root.open_read(&[name]), is_denied_name, name);
+    }
+    assert_eq!(sandbox.inside_snapshot(), before, "r is unchanged");
+}
+
+// Rows "read the empty path" and "replace the empty path": the empty path
+// names the root, a directory, where a file is required.
+#[test]
+fn read_the_empty_path() {
+    let sandbox = Sandbox::new("emptyread");
+    let root = sandbox.root();
+    assert_denied(root.open_read(&[]), is_not_a_file, "read the empty path");
 }
 
 #[test]
-fn a_root_that_is_a_junction_is_denied() {
-    let sandbox = Sandbox::new("rootjunction");
-    let link = sandbox.base().join("rootlink");
-    if let Err(reason) = junction(&link, &sandbox.outside()) {
-        return not_run("a root that is a junction", &reason);
-    }
+fn replace_the_empty_path() {
+    let sandbox = Sandbox::new("emptyreplace");
+    fs::write(sandbox.inside().join("a.txt"), b"hello").unwrap();
+    let before = sandbox.inside_snapshot();
+    let root = sandbox.root();
     assert_denied(
-        ScopedDir::open_root(&link),
-        is_denied_reparse,
-        "root junction",
+        root.open_for_replace(&[]),
+        is_not_a_file,
+        "replace the empty path",
+    );
+    assert_eq!(sandbox.inside_snapshot(), before, "r is unchanged");
+}
+
+// Row "create at the empty path": there is no leaf, so no name to create.
+#[test]
+fn create_at_the_empty_path() {
+    let sandbox = Sandbox::new("emptycreate");
+    let before = sandbox.inside_snapshot();
+    let root = sandbox.root();
+    let parent = root.open_parent(&[]).unwrap();
+    assert_denied(
+        parent.create_new(""),
+        is_denied_name,
+        "create at the empty path",
+    );
+    assert_eq!(sandbox.inside_snapshot(), before, "r is unchanged");
+}
+
+// Row "name profile".
+#[test]
+fn name_profile() {
+    for name in [".", "..", "a/b", "a\\b", "a:b", "a.", "a ", "a\u{7}", ""] {
+        assert_denied(check_name(name), is_denied_name, &format!("{name:?}"));
+    }
+}
+
+// Row "alternate stream".
+#[test]
+fn alternate_stream() {
+    let sandbox = Sandbox::new("datastream");
+    fs::write(sandbox.inside().join("a.txt"), b"hello").unwrap();
+    let root = sandbox.root();
+    assert_denied(check_name("a.txt::$DATA"), is_denied_name, "check_name");
+    assert_denied(
+        root.open_read(&["a.txt::$DATA"]),
+        is_denied_name,
+        "alternate stream",
     );
 }
 
-// Path shapes that are not one plain name per component.
+// Every operation applies the profile to every name before anything is
+// opened.
+#[test]
+fn every_operation_checks_every_name() {
+    let sandbox = Sandbox::new("everyname");
+    fs::create_dir(sandbox.inside().join("d")).unwrap();
+    let root = sandbox.root();
+    for names in [&["d", ".."][..], &["..", "d"][..], &["d", "nul"][..]] {
+        assert_denied(root.list(names), is_denied_name, "list");
+        assert_denied(root.stat(names), is_denied_name, "stat");
+        assert_denied(root.open_parent(names), is_denied_name, "open_parent");
+    }
+}
+
+// The feasibility record's path-shape attacks, kept as regressions.
 
 #[test]
 fn dot_dot_escape_is_denied() {
@@ -219,7 +600,6 @@ fn dot_dot_escape_is_denied() {
         is_denied_name,
         "empty component",
     );
-    deny_all(&sandbox, &[], is_denied_name, "empty request");
 }
 
 #[test]
@@ -317,87 +697,9 @@ fn a_separator_inside_a_component_is_denied() {
     );
 }
 
-// Aliases of a real name.
-
 #[test]
-fn a_case_different_name_is_denied() {
-    let sandbox = Sandbox::new("case");
-    let sub = sandbox.inside().join("sub");
-    fs::create_dir(&sub).unwrap();
-    fs::write(sub.join("notes.txt"), b"inside notes").unwrap();
-    let root = sandbox.root();
-    for names in [
-        &["sub", "NOTES.TXT"][..],
-        &["sub", "Notes.txt"][..],
-        &["SUB", "notes.txt"][..],
-    ] {
-        assert_denied(root.open_read(names), is_denied_name, "case alias, read");
-        assert_denied(
-            root.open_for_replace(names),
-            is_denied_name,
-            "case alias, replace",
-        );
-        assert_denied(
-            root.create_new(names),
-            if names[0] == "SUB" {
-                is_denied_name
-            } else {
-                is_already_exists
-            },
-            "case alias, create",
-        );
-    }
-    assert_eq!(fs::read(sub.join("notes.txt")).unwrap(), b"inside notes");
-    assert_eq!(
-        fs::read_dir(&sub).unwrap().count(),
-        1,
-        "nothing was created"
-    );
-}
-
-#[test]
-fn an_eight_dot_three_short_name_is_denied() {
-    let sandbox = Sandbox::new("shortname");
-    let long_dir = sandbox.inside().join("LongDirectoryName");
-    fs::create_dir(&long_dir).unwrap();
-    let long = long_dir.join("LongFileNameExample.txt");
-    fs::write(&long, b"long name").unwrap();
-    let short_file = match short_name(&long) {
-        Ok(short) => short,
-        Err(reason) => return not_run("8.3 short name", &reason),
-    };
-    let short_dir = match short_name(&long_dir) {
-        Ok(short) => short,
-        Err(reason) => return not_run("8.3 short name", &reason),
-    };
-    assert_ne!(short_file, "LongFileNameExample.txt");
-    // The short name really opens the file through the ordinary path rules.
-    assert_eq!(fs::read(long_dir.join(&short_file)).unwrap(), b"long name");
-
-    let root = sandbox.root();
-    for names in [
-        [short_dir.as_str(), "LongFileNameExample.txt"],
-        ["LongDirectoryName", short_file.as_str()],
-    ] {
-        assert_denied(root.open_read(&names), is_denied_name, "short name, read");
-        assert_denied(
-            root.open_for_replace(&names),
-            is_denied_name,
-            "short name, replace",
-        );
-    }
-    assert_denied(
-        root.create_new(&["LongDirectoryName", &short_file]),
-        is_already_exists,
-        "short name, create",
-    );
-    assert_eq!(fs::read(&long).unwrap(), b"long name");
-    assert_eq!(fs::read_dir(&long_dir).unwrap().count(), 1);
-}
-
-#[test]
-fn a_trailing_dot_is_denied() {
-    let sandbox = Sandbox::new("trailingdot");
+fn a_trailing_dot_or_space_is_denied() {
+    let sandbox = Sandbox::new("trailing");
     fs::write(sandbox.inside().join("notes.txt"), b"x").unwrap();
     deny_all(&sandbox, &["notes.txt."], is_denied_name, "trailing dot");
     deny_all(
@@ -406,23 +708,8 @@ fn a_trailing_dot_is_denied() {
         is_denied_name,
         "trailing dot, directory",
     );
-    assert_eq!(fs::read_dir(sandbox.inside()).unwrap().count(), 1);
-}
-
-#[test]
-fn a_trailing_space_is_denied() {
-    let sandbox = Sandbox::new("trailingspace");
-    fs::write(sandbox.inside().join("notes.txt"), b"x").unwrap();
     deny_all(&sandbox, &["notes.txt "], is_denied_name, "trailing space");
     assert_eq!(fs::read_dir(sandbox.inside()).unwrap().count(), 1);
-}
-
-#[test]
-fn the_default_data_stream_syntax_is_denied() {
-    let sandbox = Sandbox::new("datastream");
-    fs::write(sandbox.inside().join("file.txt"), b"x").unwrap();
-    deny_all(&sandbox, &["file.txt::$DATA"], is_denied_name, "::$DATA");
-    assert_eq!(fs::read(sandbox.inside().join("file.txt")).unwrap(), b"x");
 }
 
 #[test]
@@ -441,58 +728,26 @@ fn a_named_stream_is_denied() {
     assert_eq!(fs::read(&file).unwrap(), b"x");
 }
 
-fn deny_device(case: &str, device: &str) {
-    let sandbox = Sandbox::new(case);
-    deny_all(&sandbox, &[device], is_denied_name, device);
-    deny_all(&sandbox, &[device, "x.txt"], is_denied_name, device);
-    assert_eq!(
-        fs::read_dir(sandbox.inside()).unwrap().count(),
-        0,
-        "{device}: nothing was created inside the root"
-    );
-}
-
 #[test]
-fn the_nul_device_is_denied() {
-    deny_device("nul", "NUL");
-    deny_device("nullower", "nul");
-}
-
-#[test]
-fn the_con_device_is_denied() {
-    deny_device("con", "CON");
-}
-
-#[test]
-fn the_com1_device_is_denied() {
-    deny_device("com1", "COM1");
-}
-
-#[test]
-fn a_device_name_with_an_extension_is_denied() {
-    deny_device("auxtxt", "aux.txt");
-}
-
-// Creation.
-
-#[test]
-fn create_over_an_existing_file_is_refused() {
-    let sandbox = Sandbox::new("createover");
-    let path = sandbox.inside().join("notes.txt");
-    fs::write(&path, b"keep me").unwrap();
-    let root = sandbox.root();
-    assert_denied(
-        root.create_new(&["notes.txt"]),
-        is_already_exists,
-        "create over",
-    );
-    assert_denied(
-        root.create_new(&["NOTES.txt"]),
-        is_already_exists,
-        "create over a case alias",
-    );
-    assert_eq!(fs::read(&path).unwrap(), b"keep me");
-    assert_eq!(fs::read_dir(sandbox.inside()).unwrap().count(), 1);
+fn a_device_name_is_denied_and_nothing_is_created() {
+    for device in [
+        "NUL",
+        "nul",
+        "CON",
+        "COM1",
+        "aux.txt",
+        "CONOUT$",
+        "lpt\u{b2}",
+    ] {
+        let sandbox = Sandbox::new("device");
+        deny_all(&sandbox, &[device], is_denied_name, device);
+        deny_all(&sandbox, &[device, "x.txt"], is_denied_name, device);
+        assert_eq!(
+            fs::read_dir(sandbox.inside()).unwrap().count(),
+            0,
+            "{device}: nothing was created inside the root"
+        );
+    }
 }
 
 #[test]
@@ -512,12 +767,12 @@ fn create_through_a_dangling_symlink_is_refused() {
     let before = sandbox.outside_snapshot();
     let root = sandbox.root();
     assert_denied(
-        root.create_new(&["dangling.txt"]),
+        create(&root, &["dangling.txt"]),
         is_already_exists,
         "create on a dangling file symlink",
     );
     assert_denied(
-        root.create_new(&["danglingdir", "x.txt"]),
+        create(&root, &["danglingdir", "x.txt"]),
         is_denied_reparse,
         "create below a dangling directory symlink",
     );
@@ -531,41 +786,45 @@ fn create_through_a_dangling_symlink_is_refused() {
     assert_eq!(sandbox.outside_snapshot(), before);
 }
 
-// Hard links: recorded, not denied. The specification states that a policy
-// does not establish where data came from; the adapter cannot tell an
-// ordinary file from one of several names of the same file by name alone.
-
 #[test]
-fn a_hard_link_to_an_outside_file_is_followed_as_the_specification_states() {
+fn a_root_that_is_a_junction_is_denied() {
+    let sandbox = Sandbox::new("rootjunction");
+    let link = sandbox.base().join("rootlink");
+    if let Err(reason) = junction(&link, &sandbox.outside()) {
+        return not_run("a root that is a junction", &reason);
+    }
+    assert_denied(
+        ScopedDir::open_root(&link),
+        is_denied_reparse,
+        "root junction",
+    );
+}
+
+// A hard link to an outside file is an ordinary entry: it reads, and its
+// link count tells the caller that a replace would be seen outside.
+#[test]
+fn a_hard_link_to_an_outside_file_reports_its_count() {
     let sandbox = Sandbox::new("hardlink");
     let alias = sandbox.inside().join("alias.txt");
     if let Err(error) = fs::hard_link(sandbox.secret(), &alias) {
         return not_run("hard link to an outside file", &error.to_string());
     }
     let root = sandbox.root();
-
-    // A read through the permitted name reads the shared data.
-    let mut read = root.open_read(&["alias.txt"]).expect("the hard link opens");
-    assert_eq!(read.read_all().unwrap(), SECRET);
+    let mut read = root.open_read(&["alias.txt"]).unwrap();
+    assert_eq!(read.links(), 2);
+    assert_eq!(read_opened(&mut read), SECRET);
     drop(read);
-
-    // Create-new does not replace it.
     assert_denied(
-        root.create_new(&["alias.txt"]),
+        create(&root, &["alias.txt"]),
         is_already_exists,
         "create over a hard link",
     );
-
-    // A replace through the permitted name changes the outside name's data.
-    let mut replace = root
-        .open_for_replace(&["alias.txt"])
-        .expect("the hard link opens for replace");
+    let replace = root.open_for_replace(&["alias.txt"]).unwrap();
+    assert_eq!(replace.links(), 2);
+    drop(replace);
     assert_eq!(
         fs::read(sandbox.secret()).unwrap(),
         SECRET,
         "no change at open"
     );
-    replace.replace_contents(b"written inside").unwrap();
-    drop(replace);
-    assert_eq!(fs::read(sandbox.secret()).unwrap(), b"written inside");
 }

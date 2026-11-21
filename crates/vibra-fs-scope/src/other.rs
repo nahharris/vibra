@@ -1,13 +1,27 @@
-//! Every platform other than Windows: each operation is unsupported. A request
-//! with a name that is not plain is still denied as such.
+//! Every platform other than Windows: no root can be acquired, so
+//! [`ScopedDir::open_root`] returns [`ScopeError::Unsupported`] and no other
+//! operation can be reached. The signatures are those of the Windows adapter.
 
+use std::marker::PhantomData;
 use std::path::Path;
 
-use crate::{ScopeError, ScopedFile, name};
+use crate::{Metadata, ScopeError, ScopedFile, name};
 
 /// A held root directory. On this platform none can be acquired.
 #[derive(Debug)]
 pub struct ScopedDir {
+    _unconstructible: (),
+}
+
+/// A directory held for one creation. On this platform none exists.
+#[derive(Debug)]
+pub struct ScopedParent<'r> {
+    _unconstructible: PhantomData<&'r ScopedDir>,
+}
+
+/// A directory opened for listing. On this platform none exists.
+#[derive(Debug)]
+pub struct ScopedListing {
     _unconstructible: (),
 }
 
@@ -19,19 +33,70 @@ impl ScopedDir {
 
     /// Returns [`ScopeError::DeniedName`] or [`ScopeError::Unsupported`].
     pub fn open_read(&self, names: &[&str]) -> Result<ScopedFile, ScopeError> {
-        name::check_all(names)?;
-        Err(ScopeError::Unsupported)
-    }
-
-    /// Returns [`ScopeError::DeniedName`] or [`ScopeError::Unsupported`].
-    pub fn create_new(&self, names: &[&str]) -> Result<ScopedFile, ScopeError> {
-        name::check_all(names)?;
+        name::check_each(names)?;
         Err(ScopeError::Unsupported)
     }
 
     /// Returns [`ScopeError::DeniedName`] or [`ScopeError::Unsupported`].
     pub fn open_for_replace(&self, names: &[&str]) -> Result<ScopedFile, ScopeError> {
-        name::check_all(names)?;
+        name::check_each(names)?;
         Err(ScopeError::Unsupported)
+    }
+
+    /// Returns [`ScopeError::DeniedName`] or [`ScopeError::Unsupported`].
+    pub fn list(&self, names: &[&str]) -> Result<ScopedListing, ScopeError> {
+        name::check_each(names)?;
+        Err(ScopeError::Unsupported)
+    }
+
+    /// Returns [`ScopeError::DeniedName`] or [`ScopeError::Unsupported`].
+    pub fn stat(&self, names: &[&str]) -> Result<Metadata, ScopeError> {
+        name::check_each(names)?;
+        Err(ScopeError::Unsupported)
+    }
+
+    /// Returns [`ScopeError::DeniedName`] or [`ScopeError::Unsupported`].
+    pub fn open_parent(&self, names: &[&str]) -> Result<ScopedParent<'_>, ScopeError> {
+        name::check_each(names)?;
+        Err(ScopeError::Unsupported)
+    }
+}
+
+impl ScopedParent<'_> {
+    /// The directory's real names; none exist on this platform.
+    pub fn real_names(&self) -> &[String] {
+        &[]
+    }
+
+    /// Returns [`ScopeError::DeniedName`] or [`ScopeError::Unsupported`].
+    pub fn create_new(self, leaf: &str) -> Result<ScopedFile, ScopeError> {
+        name::check_name(leaf)?;
+        Err(ScopeError::Unsupported)
+    }
+}
+
+impl ScopedListing {
+    /// The directory's real names; none exist on this platform.
+    pub fn real_names(&self) -> &[String] {
+        &[]
+    }
+
+    /// Returns [`ScopeError::Unsupported`].
+    pub fn entries(self) -> Result<Vec<String>, ScopeError> {
+        Err(ScopeError::Unsupported)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn open_root_is_unsupported() {
+        let here = std::env::temp_dir();
+        assert!(matches!(
+            ScopedDir::open_root(&here),
+            Err(ScopeError::Unsupported)
+        ));
     }
 }

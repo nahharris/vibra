@@ -487,7 +487,8 @@ selects directories: `self` is `prefix` itself, `children` one name further,
 - **A file rule grants no listing.** Permission to read `.txt` files does
   not permit enumerating a directory.
 - **Paths.** A `RelativePath` (`@std.fs`) is a list of names, built by the
-  fallible constructor `RelativePath(names)`. A name is non-empty and is
+  fallible constructor `RelativePath(names)`. The empty path is valid and
+  names the directory the grant holds. A name is non-empty and is
   rejected if it is `.` or `..`, contains `/`, `\`, `:`, NUL, or a control
   character, ends in a dot or a space, or is a reserved device name.
   Absolute, drive-relative, UNC, and device paths cannot be represented.
@@ -499,11 +500,12 @@ selects directories: `self` is `prefix` itself, `children` one name further,
 - **Reserved device names.** Names are portable: the same closed set is
   rejected on every platform. A name's **stem** is the part before its
   first dot, with trailing spaces removed. A name is rejected when its
-  stem, compared without case, is one of `CON`, `PRN`, `AUX`, `NUL`,
-  `CONIN$`, `CONOUT$`, `COM0` through `COM9`, `LPT0` through `LPT9`, or
-  the superscript-digit forms `COM¹`, `COM²`, `COM³`, `LPT¹`, `LPT²`,
-  `LPT³`. So `nul`, `NUL.txt`, and `con .log` are rejected and `nul2` is
-  not.
+  stem, after each character is mapped to its Unicode simple uppercase, is
+  one of `CON`, `PRN`, `AUX`, `NUL`, `CONIN$`, `CONOUT$`, `COM0` through
+  `COM9`, `LPT0` through `LPT9`, or the superscript-digit forms `COM¹`,
+  `COM²`, `COM³`, `LPT¹`, `LPT²`, `LPT³`. So `nul`, `NUL.txt`, `con .log`,
+  and `conın$` (with U+0131, whose simple uppercase is `I`) are rejected
+  and `nul2` is not.
 - **Names.** A name test compares exact Unicode scalars, with no case
   folding and no normalization. `suffix(".txt")` accepts `notes.txt` and
   `.txt` and rejects `notes.TXT` and `notes.txt.exe`. An empty suffix is
