@@ -28,6 +28,7 @@ use super::contract::{
 };
 use super::cycle::initializer_cycles;
 use super::declare::{BoundData, Entity, FnData, Program, TypeKind};
+use super::effects;
 use super::expr::{
     BodyChecker, CallableScope, Checked, GuardViews, Layout, Reference, Target,
     fallible_construction,
@@ -38,14 +39,17 @@ use super::testing::{self, TestFaults};
 use super::{CheckResult, CheckedTest};
 
 /// The bodies of one pass.
-struct Pass {
-    functions: BTreeMap<usize, Checked>,
-    values: BTreeMap<usize, Checked>,
-    tests: BTreeMap<usize, Checked>,
+pub(crate) struct Pass {
+    /// The checked body of each function, by program index.
+    pub(crate) functions: BTreeMap<usize, Checked>,
+    /// The checked initializer of each module value, by program index.
+    pub(crate) values: BTreeMap<usize, Checked>,
+    /// The checked body of each test, by program index.
+    pub(crate) tests: BTreeMap<usize, Checked>,
     /// The diagnostics of each declaration.
-    faults: BTreeMap<Target, Vec<Diagnostic>>,
+    pub(crate) faults: BTreeMap<Target, Vec<Diagnostic>>,
     /// The references of each declaration.
-    references: BTreeMap<Target, Vec<Reference>>,
+    pub(crate) references: BTreeMap<Target, Vec<Reference>>,
     /// Every instantiation of a generic function inside a body.
     instantiations: Vec<Instantiation>,
     /// The diagnostics of the labelled defaults of abstract contract
@@ -877,7 +881,8 @@ pub(crate) fn check_program(
     layout.constants_known = true;
     layout.errors = first.errors.clone();
     drop(first);
-    let pass = check_bodies(&program, documents, &layout);
+    let mut pass = check_bodies(&program, documents, &layout);
+    effects::analysis::check_bodies(&program, &mut pass);
     let inputs = Inputs {
         program: &program,
         layout: &layout,
@@ -1372,12 +1377,18 @@ fn assemble(
                         exit_guard,
                         slot_count: checked.slot_count,
                         origin,
-                        context: BodyContext::Pure,
+                        context: effects::procs::lower(program, data),
                     }
                 }
-                None if stubs => {
-                    stub(at, &signature, data.binders.len(), record, origin, data)
-                }
+                None if stubs => stub(
+                    program,
+                    at,
+                    &signature,
+                    data.binders.len(),
+                    record,
+                    origin,
+                    data,
+                ),
                 None => {
                     return Err(format!(
                         "the function `{}` was not lowered",
@@ -1417,7 +1428,7 @@ fn assemble(
             exit_guard: None,
             slot_count,
             origin: origin(program, data.module, data.view.construct().span()),
-            context: BodyContext::Pure,
+            context: effects::procs::test_context(data),
         });
     }
     for (ty, at) in &anonymous {
@@ -1548,6 +1559,7 @@ fn lower_guard(
 /// arguments: the stand-in for a body that was not lowered, in a module set
 /// that compile-time evaluations run over and that never runs it.
 fn stub(
+    program: &Program<'_>,
     at: usize,
     signature: &FnType,
     binders: usize,
@@ -1601,7 +1613,7 @@ fn stub(
         exit_guard: None,
         slot_count: signature.slot_count(),
         origin,
-        context: BodyContext::Pure,
+        context: effects::procs::lower(program, data),
     }
 }
 

@@ -13,14 +13,13 @@
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 use vibra_ir::external::compiler::CompilerIntrinsic;
 use vibra_ir::{FnType, NamedTypes, Substitution, Type, TypeId};
-use vibra_syntax::source::{
-    Callable, CallableKind, Given, Ident, Impl, Path, TypeExpr, TypeForm,
-};
+use vibra_syntax::source::{Callable, Given, Ident, Impl, Path, TypeExpr, TypeForm};
 
 use super::declare::{
     BoundData, BoundGoal, Entity, FnData, GoalHead, Host, ImplData,
-    InterfaceMemberData, NoType, Program, Scope, TypeKind, unguarded,
+    InterfaceMemberData, NoType, Program, Scope, TypeKind,
 };
+use super::effects::{self, Hook};
 
 /// An interface as applied: its index, its positional arguments, and the
 /// choices its labels fix, in canonical name order.
@@ -387,8 +386,9 @@ impl<'a> Program<'a> {
             for member in view.members() {
                 let Some(name) = member.name() else { continue };
                 let what = format!("the member `{interface_name}.{}`", name.text());
-                if member.performs().is_some() || member.kind() == CallableKind::Proc {
-                    self.unsupported(module, member.construct().span(), &what);
+                if effects::members::contract_member(self, module, &member, &what)
+                    == Hook::Reported
+                {
                     continue;
                 }
                 let mut binders = params.clone();
@@ -1036,8 +1036,14 @@ impl<'a> Program<'a> {
                 "the member `{}` of an implementation in `{host}`",
                 name.text()
             );
-            if !unguarded(&member) || member.kind() == CallableKind::Proc {
+            if member.requires().is_some() || member.ensures().is_some() {
                 self.unsupported(module, member.construct().span(), &what);
+                usable = false;
+                continue;
+            }
+            if effects::members::impl_member(self, module, &member, &what)
+                == Hook::Reported
+            {
                 usable = false;
                 continue;
             }

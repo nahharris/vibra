@@ -23,13 +23,13 @@ use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 use vibra_ir::external::compiler::{CompilerIntrinsic, is_assertion};
 use vibra_ir::{
     Arguments, CallTarget, ClosureBody, Constant, Construction, ExitGuard,
-    Expr as IrExpr, FnType, Library, MatchArm, Node, Pattern as IrPattern,
+    Expr as IrExpr, FnType, IntentType, Library, MatchArm, Node, Pattern as IrPattern,
     SourceOrigin, Type, Value,
 };
 use vibra_syntax::source::{
-    Argument, Body, Callable, CallableKind, Expr, ExprForm, Ident, If, Let as LetView,
-    Match, MatchArm as ArmView, Pattern, PatternForm, Postfix, Primary, Statement,
-    Suffix, TypeExpr,
+    Argument, Body, Callable, Expr, ExprForm, Ident, If, Let as LetView, Match,
+    MatchArm as ArmView, Pattern, PatternForm, Postfix, Primary, Statement, Suffix,
+    TypeExpr,
 };
 use vibra_syntax::{CstNode, SyntaxKind};
 
@@ -38,6 +38,7 @@ use super::contract::{CheckedGuard, ClosureContract, Guards, Site, constant_oper
 use super::declare::{
     BoundData, Entity, NoType, Program, Scope, TypeKind, key_diagnostic,
 };
+use super::effects;
 use super::literal::{self, LiteralFault};
 use super::pattern::{Coverage, LimitReached, Pat};
 use dispatch::Dispatch;
@@ -82,13 +83,14 @@ pub(crate) struct Reference {
 
 /// The type and the lowered node of one checked expression.
 #[derive(Debug)]
-struct Out {
+pub(crate) struct Out {
     ty: Option<Type>,
     node: Option<Node>,
 }
 
 impl Out {
-    const fn error() -> Self {
+    /// The out of an expression that has a fault: no type and no node.
+    pub(crate) const fn error() -> Self {
         Self {
             ty: None,
             node: None,
@@ -98,7 +100,7 @@ impl Out {
 
 /// How the value of an expression is used.
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum Ctx {
+pub(crate) enum Ctx {
     /// The value is not used: the expression is a statement.
     Stmt,
     /// The value is used, at the expected type when one is known.
@@ -150,7 +152,7 @@ enum Head {
 
 /// What a call calls.
 #[derive(Debug)]
-enum Callee {
+pub(crate) enum Callee {
     Function(usize),
     Value(Option<Box<Node>>, Box<FnType>),
     /// A generic anonymous callable bound by `let`, instantiated at the
@@ -176,7 +178,9 @@ enum Product {
     Dict,
 }
 
-struct ProductState<'a> {
+/// A tuple, record, list, or dict literal being checked, one operand at a
+/// time.
+pub(crate) struct ProductState<'a> {
     product: Product,
     operands: Vec<Expr<'a>>,
     expected: Option<Type>,
@@ -194,7 +198,8 @@ struct ProductState<'a> {
     failed: bool,
 }
 
-struct PostfixState<'a> {
+/// A postfix form being checked, one suffix at a time.
+pub(crate) struct PostfixState<'a> {
     ctx: Ctx,
     suffixes: Vec<(Suffix<'a>, ByteSpan)>,
     next: usize,
@@ -204,7 +209,8 @@ struct PostfixState<'a> {
     end: usize,
 }
 
-struct CallState<'a> {
+/// An application being checked, one argument at a time.
+pub(crate) struct CallState<'a> {
     callee: Callee,
     args: Vec<Argument<'a>>,
     next: usize,
@@ -293,7 +299,8 @@ impl CallState<'_> {
     }
 }
 
-struct IfState<'a> {
+/// An `if` being checked: its condition, then its branches.
+pub(crate) struct IfState<'a> {
     view: If<'a>,
     ctx: Ctx,
     stage: u8,
@@ -302,7 +309,8 @@ struct IfState<'a> {
     failed: bool,
 }
 
-struct MatchState<'a> {
+/// A `match` being checked: its subject, then each arm.
+pub(crate) struct MatchState<'a> {
     view: Match<'a>,
     ctx: Ctx,
     arms: Vec<ArmView<'a>>,
@@ -359,7 +367,8 @@ enum Pending<'a> {
     },
 }
 
-struct BodyState<'a> {
+/// A body being checked, one statement at a time.
+pub(crate) struct BodyState<'a> {
     span: ByteSpan,
     statements: Vec<Statement<'a>>,
     next: usize,
@@ -373,7 +382,9 @@ struct BodyState<'a> {
     failed: bool,
 }
 
-enum Task<'a> {
+/// One entry of the checker's work list: an expression to start, or a form
+/// that resumes with the out of the child task run before it.
+pub(crate) enum Task<'a> {
     Expr(Expr<'a>, Ctx),
     Return(ByteSpan),
     /// A `try`, and its operand's span.
@@ -389,7 +400,9 @@ enum Task<'a> {
     Closure(Box<ClosureState<'a>>),
 }
 
-enum Step<'a> {
+/// What starting or resuming a task gives: the out of the expression, or a
+/// child task to run before the parent task resumes with its out.
+pub(crate) enum Step<'a> {
     Done(Out),
     Child(Task<'a>, Task<'a>),
 }
@@ -411,7 +424,7 @@ struct Local {
 /// A generic anonymous callable bound by `let`, checked once over its own
 /// type parameters.
 #[derive(Debug)]
-struct GenericClosure {
+pub(crate) struct GenericClosure {
     /// Its body, in which its own type parameters are the binders after the
     /// enclosing ones.
     closure: Arc<ClosureBody>,
@@ -433,7 +446,7 @@ struct GenericClosure {
 
 /// What an anonymous callable is checked as.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ClosureMode {
+pub(crate) enum ClosureMode {
     /// A value, instantiated from the expected type of its position when it
     /// is generic.
     Value,
@@ -471,7 +484,9 @@ struct Capture {
 /// pattern, and the pattern's span.
 type Destructure = (usize, Type, IrPattern, ByteSpan);
 
-struct ClosureState<'a> {
+/// An anonymous callable being checked: its labelled defaults, its guards,
+/// and then its body.
+pub(crate) struct ClosureState<'a> {
     view: Callable<'a>,
     span: ByteSpan,
     mode: ClosureMode,
@@ -556,6 +571,10 @@ pub(crate) struct BodyChecker<'p, 'a> {
     pub(crate) sites: Vec<Site>,
     /// The guards of each anonymous callable checked since the body began.
     closures: Vec<ClosureContract>,
+    /// Each `await` checked since the body began, at its span, with the
+    /// type of the plan it awaits: what [`effects::analysis::check_bodies`]
+    /// reads. [`effects::procs::await_expr`] records it.
+    pub(crate) awaits: Vec<(ByteSpan, IntentType)>,
 }
 
 /// What a callable body sees besides its parameters: its type parameters
@@ -583,6 +602,8 @@ pub(crate) struct Checked {
     pub(crate) guards: Guards,
     /// The guards of each anonymous callable in it that has one.
     pub(crate) closures: Vec<ClosureContract>,
+    /// Each `await` in it, at its span, with the type of the plan it awaits.
+    pub(crate) awaits: Vec<(ByteSpan, IntentType)>,
 }
 
 impl<'p, 'a> BodyChecker<'p, 'a> {
@@ -624,6 +645,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             gaps: Vec::new(),
             sites: Vec::new(),
             closures: Vec::new(),
+            awaits: Vec::new(),
         }
     }
 
@@ -648,6 +670,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         self.frames.clear();
         self.gaps.clear();
         self.closures.clear();
+        self.awaits.clear();
         let mark = self.diagnostics.len();
         self.binders = scope.binders;
         self.self_type = scope.self_type;
@@ -689,6 +712,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             defaults,
             guards,
             closures: std::mem::take(&mut self.closures),
+            awaits: std::mem::take(&mut self.awaits),
         }
     }
 
@@ -1066,6 +1090,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             defaults: Vec::new(),
             guards: Guards::default(),
             closures: std::mem::take(&mut self.closures),
+            awaits: std::mem::take(&mut self.awaits),
         }
     }
 
@@ -1108,6 +1133,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             defaults: Vec::new(),
             guards: Guards::default(),
             closures: std::mem::take(&mut self.closures),
+            awaits: std::mem::take(&mut self.awaits),
         }
     }
 
@@ -1124,13 +1150,15 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         self.result_span = None;
         self.gaps.clear();
         self.closures.clear();
+        self.awaits.clear();
     }
 
     fn node(&self, expr: IrExpr, span: ByteSpan) -> Node {
         Node::new(expr, self.origin(span))
     }
 
-    fn report(
+    /// Reports code at span in the module being checked.
+    pub(crate) fn report(
         &mut self,
         code: DiagnosticCode,
         span: ByteSpan,
@@ -1365,13 +1393,8 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                     Task::Expr(operand, Ctx::Value(expected)),
                 )
             }
-            ExprForm::Await(_) => {
-                self.report(
-                    DiagnosticCode::EffectInvalidAwait,
-                    span,
-                    "`await` is valid only in a `proc`",
-                );
-                Step::Done(Out::error())
+            ExprForm::Await(operand) => {
+                effects::procs::await_expr(self, operand, span, &ctx)
             }
             ExprForm::Let(_) => Step::Done(Out::error()),
             ExprForm::Postfix(postfix) => self.start_postfix(postfix, ctx),
@@ -1869,11 +1892,8 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         ctx: &Ctx,
         mode: ClosureMode,
     ) -> Step<'a> {
-        if view.kind() != CallableKind::Fn {
-            return self.unavailable_primary(span, "an anonymous `proc`");
-        }
-        if view.performs().is_some() {
-            return self.unavailable_primary(span, "an anonymous callable with a row");
+        if let Some(step) = effects::values::anonymous(self, &view, span, ctx, mode) {
+            return step;
         }
         let mut own = view
             .params()
@@ -2423,6 +2443,9 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             Some(Type::Fn(ref signature)) => {
                 Some(Callee::Value(node.map(Box::new), signature.clone()))
             }
+            Some(Type::Proc(ref signature)) => {
+                effects::procs::apply(self, node, signature, callee_span)
+            }
             Some(Type::Never) => {
                 self.report(
                     DiagnosticCode::TypeUnreachableCode,
@@ -2721,6 +2744,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         };
         if self.program.key_fault(operand)
             != Some(DiagnosticCode::TypeFunctionNotEquatable)
+            && !effects::grants::check_equatable(self.program, operand)
         {
             return false;
         }

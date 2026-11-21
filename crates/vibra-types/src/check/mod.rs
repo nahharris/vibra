@@ -13,13 +13,16 @@
 //! ([`pattern`]), runs the initializer-cycle analysis ([`cycle`]), reviews
 //! the guards and invariants against the certified fragment, evaluating
 //! constants through the interpreter ([`contract`], [`ctfe`]), and builds the
-//! [`CheckedModuleSet`] ([`lower`]).
+//! [`CheckedModuleSet`] ([`lower`]). Every decision about a procedure, a
+//! row, an `await`, a grant type, or an entry is taken in [`effects`], which
+//! the other files call.
 
 mod callables;
 mod contract;
 mod ctfe;
 mod cycle;
 mod declare;
+mod effects;
 mod expr;
 mod generics;
 mod interfaces;

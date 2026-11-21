@@ -40,12 +40,13 @@ use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 use vibra_ir::external::compiler::CompilerIntrinsic;
 use vibra_ir::{FnType, Library, NamedTypes, Type, TypeId};
 use vibra_syntax::source::{
-    Callable, CallableKind, Declaration, ExprForm, Given, Impl, Inputs, InterfaceDecl,
-    Module, ModuleLet, Primary, SourceOptions, Suffix, Test, TypeBody, TypeDecl,
-    TypeExpr, TypeForm, Where,
+    Callable, Declaration, ExprForm, Given, Impl, Inputs, InterfaceDecl, Module,
+    ModuleLet, Primary, SourceOptions, Suffix, Test, TypeBody, TypeDecl, TypeExpr,
+    TypeForm, Where,
 };
 use vibra_syntax::{CstNode, Document, parse_source, parse_source_with};
 
+use super::effects;
 use crate::stdlib::declaration_identity;
 
 /// One module handed to the checker.
@@ -720,14 +721,7 @@ impl<'a> Program<'a> {
                     self.declare(module_index, name.text(), Entity::Fn(index));
                 }
                 Declaration::Proc(callable) => {
-                    if let Some(name) = callable.name() {
-                        let span = callable.construct().span();
-                        self.declare(
-                            module_index,
-                            name.text(),
-                            Entity::Other(module_index, span),
-                        );
-                    }
+                    effects::procs::declare(self, module_index, callable);
                 }
                 Declaration::Let(view) => {
                     let Some(name) = view.name() else { continue };
@@ -767,7 +761,8 @@ impl<'a> Program<'a> {
         }
     }
 
-    fn declare(&mut self, module: usize, name: &str, entity: Entity) {
+    /// Declares `name` in the scope of `module`, unless it is declared there.
+    pub(crate) fn declare(&mut self, module: usize, name: &str, entity: Entity) {
         if let Some(data) = self.modules.get_mut(module) {
             data.scope.entry(name.to_owned()).or_insert(entity);
         }
@@ -970,6 +965,9 @@ impl<'a> Program<'a> {
         if callable {
             return Some(DiagnosticCode::TypeFunctionNotEquatable);
         }
+        if let Some(code) = effects::grants::check_dict_key(self, key) {
+            return Some(code);
+        }
         let mut pending = vec![key];
         while let Some(ty) = pending.pop() {
             match ty {
@@ -1007,7 +1005,9 @@ impl<'a> Program<'a> {
         Ok(ty)
     }
 
-    fn written_at(
+    /// The checked type of a written type expression whose depth
+    /// [`Self::written`] has measured.
+    pub(crate) fn written_at(
         &self,
         module: usize,
         written: TypeExpr<'_>,
@@ -1209,10 +1209,9 @@ impl<'a> Program<'a> {
                     result,
                 }))
             }
-            TypeForm::Proc { inputs, .. } => {
-                Err(repeated_label(&inputs).unwrap_or(NoType::Unsupported))
+            form @ (TypeForm::Proc { .. } | TypeForm::Intent { .. }) => {
+                effects::values::written_type(self, module, form, scope)
             }
-            TypeForm::Intent { .. } => Err(NoType::Unsupported),
         }
     }
 
@@ -1679,12 +1678,12 @@ impl<'a> Program<'a> {
                 associated: &[],
             };
             let own = data.view.params().len();
-            // A guard is read with the body; a row and a procedure are not
-            // supported yet.
-            let header = if data.view.performs().is_some()
-                || data.view.kind() == CallableKind::Proc
-                || (external.is_none() && data.view.body().is_none())
+            // A guard is read with the body; a row and a procedure are read
+            // by their hook.
+            let header = if let Some(header) = effects::procs::header(self, data, scope)
             {
+                header
+            } else if external.is_none() && data.view.body().is_none() {
                 Err(NoType::Unsupported)
             } else {
                 self.read_bounds(
@@ -1712,10 +1711,7 @@ impl<'a> Program<'a> {
             };
             let module = data.module;
             let span = data.view.construct().span();
-            let what = match data.view.kind() {
-                CallableKind::Proc => format!("the procedure `{}`", data.qualified),
-                CallableKind::Fn => format!("the function `{}`", data.qualified),
-            };
+            let what = effects::procs::describe(data);
             match header {
                 Ok((signature, bounds)) => {
                     let (binders, bounds) = self.open_choices(&data.binders, bounds);
@@ -1730,28 +1726,7 @@ impl<'a> Program<'a> {
                 Err(why) => self.no_type(module, span, &what, why),
             }
         }
-        for module in 0..self.modules.len() {
-            let Some(view) = self.modules.get(module).and_then(|data| data.view) else {
-                continue;
-            };
-            for declaration in view.declarations() {
-                match declaration {
-                    Declaration::Proc(callable) => {
-                        let what = format!(
-                            "the procedure `{}`",
-                            callable.name().map(|name| name.text()).unwrap_or_default()
-                        );
-                        self.unsupported(module, callable.construct().span(), &what);
-                    }
-                    Declaration::Test(_)
-                    | Declaration::Interface(_)
-                    | Declaration::Use(_)
-                    | Declaration::Type(_)
-                    | Declaration::Fn(_)
-                    | Declaration::Let(_) => {}
-                }
-            }
-        }
+        effects::procs::module_headers(self);
     }
 
     /// Reads the written type of every module value.
@@ -1895,11 +1870,6 @@ impl<'a> Program<'a> {
     }
 }
 
-/// Whether a callable header has no guard and no row.
-pub(crate) fn unguarded(view: &Callable<'_>) -> bool {
-    view.requires().is_none() && view.ensures().is_none() && view.performs().is_none()
-}
-
 /// The span of a `where` section: its keyword to the end of its last
 /// operand.
 pub(crate) fn where_span(section: Where<'_>) -> ByteSpan {
@@ -2000,7 +1970,7 @@ pub(crate) fn depth_fault(span: ByteSpan) -> NoType {
 /// The fault of a written `Fn` or `Proc` type whose inputs repeat a label:
 /// `@type.typeArgumentMismatch` at the second occurrence
 /// (`docs/spec/02-type-system.md`, "Callable types").
-fn repeated_label(inputs: &Inputs<'_>) -> Option<NoType> {
+pub(crate) fn repeated_label(inputs: &Inputs<'_>) -> Option<NoType> {
     let labelled = inputs.labelled();
     let mut seen = BTreeSet::new();
     let (name, _) = labelled
