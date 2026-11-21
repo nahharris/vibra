@@ -1,0 +1,19 @@
+[package]
+name = "vibra-host-v1"
+description = "The host provider of the Vibra runtime: the provider trait, the system provider, the in-memory host world, and the audit event."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+getrandom.workspace = true
+serde_json.workspace = true
+vibra-diagnostics-v1.workspace = true
+vibra-ir-v1.workspace = true
+vibra-syntax-v1.workspace = true
+
+[lints]
+workspace = true

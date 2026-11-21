@@ -1,0 +1,12 @@
+id = "V2-CONTRACT-ensures-else-once"
+rule = "V2-CONTRACT-ensures-else-once"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#guards-with-else: the ensures predicate is evaluated once on the candidate"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

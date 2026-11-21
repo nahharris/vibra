@@ -1,88 +1,67 @@
 //! The conformance corpus runner.
 //!
-//! `docs/spec/07-diagnostics-and-conformance.md` requires a
-//! backend-independent corpus organized by specification rule rather than by
-//! compiler module, and a set of capability profiles from `reader-v1` through
-//! `full-v1`. This crate loads that corpus and dispatches each case to the
-//! profile it addresses.
+//! `docs/spec/07-diagnostics-and-conformance.md` requires a corpus of Vibra
+//! cases that is independent of any backend and organized by the rule each
+//! case tests. This crate loads that corpus from `conformance/cases`, checks
+//! every case against the rule index `conformance/rules.tsv`, dispatches each
+//! case to a handler of its profile, and compares the handler's observations
+//! with the expectations written from the specification. It has no mode that
+//! writes an expectation.
 //!
 //! # Position in the architecture
 //!
 //! This crate sits above every other node and may depend on all of them. That
-//! also makes it the right home for workspace-wide structural invariants,
-//! such as the dependency-direction test in `tests/`, which no single
-//! language crate can check from the inside.
+//! also makes it the home of workspace-wide structural invariants, such as
+//! the architecture test in `tests/`, which no single crate can check from
+//! the inside.
 //!
 //! # Handlers
 //!
-//! The corpus layout, neutral manifest decoder, profile dispatcher, and
-//! backend-independent runner are the common path. Handlers register on it for
-//! the syntax and formatter, structural query snapshots, confined source-graph
-//! observations, the filesystem-free resolver observation and its
-//! `@resolved.v1` artifact, and the tooling-profile snapshot-backed formatter
-//! observation. A profile with no handler reports its cases unavailable. Each
-//! accepted executable case also runs in the WebAssembly backend, against the
-//! case's one expectation, and a case on which either backend disagrees fails.
+//! [`ReaderV2Handler`] runs the `reader` operation under `readerV2`;
+//! [`ProjectDecodeHandler`], [`SourceGraphHandler`], [`ResolveHandler`], and
+//! [`WorkspaceCheckHandler`] run `projectDecode`, `sourceGraph`, `resolve`,
+//! and `workspaceCheck` under `staticV2`; [`InterpretHandler`] and
+//! [`WorkspaceTestHandler`] run `interpret` and `workspaceTest` under
+//! `interpreterV2`; [`FormatHandler`] runs `format` under `toolingV2`.
+//! Every other case is unavailable until the step that makes its
+//! observations exist registers a handler.
 
-pub mod baseline;
 mod corpus;
 mod format;
-mod graph;
+mod interpret;
 mod manifest;
-mod native;
-mod native_exe;
-mod native_read;
 mod profile;
 mod project;
 mod reader;
 mod resolve;
+mod rules;
 mod runner;
 mod standard;
-mod test_run;
-mod types;
-mod wasm;
-mod workspace_index;
-mod workspace_query;
-mod workspace_semantic;
+mod workspace_check;
+mod workspace_test;
 
 pub use corpus::{
-    Case, CaseInputDocument, CaseTreeFile, Corpus, CorpusError, HostWorldError,
-    corpus_root, workspace_root,
+    Case, CaseInputDocument, CaseTreeFile, Corpus, CorpusError, corpus_root,
+    workspace_root,
 };
-pub use format::ToolingV1FormatHandler;
-pub use graph::StaticV1SourceGraphHandler;
+pub use format::FormatHandler;
+pub use interpret::{INTERPRET_BUDGET, InterpretHandler};
 pub use manifest::{
-    CaseExpectations, CaseInputs, CaseManifest, ConformanceOperation,
-    ExpectedDiagnostic, ExpectedExecution, ExpectedFix, ExpectedQuery,
-    ExpectedRelatedSpan, MANIFEST_FILE_NAME, ManifestError, NORMATIVE_SECTION_IDS,
+    CaseExpectations, CaseInputs, CaseManifest, ExpectedDiagnostic, ExpectedFix,
+    ExpectedRelatedSpan, MANIFEST_FILE_NAME, ManifestError, Verdict,
 };
-pub use native::{
-    COLUMNS as NATIVE_PARITY_COLUMNS, EntryJob, INVENTORY_FILE as NATIVE_PARITY_FILE,
-    Inventory, InventoryCell, InventoryRow, NativeCounts, NativeObservation,
-    NativeStatus, StepperRun, owning_package,
+pub use profile::{
+    CaseObservation, ConformanceOperation, ConformanceProfile, HandlerError,
+    ProfileHandler, UnknownOperation, UnknownProfile,
 };
-pub use native_exe::{WindowsExecutor, WindowsUnavailable};
-pub use profile::{ConformanceProfile, UnknownProfile};
-pub use project::StaticV1ProjectHandler;
-pub use reader::ReaderV1Handler;
-pub use resolve::StaticV1ResolveHandler;
-pub use runner::{
-    BackendObservation, BackendStatuses, CaseObservation, CaseReport, CaseStatus,
-    ConformanceRunner, DispatchResult, ExecutionObservation, HandlerError,
-    INSTANCE_MEMORY_LIMIT_BYTES, InterpreterCounts, ProfileDispatcher, ProfileHandler,
-    QueryObservation, RunReport, WasmCounts, WasmObservation, WasmStatus,
+pub use project::{ProjectDecodeHandler, SourceGraphHandler};
+pub use reader::ReaderV2Handler;
+pub use resolve::ResolveHandler;
+pub use rules::{
+    IdentityParts, InvalidIdentity, RULE_PREFIXES, RULES_FILE_NAME, RULES_HEADER,
+    RuleIndex, RuleRow, RuleStatus, RulesError, parse_identity,
 };
-pub use standard::standard_dispatcher;
-pub use test_run::{
-    RowFailure, RowOrigin, RowTrap, TestRow, command_result, format_test_run,
-};
-pub use types::InterpreterV1Handler;
-pub use wasm::{
-    TestsObserved, observe as observe_wasm, observe_tests as observe_wasm_tests,
-};
-pub use workspace_index::ToolingV1IndexHandler;
-pub use workspace_query::ToolingV1QueryHandler;
-pub use workspace_semantic::{
-    InterpreterV1WorkspaceRunHandler, InterpreterV1WorkspaceTestHandler,
-    StaticV1WorkspaceCheckHandler,
-};
+pub use runner::{CaseReport, CaseStatus, ConformanceRunner, ProfileCounts, RunReport};
+pub use standard::{DispatchResult, ProfileDispatcher, standard_dispatcher};
+pub use workspace_check::WorkspaceCheckHandler;
+pub use workspace_test::WorkspaceTestHandler;

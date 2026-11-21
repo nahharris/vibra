@@ -1,0 +1,19 @@
+id = "V2-TYPE-CONTROL-match-unreachable"
+rule = "V2-TYPE-CONTROL-match-unreachable"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#coverage: an arm an earlier arm covers is unreachable"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@pattern.unreachableArm"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 75, end = 90 }
+related = [{ span = { start = 63, end = 64 } }]

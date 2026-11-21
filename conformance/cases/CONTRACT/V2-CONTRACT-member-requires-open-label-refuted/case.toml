@@ -1,0 +1,19 @@
+id = "V2-CONTRACT-member-requires-open-label-refuted"
+rule = "V2-CONTRACT-member-requires-open-label-refuted"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#guards-and-callable-types: a written label that makes a contract member's bare requires false at a call at a bounded type parameter is @contract.refuted"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@contract.refuted"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 96, end = 119 }
+related = [{ source = "src/app/main.vib", span = { start = 364, end = 368 } }]

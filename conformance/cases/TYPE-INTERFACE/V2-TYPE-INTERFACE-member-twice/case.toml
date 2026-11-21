@@ -1,0 +1,19 @@
+id = "V2-TYPE-INTERFACE-member-twice"
+rule = "V2-TYPE-INTERFACE-member-twice"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#implementations: a member supplied twice is @name.memberCollision at the later name, related to the first"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@name.memberCollision"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 295, end = 301 }
+related = [{ source = "src/app/main.vib", span = { start = 193, end = 199 } }]

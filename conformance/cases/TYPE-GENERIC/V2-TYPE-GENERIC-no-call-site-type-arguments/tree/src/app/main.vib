@@ -1,0 +1,12 @@
+interface Feed(S)
+  given {S: Ordered}
+  fn feed
+    takes {x: Self item: S}
+    returns r: U8
+  endfn
+endinterface
+
+type Plain of U8 endtype
+fn need(T) takes {x: T} returns r: U8 given {T: Ordered} do return 1u8 endfn
+
+fn f returns r: U8 do return need(U8) endfn

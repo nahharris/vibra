@@ -1,0 +1,25 @@
+fn main returns r: I32 do
+  let m be Ordered.max(Box(3i32) Box(5i32)) endlet
+  let d: Dict(Box(I32) I32) be [Box(2i32): 20i32 Box(1i32): 10i32] endlet
+  let Box(v) be m endlet
+  match d(Box(1i32))
+    case Option.some(value: w)
+      return I32.add(v w)
+    case Option.none()
+      return 0i32
+  endmatch
+endfn
+
+type Box(T) of T
+  given {T: Ordered}
+  impl Ordered
+    fn compare
+      takes {left: Self right: Self}
+      returns order: Ordering
+      do
+        let Box(l) be left endlet
+        let Box(r) be right endlet
+        return Ordered.compare(l r)
+    endfn
+  endimpl
+endtype

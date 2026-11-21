@@ -1,0 +1,12 @@
+id = "V2-TYPE-GENERIC-bound-open-item-impl"
+rule = "V2-TYPE-GENERIC-bound-open-item-impl"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#bounds: an implementation in a generic type whose bound leaves an associated type open takes that type from the implementation the bound selects"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

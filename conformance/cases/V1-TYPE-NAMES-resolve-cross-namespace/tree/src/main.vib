@@ -1,3 +1,0 @@
-(def value i32 0i32)
-(defn value () void (do))
-(defn run () void (do))

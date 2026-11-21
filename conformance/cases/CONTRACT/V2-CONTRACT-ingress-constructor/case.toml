@@ -1,0 +1,12 @@
+id = "V2-CONTRACT-ingress-constructor"
+rule = "V2-CONTRACT-ingress-constructor"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#type-invariants: the constructor is an ingress path: a construction of a type whose where has an else, from a value the predicate rejects, is Result.err with the consequence"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

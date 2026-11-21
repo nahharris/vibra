@@ -1,0 +1,18 @@
+id = "V2-TYPE-INTERFACE-assoc-no-bound"
+rule = "V2-TYPE-INTERFACE-assoc-no-bound"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#associated-types: an associated type is not bounded where it is declared, so a bound naming it names no type parameter"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@name.unknownSymbol"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 94, end = 98 }

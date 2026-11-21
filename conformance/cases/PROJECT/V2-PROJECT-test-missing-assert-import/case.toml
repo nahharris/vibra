@@ -1,0 +1,19 @@
+id = "V2-PROJECT-test-missing-assert-import"
+rule = "V2-PROJECT-test-missing-assert-import"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "04-programs-and-packages.md#tests: a test module without an import of @std.assert is rejected at its first test's name and every item is invalid"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+testRun = "test-run.vibon"
+
+[[expect.diagnostics]]
+code = "@module.missingRequiredImport"
+level = "@error"
+source = "tests/math.vib"
+span = { start = 5, end = 12 }

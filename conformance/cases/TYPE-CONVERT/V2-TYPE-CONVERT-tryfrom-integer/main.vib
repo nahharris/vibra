@@ -1,0 +1,8 @@
+use @std.core.ConversionError enduse
+
+fn main
+  returns r: Result(I8 ConversionError)
+  do
+    let n: Result(I8 ConversionError) be TryFrom.convert(300i32) endlet
+    return n
+endfn

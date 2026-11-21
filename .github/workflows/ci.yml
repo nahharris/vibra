@@ -22,7 +22,7 @@ env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -D warnings
   # No CI step opens a debugger and no test reads debuginfo, so skipping it
-  # shortens every compile and link, Wasmtime included. Local builds keep the
+  # shortens every compile and link, Cranelift included. Local builds keep the
   # default profile.
   CARGO_PROFILE_DEV_DEBUG: 0
 
@@ -42,7 +42,7 @@ jobs:
         run: rustup toolchain install
 
       # The cache key is shared with the conformance job of the same operating
-      # system, and both restore it, Wasmtime included. Only `main` saves it,
+      # system, and both restore it, Cranelift included. Only `main` saves it,
       # and only this job does: this job builds the whole workspace with every
       # test target, a superset of what the conformance job builds, and a pull
       # request run would save a cache that nothing restores.
@@ -78,17 +78,15 @@ jobs:
           RUSTDOCFLAGS: -D warnings
 
   # The conformance corpus is a separate job from the host-language tests, and
-  # since milestone 4 Step 4 it also runs every executable case in the
-  # WebAssembly backend, so it runs on the three platforms the engine must build
-  # on. It does not wait for `check`: the two jobs run in parallel, so the
-  # pipeline takes as long as the slower of them and not the sum. On a cold
-  # cache each job compiles Wasmtime for itself; on a warm one both restore the
-  # build that `main` saved under the shared key. This job never saves that
-  # cache, because it builds less than `check` does and its smaller build must
-  # not take the key from the fuller one. The host tests of the emitter, the
-  # runner, deterministic emission, and the specification
-  # inventory run in `check`, whose workspace test run includes them on every
-  # platform, so this job does not repeat them.
+  # it runs on the three platforms the toolchain must build on. It does not
+  # wait for `check`: the two jobs run in parallel, so the pipeline takes as
+  # long as the slower of them and not the sum. On a cold cache each job
+  # compiles its dependencies for itself; on a warm one both restore the build
+  # that `main` saved under the shared key. This job never saves that cache,
+  # because it builds less than `check` does and its smaller build must not
+  # take the key from the fuller one. The host tests run in `check`, whose
+  # workspace test run includes them on every platform, so this job does not
+  # repeat them.
   conformance:
     name: conformance corpus (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -111,15 +109,15 @@ jobs:
         run: cargo fetch --locked
 
       # This is the internal runner, not a user-facing `vibra` binary. It
-      # executes the checked-in cases through the real handlers, the reference
-      # interpreter and the WebAssembly backend, and exits nonzero on a failed or
-      # unavailable case. It prints the counts by profile and by backend.
-      - name: Run the corpus in both backends
+      # executes the checked-in cases through the real handlers and exits
+      # nonzero on a failed or unavailable case. It prints the counts by
+      # profile.
+      - name: Run the corpus
         run: cargo run --locked --offline -p vibra-conformance --bin vibra-conformance -- --root conformance/cases
 
       - name: Run fuzz smoke
         if: matrix.os == 'ubuntu-latest'
-        run: cargo run --locked --offline -p vibra-conformance --bin m1-fuzz -- --profile ci-smoke
+        run: cargo run --locked --offline -p vibra-conformance --bin fuzz -- --profile ci-smoke
 
   archive-isolation:
     name: archive stays out of the build

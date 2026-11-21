@@ -1,41 +1,16 @@
-//! Versioned JSON contracts for the Vibra CLI and MCP surfaces.
+//! The version 2 JSON contracts of the Vibra command line.
 //!
-//! JSON is the machine interchange format for tooling only. Vibra owns no
-//! persistent JSON file: project, lock, and build data use the canonical
-//! `.vibon` data grammar. Schema identifiers and major versions are contracts;
-//! `docs/spec/05-tooling.md` is the normative definition.
-//!
-//! # Schema identifiers
-//!
-//! Published schemas are identified by URN, for example
-//! `urn:vibra:schema:v1:diagnostic`. A URN names the contract without
-//! asserting that a URL resolves to it, and Vibra has no schema-hosting domain
-//! yet. Every `$ref` is internal, so no resolution is required to validate a
-//! document.
-//!
-//! This is provisional: the intended home is an HTTPS identifier once the
-//! project's domain exists. Because identifiers are contracts, that switch
-//! must be made across every published schema at once and before v1 is
-//! released. See design decision D5 in `docs/roadmap/v0.0.1/m1/execution.md`.
-//!
-//! The `v1` in an identifier and in [`SCHEMA_VERSION`] is the schema's major
-//! version, not the language's. The charter versions machine schemas
-//! independently of the source language after 1.0.
+//! `docs/spec/05-tooling.md`, "Versioned envelope and results" and "Command
+//! payloads", and `docs/spec/07-diagnostics-and-conformance.md`, "Diagnostic
+//! documents and spans", are the normative definitions. This crate renders
+//! the language model of `vibra-diagnostics` into those documents and
+//! validates every document against its embedded schema, because a producer
+//! MUST validate what it emits.
 //!
 //! # Position in the architecture
 //!
-//! This crate translates language facts into a wire format, so the arrow
-//! points one way only: it may depend on the language crates, and no compiler
-//! phase may depend on it. Step 10 deliberately adds the one-way
-//! `vibra-schema` -> `vibra-syntax` edge for structural queries; the syntax
-//! crate remains schema-free. The milestone 2 exit gate states that rule
-//! directly.
-//!
-//! # Status
-//!
-//! Milestone 1 published the diagnostic and source-position query contracts;
-//! M2 Step 11 adds the versioned CLI command-result contract. Edit-plan and
-//! test-report contracts follow in later milestones.
+//! The crate depends only on `vibra-diagnostics` among the Vibra crates. No
+//! language phase depends on it.
 
 // Tests assert by panicking and index fixtures they just built. The library
 // itself is still checked against these lints, because clippy builds the lib
@@ -50,34 +25,39 @@
     )
 )]
 
+mod capability;
 mod diagnostic;
-mod index;
-mod query;
-mod semantic_query;
+mod envelope;
+mod test_payload;
+mod validate;
 
-/// The published JSON Schema for versioned CLI command-result envelopes.
-pub const COMMAND_RESULT_SCHEMA: &str =
-    include_str!("../schemas/v1/command-result.json");
-
+pub use capability::CommandCapability;
 pub use diagnostic::{
-    DIAGNOSTIC_SCHEMA, DiagnosticDocument, DiagnosticRenderError, FixDocument,
-    PositionDocument, REGISTRY_ENTRY_SCHEMA, RegistryEntryDocument,
-    RelatedSpanDocument, SCHEMA_VERSION, SpanDocument,
+    DiagnosticDocument, DiagnosticRenderError, FixDocument, PositionDocument,
+    RelatedSpanDocument, SpanDocument,
 };
-pub use index::{
-    INDEX_SCHEMA, IndexDeclarationDocument, IndexDocumentJson, IndexExternalDocument,
-    IndexFactsDocument, IndexImplementationDocument, IndexImplementationMemberDocument,
-    IndexReferenceDocument, IndexRowDocument, IndexSourceDocument,
+pub use envelope::{
+    CheckPayload, CommandOutcome, Envelope, FmtPayload, HelpPayload, Limits,
+    ObligationKind, ObligationRecord, Payload, Status,
 };
-pub use query::{
-    SOURCE_POSITION_QUERY_SCHEMA, SourcePositionQueryDocument, category_name,
-    status_name,
+pub use test_payload::{
+    AuditEvent, ObservationError, ObservationErrorCode, TestFailure, TestFailureKind,
+    TestItem, TestPayload, TestResult, TrapRecord,
 };
-pub use semantic_query::{
-    ApplicationContractDocument, EffectRowDocument, EffectsDocument,
-    EnclosingEffectsDocument, ImportAliasDocument, LabelledTypeDocument,
-    LocalBindingDocument, QueryIdentityDocument, RootWitnessDocument,
-    SemanticFactDocument, SemanticTypeDocument, TargetEffectsDocument,
-    WORKSPACE_POSITION_QUERY_SCHEMA, WitnessCalleeDocument, WitnessHopDocument,
-    WorkspacePositionQueryDocument,
-};
+pub use validate::{SchemaViolation, validate_command_result, validate_diagnostic};
+
+/// The major version of every document this crate publishes.
+pub const SCHEMA_VERSION: u32 = 2;
+
+/// The identifier of the command result schema.
+pub const COMMAND_RESULT_SCHEMA_ID: &str = "urn:vibra:schema:v2:command-result";
+
+/// The identifier of the diagnostic schema.
+pub const DIAGNOSTIC_SCHEMA_ID: &str = "urn:vibra:schema:v2:diagnostic";
+
+/// The published JSON Schema of [`Envelope`].
+pub const COMMAND_RESULT_SCHEMA: &str =
+    include_str!("../schemas/v2/command-result.json");
+
+/// The published JSON Schema of [`DiagnosticDocument`], with its span.
+pub const DIAGNOSTIC_SCHEMA: &str = include_str!("../schemas/v2/diagnostic.json");

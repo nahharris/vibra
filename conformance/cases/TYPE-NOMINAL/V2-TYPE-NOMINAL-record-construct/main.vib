@@ -1,0 +1,2 @@
+type User of {name: Str id: U64} endtype
+fn main returns r: User do return User(id: 1u64 name: "Ada") endfn

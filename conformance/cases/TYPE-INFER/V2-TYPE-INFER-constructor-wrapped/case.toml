@@ -1,0 +1,12 @@
+id = "V2-TYPE-INFER-constructor-wrapped"
+rule = "V2-TYPE-INFER-constructor-wrapped"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#functions-as-values: an anonymous fn wraps a constructor where a function value is needed"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

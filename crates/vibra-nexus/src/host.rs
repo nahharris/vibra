@@ -1,6 +1,6 @@
 //! The Nexus half of the host value-access interface.
 //!
-//! `vibra-host` writes each host operation once, against an interface that
+//! `vibra-host-v1` writes each host operation once, against an interface that
 //! reads arguments and builds results. This module supplies that interface
 //! over the cells of a [`Store`], so a host call in a native executable runs
 //! the same operation code, and builds the same audit event, as one in the
@@ -9,8 +9,8 @@
 //! A value of the store carries no type: the registry row fixes what each
 //! argument and result is, so a builder needs no type to build with.
 
-use vibra_host::{HostEnum, HostRecord, HostValues, ReadError};
-use vibra_ir::arena::{STRIDE_CELLS, class, kind};
+use vibra_host_v1::{HostEnum, HostRecord, HostValues, ReadError};
+use vibra_ir_v1::arena::{STRIDE_CELLS, class, kind};
 
 use crate::store::{Cell, Store, StoreError};
 

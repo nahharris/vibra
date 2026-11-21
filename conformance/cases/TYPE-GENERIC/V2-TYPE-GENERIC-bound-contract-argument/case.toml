@@ -1,0 +1,19 @@
+id = "V2-TYPE-GENERIC-bound-contract-argument"
+rule = "V2-TYPE-GENERIC-bound-contract-argument"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#dispatch: an operand that fixes an interface parameter to a type breaking its bound is @type.unsatisfiedBound at that operand, not at the receiver"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.unsatisfiedBound"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 417, end = 427 }
+related = [{ source = "src/app/main.vib", span = { start = 30, end = 37 } }]

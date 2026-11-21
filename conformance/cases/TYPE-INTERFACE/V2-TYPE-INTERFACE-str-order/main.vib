@@ -1,0 +1,5 @@
+fn main
+  returns r: {Ordering Bool}
+  do
+    return {Ordered.compare("ab" "b") Equatable.equal("a" "a")}
+endfn

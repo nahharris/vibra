@@ -1,14 +1,15 @@
 //! The closed diagnostic registry.
 //!
-//! `docs/spec/07-diagnostics-and-conformance.md` carries a canonical table of
-//! every diagnostic code and its fixed level. The registry maps each code to
-//! that level plus its domain, summary, and fix capability. It is compiler
-//! data: queryable and covered by tests, never loaded from Vibra source, and
-//! never configurable by a project.
+//! `docs/spec/07-diagnostics-and-conformance.md`, "Diagnostics are a language
+//! surface", carries the table of every diagnostic code and its fixed level.
+//! The registry maps each code to that level plus its domain, summary, and fix
+//! capability. It is compiler data: queryable and covered by tests, never
+//! loaded from Vibra source, and never configurable by a project.
 //!
 //! The registry is a closed Rust enum rather than a parsed string, so "every
-//! diagnostic code is unique" — a release-gate requirement — holds by
-//! construction rather than by test.
+//! diagnostic code is unique" holds by construction rather than by test. The
+//! rows below are in the order of the specification table, which is also the
+//! registry order that breaks ties when diagnostics are sorted.
 
 use std::fmt;
 use std::str::FromStr;
@@ -21,7 +22,7 @@ use std::str::FromStr;
 pub enum Level {
     /// The construct is rejected.
     Error,
-    /// The construct is accepted, and normalized where a fix applies.
+    /// The construct is accepted, and the diagnostic reports it.
     Warning,
 }
 
@@ -44,13 +45,13 @@ impl fmt::Display for Level {
 
 /// Whether the compiler can offer a fix for a code.
 ///
-/// The specification fixes this vocabulary at exactly two values, because v1
-/// has no command that would apply a fix requiring human review. Unlike a
-/// level, a code's capability describes what the implementation can currently
-/// do and may widen from [`Self::None`] to [`Self::Safe`] as fixes are added.
+/// The specification fixes this vocabulary at exactly two values; there is no
+/// "review needed" level between them. Unlike a level, a code's capability
+/// describes what the implementation can currently do and may widen from
+/// [`Self::None`] to [`Self::Safe`] as fixes are added.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum FixCapability {
-    /// A fix may be offered, and `vibra edit fix` may apply it.
+    /// A fix may be offered and applied automatically.
     Safe,
     /// No fix is ever offered.
     None,
@@ -76,35 +77,55 @@ impl fmt::Display for FixCapability {
 /// The first component of a diagnostic code's spelling.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Domain {
-    /// Reader, tokens, and document grammar.
+    /// Tokens, the source grammar, and recovery.
     Syntax,
-    /// Resolution, namespaces, and reserved spellings.
+    /// Resolution, visibility, and reserved spellings.
     Name,
-    /// Module layout and paths.
+    /// Module layout, paths, and imports.
     Module,
-    /// The type system.
+    /// The type system and interfaces.
     Type,
-    /// Pattern irrefutability.
+    /// Pattern irrefutability and coverage.
     Pattern,
-    /// Effect rows and ceilings.
+    /// Effect rows, ceilings, and `await`.
     Effect,
-    /// External declarations and their provider registries.
+    /// External declarations and their registries.
     External,
     /// VIBON data documents.
     Data,
     /// Projects, targets, dependencies, and locks.
     Project,
-    /// Execution and the host ABI.
+    /// Execution defects and host events.
     Runtime,
-    /// Canonical presentation.
+    /// Naming conventions.
     Style,
-    /// Tool commands and capability availability.
-    Tool,
-    /// Declared contracts that hold but say more than they need to.
+    /// Guards, predicates, consequences, and written ceilings.
     Contract,
+    /// Grant bindings and policies.
+    Grant,
+    /// Tool commands, limits, and builds.
+    Tool,
 }
 
 impl Domain {
+    /// Every domain, in the order of its first code in the registry.
+    pub const ALL: &'static [Self] = &[
+        Self::Syntax,
+        Self::Name,
+        Self::Module,
+        Self::Type,
+        Self::Pattern,
+        Self::Effect,
+        Self::External,
+        Self::Data,
+        Self::Project,
+        Self::Runtime,
+        Self::Style,
+        Self::Contract,
+        Self::Grant,
+        Self::Tool,
+    ];
+
     /// The domain's spelling, without the leading `@` of a code.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
@@ -120,8 +141,9 @@ impl Domain {
             Self::Project => "project",
             Self::Runtime => "runtime",
             Self::Style => "style",
-            Self::Tool => "tool",
             Self::Contract => "contract",
+            Self::Grant => "grant",
+            Self::Tool => "tool",
         }
     }
 }
@@ -138,7 +160,7 @@ pub struct UnknownDiagnosticCode;
 
 impl fmt::Display for UnknownDiagnosticCode {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("not a diagnostic code in the v1 registry")
+        formatter.write_str("not a diagnostic code of the registry")
     }
 }
 
@@ -147,13 +169,14 @@ impl std::error::Error for UnknownDiagnosticCode {}
 /// Declares the closed registry from one table.
 ///
 /// One row per code keeps the Rust registry laid out the same way the
-/// specification's canonical table is, so the two can be read side by side.
+/// specification's table is, so the two can be read side by side.
 macro_rules! diagnostic_registry {
     ($($variant:ident => $atom:literal, $domain:ident, $level:ident, $fix:ident,
        $summary:literal;)*) => {
-        /// Every diagnostic code in the v1 line.
+        /// Every diagnostic code of the registry.
         ///
-        /// The set is closed and its spellings are stable within v1.
+        /// The set is closed. A retired code is never reused for another
+        /// meaning.
         #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
         pub enum DiagnosticCode {
             $(
@@ -191,6 +214,8 @@ macro_rules! diagnostic_registry {
             }
 
             /// A one-line description of the condition.
+            ///
+            /// The wording is compiler data, not fixed text.
             #[must_use]
             pub const fn summary(self) -> &'static str {
                 match self { $(Self::$variant => $summary,)* }
@@ -211,194 +236,244 @@ macro_rules! diagnostic_registry {
 }
 
 diagnostic_registry! {
-    SyntaxUnmatchedDelimiter => "@syntax.unmatched-delimiter", Syntax, Error, None,
-        "a list or quoted leaf has an unmatched delimiter";
-    SyntaxMissingSeparator => "@syntax.missing-separator", Syntax, Error, None,
-        "sibling forms in a list are not separated by required trivia";
-    SyntaxInvalidCharacterLiteral => "@syntax.invalid-character-literal", Syntax, Error, None,
-        "a character literal is not one valid EDN character spelling";
-    SyntaxInvalidStringLiteral => "@syntax.invalid-string-literal", Syntax, Error, None,
-        "a terminated string literal contains an invalid escape or Unicode scalar";
-    SyntaxInvalidNumericLiteral => "@syntax.invalid-numeric-literal", Syntax, Error, None,
-        "a numeric literal has a malformed or unknown suffix, or trailing text";
-    SyntaxInvalidName => "@syntax.invalid-name", Syntax, Error, None,
-        "a nonliteral leaf is not a valid symbol, label, atom, or discard spelling";
-    SyntaxRetiredForm => "@syntax.retired-form", Syntax, Error, None,
-        "a form retired from v1, such as `while` or `break`, was written";
-    SyntaxInvalidForm => "@syntax.invalid-form", Syntax, Error, None,
-        "a source form has an invalid head, arity, or grammar position";
-    SyntaxMisplacedBinding => "@syntax.misplaced-binding", Syntax, Error, None,
-        "a `let` or `let-else` is not a direct element of a body sequence";
-    SyntaxDuplicateAttribute => "@syntax.duplicate-attribute", Syntax, Error, None,
-        "a declaration repeats one attribute";
-    SyntaxUnknownAttribute => "@syntax.unknown-attribute", Syntax, Error, None,
-        "a declaration uses an attribute not allowed in its context";
-    SyntaxInvalidAttribute => "@syntax.invalid-attribute", Syntax, Error, None,
-        "a declaration attribute has the wrong value or placement";
-    NameUnknownSymbol => "@name.unknown-symbol", Name, Error, None,
-        "a symbol does not resolve to a visible entity";
-    NameWrongEntityKind => "@name.wrong-entity-kind", Name, Error, None,
-        "a resolved entity is not the kind this position requires";
-    NamePrivateAccess => "@name.private-access", Name, Error, None,
-        "a reference resolves to a declaration that is private from this position";
+    SyntaxUnmatchedDelimiter => "@syntax.unmatchedDelimiter", Syntax, Error, None,
+        "a closer does not match the innermost open construct, a construct is never closed, or a quote is unterminated";
+    SyntaxMissingSeparator => "@syntax.missingSeparator", Syntax, Error, None,
+        "two adjacent tokens that need trivia between them have none";
+    SyntaxInvalidCharacterLiteral => "@syntax.invalidCharacterLiteral", Syntax, Error, None,
+        "a character literal is empty, holds several scalars, or holds a surrogate";
+    SyntaxInvalidStringLiteral => "@syntax.invalidStringLiteral", Syntax, Error, None,
+        "a terminated string has a malformed or unsupported escape";
+    SyntaxInvalidNumericLiteral => "@syntax.invalidNumericLiteral", Syntax, Error, None,
+        "a numeric literal has an unknown suffix, an integer suffix on a float body, or trailing text";
+    SyntaxInvalidName => "@syntax.invalidName", Syntax, Error, None,
+        "an identifier is malformed";
+    SyntaxInvalidForm => "@syntax.invalidForm", Syntax, Error, None,
+        "the grammar does not admit a form in this position";
+    SyntaxMisplacedBinding => "@syntax.misplacedBinding", Syntax, Error, None,
+        "a `let` is written where a statement is not allowed";
+    SyntaxDuplicateSection => "@syntax.duplicateSection", Syntax, Error, None,
+        "a declaration repeats a section";
+    SyntaxInvalidEncoding => "@syntax.invalidEncoding", Syntax, Error, None,
+        "a document has a byte-order mark, invalid UTF-8, or a NUL";
+    SyntaxInvalidSection => "@syntax.invalidSection", Syntax, Error, None,
+        "a declaration has a section it does not admit";
+    NameUnknownSymbol => "@name.unknownSymbol", Name, Error, None,
+        "a name resolves to nothing";
+    NameWrongEntityKind => "@name.wrongEntityKind", Name, Error, None,
+        "a name resolves to an entity of the wrong kind for its position";
+    NamePrivateAccess => "@name.privateAccess", Name, Error, None,
+        "a reference reaches a private declaration";
+    NameInaccessibleRepresentation => "@name.inaccessibleRepresentation", Name, Error, None,
+        "a hidden constructor, pattern, or field read is used";
     NameRedeclaration => "@name.redeclaration", Name, Error, None,
-        "a lexical name or top-level declaration is introduced more than once";
-    NameMemberCollision => "@name.member-collision", Name, Error, None,
-        "two members of one owner share a name in its flat member namespace";
-    NameGenericRedeclaration => "@name.generic-redeclaration", Name, Error, None,
-        "a nested declaration redeclares a generic name its owner already binds";
-    NameReservedLabel => "@name.reserved-label", Name, Error, None,
-        "a label uses a spelling the grammar reserves";
-    NameReservedDeclaration => "@name.reserved-declaration", Name, Error, None,
-        "a declaration, generic name, or lexical binder uses a reserved spelling";
-    NameReservedValueSpelling => "@name.reserved-value-spelling", Name, Error, None,
-        "a module-level value or import alias is spelled as a builtin type name";
-    ModuleFileDirectoryCollision => "@module.file-directory-collision", Module, Error, None,
-        "a module path is claimed by both a file and a directory";
-    ModuleSourceIdCollision => "@module.source-id-collision", Module, Error, None,
-        "one source identity belongs to multiple modules in a resolver graph";
-    ModuleUnknownPath => "@module.unknown-path", Module, Error, None,
-        "a module path does not resolve to a source unit";
-    ModuleMissingRequiredImport => "@module.missing-required-import", Module, Error, None,
-        "a module declaring tests omits its required `@std.assert` import";
-    ModuleImportCycle => "@module.import-cycle", Module, Error, None,
+        "a name is introduced twice in one scope, or shadows another";
+    NameMemberCollision => "@name.memberCollision", Name, Error, None,
+        "two members of one owner share a name";
+    NameGenericRedeclaration => "@name.genericRedeclaration", Name, Error, None,
+        "a type parameter is repeated, or an associated type takes the name of a visible type parameter";
+    NameReservedLabel => "@name.reservedLabel", Name, Error, None,
+        "a reserved word is written in a label position";
+    NameReservedDeclaration => "@name.reservedDeclaration", Name, Error, None,
+        "a reserved word or prelude name is declared or bound";
+    NameReservedValueSpelling => "@name.reservedValueSpelling", Name, Error, None,
+        "a prelude spelling is used for a module value, function, or import";
+    ModuleFileDirectoryCollision => "@module.fileDirectoryCollision", Module, Error, None,
+        "a `.vib` file lies beside a directory of the same name";
+    ModuleSourceIdCollision => "@module.sourceIdCollision", Module, Error, None,
+        "one source identity belongs to two modules";
+    ModuleCaseCollision => "@module.caseCollision", Module, Error, None,
+        "two source paths differ only by case";
+    ModuleTestOutsideTests => "@module.testOutsideTests", Module, Error, None,
+        "a test is declared outside the tests unit";
+    ModuleAssertionOutsideTests => "@module.assertionOutsideTests", Module, Error, None,
+        "an assertion operation is used outside the tests unit";
+    ModuleUnknownPath => "@module.unknownPath", Module, Error, None,
+        "a path reaches no module visible to the importing module";
+    ModuleMissingRequiredImport => "@module.missingRequiredImport", Module, Error, None,
+        "a test module has no import that resolves to `@std.assert`";
+    ModuleImportCycle => "@module.importCycle", Module, Error, None,
         "module imports form a cycle";
-    ModuleInvalidSegment => "@module.invalid-segment", Module, Error, None,
-        "a source path segment is not one kebab-name component";
-    ModulePathEscape => "@module.path-escape", Module, Error, None,
-        "a source link resolves outside its confined root";
-    ModuleIoError => "@module.io-error", Module, Error, None,
-        "a source path cannot be inspected or read";
-    TypeArgumentMismatch => "@type.argument-mismatch", Type, Error, None,
-        "an operand does not match the parameter it binds to";
-    TypeTypeArgumentMismatch => "@type.type-argument-mismatch", Type, Error, None,
-        "a `types:` list does not match the addressed entity's parameter list";
-    TypeRedundantImplementation => "@type.redundant-implementation", Type, Error, None,
-        "an implementation duplicates one already supplied";
-    TypeDefaultOverride => "@type.default-override", Type, Error, None,
-        "an implementation supplies a member the contract defines as a default";
-    TypeMissingAbstractMember => "@type.missing-abstract-member", Type, Error, None,
-        "an implementation omits an abstract contract member";
-    TypeFunctionNotEquatable => "@type.function-not-equatable", Type, Error, None,
-        "a function value is used where equality is required";
-    TypeNotApplicable => "@type.not-applicable", Type, Error, None,
-        "a value of this type cannot head an application";
-    TypeInvalidTupleIndex => "@type.invalid-tuple-index", Type, Error, None,
-        "a tuple index is out of bounds or is not a literal";
-    TypeUnknownRecordField => "@type.unknown-record-field", Type, Error, None,
-        "an atom selector names no field of this record";
-    TypeNumericOutOfRange => "@type.numeric-out-of-range", Type, Error, None,
-        "a literal lies outside the range of its suffixed type";
-    TypeNotConstant => "@type.not-constant", Type, Error, None,
+    ModuleInvalidSegment => "@module.invalidSegment", Module, Error, None,
+        "a source path segment is invalid";
+    ModulePathEscape => "@module.pathEscape", Module, Error, None,
+        "a link leaves the source root";
+    ModuleIoError => "@module.ioError", Module, Error, None,
+        "a module cannot be enumerated or read, or an entry is unreadable or dangling";
+    TypeArgumentMismatch => "@type.argumentMismatch", Type, Error, None,
+        "an argument does not fit its slot, or an application or pattern has the wrong shape";
+    TypeTypeArgumentMismatch => "@type.typeArgumentMismatch", Type, Error, None,
+        "a type application has the wrong arguments or labels";
+    TypeRedundantImplementation => "@type.redundantImplementation", Type, Error, None,
+        "an `impl` inside an interface targets a type of the same module";
+    TypeDefaultOverride => "@type.defaultOverride", Type, Error, None,
+        "an implementation supplies a default member again";
+    TypeMissingAbstractMember => "@type.missingAbstractMember", Type, Error, None,
+        "an implementation does not supply an abstract member or an associated type";
+    TypeFunctionNotEquatable => "@type.functionNotEquatable", Type, Error, None,
+        "a callable is used where equality is required";
+    TypeNotApplicable => "@type.notApplicable", Type, Error, None,
+        "a value that is not applicable is applied";
+    TypeUnknownRecordField => "@type.unknownRecordField", Type, Error, None,
+        "a field read names no field of the value";
+    TypeNumericOutOfRange => "@type.numericOutOfRange", Type, Error, None,
+        "a literal does not fit its type";
+    TypeNotConstant => "@type.notConstant", Type, Error, None,
         "a constant expression is required and the expression is not one";
-    TypeInitializerCycle => "@type.initializer-cycle", Type, Error, None,
-        "module value initializers form a cycle";
-    TypeUndispatchableContractMember => "@type.undispatchable-contract-member", Type, Error, None,
-        "a contract member does not name `self` in a dispatchable position";
-    TypeUnionTooFewMembers => "@type.union-too-few-members", Type, Error, None,
-        "a union body declares fewer than two members";
-    TypeUnionMemberOverlap => "@type.union-member-overlap", Type, Error, None,
-        "two union members are unifiable";
-    TypeUnionMemberNotConcrete => "@type.union-member-not-concrete", Type, Error, None,
-        "a union member is a union, an interface, or a bare generic";
-    TypeOverlappingImplementation => "@type.overlapping-implementation", Type, Error, None,
-        "two implementations on one receiver overlap under instantiation";
-    TypeAmbiguousImplementation => "@type.ambiguous-implementation", Type, Error, None,
-        "a call matches more than one implementation";
-    TypeUnsatisfiedBound => "@type.unsatisfied-bound", Type, Error, None,
-        "a type does not implement the interface a bound or contract call needs";
-    TypeAmbiguousDestination => "@type.ambiguous-destination", Type, Error, None,
-        "a destination-dispatched member has no written expected type";
-    TypeInvalidAscription => "@type.invalid-ascription", Type, Error, None,
-        "`as` names a type the operand does not admit";
-    TypeNarrowingNonUnion => "@type.narrowing-non-union", Type, Error, None,
-        "an `as` pattern is written against a non-union scrutinee";
-    TypeNotAUnionMember => "@type.not-a-union-member", Type, Error, None,
-        "an `as` pattern names a type outside the union's member set";
-    TypeRedundantConversion => "@type.redundant-conversion", Type, Error, None,
-        "`from` and `try-from` are both implemented for one source";
+    TypeInitializerCycle => "@type.initializerCycle", Type, Error, None,
+        "a module value's initializer reaches itself";
+    TypeUndispatchableContractMember => "@type.undispatchableContractMember", Type, Error, None,
+        "a contract member has no receiver slot and its result type does not contain `Self`";
+    TypeUnsupportedSelfPosition => "@type.unsupportedSelfPosition", Type, Error, None,
+        "a contract member's result type places `Self` outside the `Self` map";
+    TypeOverlappingImplementation => "@type.overlappingImplementation", Type, Error, None,
+        "two implementations of one receiver have targets that unify";
+    TypeAmbiguousImplementation => "@type.ambiguousImplementation", Type, Error, None,
+        "two implementations are still candidates at a call";
+    TypeUnsatisfiedBound => "@type.unsatisfiedBound", Type, Error, None,
+        "a type has no implementation the call or bound needs";
+    TypeAmbiguousDestination => "@type.ambiguousDestination", Type, Error, None,
+        "a destination-dispatched call has no written expected type";
+    TypeRedundantConversion => "@type.redundantConversion", Type, Error, None,
+        "`From` and `TryFrom` sources of one receiver unify";
     TypeMismatch => "@type.mismatch", Type, Error, None,
-        "an expression's type differs from its written or required expected type";
-    TypeAmbiguousInference => "@type.ambiguous-inference", Type, Error, None,
-        "no unique type follows for a literal, empty collection, or generic argument";
-    TypeInfiniteSize => "@type.infinite-size", Type, Error, None,
-        "a recursive type expands without passing through a variable-size container";
-    TypeInvalidDictKey => "@type.invalid-dict-key", Type, Error, None,
-        "a dict key type has no `equatable`, `ordered`, and `hashable` conformance";
-    TypeInvalidTry => "@type.invalid-try", Type, Error, None,
-        "`try` is outside a matching `option` or `result` context";
-    TypeUnhandledFallible => "@type.unhandled-fallible", Type, Error, None,
-        "a `result` value is ignored without an explicit discard";
-    TypeInvalidReturn => "@type.invalid-return", Type, Error, None,
-        "`return` has no enclosing function body to exit";
-    TypeRedundantReturn => "@type.redundant-return", Type, Error, None,
-        "`return` is in tail position, where the final expression is already the result";
-    TypeUnreachableCode => "@type.unreachable-code", Type, Error, None,
-        "a `never` expression is in a position that admits none, or follows one";
-    PatternRefutableBinding => "@pattern.refutable-binding", Pattern, Error, None,
-        "a binding pattern is refutable for its expected type";
-    PatternIrrefutableLetElse => "@pattern.irrefutable-let-else", Pattern, Error, None,
-        "a `let-else` pattern covers every value, so `let` is the form to write";
-    PatternNonExhaustive => "@pattern.non-exhaustive", Pattern, Error, None,
-        "the arms of a `match` do not cover every value of the scrutinee type";
-    PatternUnreachableArm => "@pattern.unreachable-arm", Pattern, Error, None,
-        "earlier arms of a `match` already cover every value this arm matches";
-    EffectOutsideCeiling => "@effect.outside-ceiling", Effect, Error, None,
-        "a performed effect root lies outside the written or default ceiling";
-    EffectInvalidReference => "@effect.invalid-reference", Effect, Error, None,
-        "an effect row entry is not a lexical symbol resolved through imports";
-    EffectDuplicateRoot => "@effect.duplicate-root", Effect, Error, None,
-        "an effect row, or a target effects array, names the same root twice";
-    ExternalUnknownSymbol => "@external.unknown-symbol", External, Error, None,
-        "an external declaration names no symbol in its provider registry";
-    ExternalOwnerMismatch => "@external.owner-mismatch", External, Error, None,
-        "a host registry entry is owned by a root other than the deffect that declares it";
-    DataInvalidExtension => "@data.invalid-extension", Data, Error, None,
-        "a document was presented to the loader for the other grammar";
-    DataInvalidShape => "@data.invalid-shape", Data, Error, None,
-        "a VIBON value has an invalid root or container shape";
-    DataInvalidValue => "@data.invalid-value", Data, Error, None,
-        "a VIBON value contains a source-only or otherwise forbidden form";
-    DataDuplicateField => "@data.duplicate-field", Data, Error, None,
-        "a VIBON record repeats a label";
-    DataDuplicateKey => "@data.duplicate-key", Data, Error, None,
-        "a VIBON dict repeats a key";
-    ProjectStaleLock => "@project.stale-lock", Project, Error, None,
-        "the lock does not match the declared dependencies";
-    ProjectEntryOutsideTarget => "@project.entry-outside-target", Project, Error, None,
-        "an `entry` declaration resolves outside its target root";
-    ProjectEntryOnLibrary => "@project.entry-on-library", Project, Error, None,
-        "a library target declares an `entry`";
-    ProjectInvalidEntrySignature => "@project.invalid-entry-signature", Project, Error, None,
-        "an `entry` declaration does not have the required signature";
-    ProjectAmbiguousDependencyTarget => "@project.ambiguous-dependency-target", Project, Error, None,
-        "a dependency alias does not bind exactly one `@lib` target";
-    ProjectReservedUnitName => "@project.reserved-unit-name", Project, Error, None,
-        "a target or dependency name collides with the reserved `@tests` unit";
-    ProjectOverlappingTargetRoots => "@project.overlapping-target-roots", Project, Error, None,
-        "two target roots nest or coincide";
-    ProjectNotFound => "@project.not-found", Project, Error, None,
-        "no exact project.vibon was found in the discovery boundary";
-    ProjectInvalidTargetRoot => "@project.invalid-target-root", Project, Error, None,
-        "a target root is missing, malformed, or outside the project";
-    ProjectIoError => "@project.io-error", Project, Error, None,
-        "a project filesystem operation failed";
-    RuntimeInvalidHostValue => "@runtime.invalid-host-value", Runtime, Error, None,
-        "a host operation received or returned a value its ABI does not admit";
-    RuntimeInvalidCheckedProgram => "@runtime.invalid-checked-program", Runtime, Error, None,
-        "checked program execution violated a runtime invariant";
-    RuntimeDivisionByZero => "@runtime.division-by-zero", Runtime, Error, None,
-        "an unchecked integer division or remainder had a zero divisor";
-    RuntimeUnobservableFunction => "@runtime.unobservable-function", Runtime, Error, None,
-        "a value that holds a function reached an observation, which has no encoding for one";
-    RuntimeMemoryExhausted => "@runtime.memory-exhausted", Runtime, Error, None,
-        "execution exhausted the memory or the value-ID space of the instance, a host event rather than a trap";
-    StyleArgumentOrder => "@style.argument-order", Style, Warning, Safe,
-        "operands are in a noncanonical but unambiguous order";
-    ContractUnusedEffect => "@contract.unused-effect", Contract, Warning, None,
-        "a declared effect root is never performed";
+        "a type or expression differs from the one its position requires";
+    TypeAmbiguousInference => "@type.ambiguousInference", Type, Error, None,
+        "the call does not determine a type argument";
+    TypeInfiniteSize => "@type.infiniteSize", Type, Error, None,
+        "a declared type's expansion repeats";
+    TypeDepthExceeded => "@type.depthExceeded", Type, Error, None,
+        "a type nests more than 64 levels";
+    TypeExpandingInstantiation => "@type.expandingInstantiation", Type, Error, None,
+        "a generic callable reaches itself at a type built around its own type parameter";
+    TypeInvalidDictKey => "@type.invalidDictKey", Type, Error, None,
+        "a dict key type is not admissible";
+    TypeInvalidTry => "@type.invalidTry", Type, Error, None,
+        "`try` is on a wrong carrier, in a callable with another carrier, or directly in a test";
+    TypeUnhandledFallible => "@type.unhandledFallible", Type, Error, None,
+        "a fallible value is left unused as a statement";
+    TypeInvalidReturn => "@type.invalidReturn", Type, Error, None,
+        "`return` is outside a callable, in a module value, or directly in a test";
+    TypeMissingReturn => "@type.missingReturn", Type, Error, None,
+        "a callable body can run off its end";
+    TypeInvalidInvariant => "@type.invalidInvariant", Type, Error, None,
+        "a type invariant is not a predicate over the representation";
+    TypeSuspiciousRow => "@type.suspiciousRow", Type, Warning, None,
+        "a result type is a tuple of operation interfaces";
+    TypeUnreachableCode => "@type.unreachableCode", Type, Error, None,
+        "a statement follows one that cannot complete";
+    PatternRefutableBinding => "@pattern.refutableBinding", Pattern, Error, None,
+        "a `let` or parameter pattern can fail and has no `else`";
+    PatternIrrefutableLetElse => "@pattern.irrefutableLetElse", Pattern, Error, None,
+        "a `let … else` pattern cannot fail";
+    PatternNonExhaustive => "@pattern.nonExhaustive", Pattern, Error, None,
+        "a `match` does not cover its type";
+    PatternUnreachableArm => "@pattern.unreachableArm", Pattern, Error, None,
+        "an arm is repeated, already covered, or uninhabited";
+    PatternUnsupportedCoverage => "@pattern.unsupportedCoverage", Pattern, Error, None,
+        "the checker cannot decide coverage for this type";
+    PatternInvalidConstant => "@pattern.invalidConstant", Pattern, Error, None,
+        "a constant pattern's value has no pattern form";
+    EffectOutsideCeiling => "@effect.outsideCeiling", Effect, Error, None,
+        "a body performs an interface outside its ceiling";
+    EffectInvalidReference => "@effect.invalidReference", Effect, Error, None,
+        "a row entry is not an operation interface";
+    EffectDuplicateRoot => "@effect.duplicateRoot", Effect, Error, None,
+        "a row names one interface twice";
+    EffectInvalidAwait => "@effect.invalidAwait", Effect, Error, None,
+        "`await` is outside a `proc` or test, or of a value that is not a plan";
+    ExternalUnknownSymbol => "@external.unknownSymbol", External, Error, None,
+        "an external symbol is not in the registry";
+    ExternalOwnerMismatch => "@external.ownerMismatch", External, Error, None,
+        "an external member is declared on the wrong interface";
+    ExternalSignatureMismatch => "@external.signatureMismatch", External, Error, None,
+        "an external member's signature or row differs from the registry";
+    DataInvalidExtension => "@data.invalidExtension", Data, Error, None,
+        "a file has the wrong extension";
+    DataInvalidShape => "@data.invalidShape", Data, Error, None,
+        "a VIBON field is missing or unknown, or a value has the wrong form";
+    DataInvalidValue => "@data.invalidValue", Data, Error, None,
+        "a VIBON value is not admitted by its slot, or fields relate wrongly";
+    DataDuplicateField => "@data.duplicateField", Data, Error, None,
+        "a VIBON record repeats a field";
+    DataDuplicateKey => "@data.duplicateKey", Data, Error, None,
+        "a VIBON dict repeats a key after decoding";
+    ProjectStaleLock => "@project.staleLock", Project, Error, None,
+        "the lock does not match the project or the vendored content";
+    ProjectDependencyCycle => "@project.dependencyCycle", Project, Error, None,
+        "package dependencies form a cycle";
+    ProjectEntryOutsideTarget => "@project.entryOutsideTarget", Project, Error, None,
+        "a target `entry` does not start with the target's name";
+    ProjectEntryOnLibrary => "@project.entryOnLibrary", Project, Error, None,
+        "a library target has an `entry`";
+    ProjectInvalidEntrySignature => "@project.invalidEntrySignature", Project, Error, None,
+        "an `entry` is not a module-level `proc` with an entry signature";
+    ProjectAmbiguousDependencyTarget => "@project.ambiguousDependencyTarget", Project, Error, None,
+        "a dependency without `target` names a package with several library targets";
+    ProjectReservedUnitName => "@project.reservedUnitName", Project, Error, None,
+        "a target or dependency is named `tests` or `std`";
+    ProjectDuplicateName => "@project.duplicateName", Project, Error, None,
+        "two targets, or a target and a dependency, share a name";
+    ProjectOverlappingTargetRoots => "@project.overlappingTargetRoots", Project, Error, None,
+        "target roots overlap each other or `tests`";
+    ProjectNotFound => "@project.notFound", Project, Error, None,
+        "no `project.vibon` lies at or above the workspace";
+    ProjectInvalidTargetRoot => "@project.invalidTargetRoot", Project, Error, None,
+        "a target or test root is missing, not a directory, absolute, or escapes";
+    ProjectIoError => "@project.ioError", Project, Error, None,
+        "a project input or output operation failed";
+    RuntimeInvalidHostValue => "@runtime.invalidHostValue", Runtime, Error, None,
+        "a boundary value is invalid, stale, foreign, or of the wrong kind";
+    RuntimeInvalidCheckedProgram => "@runtime.invalidCheckedProgram", Runtime, Error, None,
+        "checked IR, a descriptor, or a continuation is impossible";
+    RuntimeMemoryExhausted => "@runtime.memoryExhausted", Runtime, Error, None,
+        "memory is exhausted, a host event rather than a trap";
+    StyleCasing => "@style.casing", Style, Warning, None,
+        "a name departs from the casing convention";
+    ContractUnusedEffect => "@contract.unusedEffect", Contract, Warning, None,
+        "a ceiling or `effects` entry names an interface nothing performs";
+    ContractUnproved => "@contract.unproved", Contract, Error, None,
+        "a bare guard is not established by the rules";
+    ContractRefuted => "@contract.refuted", Contract, Error, None,
+        "a bare guard is disproved";
+    ContractUnsupportedPredicate => "@contract.unsupportedPredicate", Contract, Error, None,
+        "a predicate is outside the certified fragment";
+    ContractObligationLost => "@contract.obligationLost", Contract, Error, None,
+        "a conversion to a plain callable type would hide a bare `requires`";
+    ContractInvalidPredicate => "@contract.invalidPredicate", Contract, Error, None,
+        "a predicate has the wrong type or shape";
+    ContractInvalidConsequence => "@contract.invalidConsequence", Contract, Error, None,
+        "a consequence has the wrong type, is not constant where required, or is not pure";
+    GrantInvalidBinding => "@grant.invalidBinding", Grant, Error, None,
+        "a grant binding is missing, extra, ill-typed, unapproved, or names a wrong `after` or `source`";
+    GrantBindingCycle => "@grant.bindingCycle", Grant, Error, None,
+        "grant `after` edges form a cycle";
+    GrantRequiredUnavailable => "@grant.requiredUnavailable", Grant, Error, None,
+        "a required grant is refused at startup";
+    GrantAcquisitionFailed => "@grant.acquisitionFailed", Grant, Error, None,
+        "a grant acquisition fails at startup";
+    GrantInvalidPolicy => "@grant.invalidPolicy", Grant, Error, None,
+        "a policy is invalid or names another root";
+    GrantPolicyTooComplex => "@grant.policyTooComplex", Grant, Error, None,
+        "a policy is over the size or depth limit";
     ToolUnavailable => "@tool.unavailable", Tool, Error, None,
-        "a valid v1 surface is not available in the selected implementation profile";
+        "a valid command or construct is outside the tool's profile";
+    ToolStalePlan => "@tool.stalePlan", Tool, Error, None,
+        "a plan's workspace or document revision no longer matches";
+    ToolActionDenied => "@tool.actionDenied", Tool, Error, None,
+        "the server's permissions deny a tool action";
+    ToolLimitExceeded => "@tool.limitExceeded", Tool, Error, None,
+        "a tool limit is reached and the result is incomplete";
+    ToolUnsupportedValue => "@tool.unsupportedValue", Tool, Error, None,
+        "a function, plan, or grant cannot be shown";
+    ToolUnsupportedTarget => "@tool.unsupportedTarget", Tool, Error, None,
+        "the toolchain does not emit for the requested platform";
+    ToolMissingLinkTool => "@tool.missingLinkTool", Tool, Error, None,
+        "the platform linker is missing";
+    ToolLinkFailed => "@tool.linkFailed", Tool, Error, None,
+        "a link step failed";
+    ToolIncompatibleArtifact => "@tool.incompatibleArtifact", Tool, Error, None,
+        "the runtime cannot admit an artifact's ABI, registry, or identities";
 }
 
 impl fmt::Display for DiagnosticCode {
@@ -412,8 +487,8 @@ mod tests {
     use super::{DiagnosticCode, Domain, FixCapability, Level, UnknownDiagnosticCode};
     use std::collections::BTreeSet;
 
-    /// The count in the specification's canonical table.
-    const REGISTERED_CODES: usize = 94;
+    /// The count of the specification table.
+    const REGISTERED_CODES: usize = 119;
 
     #[test]
     fn the_registry_has_every_code_in_the_specification_table() {
@@ -426,15 +501,11 @@ mod tests {
             .iter()
             .map(|code| code.as_atom())
             .collect();
-        assert_eq!(
-            spellings.len(),
-            DiagnosticCode::ALL.len(),
-            "the release gate requires every diagnostic code to be unique"
-        );
+        assert_eq!(spellings.len(), DiagnosticCode::ALL.len());
     }
 
     #[test]
-    fn every_code_is_spelled_as_an_atom_of_two_kebab_components() {
+    fn every_code_is_spelled_as_an_atom_of_two_camel_case_components() {
         for code in DiagnosticCode::ALL {
             let atom = code.as_atom();
             let path = atom
@@ -442,10 +513,9 @@ mod tests {
                 .unwrap_or_else(|| panic!("{atom} does not start with @"));
 
             let components: Vec<&str> = path.split('.').collect();
-            assert_eq!(components.len(), 2, "{atom} is not `@<domain>.<thing>`");
+            assert_eq!(components.len(), 2, "{atom} is not `@<domain>.<condition>`");
 
             for component in components {
-                assert!(!component.is_empty(), "{atom} has an empty component");
                 assert!(
                     component.starts_with(|first: char| first.is_ascii_lowercase()),
                     "{atom} has a component not starting with a lowercase letter"
@@ -453,20 +523,16 @@ mod tests {
                 assert!(
                     component
                         .chars()
-                        .all(|character| character.is_ascii_lowercase()
-                            || character == '-'),
-                    "{atom} has a component that is not kebab-case"
+                        .all(|character| character.is_ascii_alphanumeric()),
+                    "{atom} has a component that is not camelCase"
                 );
-                assert!(!component.ends_with('-'), "{atom} has a trailing hyphen");
             }
+            assert!(!atom.contains('-'), "{atom} is spelled with a hyphen");
         }
     }
 
     #[test]
     fn every_code_domain_matches_the_first_component_of_its_spelling() {
-        // The specification states this directly, and the conformance corpus
-        // asserts it too. Getting it wrong would make `vibra query` disagree
-        // with the code it was asked about.
         for code in DiagnosticCode::ALL {
             let atom = code.as_atom();
             let spelled = atom
@@ -474,6 +540,18 @@ mod tests {
                 .and_then(|path| path.split('.').next())
                 .unwrap_or_else(|| panic!("{atom} has no domain component"));
             assert_eq!(code.domain().as_str(), spelled, "for {atom}");
+        }
+    }
+
+    #[test]
+    fn every_domain_has_a_code() {
+        for domain in Domain::ALL {
+            assert!(
+                DiagnosticCode::ALL
+                    .iter()
+                    .any(|code| code.domain() == *domain),
+                "{domain} has no code"
+            );
         }
     }
 
@@ -489,76 +567,27 @@ mod tests {
     }
 
     #[test]
-    fn unmatched_delimiter_summary_covers_lists_and_quoted_leaves() {
-        assert_eq!(
-            DiagnosticCode::SyntaxUnmatchedDelimiter.summary(),
-            "a list or quoted leaf has an unmatched delimiter"
-        );
-    }
-
-    #[test]
-    fn exactly_two_codes_are_warnings() {
-        // The specification's table fixes 91 errors and 2 warnings. Pinning
-        // the split catches a level silently flipping in either direction.
-        let warnings: Vec<&str> = DiagnosticCode::ALL
+    fn exactly_three_codes_are_warnings() {
+        let warnings: Vec<DiagnosticCode> = DiagnosticCode::ALL
             .iter()
+            .copied()
             .filter(|code| code.level() == Level::Warning)
-            .map(|code| code.as_atom())
             .collect();
         assert_eq!(
             warnings,
-            ["@style.argument-order", "@contract.unused-effect"]
+            [
+                DiagnosticCode::TypeSuspiciousRow,
+                DiagnosticCode::StyleCasing,
+                DiagnosticCode::ContractUnusedEffect,
+            ]
         );
     }
 
     #[test]
-    fn levels_the_specification_states_in_prose_match_the_registry() {
-        // These are the codes whose level the chapter restates outside the
-        // canonical table. The table governs, so the two must agree.
-        for atom in [
-            "@syntax.invalid-character-literal",
-            "@syntax.invalid-string-literal",
-            "@syntax.invalid-numeric-literal",
-            "@syntax.invalid-name",
-            "@type.numeric-out-of-range",
-            "@effect.invalid-reference",
-            "@data.invalid-extension",
-            "@type.not-applicable",
-            "@type.invalid-tuple-index",
-            "@type.unknown-record-field",
-            "@pattern.refutable-binding",
-            "@name.reserved-value-spelling",
-            "@type.function-not-equatable",
-            "@type.undispatchable-contract-member",
-            "@type.union-too-few-members",
-            "@type.union-member-overlap",
-            "@type.union-member-not-concrete",
-            "@type.overlapping-implementation",
-            "@type.ambiguous-implementation",
-            "@type.ambiguous-destination",
-            "@type.invalid-ascription",
-            "@type.narrowing-non-union",
-            "@type.not-a-union-member",
-            "@type.redundant-conversion",
-        ] {
-            let code: DiagnosticCode = atom
-                .parse()
-                .unwrap_or_else(|_| panic!("{atom} is not registered"));
-            assert_eq!(code.level(), Level::Error, "for {atom}");
+    fn every_code_has_fix_capability_none() {
+        for code in DiagnosticCode::ALL {
+            assert_eq!(code.fix_capability(), FixCapability::None, "for {code}");
         }
-    }
-
-    #[test]
-    fn only_a_code_with_a_safe_fix_advertises_one() {
-        // Today the formatter's operand reordering is the one fix the
-        // compiler can offer. This will widen as fixes are added; it should
-        // never widen by accident.
-        let fixable: Vec<&str> = DiagnosticCode::ALL
-            .iter()
-            .filter(|code| code.fix_capability() == FixCapability::Safe)
-            .map(|code| code.as_atom())
-            .collect();
-        assert_eq!(fixable, ["@style.argument-order"]);
     }
 
     #[test]
@@ -574,13 +603,19 @@ mod tests {
 
     #[test]
     fn an_unregistered_code_does_not_parse() {
+        // Built at run time so that the registry source holds no atom
+        // literal other than the registered ones.
+        let unknown = format!("@{}.{}", "type", "noSuchCondition");
         assert_eq!(
-            "@type.no-such-condition".parse::<DiagnosticCode>(),
+            unknown.parse::<DiagnosticCode>(),
             Err(UnknownDiagnosticCode)
         );
         assert_eq!("".parse::<DiagnosticCode>(), Err(UnknownDiagnosticCode));
+        let without_at = DiagnosticCode::TypeMismatch
+            .as_atom()
+            .trim_start_matches('@');
         assert_eq!(
-            "type.argument-mismatch".parse::<DiagnosticCode>(),
+            without_at.parse::<DiagnosticCode>(),
             Err(UnknownDiagnosticCode),
             "the leading @ is part of the spelling"
         );
@@ -598,7 +633,7 @@ mod tests {
     fn a_code_displays_as_its_atom() {
         assert_eq!(
             DiagnosticCode::TypeArgumentMismatch.to_string(),
-            "@type.argument-mismatch"
+            DiagnosticCode::TypeArgumentMismatch.as_atom()
         );
         assert_eq!(Domain::Type.to_string(), "type");
         assert_eq!(Level::Error.to_string(), "@error");

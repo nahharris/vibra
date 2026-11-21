@@ -1,0 +1,32 @@
+interface Make(T)
+  fn make
+    returns r: {Self T}
+  endfn
+endinterface
+
+type Box of U8
+  impl Make(U8)
+    fn make
+      returns r: {Self U8}
+      do
+        return {Box(1u8) 8u8}
+    endfn
+  endimpl
+  impl Make(U16)
+    fn make
+      returns r: {Self U16}
+      do
+        return {Box(2u8) 16u16}
+    endfn
+  endimpl
+endtype
+
+fn main
+  returns r: U8
+  do
+    let made: {Box U8} be Make.make() endlet
+    match made
+      case {_ n}
+        return n
+    endmatch
+endfn

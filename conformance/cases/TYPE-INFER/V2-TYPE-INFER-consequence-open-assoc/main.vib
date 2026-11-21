@@ -1,0 +1,8 @@
+interface Bag
+  type Item endtype
+  fn items takes {value: Self n: I32} returns r: List(Item) requires Ordered.greater(n 0i32) else [] do return [] endfn
+endinterface
+type A of I32
+  impl Bag type Item of U8 endtype endimpl
+endtype
+fn main returns r: I32 do let l be Bag.items(A(1i32) 0i32) endlet return 1i32 endfn

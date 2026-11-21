@@ -1,0 +1,1 @@
+{format: @value.v2 typeInfo: {kind: @declared path: @app.main.User seed: "sha256:3230d90142b08bf7bb451426e1f4a6b85afa6895cb60d9462ecf66fc3e35817e" arguments: []} value: {kind: @record typeInfo: {kind: @declared path: @app.main.User seed: "sha256:3230d90142b08bf7bb451426e1f4a6b85afa6895cb60d9462ecf66fc3e35817e" arguments: []} fields: {name: "Ada" id: 1u64}}}

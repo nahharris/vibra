@@ -1,0 +1,24 @@
+type Money of I32
+  impl Equatable
+    fn equal
+      takes {left: Self right: Self}
+      returns same: Bool
+      do
+        let Money(a) be left endlet
+        let Money(b) be right endlet
+        return Equatable.equal(a b)
+    endfn
+  endimpl
+  impl Ordered
+    fn compare
+      takes {left: Self right: Self}
+      returns order: Ordering
+      do
+        let Money(a) be left endlet
+        let Money(b) be right endlet
+        return Ordered.compare(a b)
+    endfn
+  endimpl
+endtype
+fn ltUserReq takes {a: Money b: Money} returns r: I32 requires Bool.not(Equatable.equal(a b)) do return 0i32 endfn
+fn f takes {a: Money b: Money} returns r: I32 do if Ordered.less(a b) then return ltUserReq(a b) else return 1i32 endif endfn

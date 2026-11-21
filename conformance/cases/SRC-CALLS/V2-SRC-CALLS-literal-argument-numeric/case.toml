@@ -1,0 +1,18 @@
+id = "V2-SRC-CALLS-literal-argument-numeric"
+rule = "V2-SRC-CALLS-literal-argument-numeric"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#application: an unsuffixed float literal argument at an integer slot is @type.argumentMismatch at the literal"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.argumentMismatch"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 86, end = 89 }

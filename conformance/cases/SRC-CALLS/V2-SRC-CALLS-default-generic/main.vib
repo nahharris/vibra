@@ -1,0 +1,5 @@
+fn main returns r: U64 do return U64.add(count([1i32 2i32]) count(["a"] tail: ["b" "c"] spare: Option.some(value: "d"))) endfn
+fn count(T) takes {xs: List(T)} labelled {tail: List(T) be [] spare: Option(T) be Option.none()} returns r: U64 do
+  let n be match spare case Option.some(value: _) 1u64 case Option.none() 0u64 endmatch endlet
+  return U64.add(n List.length(List.concat(xs tail)))
+endfn

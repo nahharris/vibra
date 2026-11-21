@@ -50,12 +50,18 @@ vibra [GLOBAL...] build [TARGET] [--target TRIPLE]
 vibra [GLOBAL...] query SUBJECT [--include METADATA] [--expand RELATIONS]
 vibra [GLOBAL...] edit fix SUBJECT [--write]
 vibra [GLOBAL...] edit rename SUBJECT NEWNAME [--write]
-vibra [GLOBAL...] edit organize-imports PATH [--write]
+vibra [GLOBAL...] edit imports PATH [--write]
 vibra [GLOBAL...] mcp [SERVER-PERMISSION...]
 vibra [GLOBAL...] help
 ```
 
 This is the grammar of a process command line, not Vibra source.
+
+**Names.** A code entity is written in camelCase or PascalCase everywhere,
+the command line included: an argument that names one, such as an atom, a
+profile, or a result, keeps the entity's spelling. Every other word of the
+command line, a command or an option, may be kebab-case. A command name is
+short, preferably one word: `edit imports` organizes imports.
 
 | Operand | Meaning |
 | --- | --- |
@@ -69,10 +75,21 @@ This is the grammar of a process command line, not Vibra source.
 | `TEST` | a [test selector](#tests-and-selection) |
 
 - An unknown command or option, a repeated single option, and an extra
-  positional are invalid input.
+  positional are invalid input. So are a command line with no command and a
+  command group, `project` or `edit`, with no subcommand of the group
+  after it; the response then carries the empty command name.
+- Invalid input is answered in the format recognized before the fault:
+  `--format json --format human help` is refused in JSON, and
+  `--format xml help` in the human format. It carries no diagnostic. In the
+  human format it is one line on standard error, whose wording is not a
+  contract.
+- Every token after `mcp` is a server permission operand, whatever it
+  begins with; none is read as an option.
 - A known command the tool does not yet support is **unavailable**, which is
   a different outcome from an unknown spelling. The support inventory MUST
-  name every such command.
+  name every such command. A well-formed line of such a command is
+  unavailable whatever its operands hold: its typed operands are not
+  validated.
 - `help`, `--help`, and `-h` in the command position are equivalent and take
   no arguments. Help shows this hierarchy with the supported inventory and
   MUST NOT present an unavailable command as working. In JSON it returns the
@@ -86,7 +103,9 @@ This is the grammar of a process command line, not Vibra source.
   status `unsupported`, and the other targets are checked. `run` and
   `build` need the project's only binary target; with none or several and no
   selector, the command is invalid input with no source diagnostic. A missing
-  target, or a library given to `run` or `build`, is invalid input.
+  target, or a library given to `run` or `build`, is invalid input. So is a
+  `TARGET` that names no local target, as in `check @nope`: the result is
+  `@command.invalidInput`, with no diagnostic.
 - `edit fix` needs exactly one applicable safe fix. `edit rename` needs one
   resolved renameable identity, and checks collisions before planning. A
   subject that matches nothing, or several things, is invalid input. No tool
@@ -129,7 +148,16 @@ limit is an **unknown** outcome. It MUST NOT be reported as a pass, as a
 false guard, or as an error value of the program. A scheduler quota only
 suspends and resumes; it is never a program result. The compiler's own
 constant evaluation uses the same interface: a required constant or
-obligation that is not established within the limits fails its check.
+obligation that is not established within the limits fails its check. The
+published limit profile is `m1Default`. It allows one compile-time
+evaluation 10,000,000 reductions, a reduction being the evaluation of one
+checked node, and the discharge of one obligation 100,000 attempted
+derivations of
+[integer facts](07-diagnostics-and-conformance.md#integer-facts), a
+derivation being one application of one fact to one premise or one pair of
+premises, or one comparison of two constants, whether or not its conclusion
+is new. A discharge that this limit stops before the rules reach a verdict
+is reported as [Bare guards](02-type-system.md#bare-guards) states.
 
 ### Initialization and project operations
 
@@ -173,6 +201,10 @@ cycle is an error whatever the revisions.
 `fmt PATH` formats source or VIBON according to the extension. For VIBON it
 is the source-preserving formatter: it keeps comments, spellings, and the
 written order of entries. It previews by default; `--write` applies.
+`fmt` has no mode for the files of the embedded standard library: the
+extension alone selects the grammar, so a section only the library admits is
+reported as in any other file. The toolchain's own tests keep those files
+canonical.
 
 | Outcome | `changed` | `written` | `text` |
 | --- | --- | --- | --- |
@@ -185,6 +217,9 @@ written order of entries. It previews by default; `--write` applies.
   name-case convention is a diagnostic, never a reason to rename.
 - Source the parser recovered from ambiguously is kept byte for byte. The
   formatter does not repair by guessing.
+- A file that is not valid UTF-8 is `@syntax.invalidEncoding` and plans no
+  edit: `changed` is `false` and `text` is `null`. It is never decoded
+  lossily.
 - A captured module is formatted with a semantic check of the candidate text
   in place of the captured bytes. A file that is not a module is formatted
   by syntax alone. When checking is unavailable, formatting proceeds from
@@ -218,13 +253,17 @@ input (exit 2, no diagnostics).
 | `@test.trap` | a toolchain defect trap |
 | `@test.invalid` | the selection had static errors |
 | `@test.unavailable` | the item needs an unsupported construct |
+| `@test.exhausted` | the item exhausted its memory, the host event `@runtime.memoryExhausted` |
 
-`selected` counts selected items, `passed` only `@test.passed`, and `failed`
-is their difference. An item that ended unknown or exhausted is never
-counted as passed. When items differ, the suite result follows this
-precedence: trap, operational exhaustion, unavailable, test failed, ok. A
-diagnostic appears once in the envelope and is attributed to every item it
-affects. An item keeps the audit events it completed before a later failure.
+`selected` counts selected items, `passed` only `@test.passed`, and `failed` is
+their difference. An item that ended unknown or exhausted is never counted as
+passed, and the other items keep their results. When items differ, the suite
+result follows this precedence: trap, operational exhaustion, unavailable, test
+failed, ok. A diagnostic appears once in the envelope. Every error is attributed
+to every item of an invalid selection; an item's ending diagnostic (its
+`@tool.unavailable`, its trap, its exhaustion, or its observation error) is
+attributed to that item; a warning is attributed to no item. An item keeps the
+audit events it completed before a later failure.
 
 ## Machine contracts
 
@@ -238,6 +277,10 @@ relate fields.
 JSON is the only place `null` appears: it is the **JSON projection** of an
 absent optional field of a VIBON document, and of an unavailable fact.
 Every VIBON document a response carries is embedded as its canonical text.
+A code, whether a diagnostic code of the registry, a `@command.*` result,
+or a `@test.*` result, is spelled in JSON as its full atom text, `@`
+included: an observation error carries `"@tool.unsupportedValue"`, never
+`"unsupportedValue"`.
 Every structured response is a closed object with these fields:
 
 ```json
@@ -254,28 +297,35 @@ Every structured response is a closed object with these fields:
 }
 ```
 
-- `workspaceRevision` is `null` only when no snapshot was taken: help, a
-  command-line error, or failed discovery. It is never invented.
+- `workspaceRevision` is `null` only when no snapshot was taken (help, a
+  command-line error, or failed discovery) and for invalid input. It is never
+  invented.
 - `status` is `passed`, `refuted`, `unknown`, or `unsupported`. It describes
   the observation requested. Passing sampled tests is `passed` for that run,
-  not a universal claim about the program.
-- `limits.profile` names the published limit profile, with its units,
-  defaults, and engine version. `reached` lists the limits reached, in
-  order. `complete` is `false` after truncation or exhaustion.
+  not a universal claim about the program. The result fixes it, as the table
+  below states, with two exceptions: a reached limit and a bare guard that
+  is not established make it `unknown`.
+- `command` is the words that select the command, joined by one space:
+  `check`, `project init`, `edit imports`. An operand is never part of it,
+  so `project add target` has the name `project add`.
+- `limits.profile` names the published limit profile, with its units, defaults,
+  and engine version. `reached` lists the names of the limits reached, in order;
+  the memory limit is `"memory"`. `complete` is `false` after truncation or
+  exhaustion.
 - When output would exceed its limit, the tool emits a bounded, valid
   document with status `unknown`. It never emits truncated JSON and never
   silently omits facts.
 
-| Result | Exit | Meaning |
-| --- | --- | --- |
-| `@command.ok` | 0 | the requested operation completed and succeeded |
-| `@command.diagnostics` | 1 | static diagnostics prevent admission |
-| `@command.testFailed` | 1 | at least one selected test failed |
-| `@command.invalidInput` | 2 | invalid command, selector, or typed input |
-| `@command.operationalFailure` | 3 | tool, host, or startup failure or exhaustion |
-| `@command.unavailable` | 4 | a known operation outside the supported profile |
-| `@command.trap` | 5 | a registered toolchain or runtime defect |
-| `@command.programFailed` | 6 | the program returned a non-zero `ExitCode` |
+| Result | Exit | Status | Meaning |
+| --- | --- | --- | --- |
+| `@command.ok` | 0 | `passed` | the requested operation completed and succeeded |
+| `@command.diagnostics` | 1 | `refuted` | static diagnostics prevent admission |
+| `@command.testFailed` | 1 | `refuted` | at least one selected test failed |
+| `@command.invalidInput` | 2 | `unknown` | invalid command, selector, or typed input |
+| `@command.operationalFailure` | 3 | `unknown` | tool, host, or startup failure or exhaustion |
+| `@command.unavailable` | 4 | `unsupported` | a known operation outside the supported profile |
+| `@command.trap` | 5 | `unknown` | a registered toolchain or runtime defect |
+| `@command.programFailed` | 6 | `unknown` | the program returned a non-zero `ExitCode` |
 
 - A bare guard that is disproved has status `refuted`; one that is not
   established has status `unknown`. Both prevent admission.
@@ -289,10 +339,9 @@ Every structured response is a closed object with these fields:
   program's output into the payload; bytes that are not UTF-8 show as U+FFFD
   there, and the audit trace keeps the exact bytes. In human format the
   program's bytes go straight through and diagnostics go to standard error.
-- **Invalid input.** Before a command's typed inputs are validated, the
-  response has the recognized command name, or an empty one, and an empty
-  payload. After validation it has that command's payload, with unavailable
-  facts `null`.
+- **Invalid input.** The response has the recognized command name, or an
+  empty one, a `null` `workspaceRevision`, no diagnostic, and the empty
+  payload, whether the fault is found before or after a snapshot.
 
 ### Command payloads
 
@@ -311,7 +360,7 @@ in the
 | `lint` | `accepted`: boolean; `plan`: `EditPlan` or null |
 | `query` | `subject`: string; `resolvedKind`: string or null; `identity`: `Identity` or null; `metadata`: object; `expansions`: object |
 | `eval` | `subject`: `Identity` or null; `value`: canonical VIBON text or null; `observationError`: `ObservationError` or null |
-| `run` | `target`: atom string; `programResult`: canonical value text or null; `applicationCode`: integer 0–255 or null; `stdout`: string; `stderr`: string; `auditTrace`: `AuditEvent[]`; `startup`: `StartupRecord`; `trap`: `TrapRecord` or null |
+| `run` | `target`: atom string; `programResult`: canonical value text or null; `applicationCode`: integer 0–255 or null; `stdout`: string; `stderr`: string; `auditTrace`: `AuditEvent[]`, the events of phase `@entry`; `drivers`: `{provider, version}[]`; `policies`: object from policy hash to the canonical text of the normalized `@scopePolicy.v1` document; `startup`: `StartupRecord`; `trap`: `TrapRecord` or null |
 | `test` | `selected`, `passed`, `failed`: non-negative integers; `tests`: `TestItem[]` |
 | `build` | `target`: atom string; `triple`: string; `executable`: confined path or null; `manifest`: canonical build VIBON text or null; `semanticIdentity`: digest or null; `artifactIdentity`: digest or null |
 | `project add`, `project remove`, every `edit` | `plan`: `EditPlan` or null; `applied`: boolean; `resultingRevision`: digest or null |
@@ -319,21 +368,25 @@ in the
 
 | Record | Fields |
 | --- | --- |
-| `CommandCapability` | `command`; `operations`: string[]; `profiles`: string[]; `supported`: boolean; `schemaIds`: exact published identifiers |
+| `CommandCapability` | one per line of the command surface, in its order: `command`, the command name; `operations`: string[], the [case operations](07-diagnostics-and-conformance.md#case-operations-and-inputs) whose observation a supported command produces, and its own name for `help`; `profiles`: string[], the profiles of those operations in the [profile table](07-diagnostics-and-conformance.md#conformance-profiles), and `toolingV2`, whose CLI contract covers it, for `help`; `supported`: boolean; `schemaIds`: exact published identifiers of the documents it emits. The three lists are empty for an unsupported command |
 | `TargetSummary` | `name`; `kind`; `root`; `entry` (nullable); `bindingStatus`: `exact`, `recovered`, or `unavailable` |
 | `DependencySummary` | `alias`; `kind`; `source`; `target` (nullable); `status`: `captured`, `verified`, `unavailable`, or `refuted`; `identity` (nullable) |
-| `TestItem` | `name`; `result`; `failure` (nullable); `trap` (nullable); `auditTrace`; `diagnostics`; `status` |
+| `TestItem` | `name`, the selector; `result`, the `@test.*` atom; `failure` (nullable); `trap` (nullable); `auditTrace`: `AuditEvent[]`, the test's events; `diagnostics`: string[], the codes of the envelope's diagnostics attributed to the item; `status`, that of the command result the item's result corresponds to: `passed` for `@test.passed`, `refuted` for `@test.assertionFailed` and `@test.invalid`, `unknown` for `@test.trap` and `@test.exhausted`, and `unsupported` for `@test.unavailable` |
 | `TestItem.failure` | `kind`: `assertion` or `observation`; `assertion`, `expected`, `actual`: canonical text or null; `primarySpan`: `SpanDocument`; `observationError`: null for an assertion |
 | `TrapRecord` | `trapCode`; `origin` (nullable) |
-| `ObservationError` | `code`: `unsupportedValue`; `type` and `origin`: nullable |
-| `StartupRecord` | `status`: `notStarted`, `acquired`, or `failed`; `bindings`; `auditTrace`; `failure`: null or `{binding, code, origin}`, where `code` is `@grant.requiredUnavailable` for a refused required leaf and `@grant.acquisitionFailed` for a failed acquisition |
-| `StartupRecord.bindings[]` | one per processed leaf, in processing order: `name`; `recipeIdentity`: `sha256:` and the SHA-256 of `vibraRecipeIdentityV2`, a zero byte, and the canonical bytes of the recipe with its policy normalized; `providerIdentity`: `{provider, version}`; `status`: `acquired`, `refused`, or `failed`, the three outcomes of the [startup order](04-programs-and-packages.md#startup-order), or `released` for an acquired leaf after its release; `grantProjection` (nullable) |
+| `ObservationError` | `code`: `"@tool.unsupportedValue"`, the observation error; `type`: the canonical `@type.v2` text of the operand's type, or null; `origin`: a `U64`, or null |
+| `StartupRecord` | `status`: `notStarted`, `acquired`, or `failed`; `bindings`; `auditTrace`: `AuditEvent[]`, the `@startup` events and the `@host` events of phase `@startup`; `failure`: null or `{binding, code, origin}`, where `code` is `@grant.requiredUnavailable` for a refused required leaf and `@grant.acquisitionFailed` for a failed acquisition; `null` with the status `failed` when a defect trap ended startup, which no leaf stopped |
+| `StartupRecord.bindings[]` | one per processed leaf, in processing order: `name`; `recipeIdentity`: `sha256:` and the SHA-256 of `vibraRecipeIdentityV2`, a zero byte, and the canonical bytes of the recipe with its policy normalized; `providerIdentity`: `{provider, version}`; `status`: `refused` or `failed`, two outcomes of the [startup order](04-programs-and-packages.md#startup-order), or `released` for an acquired leaf, since every acquired binding of a finished command is released; `acquired` is the status inside the `@startup` event, which is appended before release; `grantProjection` (nullable) |
 
 A summary never executes an acquisition. A grant projection is data that
 describes a grant; it cannot be turned back into one, and its schema and
 `AuditEvent` belong to the [runtime chapter](06-runtime.md#audit-trace). A
 function, a plan, or a grant is never encoded by inventing a string for it.
-A failed command keeps the startup events that completed.
+A failed command keeps the startup events that completed. The events of a
+run are split by phase, so no event is in both `startup.auditTrace` and the
+payload's `auditTrace`; `drivers` and `policies` are those of the run's
+`@auditTrace.v2` document, so every projection's `policy` hash is a key of
+`policies`.
 
 A human test report keeps selectors and result atoms, prints each item that
 did not pass with its diagnostic, failure, or trap, and ends with the
@@ -398,6 +451,15 @@ The `toolchain` record is a `@toolchain.v2` document:
   registry: {major: 2u32 minor: 0u32}
 }
 ```
+
+Every snapshot has exactly one `toolchain` record, whose bytes are the
+canonical bytes of this document, so a revision changes with the toolchain
+and with its embedded library even when no project byte changes. Every
+field but `stdlib` is a name fixed by the toolchain release: those of the
+example are the names of the release `0.0.2`, and its `stdlib` is the
+digest of the manifest it embeds. A revision written in an expected
+observation, such as the `revision` of an audit trace, is computed with
+this record.
 
 **Claim and witness.** Each declaration has two further hashes, each
 `sha256:` and 64 lower-case hexadecimal digits of the SHA-256 of a framing
@@ -608,7 +670,7 @@ resultType, dispatch}`.
 - `dispatch` is `null` or `{contract, member, receiver, selection,
   destination}`. `selection` is `static`, `default`, `dynamic`, or
   `closed`. `destination` is `true` for a member with no receiver slot that
-  was chosen by the written expected type.
+  was chosen by the expected type.
 - Applying a `proc` member builds a plan and performs nothing. An `await` is
   reported separately, with the plan's type, its complete row, and its
   witness.
@@ -620,12 +682,13 @@ of identities and types, and `constructor` is the resolved identity or
 `null`.
 
 **Obligation record:** `{kind, declaration, predicateIdentity, source,
-status, ruleIds, dependencies, counterexample}`. `kind` is `requires`,
-`ensures`, or `where`. `status` is `passed`, `refuted`, `unknown`, or
-`unsupported`. `dependencies` pins the checked inputs. `counterexample` is
-data or `null`. A guard with `else` is recorded in the declaration's
-metadata with its consequence; having a consequence never makes its
-predicate `passed`.
+status, ruleIds, dependencies, counterexample}`, the JSON form of the
+[obligation record](07-diagnostics-and-conformance.md#persistent-observations)
+of `@types.v2`, whose table gives each field with its JSON name and type:
+`declaration` and `predicateIdentity` are strings, `source` is a
+`SpanDocument`, and `counterexample` is a string or `null`. A guard with
+`else` is recorded in the declaration's metadata with its consequence;
+having a consequence never makes its predicate `passed`.
 
 ### Effect and authority projections
 
@@ -667,7 +730,7 @@ and storage are not compiler services.
 | declaration | `id` (`Str`, the identity); `kind` (a declaration kind atom of the [type chapter](02-type-system.md#declared-types)); `module` (atom); `owner` (optional `Str`, the owner's identity; absent at top level); `access` (`@public` or `@private`); `source` (a span record); `text` (`Str`, the formatted source); `binding` (optional record `provider: Atom`, `wireSymbol: Str`, present for an external declaration); `facts` (optional, absent when not established) |
 | `facts` | in this order: `signature` (optional [signature record](06-runtime.md#open-signatures); absent for a module, an interface, and an associated type); `ceiling` (optional row, the written `performs`; present for a `proc` and a test); `effects` (optional row, the performed row; present with `ceiling`); `errors` (list of open type encodings, the ordinary result error types, in written order, written even when empty); `applications` (list of application facts sorted by `source`, written even when empty); `contracts` (list of `{kind: Atom predicate: Str consequence: Str}` in written order, with `consequence` optional, distinguishing bare guards from guards with a consequence; written even when empty); `claimIdentity` (`Str`, required); `witnessIdentity` (`Str`, required) |
 | application fact | in this order: `source` (a span record); `kind` (`@function`, `@procPlan`, `@constructor`, `@contract`, `@recordProjection`, or `@collectionLookup`); `callee` (optional `Str` identity, absent without one resolved declaration); `calleeType` (an open type encoding); `positional` (list of open type encodings, the operand types in written order); `labels` (dict from `Str` label to open type encoding); `resultType` (an open type encoding); `dispatch` (optional dispatch fact) |
-| dispatch fact | in this order: `contract` (`Str`, the interface's identity); `member` (`Str`, the member's identity); `receiver` (an open type encoding); `selection` (`@static`, `@default`, `@dynamic`, or `@closed`); `destination` (`Bool`, `true` for a member with no receiver slot chosen by the written expected type) |
+| dispatch fact | in this order: `contract` (`Str`, the interface's identity); `member` (`Str`, the member's identity); `receiver` (an open type encoding); `selection` (`@static`, `@default`, `@dynamic`, or `@closed`); `destination` (`Bool`, `true` for a member with no receiver slot chosen by the expected type) |
 | index implementation | in this order: `implementation` (an [implementation record](06-runtime.md#open-signatures): its binders, its positional interface key `contract`, its `receiver`, and its `choices`); `source` (a span record); `text` (`Str`); `members` (list, in written order, of `{member: Str source: S signature: G text: Str}`, where `member` is the contract member's identity, `S` a span record, and `G` a signature record over the implementation's binders) |
 | reference | `from` (`Str`, the identity of the enclosing declaration); `written` (`Str`); `source` (a span record); `to` (optional `Str`, absent when it depends on failed checking) |
 
@@ -795,9 +858,8 @@ major version.
 Read queries, bounded eval, and revision-checked edits belong to the
 language release. The MCP server and editor adapters follow in a named
 milestone of the [roadmap](../roadmap/README.md). `build` produces native
-executables for the qualified targets; the WebAssembly backend is removed
-when native execution is qualified; `run`, `test`, and `eval` stay on the
-interpreter. A tool reports what it supports at every stage.
+executables for the qualified targets; `run`, `test`, and `eval` stay on
+the interpreter. A tool reports what it supports at every stage.
 
 Excluded:
 

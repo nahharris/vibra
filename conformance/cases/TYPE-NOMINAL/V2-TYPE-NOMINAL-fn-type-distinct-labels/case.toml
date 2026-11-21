@@ -1,0 +1,12 @@
+id = "V2-TYPE-NOMINAL-fn-type-distinct-labels"
+rule = "V2-TYPE-NOMINAL-fn-type-distinct-labels"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#callable-types: a Fn type with two distinct labels names each input once, and a call through it takes both defaults"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

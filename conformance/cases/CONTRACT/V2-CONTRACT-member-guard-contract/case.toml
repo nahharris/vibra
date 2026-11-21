@@ -1,0 +1,12 @@
+id = "V2-CONTRACT-member-guard-contract"
+rule = "V2-CONTRACT-member-guard-contract"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#guards-and-callable-types: an implementation is checked under its contract member's requires"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

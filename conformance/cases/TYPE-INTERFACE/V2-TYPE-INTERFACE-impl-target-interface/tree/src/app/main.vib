@@ -1,0 +1,8 @@
+fn main returns r: I32 do return 1i32 endfn
+
+type Printable2 of U8 endtype
+
+type A of U8
+  impl Printable2
+  endimpl
+endtype

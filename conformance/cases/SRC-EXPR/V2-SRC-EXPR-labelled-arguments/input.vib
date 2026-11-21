@@ -1,0 +1,1 @@
+let u: User be User(id: UserId(1u64) name: "Ada") endlet

@@ -1,396 +1,223 @@
-//! Public workspace test-runner contracts for Step 13.
+//! The test runner: selectors, discovery order, the check before any test
+//! runs, a fresh interpreter per test, isolation of an exhausted test, and
+//! the `@testRun.v2` observation. Expectations come from the programs
+//! chapter, "Tests" and "Assertions", and the tooling chapter, "Tests and
+//! selection".
 
-use vibra_types::load_stdlib;
+use vibra_interp::MemoryBudget;
 use vibra_workspace::{
-    WorkspaceSnapshot,
-    semantic::{TestItemStatus, TestSelector, TestSuiteStatus, run_tests},
+    InvalidSelection, SuiteResult, TestOutcome, TestRun, TestSelector, run_tests,
 };
 
-use crate::support::TempDir;
+use crate::support::{LIBRARY, TempDir, capture};
 
-fn verified_bootstrap() -> vibra_types::Stdlib {
-    load_stdlib().expect("embedded standard library")
+const MATH: &str = "fn add\n  takes {left: I32 right: I32}\n  returns sum: I32\n  \
+                    visibility @public\n  do\n    return I32.add(left right)\nendfn\n";
+
+/// Runs the tests of a library project holding `src/app/math.vib` and
+/// `files`.
+fn run(
+    files: &[(&str, &str)],
+    selector: Option<&str>,
+) -> Result<TestRun, InvalidSelection> {
+    run_with(files, selector, MemoryBudget::DEFAULT)
+}
+
+fn run_with(
+    files: &[(&str, &str)],
+    selector: Option<&str>,
+    budget: MemoryBudget,
+) -> Result<TestRun, InvalidSelection> {
+    let mut all = vec![("src/app/math.vib", MATH)];
+    all.extend_from_slice(files);
+    let tree = TempDir::project("tests", LIBRARY, &all);
+    let snapshot = capture(tree.path()).expect("the project captures");
+    let selector = selector.map(|text| TestSelector::parse(text).expect("a selector"));
+    run_tests(&snapshot, selector.as_ref(), budget)
+}
+
+fn names(run: &TestRun) -> Vec<String> {
+    run.items()
+        .iter()
+        .map(|item| item.selector().to_string())
+        .collect()
 }
 
 #[test]
-fn selected_tests_use_verified_assertions_and_record_structured_failure() {
-    let project = TempDir::demo(
-        "assertions",
-        &[
-            ("src/app/main.vib", "(defn execute () void void)\n"),
-            (
-                "tests/math/add.vib",
-                "(import assert @std.assert)\n(test \"fails\" (assert.equal \"expected\" \"actual\"))\n(test \"passes-after-failure\" (assert.equal 4i32 4i32))\n",
-            ),
-        ],
-    );
-    let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
-    let verification = verified_bootstrap();
-
-    let result = run_tests(&snapshot, None, Some(&verification));
-
-    assert_eq!(result.status(), TestSuiteStatus::TestFailed);
-    assert_eq!(result.selected(), 2);
-    assert_eq!(result.passed(), 1);
-    assert_eq!(result.failed(), 1);
-    let failure = result.items()[0].failure().expect("assertion failure");
-    assert_eq!(result.items()[0].status(), TestItemStatus::AssertionFailed);
-    assert_eq!(result.items()[1].status(), TestItemStatus::Passed);
-    assert_eq!(
-        result.items()[1].name(),
-        "@tests.math.add::\"passes-after-failure\""
-    );
-    assert_eq!(failure.assertion(), "@std.assert.equal");
-    assert_eq!(failure.expected(), "\"expected\"");
-    assert_eq!(failure.actual(), "\"actual\"");
-    assert_eq!(failure.source_id(), "tests/math/add.vib");
-    assert!(
-        result
-            .items()
-            .iter()
-            .all(|item| item.audit_trace().is_empty())
-    );
-}
-
-#[test]
-fn unknown_explicit_selector_is_invalid_while_omitted_empty_suite_succeeds() {
-    let empty = TempDir::demo(
-        "empty-suite",
-        &[("src/app/main.vib", "(defn execute () void void)\n")],
-    );
-    let snapshot = WorkspaceSnapshot::load(empty.path()).expect("snapshot");
-    let verification = verified_bootstrap();
-
-    let result = run_tests(&snapshot, None, Some(&verification));
-    assert_eq!(result.status(), TestSuiteStatus::Ok);
-    assert_eq!(result.selected(), 0);
-    assert!(result.items().is_empty());
-
+fn a_selector_is_a_tests_module_and_a_canonical_string() {
     let selector =
-        TestSelector::parse("@tests.math::\"missing\"").expect("canonical selector");
-    let missing = run_tests(&snapshot, Some(&selector), Some(&verification));
-    assert_eq!(missing.status(), TestSuiteStatus::InvalidInput);
-    assert!(missing.items().is_empty());
-    assert!(missing.diagnostics().is_empty());
+        TestSelector::parse("@tests.math::\"adds one\"").expect("a selector");
+    assert_eq!(selector.module(), "@tests.math");
+    assert_eq!(selector.name(), "adds one");
+    assert_eq!(selector.to_string(), "@tests.math::\"adds one\"");
+    for malformed in [
+        "@app.math::\"adds\"",
+        "@tests::\"adds\"",
+        "@tests.math:: \"adds\"",
+        "@tests.math::adds",
+        "@tests.math::\"\\u{61}dds\"",
+        "@tests.math",
+        "@tests.Math-x::\"adds\"",
+    ] {
+        assert_eq!(
+            TestSelector::parse(malformed),
+            Err(InvalidSelection::Malformed(malformed.to_owned())),
+            "{malformed}"
+        );
+    }
 }
 
 #[test]
-fn duplicate_decoded_names_in_one_module_make_all_selected_items_invalid() {
-    let project = TempDir::demo(
-        "duplicates",
-        &[
-            ("src/app/main.vib", "(defn execute () void void)\n"),
-            (
-                "tests/math.vib",
-                "(import assert @std.assert)\n(test \"same\" (assert.true true))\n(test \"same\" (assert.true true))\n",
-            ),
-        ],
+fn tests_run_in_module_order_then_declaration_order() {
+    let b = "use @std.assert enduse\n\ntest \"second\" do assert.true(true) endtest\n\n\
+             test \"first\" do assert.true(true) endtest\n";
+    let a = "use @std.assert enduse\n\ntest \"z\" do assert.true(true) endtest\n\n\
+             test \"y\" do assert.true(true) endtest\n";
+    let run = run(&[("tests/b.vib", b), ("tests/a.vib", a)], None).expect("a run");
+    assert_eq!(
+        names(&run),
+        [
+            "@tests.a::\"z\"",
+            "@tests.a::\"y\"",
+            "@tests.b::\"second\"",
+            "@tests.b::\"first\"",
+        ]
     );
-    let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
-    let verification = verified_bootstrap();
+    assert_eq!(run.result(), SuiteResult::Ok);
+    assert_eq!((run.selected(), run.passed(), run.failed()), (4, 4, 0));
+}
 
-    let result = run_tests(&snapshot, None, Some(&verification));
+#[test]
+fn every_test_initializes_the_module_values_it_reads_afresh() {
+    let tests = "use @std.assert enduse\n\nlet base: I32 be I32.add(1i32 2i32) endlet\n\n\
+                 test \"once\" do assert.equal(3i32 base) endtest\n\n\
+                 test \"again\" do assert.equal(3i32 base) endtest\n";
+    let run = run(&[("tests/state.vib", tests)], None).expect("a run");
+    assert_eq!(run.result(), SuiteResult::Ok);
+    let initializations = run
+        .items()
+        .iter()
+        .map(|item| {
+            assert_eq!(item.outcome(), &TestOutcome::Passed);
+            item.instrumentation()
+                .map(|measured| measured.module_value_initializations)
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(initializations, [Some(1), Some(1)]);
+}
 
-    assert_eq!(result.status(), TestSuiteStatus::Diagnostics);
-    assert_eq!(result.selected(), 2);
+#[test]
+fn a_selector_selects_one_test() {
+    let tests = "use @std.assert enduse\n\nuse @app.math enduse\n\n\
+                 test \"adds\" do assert.equal(3i32 math.add(1i32 2i32)) endtest\n\n\
+                 test \"other\" do assert.true(false) endtest\n";
+    let files = [("tests/math.vib", tests)];
+    let run = run(&files, Some("@tests.math::\"adds\"")).expect("a run");
+    assert_eq!(names(&run), ["@tests.math::\"adds\""]);
+    assert_eq!(run.result(), SuiteResult::Ok);
+    for unknown in ["@tests.math::\"missing\"", "@tests.other::\"adds\""] {
+        assert_eq!(
+            self::run(&files, Some(unknown)),
+            Err(InvalidSelection::Unknown(unknown.to_owned()))
+        );
+    }
+}
+
+#[test]
+fn a_selector_parses_its_module_and_the_test_modules_it_imports() {
+    let helpers = "fn three\n  returns r: I32\n  visibility @public\n  do\n    return 3i32\nendfn\n";
+    let uses = "use @std.assert enduse\n\nuse @tests.helpers enduse\n\n\
+                test \"uses\" do assert.equal(3i32 helpers.three()) endtest\n";
+    let broken = "test \"x\" do endfn";
+    let files = [
+        ("tests/helpers.vib", helpers),
+        ("tests/uses.vib", uses),
+        ("tests/broken.vib", broken),
+    ];
+    let run = run(&files, Some("@tests.uses::\"uses\"")).expect("a run");
+    assert_eq!(names(&run), ["@tests.uses::\"uses\""]);
+    assert_eq!(run.result(), SuiteResult::Ok);
+    assert!(run.diagnostics().is_empty(), "{:?}", run.diagnostics());
+    // An imported test module is required: its parse errors come first.
+    let files = [("tests/helpers.vib", broken), ("tests/uses.vib", uses)];
+    let run = self::run(&files, Some("@tests.uses::\"uses\"")).expect("a run");
+    assert_eq!(run.result(), SuiteResult::Diagnostics);
+    assert!(run.items().is_empty());
     assert!(
-        result
-            .items()
+        run.diagnostics()
             .iter()
-            .all(|item| item.status() == TestItemStatus::Invalid)
+            .all(|diagnostic| diagnostic.source_id() == Some("tests/helpers.vib"))
     );
-    assert!(result.diagnostics().iter().any(|diagnostic| {
-        diagnostic.code() == vibra_diagnostics::DiagnosticCode::NameRedeclaration
-    }));
 }
 
 #[test]
-fn unavailable_helper_is_attributed_only_to_tests_that_reference_it() {
-    let project = TempDir::demo(
-        "dependency-scoped-unavailable",
-        &[
-            ("src/app/main.vib", "(defn execute () void void)\n"),
-            (
-                "tests/helpers.vib",
-                "(deffect host\n  visibility: @public\n  (defn unavailable () i32 visibility: @public native: \"audit.call\" 1i32))\n",
-            ),
-            (
-                "tests/math.vib",
-                "(import assert @std.assert)\n(import helpers @tests.helpers)\n(test \"depends\" effects: (helpers.host) (do (helpers.host.unavailable) void))\n(test \"independent\" (assert.true true))\n",
-            ),
-        ],
-    );
-    let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
-    let verification = verified_bootstrap();
-
-    let result = run_tests(&snapshot, None, Some(&verification));
-
-    assert_eq!(result.status(), TestSuiteStatus::Unavailable);
-    assert_eq!(result.selected(), 2);
-    assert_eq!(result.items()[0].status(), TestItemStatus::Unavailable);
-    assert!(result.items()[0].diagnostics().iter().any(|diagnostic| {
-        diagnostic.code() == vibra_diagnostics::DiagnosticCode::ToolUnavailable
-    }));
-    assert_eq!(result.items()[1].status(), TestItemStatus::Passed);
+fn an_exhausted_test_ends_only_itself() {
+    let tests = "use @std.assert enduse\n\n\
+                 fn grow\n  takes {items: List(I32)}\n  returns count: U64\n  do\n    \
+                 return grow(List.concat(items items))\nendfn\n\n\
+                 test \"a exhausts\" do assert.equal(0u64 grow([1i32])) endtest\n\n\
+                 test \"b passes\" do assert.true(true) endtest\n";
+    let run = run_with(
+        &[("tests/memory.vib", tests)],
+        None,
+        MemoryBudget::new(4 * 1024 * 1024),
+    )
+    .expect("a run");
+    let outcomes = run
+        .items()
+        .iter()
+        .map(|item| item.outcome().clone())
+        .collect::<Vec<_>>();
+    assert_eq!(outcomes, [TestOutcome::Exhausted, TestOutcome::Passed]);
+    assert_eq!(run.result(), SuiteResult::OperationalFailure);
+    assert_eq!((run.selected(), run.passed(), run.failed()), (2, 1, 1));
+    let document = run.document();
     assert!(
-        result.items()[1].diagnostics().is_empty(),
-        "{:?}",
-        result.items()[1].diagnostics()
+        document.starts_with(
+            "{format: @testRun.v2 result: @command.operationalFailure tests: \
+             [{name: \"@tests.memory::\\\"a exhausts\\\"\" result: @test.exhausted auditTrace:"
+        ),
+        "{document}"
     );
-}
-
-#[test]
-fn unsupported_test_form_is_unavailable_at_its_reference() {
-    let project = TempDir::demo(
-        "unsupported-form",
-        &[
-            ("src/app/main.vib", "(defn execute () void void)\n"),
-            (
-                "tests/helpers.vib",
-                "(deffect host\n  visibility: @public\n  (defn call () i32 visibility: @public native: \"audit.call\" 1i32))\n",
-            ),
-            (
-                "tests/math.vib",
-                "(import assert @std.assert)\n(import helpers @tests.helpers)\n(test \"generic\" effects: (helpers.host) (let - (helpers.host.call)) (assert.true true))\n",
-            ),
-        ],
-    );
-    let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
-    let verification = verified_bootstrap();
-
-    let result = run_tests(&snapshot, None, Some(&verification));
-
-    assert_eq!(result.status(), TestSuiteStatus::Unavailable);
-    assert_eq!(result.items()[0].status(), TestItemStatus::Unavailable);
-    assert!(result.items()[0].diagnostics().iter().any(|diagnostic| {
-        diagnostic.code() == vibra_diagnostics::DiagnosticCode::ToolUnavailable
-    }));
-}
-
-#[test]
-fn missing_verified_assertion_bootstrap_is_unavailable_not_a_type_error() {
-    let project = TempDir::demo(
-        "missing-assert-bootstrap",
-        &[
-            ("src/app/main.vib", "(defn execute () void void)\n"),
-            (
-                "tests/math.vib",
-                "(import assert @std.assert)\n(test \"needs-bootstrap\" (assert.true true))\n",
-            ),
-        ],
-    );
-    let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
-
-    let result = run_tests(&snapshot, None, None);
-
-    assert_eq!(result.status(), TestSuiteStatus::Unavailable);
-    assert_eq!(result.items()[0].status(), TestItemStatus::Unavailable);
-    assert!(result.items()[0].diagnostics().iter().any(|diagnostic| {
-        diagnostic.code() == vibra_diagnostics::DiagnosticCode::ToolUnavailable
-    }));
-}
-
-#[test]
-fn ordinary_type_errors_in_selected_import_closure_block_all_tests() {
-    let project = TempDir::demo(
-        "static-type-error",
-        &[
-            ("src/app/main.vib", "(defn execute () void void)\n"),
-            (
-                "tests/math.vib",
-                "(import assert @std.assert)\n(test \"broken\" (assert.true 1i32))\n(test \"would-pass\" (assert.true true))\n",
-            ),
-        ],
-    );
-    let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
-    let verification = verified_bootstrap();
-
-    let result = run_tests(&snapshot, None, Some(&verification));
-
-    assert_eq!(result.status(), TestSuiteStatus::Diagnostics);
-    assert_eq!(result.selected(), 2);
     assert!(
-        result
-            .items()
+        document.contains(
+            "{name: \"@tests.memory::\\\"b passes\\\"\" result: @test.passed auditTrace:"
+        ),
+        "{document}"
+    );
+}
+
+#[test]
+fn a_static_error_invalidates_the_whole_selection() {
+    let tests = "use @std.assert enduse\n\n\
+                 test \"bad\" do assert.true(1i32) endtest\n\n\
+                 test \"good\" do assert.true(true) endtest\n";
+    let run = run(&[("tests/math.vib", tests)], None).expect("a run");
+    assert_eq!(run.result(), SuiteResult::Diagnostics);
+    assert!(
+        run.items()
             .iter()
-            .all(|item| item.status() == TestItemStatus::Invalid)
+            .all(|item| item.outcome() == &TestOutcome::Invalid)
     );
-    assert!(result.diagnostics().iter().any(|diagnostic| {
-        diagnostic.code() == vibra_diagnostics::DiagnosticCode::TypeArgumentMismatch
-    }));
+    assert_eq!(run.items().len(), 2);
+    assert!(!run.diagnostics().is_empty());
 }
 
 #[test]
-fn tests_can_call_public_target_helpers_through_ordinary_imports() {
-    let project = TempDir::demo(
-        "target-public-import",
-        &[
-            ("src/app/main.vib", "(defn execute () void void)\n"),
-            (
-                "src/app/api.vib",
-                "(defn answer () i32 visibility: @public 42i32)\n",
-            ),
-            (
-                "tests/math.vib",
-                "(import assert @std.assert)\n(import api @app.api)\n(test \"uses-public-target\" (assert.equal (api.answer) 42i32))\n",
-            ),
-        ],
-    );
-    let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
-    let verification = verified_bootstrap();
-
-    let result = run_tests(&snapshot, None, Some(&verification));
-
-    assert_eq!(result.status(), TestSuiteStatus::Ok);
-    assert_eq!(result.passed(), 1);
-    assert_eq!(result.items()[0].status(), TestItemStatus::Passed);
+fn a_parse_error_reports_no_items() {
+    let run = run(&[("tests/math.vib", "test \"broken\" do\n")], None).expect("a run");
+    assert_eq!(run.result(), SuiteResult::Diagnostics);
+    assert!(run.items().is_empty());
+    assert!(!run.diagnostics().is_empty());
 }
 
 #[test]
-fn missing_required_assertion_import_is_an_ordinary_invalidating_error() {
-    let source = "(test \"missing-import\" void)\n";
-    let project = TempDir::demo(
-        "missing-required-assert-import",
-        &[
-            ("src/app/main.vib", "(defn execute () void void)\n"),
-            ("tests/math.vib", source),
-        ],
-    );
-    let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
-    let verification = verified_bootstrap();
-
-    let result = run_tests(&snapshot, None, Some(&verification));
-
-    assert_eq!(result.status(), TestSuiteStatus::Diagnostics);
-    assert_eq!(result.items().len(), 1);
-    assert_eq!(result.items()[0].status(), TestItemStatus::Invalid);
-    let [diagnostic] = result.diagnostics() else {
-        panic!("one missing import diagnostic");
-    };
+fn a_project_without_tests_is_an_empty_passing_suite() {
+    let run = run(&[], None).expect("a run");
+    assert_eq!(run.result(), SuiteResult::Ok);
+    assert!(run.items().is_empty());
     assert_eq!(
-        diagnostic.code(),
-        vibra_diagnostics::DiagnosticCode::ModuleMissingRequiredImport
+        run.document(),
+        "{format: @testRun.v2 result: @command.ok tests: []}"
     );
-    assert_eq!(diagnostic.source_id(), Some("tests/math.vib"));
-    let start = source.find("\"missing-import\"").expect("name literal");
-    assert_eq!(
-        diagnostic.primary_span(),
-        vibra_diagnostics::ByteSpan::new(start, start + "\"missing-import\"".len())
-    );
-}
-
-#[test]
-fn warnings_are_reported_without_blocking_test_execution() {
-    let project = TempDir::demo(
-        "nonblocking-warning",
-        &[
-            ("src/app/main.vib", "(defn execute () void void)\n"),
-            (
-                "tests/math.vib",
-                "(import assert @std.assert)\n(defn choose (fallback i32) i32 labelled: (first i32 7i32 second i32 8i32) first)\n(test \"warning-still-runs\" (assert.equal (choose 3i32 second: 11i32 first: 9i32) 9i32))\n",
-            ),
-        ],
-    );
-    let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
-    let verification = verified_bootstrap();
-
-    let result = run_tests(&snapshot, None, Some(&verification));
-
-    assert_eq!(result.status(), TestSuiteStatus::Ok);
-    assert_eq!(result.passed(), 1);
-    assert!(result.diagnostics().iter().any(|diagnostic| {
-        diagnostic.code() == vibra_diagnostics::DiagnosticCode::StyleArgumentOrder
-            && diagnostic.level() == vibra_diagnostics::Level::Warning
-    }));
-    assert!(result.items()[0].diagnostics().iter().any(|diagnostic| {
-        diagnostic.code() == vibra_diagnostics::DiagnosticCode::StyleArgumentOrder
-            && diagnostic.level() == vibra_diagnostics::Level::Warning
-    }));
-}
-
-#[test]
-fn a_test_that_exhausts_its_budget_ends_the_run_with_the_host_event_and_no_counts() {
-    use vibra_workspace::semantic::{MemoryBudget, run_tests_with_budget};
-
-    let project = TempDir::demo(
-        "memory-exhausted",
-        &[
-            ("src/app/main.vib", "(defn execute () void void)\n"),
-            (
-                "tests/deep/forever.vib",
-                "(import assert @std.assert)
-(defn forever (count u64) u64\n  (match (u64.add-checked (forever count) 1u64)\n    (result.ok total) total\n    (result.err -) 0u64))\n(test \"first\" (assert.true true))\n(test \"never ends\" (assert.equal (forever 0u64) 0u64))\n",
-            ),
-        ],
-    );
-    let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
-    let verification = verified_bootstrap();
-    let budget = MemoryBudget::new(2 * 1024 * 1024);
-
-    let result = run_tests_with_budget(&snapshot, None, Some(&verification), budget);
-
-    assert_eq!(result.status(), TestSuiteStatus::OperationalFailure);
-    assert_eq!(result.selected(), 0, "a host event reports no counts");
-    assert_eq!(result.passed(), 0);
-    assert_eq!(result.failed(), 0);
-    assert!(result.items().is_empty());
-    let [diagnostic] = result.diagnostics() else {
-        panic!("one unlocated diagnostic: {:?}", result.diagnostics());
-    };
-    assert_eq!(
-        diagnostic.code(),
-        vibra_diagnostics::DiagnosticCode::RuntimeMemoryExhausted
-    );
-    assert_eq!(diagnostic.source_id(), None);
-    assert_eq!(
-        diagnostic.primary_span(),
-        vibra_diagnostics::ByteSpan::empty_at(0)
-    );
-
-    // The same suite under the default budget stops the same way, and a
-    // following suite without the recursion runs normally in this process.
-    let result = run_tests(&snapshot, None, Some(&verification));
-    assert_eq!(result.status(), TestSuiteStatus::OperationalFailure);
-    let passing = TempDir::demo(
-        "memory-recovered",
-        &[
-            ("src/app/main.vib", "(defn execute () void void)\n"),
-            (
-                "tests/deep/fine.vib",
-                "(import assert @std.assert)\n(test \"first\" (assert.true true))\n",
-            ),
-        ],
-    );
-    let snapshot = WorkspaceSnapshot::load(passing.path()).expect("snapshot");
-    let result = run_tests(&snapshot, None, Some(&verification));
-    assert_eq!(result.status(), TestSuiteStatus::Ok);
-    assert_eq!(result.passed(), 1);
-}
-
-#[test]
-fn a_test_body_ending_in_a_source_call_reuses_its_activation() {
-    let project = TempDir::demo(
-        "tail-test-body",
-        &[
-            ("src/app/main.vib", "(defn execute () void void)\n"),
-            (
-                "tests/tail/loop.vib",
-                "(import assert @std.assert)
-(defn finish () void (do))\n(defn spin (count u64) void\n  (if (equatable.equal count 0u64) (finish) (spin (lower count))))\n(defn lower (count u64) u64\n  (match (u64.sub-checked count 1u64)\n    (result.ok value) value\n    (result.err -) 0u64))\n(test \"one call\" (finish))\n(test \"a loop of a hundred thousand tail calls\" (spin 100000u64))\n",
-            ),
-        ],
-    );
-    let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
-    let verification = verified_bootstrap();
-
-    let result = run_tests(&snapshot, None, Some(&verification));
-
-    assert_eq!(
-        result.status(),
-        TestSuiteStatus::Ok,
-        "{:?}",
-        result.diagnostics()
-    );
-    assert_eq!(result.selected(), 2);
-    assert_eq!(result.passed(), 2);
 }

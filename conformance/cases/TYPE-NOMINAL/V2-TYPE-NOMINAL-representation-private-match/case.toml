@@ -1,0 +1,19 @@
+id = "V2-TYPE-NOMINAL-representation-private-match"
+rule = "V2-TYPE-NOMINAL-representation-private-match"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#representation-visibility: a private representation cannot be destructured by a match pattern from another module"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@name.inaccessibleRepresentation"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 92, end = 103 }
+related = [{ source = "src/app/model.vib", span = { start = 5, end = 10 } }]

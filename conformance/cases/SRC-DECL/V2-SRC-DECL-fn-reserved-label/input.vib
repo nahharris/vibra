@@ -1,0 +1,1 @@
+fn f labelled {role: Bool be false} returns r: Bool do return false endfn

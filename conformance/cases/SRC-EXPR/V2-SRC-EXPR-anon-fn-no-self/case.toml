@@ -1,0 +1,18 @@
+id = "V2-SRC-EXPR-anon-fn-no-self"
+rule = "V2-SRC-EXPR-anon-fn-no-self"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "01-source-language.md#fn-and-proc: an anonymous fn cannot refer to the let it initializes"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@name.unknownSymbol"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 75, end = 76 }

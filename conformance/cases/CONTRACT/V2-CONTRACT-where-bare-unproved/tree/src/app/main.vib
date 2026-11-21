@@ -1,0 +1,3 @@
+type Positive of I32 where isPositive endtype
+fn isPositive takes {v: I32} returns r: Bool do return Ordered.greater(v 0i32) endfn
+fn f takes {x: I32} returns r: Positive do return Positive(x) endfn

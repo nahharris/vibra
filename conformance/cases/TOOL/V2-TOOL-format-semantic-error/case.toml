@@ -1,0 +1,20 @@
+id = "V2-TOOL-format-semantic-error"
+rule = "V2-TOOL-format-semantic-error"
+profile = "toolingV2"
+operation = "format"
+description = "05-tooling.md#formatting: a captured module is checked with its candidate text: a return operand of the wrong type is a mismatch at the operand of the formatted text, and the planned text is observed"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+source = "tree/src/app/main.vib"
+
+[expect]
+verdict = "refuted"
+formatted = "formatted.vib"
+
+[[expect.diagnostics]]
+code = "@type.mismatch"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 38, end = 41 }

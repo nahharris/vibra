@@ -1,98 +1,181 @@
-; Iteration (`docs/spec/02-type-system.md`, "Iteration"). An iterator is a
-; value whose `next` yields one item and the iterator that remains; there is
-; no mutating cursor. `(array t)`, `(dict k v)`, `str`, and `(option t)` conform
-; through the closed toolchain registry.
-(defint iter
-  where: (item any)
-  role: @iter
-  visibility: @public
-  (defn next (value self) (option (tuple item self)))
-  ; The lazy defaults each return an adapter seen as an iterator. `map` may
-  ; change the element type; the others keep it.
-  (defn map (value self transform (fn (item) out)) (iter out)
-    where: (out any)
-    (mapped-iter source: value transform: transform))
-  (defn filter (value self keep (fn (item) bool)) (iter item)
-    (filtered-iter source: value keep: keep))
-  (defn skip (value self count u64) (iter item)
-    (skipped-iter source: value count: count))
-  (defn take (value self count u64) (iter item)
-    (taken-iter source: value count: count))
-  ; `collect` drains the iterator eagerly, in order.
-  (defn collect (value self) (array item)
-    (drain value (array.of))))
+// Pure iteration: the `Iter` interface, which plays the `@iter` role, and the
+// four adapter types its default members return. Each adapter stores its
+// source as an interface value and pulls from it only when it is pulled.
 
-; The items of `values` after `seen`, at constant depth.
-(defn drain (values (iter item) seen (array item)) (array item)
-  where: (item any)
-  (match (iter.next values)
-    (option.some (tupleof first rest)) (drain rest (array.append seen first))
-    (option.none) seen))
+interface Iter
+  role @iter
+  visibility @public
+  type Item endtype
+  fn next
+    takes {value: Self}
+    returns step: Option({Item Self})
+  endfn
+  fn map(Out)
+    takes {value: Self f: Fn({Item} Out)}
+    returns mapped: Iter(Item: Out)
+    do
+      return MappedIter(source: value f: f)
+  endfn
+  fn filter
+    takes {value: Self keep: Fn({Item} Bool)}
+    returns filtered: Iter(Item: Item)
+    do
+      return FilteredIter(source: value keep: keep)
+  endfn
+  fn skip
+    takes {value: Self count: U64}
+    returns skipped: Iter(Item: Item)
+    do
+      return SkippedIter(source: value count: count)
+  endfn
+  fn take
+    takes {value: Self count: U64}
+    returns taken: Iter(Item: Item)
+    do
+      return TakenIter(source: value count: count)
+  endfn
+  fn collect
+    takes {value: Self}
+    returns items: List(Item)
+    do
+      return Iter.fold(
+        value
+        []
+        fn
+          takes {gathered: List(Item) item: Item}
+          returns appended: List(Item)
+          do
+            return List.append(gathered item)
+        endfn
+      )
+  endfn
+  fn fold(Acc)
+    takes {value: Self initial: Acc step: Fn({Acc Item} Acc)}
+    returns folded: Acc
+    do
+      match Iter.next(value)
+        case Option.some(value: {item rest})
+          return Iter.fold(rest step(initial item) step)
+        case Option.none()
+          return initial
+      endmatch
+  endfn
+endinterface
 
-; `map`: each item of `source` through `transform`.
-(deftype mapped-iter (record source (iter item) transform (fn (item) out))
-  where: (item any out any)
-  visibility: @public
-  (impl (iter out)
-    (defn next (value self) (option (tuple out self))
-      (match (iter.next (value @source))
-        (option.some (tupleof first rest))
-          (option.some
-            (tupleof
-              ((value @transform) first)
-              (mapped-iter source: rest transform: (value @transform))))
-        (option.none) (option.none)))))
+// The lexicographic order of two iterators: the first pair of items that
+// differ decides, by `Ordered.compare`, and an iterator that ends first is
+// less. `Str` and `Bytes` order themselves with it.
+fn compareLexicographic(T I)
+  takes {left: I right: I}
+  returns order: Ordering
+  given {T: Ordered I: Iter(Item: T)}
+  visibility @public
+  do
+    match Iter.next(left)
+      case Option.none()
+        match Iter.next(right)
+          case Option.none()
+            return Ordering.equal()
+          case Option.some(value: _)
+            return Ordering.less()
+        endmatch
+      case Option.some(value: {leftItem leftRest})
+        match Iter.next(right)
+          case Option.none()
+            return Ordering.greater()
+          case Option.some(value: {rightItem rightRest})
+            match Ordered.compare(leftItem rightItem)
+              case Ordering.equal()
+                return compareLexicographic(leftRest rightRest)
+              case order
+                return order
+            endmatch
+        endmatch
+    endmatch
+endfn
 
-; `filter`: the items of `source` that `keep` accepts.
-(deftype filtered-iter (record source (iter item) keep (fn (item) bool))
-  where: (item any)
-  visibility: @public
-  (impl (iter item)
-    (defn next (value self) (option (tuple item self))
-      (filter-step (value @source) (value @keep)))))
+type MappedIter(In Out) of {source: Iter(Item: In) f: Fn({In} Out)}
+  visibility @public
+  representation @private
+  impl Iter
+    type Item of Out endtype
+    fn next
+      takes {value: Self}
+      returns step: Option({Item Self})
+      do
+        let MappedIter(source: inner f: f) be value endlet
+        let Option.some(value: {item rest}) be Iter.next(inner) else
+          return Option.none()
+        endlet
+        return Option.some(value: {f(item) MappedIter(source: rest f: f)})
+    endfn
+  endimpl
+endtype
 
-; The first item of `source` that `keep` accepts, with the filter over what
-; remains. Rejected items are passed at constant depth.
-(defn filter-step (source (iter item) keep (fn (item) bool)) (option (tuple item (filtered-iter item)))
-  where: (item any)
-  (match (iter.next source)
-    (option.some (tupleof first rest))
-      (if (keep first)
-        (option.some (tupleof first (filtered-iter source: rest keep: keep)))
-        (filter-step rest keep))
-    (option.none) (option.none)))
+type FilteredIter(T) of {source: Iter(Item: T) keep: Fn({T} Bool)}
+  visibility @public
+  representation @private
+  impl Iter
+    type Item of T endtype
+    fn next
+      takes {value: Self}
+      returns step: Option({Item Self})
+      do
+        let FilteredIter(source: inner keep: keep) be value endlet
+        let Option.some(value: {item rest}) be Iter.next(inner) else
+          return Option.none()
+        endlet
+        let remainder be FilteredIter(source: rest keep: keep) endlet
+        if keep(item) then
+          return Option.some(value: {item remainder})
+        else
+          return Iter.next(remainder)
+        endif
+    endfn
+  endimpl
+endtype
 
-; `skip`: the items of `source` after its first `count`.
-(deftype skipped-iter (record source (iter item) count u64)
-  where: (item any)
-  visibility: @public
-  (impl (iter item)
-    (defn next (value self) (option (tuple item self))
-      (skip-step (value @source) (value @count)))))
+type SkippedIter(T) of {source: Iter(Item: T) count: U64}
+  visibility @public
+  representation @private
+  impl Iter
+    type Item of T endtype
+    fn next
+      takes {value: Self}
+      returns step: Option({Item Self})
+      do
+        let SkippedIter(source: inner count: count) be value endlet
+        let Option.some(value: {item rest}) be Iter.next(inner) else
+          return Option.none()
+        endlet
+        if Equatable.equal(count 0u64) then
+          return Option.some(value: {item SkippedIter(source: rest count: 0u64)})
+        else
+          return Iter.next(SkippedIter(source: rest count: U64.sub(count 1u64)))
+        endif
+    endfn
+  endimpl
+endtype
 
-; The item of `source` after its first `count`, with what remains. Skipped
-; items are passed at constant depth.
-(defn skip-step (source (iter item) count u64) (option (tuple item (skipped-iter item)))
-  where: (item any)
-  (match (iter.next source)
-    (option.some (tupleof first rest))
-      (if (equatable.equal count 0u64)
-        (option.some (tupleof first (skipped-iter source: rest count: 0u64)))
-        (skip-step rest (u64.sub count 1u64)))
-    (option.none) (option.none)))
-
-; `take`: at most the first `count` items of `source`.
-(deftype taken-iter (record source (iter item) count u64)
-  where: (item any)
-  visibility: @public
-  (impl (iter item)
-    (defn next (value self) (option (tuple item self))
-      (if (equatable.equal (value @count) 0u64)
-        (option.none)
-        (match (iter.next (value @source))
-          (option.some (tupleof first rest))
-            (option.some
-              (tupleof
-                first
-                (taken-iter source: rest count: (u64.sub (value @count) 1u64))))
-          (option.none) (option.none))))))
+type TakenIter(T) of {source: Iter(Item: T) count: U64}
+  visibility @public
+  representation @private
+  impl Iter
+    type Item of T endtype
+    fn next
+      takes {value: Self}
+      returns step: Option({Item Self})
+      do
+        let TakenIter(source: inner count: count) be value endlet
+        if Equatable.equal(count 0u64) then
+          return Option.none()
+        else
+          let Option.some(value: {item rest}) be Iter.next(inner) else
+            return Option.none()
+          endlet
+          let remainder be TakenIter(source: rest count: U64.sub(count 1u64)) endlet
+          return Option.some(value: {item remainder})
+        endif
+    endfn
+  endimpl
+endtype

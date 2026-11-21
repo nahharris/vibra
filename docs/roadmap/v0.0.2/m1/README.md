@@ -1,11 +1,11 @@
 # v0.0.2 M1: pure language
 
-**Planned.** The pure part of the language, checked and run on the reference
-interpreter.
+**Exited.** The pure part of the language, checked and run on the reference
+interpreter. The exit record is [exit.md](exit.md).
 
 Design record: [architecture.md](architecture.md). Owner table for M0:
 [../m0/owners.md](../m0/owners.md). Step guides: [steps/](steps/).
-Integration branch: `v0.0.2/m1`, created from `main` after M0 exits.
+Integration branch: `v0.0.2/m1-lang`.
 
 ## Scope, in slices
 
@@ -46,18 +46,21 @@ The decisions and their reasons are in [architecture.md](architecture.md).
 In one line each:
 
 - New crates under the final names beside the old crates, which step 01
-  renames with a `-v1` suffix and step 28 deletes.
+  renames with a `-v1` suffix and step 28 deletes. The five `-v1` crates the
+  native track is compiled against, `vibra-diagnostics-v1`,
+  `vibra-syntax-v1`, `vibra-ir-v1`, `vibra-host-v1`, and `vibra-native-v1`,
+  stay after step 28: the native track lowers the v1 checked IR, which does
+  not map mechanically onto the new one. Package X2-01 moves the native
+  track to `vibra-ir`, `vibra-native`, and `vibra-host` and deletes them.
 - The checked IR is closed in step 12 for the whole of M1, with a migration
   table for the native track; package X2-01 moves the native track to it.
-- The packages N1 to N13 of the native contract are each assigned once:
-  N1, N2, N3, N5, N6, and N13 are absorbed by steps 02, 12, 13, 15, 19,
+- The packages N1 to N12 of the native contract are each assigned once:
+  N1, N2, N3, N5, and N6 are absorbed by steps 02, 12, 13, 15, 19,
   21, and 27; N4 and N7 to N12 are M2 packages on the new crates. The
   [architecture](architecture.md#native-contract-packages) has the table.
 - The checker calls the interpreter for compile-time evaluation; that arrow
   is part of language semantics.
-- The Wasm backend is ported fail-closed to the new IR in step 27 and runs
-  the new corpus's pure executable cases it supports; its column is not an
-  M1 gate.
+
 - The three host tests ignored when the specification merged are settled
   by steps 02 (the registry test, restored), 08 (the example inventory,
   deleted and replaced by a test that reads every fenced block of the
@@ -77,40 +80,58 @@ the vertical-slice rule.
 
 | Id | Name | Kind | Depends on | Can run in parallel with | Crates touched | Status |
 | --- | --- | --- | --- | --- | --- | --- |
-| 01 | [rename-v1](steps/01-rename-v1.md) | infrastructure | — | — | every existing crate, `Cargo.toml`, CI, `stdlib-v1/`, `examples-v1/`, `fuzz-v1/`, `conformance/v1/` | planned |
-| 02 | [diagnostics-and-harness](steps/02-diagnostics-and-harness.md) | infrastructure, specification prerequisite | 01 | — | `vibra-diagnostics`, `vibra-conformance` (new) | planned |
-| 03 | [lexer-and-vibon](steps/03-lexer-and-vibon.md) | vertical | 02 | 12, 13, 24 | `vibra-syntax`, `vibra-fmt` (new), `vibra-conformance`, `conformance/cases`, CI | planned |
-| 04 | [source-skeleton](steps/04-source-skeleton.md) | vertical | 03 | 09, 12, 13, 24, 27 | `vibra-syntax`, `vibra-fmt`, `conformance/cases` | planned |
-| 05 | [type-declarations](steps/05-type-declarations.md) | vertical | 04 | 09, 12, 13, 24, 27 | `vibra-syntax`, `vibra-fmt`, `conformance/cases` | planned |
-| 06 | [expressions-and-patterns](steps/06-expressions-and-patterns.md) | vertical | 05 | 09, 12, 13, 24, 27 | `vibra-syntax`, `vibra-fmt`, `conformance/cases` | planned |
-| 07 | [callables-and-tests-syntax](steps/07-callables-and-tests-syntax.md) | vertical | 06 | 09, 12, 13, 24, 27 | `vibra-syntax`, `vibra-fmt`, `conformance/cases` | planned |
-| 08 | [reader-exit](steps/08-reader-exit.md) | evidence | 07 | 09, 10, 11, 12, 13, 14, 24, 27 | `vibra-conformance`, `vibra-conformance-v1` (the ignored inventory test deleted), `fuzz/`, `conformance/cases` | planned |
-| 09 | [project-and-source-graph](steps/09-project-and-source-graph.md) | vertical | 03 | 04, 05, 06, 07, 08, 12, 13, 14, 24, 27 | `vibra-workspace` (new), `vibra-conformance`, `conformance/cases` | planned |
-| 10 | [resolve-declarations](steps/10-resolve-declarations.md) | vertical | 07, 09 | 08, 12, 13, 14, 24, 27 | `vibra-resolve` (new), `vibra-workspace`, `vibra-conformance`, `conformance/cases` | planned |
-| 11 | [resolve-bodies](steps/11-resolve-bodies.md) | vertical | 10 | 08, 12, 13, 14, 24, 27 | `vibra-resolve`, `conformance/cases` | planned |
-| 12 | [checked-ir](steps/12-checked-ir.md) | infrastructure | 02 | 03 to 11, 24 | `vibra-ir` (new) | planned |
-| 13 | [interpreter](steps/13-interpreter.md) | infrastructure | 12 | 03 to 11, 14, 24 | `vibra-interp` (new) | planned |
-| 14 | [stdlib-bootstrap](steps/14-stdlib-bootstrap.md) | infrastructure | 07, 12 | 08, 09, 10, 11, 13, 24, 27 | `stdlib/` (new), `vibra-types` (new) | planned |
-| 15 | [check-core](steps/15-check-core.md) | vertical | 11, 13, 14 | 08, 24, 27 | `vibra-types`, `vibra-interp`, `vibra-workspace`, `vibra-conformance`, `stdlib/`, `conformance/cases` | planned |
-| 16 | [check-data](steps/16-check-data.md) | vertical | 15 | 08, 24, 27 | `vibra-types`, `vibra-interp`, `stdlib/`, `conformance/cases` | planned |
-| 17 | [check-bodies](steps/17-check-bodies.md) | vertical | 16 | 08, 24, 27 | `vibra-types`, `vibra-interp`, `conformance/cases` | planned |
-| 18 | [check-callables](steps/18-check-callables.md) | vertical | 17 | 08, 23, 24, 25, 27 | `vibra-types`, `vibra-interp`, `conformance/cases` | planned |
-| 19 | [check-interfaces](steps/19-check-interfaces.md) | vertical | 18 | 08, 23, 24, 25, 26, 27 | `vibra-types`, `vibra-interp`, `stdlib/`, `conformance/cases` | planned |
-| 20 | [stdlib-pure](steps/20-stdlib-pure.md) | vertical | 19 | 08, 23, 24, 25, 26, 27 | `stdlib/`, `vibra-types`, `vibra-interp`, `conformance/cases` | planned |
-| 21 | [guards-with-else](steps/21-guards-with-else.md) | vertical | 20 | 08, 23, 24, 25, 26, 27 | `vibra-types`, `vibra-interp`, `conformance/cases` | planned |
-| 22 | [discharge](steps/22-discharge.md) | vertical | 21 | 08, 23, 24, 25, 26, 27 | `vibra-types`, `conformance/cases` | planned |
-| 23 | [tests-and-assertions](steps/23-tests-and-assertions.md) | vertical | 17 | 18 to 22, 24, 25, 27 | `vibra-workspace`, `vibra-types`, `vibra-interp`, `vibra-conformance`, `stdlib/`, `conformance/cases` | planned |
-| 24 | [cli-skeleton](steps/24-cli-skeleton.md) | vertical | 02 | 03 to 23, 27 | `vibra-schema`, `vibra-cli` (new) | planned |
-| 25 | [cli-fmt-check](steps/25-cli-fmt-check.md) | vertical | 08, 15, 24 | 16 to 23, 27 | `vibra-cli`, `vibra-schema`, `vibra-workspace`, `vibra-conformance`, `conformance/cases` | planned |
-| 26 | [cli-test](steps/26-cli-test.md) | vertical | 23, 25 | 18 to 22, 27 | `vibra-cli`, `vibra-schema` | planned |
-| 27 | [runtime-crate-port](steps/27-runtime-crate-port.md) | infrastructure | 03, 13 | 04 to 11, 14 to 26 | `vibra-host`, `vibra-native` (new), `vibra-wasm`, `vibra-wasm-run`, `vibra-ir`, `vibra-conformance`, `vibra-conformance-v1` (its Wasm column removed) | planned |
-| 28 | [cutover](steps/28-cutover.md) | infrastructure | 08, 20, 22, 23, 26, 27; X2-01 (Nexus plan) | — | every `-v1` crate (deleted), `Cargo.toml`, CI, `README.md`, `examples/`, `docs/roadmap` | planned |
-| 29 | [m1-exit](steps/29-m1-exit.md) | evidence | 28 | — | `examples/`, `conformance/cases`, this directory | planned |
+| 01 | [rename-v1](steps/01-rename-v1.md) | infrastructure | — | — | every existing crate, `Cargo.toml`, CI, `stdlib-v1/`, `examples-v1/`, `fuzz-v1/`, `conformance/v1/` | landed |
+| 02 | [diagnostics-and-harness](steps/02-diagnostics-and-harness.md) | infrastructure, specification prerequisite | 01 | — | `vibra-diagnostics`, `vibra-conformance` (new) | landed |
+| 03 | [lexer-and-vibon](steps/03-lexer-and-vibon.md) | vertical | 02 | 12, 13, 24 | `vibra-syntax`, `vibra-fmt` (new), `vibra-conformance`, `conformance/cases`, CI | landed |
+| 04 | [source-skeleton](steps/04-source-skeleton.md) | vertical | 03 | 09, 12, 13, 24, 27 | `vibra-syntax`, `vibra-fmt`, `conformance/cases` | landed |
+| 05 | [type-declarations](steps/05-type-declarations.md) | vertical | 04 | 09, 12, 13, 24, 27 | `vibra-syntax`, `vibra-fmt`, `conformance/cases` | landed |
+| 06 | [expressions-and-patterns](steps/06-expressions-and-patterns.md) | vertical | 05 | 09, 12, 13, 24, 27 | `vibra-syntax`, `vibra-fmt`, `conformance/cases` | landed |
+| 07 | [callables-and-tests-syntax](steps/07-callables-and-tests-syntax.md) | vertical | 06 | 09, 12, 13, 24, 27 | `vibra-syntax`, `vibra-fmt`, `conformance/cases` | landed |
+| 08 | [reader-exit](steps/08-reader-exit.md) | evidence | 07 | 09, 10, 11, 12, 13, 14, 24, 27 | `vibra-conformance`, `vibra-conformance-v1` (the ignored inventory test deleted), `vibra-syntax`, `vibra-fmt`, `vibra-workspace`, `vibra-diagnostics`, `fuzz/`, `conformance/cases` | landed |
+| 09 | [project-and-source-graph](steps/09-project-and-source-graph.md) | vertical | 03 | 04, 05, 06, 07, 08, 12, 13, 14, 24, 27 | `vibra-workspace` (new), `vibra-conformance`, `conformance/cases` | landed |
+| 10 | [resolve-declarations](steps/10-resolve-declarations.md) | vertical | 07, 09 | 08, 12, 13, 14, 24, 27 | `vibra-resolve` (new), `vibra-workspace`, `vibra-conformance`, `conformance/cases` | landed |
+| 11 | [resolve-bodies](steps/11-resolve-bodies.md) | vertical | 10 | 08, 12, 13, 14, 24, 27 | `vibra-resolve`, `vibra-types`, `vibra-workspace`, `vibra-conformance`, `conformance/cases` | landed |
+| 12 | [checked-ir](steps/12-checked-ir.md) | infrastructure | 02 | 03 to 11, 24 | `vibra-ir` (new) | landed |
+| 13 | [interpreter](steps/13-interpreter.md) | infrastructure | 12 | 03 to 11, 14, 24 | `vibra-interp` (new) | landed |
+| 14 | [stdlib-bootstrap](steps/14-stdlib-bootstrap.md) | infrastructure | 07, 12 | 08, 09, 10, 11, 13, 24, 27 | `stdlib/` (new), `vibra-types` (new) | landed |
+| 15 | [check-core](steps/15-check-core.md) | vertical | 11, 13, 14 | 08, 24, 27 | `vibra-types`, `vibra-interp`, `vibra-workspace`, `vibra-conformance`, `stdlib/`, `conformance/cases` | landed |
+| 16 | [check-data](steps/16-check-data.md) | vertical | 15 | 08, 24, 27 | `vibra-types`, `vibra-interp`, `stdlib/`, `conformance/cases` | landed |
+| 17 | [check-bodies](steps/17-check-bodies.md) | vertical | 16 | 08, 24, 27 | `vibra-types`, `vibra-interp`, `conformance/cases` | landed |
+| 18 | [check-callables](steps/18-check-callables.md) | vertical | 17 | 08, 23, 24, 25, 27 | `vibra-types`, `vibra-interp`, `conformance/cases` | landed |
+| 19 | [check-interfaces](steps/19-check-interfaces.md) | vertical | 18 | 08, 23, 24, 25, 26, 27 | `vibra-types`, `vibra-ir`, `vibra-cli`, `stdlib/`, `conformance/cases` | landed |
+| 20 | [stdlib-pure](steps/20-stdlib-pure.md) | vertical | 19 | 08, 23, 24, 25, 26, 27 | `stdlib/`, `vibra-types`, `vibra-resolve`, `conformance/cases` | landed |
+| 21 | [guards-with-else](steps/21-guards-with-else.md) | vertical | 20 | 08, 23, 24, 25, 26, 27 | `vibra-types`, `vibra-interp`, `vibra-conformance`, `conformance/cases` | landed |
+| 22 | [discharge](steps/22-discharge.md) | vertical | 21 | 08, 23, 24, 25, 26, 27 | `vibra-types`, `conformance/cases` | landed |
+| 23 | [tests-and-assertions](steps/23-tests-and-assertions.md) | vertical | 17 | 18 to 22, 24, 25, 27 | `vibra-workspace`, `vibra-types`, `vibra-interp`, `vibra-conformance`, `stdlib/`, `conformance/cases` | landed |
+| 24 | [cli-skeleton](steps/24-cli-skeleton.md) | vertical | 02 | 03 to 23, 27 | `vibra-schema`, `vibra-cli` (new) | landed |
+| 25 | [cli-fmt-check](steps/25-cli-fmt-check.md) | vertical | 08, 15, 24 | 16 to 23, 27 | `vibra-cli`, `vibra-schema`, `vibra-workspace`, `vibra-conformance`, `conformance/cases` | landed |
+| 26 | [cli-test](steps/26-cli-test.md) | vertical | 23, 25 | 18 to 22, 27 | `vibra-cli`, `vibra-schema`, `vibra-workspace` | landed |
+| 27 | [runtime-crate-port](steps/27-runtime-crate-port.md) | infrastructure | 03, 13 | 04 to 11, 14 to 26 | `vibra-host`, `vibra-native` (new), `vibra-ir` | landed |
+| 28 | [cutover](steps/28-cutover.md) | infrastructure | 08, 20, 22, 23, 26, 27; X2-01 (Nexus plan) | — | eight `-v1` crates and the four v0.0.1 trees (deleted), `Cargo.toml`, CI, `vibra-conformance`, `vibra-cli` (tests), `README.md`, `examples/`, `plugins/`, `docs/roadmap` | landed |
+| 29 | [m1-exit](steps/29-m1-exit.md) | evidence | 28 | — | `examples/`, `conformance/cases`, `vibra-conformance`, `vibra-cli` (tests), `docs/spec`, this directory | landed |
 
 After 01 and 02 land, steps 03, 12, and 24 are in flight at once; after 03,
 steps 04, 09, 12, 13, and 24 are. The widest front is during the checker
 chain, when 08, 23, 24 to 27 run beside it.
 
+## Packages
+
+Packages are not steps of the plan. Each closed findings or questions that
+the steps left, and each landed on the integration branch.
+
+| Package | Kind | Closes | Status |
+| --- | --- | --- | --- |
+| `m1/ir-fixes` | review fixes | the review findings on the checked IR and the interpreter | landed |
+| `m1/reader-fixes` | review fixes | the review findings on the reader and the formatter | landed |
+| `m1/checker-fixes` | review fixes | the review findings on the checker | landed |
+| `m1/guard-fixes` | review fixes | the review findings on static discharge | landed |
+| `m1/member-access` | vertical | the access of members, and the comment padding rule | landed |
+| `m1/callable-rulings` | vertical | bound checks at every position, the callable rulings, and library follow-ups | landed |
+| `m1/checker-gaps` | vertical | the checker's remaining gaps | landed |
+| `m1/checker-gaps-2` | vertical | the last checker gaps of M1 | landed |
+| `m1/spec-batch-1` | specification prerequisite | the specification questions of steps 02 to 12 | landed |
+| `m1/spec-batch-2` | specification prerequisite | the open specification questions of the later steps | landed |
+| `m1/drop-wasm` | infrastructure | the removal of the WebAssembly backend | landed |
 ## Slices and steps
 
 | Slice | Steps that implement it | Step | Slices it serves |

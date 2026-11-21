@@ -1,0 +1,2 @@
+type Pos of I32 where fn takes {v: I32} returns b: Bool requires Ordered.greater(v 0i32) do return Bool.true() endfn endtype
+fn main returns r: I32 do let Pos(x) be Pos(1i32) endlet return x endfn

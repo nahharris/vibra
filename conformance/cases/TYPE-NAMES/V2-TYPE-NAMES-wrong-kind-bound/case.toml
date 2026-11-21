@@ -1,0 +1,18 @@
+id = "V2-TYPE-NAMES-wrong-kind-bound"
+rule = "V2-TYPE-NAMES-wrong-kind-bound"
+profile = "staticV2"
+operation = "resolve"
+description = "02-type-system.md#bounds: a bound that resolves to a type, not an interface, is @name.wrongEntityKind at the bound"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@name.wrongEntityKind"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 35, end = 37 }

@@ -1,45 +1,141 @@
-; Ordering and the error types of the checked numeric and conversion
-; operations. Every variant has a `void` payload.
-(deftype ordering (enum less void equal void greater void)
-  visibility: @public)
+// The core types and contracts of the standard library: the order of two
+// values, the errors of the checked numeric and conversion operations, the
+// comparison interfaces, and the conversion interfaces.
 
-(deftype arithmetic-error
-  (enum overflow void division-by-zero void invalid-shift void)
-  visibility: @public)
+type Ordering
+  case less
+  case equal
+  case greater
+  visibility @public
+endtype
 
-(deftype conversion-error
-  (enum out-of-range void invalid-format void unrepresentable void)
-  visibility: @public)
+type ArithmeticError
+  case overflow
+  case divisionByZero
+  case invalidShift
+  visibility @public
+endtype
 
-; The comparison contracts (`docs/spec/02-type-system.md`, "Nominal
-; declarations"). They play `@equatable` and `@ordered`, so every module names
-; them without an import. Each type implements them where it is declared: the
-; builtin integers and `char` in `@std.builtin`, and `bool`, `str`, and `bytes`
-; in their own modules. Atom types and anonymous structures of admissible keys
-; conform through the closed toolchain registry, which answers every closed key
-; type as these implementations do.
-(defint equatable
-  role: @equatable
-  visibility: @public
-  (defn equal (left self right self) bool))
+type ConversionError
+  case outOfRange
+  case invalidFormat
+  case unrepresentable
+  visibility @public
+endtype
 
-(defint ordered
-  role: @ordered
-  visibility: @public
-  (defn compare (left self right self) ordering))
+interface Equatable
+  role @equatable
+  visibility @public
+  fn equal
+    takes {left: Self right: Self}
+    returns same: Bool
+  endfn
+endinterface
 
-; The conversion contracts (`docs/spec/02-type-system.md`, "Conversion"). Both
-; are implemented on the destination and name `self` only in their result, so
-; a call selects its implementation from the written expected type. The
-; builtin numbers implement them in `@std.builtin`: an integer conversion that
-; cannot fail is a `from`, every other one a `try-from`, and parsing text is a
-; `try-from str`. `str` implements `from` for each number it renders.
-(defint from
-  where: (source any)
-  visibility: @public
-  (defn convert (value source) self))
+interface Ordered
+  role @ordered
+  visibility @public
+  fn compare
+    takes {left: Self right: Self}
+    returns order: Ordering
+  endfn
+  fn less
+    takes {left: Self right: Self}
+    returns holds: Bool
+    do
+      match Ordered.compare(left right)
+        case Ordering.less()
+          return true
+        case _
+          return false
+      endmatch
+  endfn
+  fn lessOrEqual
+    takes {left: Self right: Self}
+    returns holds: Bool
+    do
+      match Ordered.compare(left right)
+        case Ordering.greater()
+          return false
+        case _
+          return true
+      endmatch
+  endfn
+  fn greater
+    takes {left: Self right: Self}
+    returns holds: Bool
+    do
+      match Ordered.compare(left right)
+        case Ordering.greater()
+          return true
+        case _
+          return false
+      endmatch
+  endfn
+  fn greaterOrEqual
+    takes {left: Self right: Self}
+    returns holds: Bool
+    do
+      match Ordered.compare(left right)
+        case Ordering.less()
+          return false
+        case _
+          return true
+      endmatch
+  endfn
+  fn min
+    takes {left: Self right: Self}
+    returns least: Self
+    do
+      match Ordered.compare(left right)
+        case Ordering.greater()
+          return right
+        case _
+          return left
+      endmatch
+  endfn
+  fn max
+    takes {left: Self right: Self}
+    returns greatest: Self
+    do
+      match Ordered.compare(left right)
+        case Ordering.less()
+          return right
+        case _
+          return left
+      endmatch
+  endfn
+  fn inRange
+    takes {value: Self low: Self high: Self}
+    returns holds: Bool
+    do
+      match Ordered.compare(value low)
+        case Ordering.less()
+          return false
+        case _
+          match Ordered.compare(value high)
+            case Ordering.greater()
+              return false
+            case _
+              return true
+          endmatch
+      endmatch
+  endfn
+endinterface
 
-(defint try-from
-  where: (source any)
-  visibility: @public
-  (defn convert (value source) (result self conversion-error)))
+interface From(Source)
+  visibility @public
+  fn convert
+    takes {value: Source}
+    returns converted: Self
+  endfn
+endinterface
+
+interface TryFrom(Source)
+  visibility @public
+  type Error endtype
+  fn convert
+    takes {value: Source}
+    returns converted: Result(Self Error)
+  endfn
+endinterface

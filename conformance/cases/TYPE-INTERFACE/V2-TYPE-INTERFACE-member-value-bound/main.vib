@@ -1,0 +1,23 @@
+fn main
+  returns r: Str
+  do
+    return show(Celsius(1i32))
+endfn
+
+interface Printable
+  fn render
+    takes {value: Self}
+    returns text: Str
+  endfn
+endinterface
+type Celsius of I32
+  impl Printable
+    fn render
+      takes {value: Self}
+      returns text: Str
+      do
+        return "warm"
+    endfn
+  endimpl
+endtype
+fn show(T) given {T: Printable} takes {x: T} returns s: Str do let f: Fn({T} Str) be Printable.render endlet return f(x) endfn

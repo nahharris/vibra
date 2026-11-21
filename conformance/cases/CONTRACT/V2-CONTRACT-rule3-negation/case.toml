@@ -1,0 +1,12 @@
+id = "V2-CONTRACT-rule3-negation"
+rule = "V2-CONTRACT-rule3-negation"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#bare-guards: GUARD-3 and GUARD-6: the negation of a comparison in the else branch is read as its defining relation"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

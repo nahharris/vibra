@@ -1,0 +1,4 @@
+fn main returns r: I32 do return even(Table(even: even odd: odd) 100000i32 0i32) endfn
+type Table of {even: Fn({Table I32 I32} I32) odd: Fn({Table I32 I32} I32)} endtype
+fn even takes {t: Table n: I32 acc: I32} returns r: I32 do if Equatable.equal(n 0i32) then return acc else return t.odd(t I32.sub(n 1i32) I32.add(acc 1i32)) endif endfn
+fn odd takes {t: Table n: I32 acc: I32} returns r: I32 do if Equatable.equal(n 0i32) then return acc else return t.even(t I32.sub(n 1i32) I32.add(acc 1i32)) endif endfn

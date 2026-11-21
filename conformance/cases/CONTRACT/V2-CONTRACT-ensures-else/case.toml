@@ -1,0 +1,12 @@
+id = "V2-CONTRACT-ensures-else"
+rule = "V2-CONTRACT-ensures-else"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#guards-with-else: an ensures with else returns the candidate that satisfies it and the consequence otherwise"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

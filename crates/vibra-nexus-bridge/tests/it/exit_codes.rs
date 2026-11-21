@@ -3,8 +3,8 @@
 //! in process on a system provider that captures the program's streams, with
 //! standard error captured through an injected writer.
 
-use vibra_host::SystemProvider;
-use vibra_ir::boundary::TrapCode;
+use vibra_host_v1::SystemProvider;
+use vibra_ir_v1::boundary::TrapCode;
 use vibra_nexus::Trap;
 use vibra_nexus_bridge::{
     EXIT_ADMISSION_REFUSED, EXIT_COMPLETED, EXIT_HOST_EVENT, EXIT_PROGRAM_FAILED,

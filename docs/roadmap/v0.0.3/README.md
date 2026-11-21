@@ -1,15 +1,15 @@
 # Vibra v0.0.3
 
 **Planned pre-alpha release.** Vibra compiles the whole supported language to
-native executables on Windows, Linux, and macOS, `vibra build` ships, and the
-WebAssembly backend is removed. The interpreter stays, as the semantic
-reference and as the engine of `run`, `test`, and `eval`.
+native executables on Windows, Linux, and macOS, and `vibra build` ships. The
+interpreter is the semantic reference and the engine of `run`, `test`, and
+`eval`.
 
 | Order | Milestone | Evidence |
 | --- | --- | --- |
 | M1 | [The whole language on native code](m1/README.md) | Every executable case agrees across the interpreter, the stepper, and a linked Windows executable. |
 | M2 | [Three platforms](m2/README.md) | Real processes on Windows x64, Linux x86-64, and macOS arm64 match the interpreter, with no pending case. |
-| M3 | [Build, distribution, and cutover](m3/README.md) | `vibra build` with a manifest, byte-identical rebuilds, a clean-machine install, and the Wasm backend removed. |
+| M3 | [Build, distribution, and cutover](m3/README.md) | `vibra build` with a manifest, byte-identical rebuilds, a clean-machine install, and native execution as a qualified profile. |
 
 ## Starting point
 
@@ -64,16 +64,9 @@ not distribution evidence.
 suites, schema validation, and the repair and approval regressions of
 v0.0.2. A case that is unsupported or was not run is a gap.
 
-**Wasm.** Until cutover the Wasm backend runs only the v0.0.1 corpus, under
-the fail-closed [transition profile](../../spec/06-runtime.md#wasm-transition).
-A program that needs grants, plans, or the new entry is unsupported there. No
-second Wasm ABI is built for a backend that is being retired. At the
-qualified cutover the Wasm contracts, profile, emitter, runner,
-dependencies, and packaging leave together.
-
 If a platform cannot qualify, the release stays incomplete until the support
-plan is changed on review. Readiness decides when native compilation ships
-and when Wasm goes; it does not decide whether.
+plan is changed on review. Readiness decides when native compilation ships;
+it does not decide whether.
 
 ## Not in this release
 

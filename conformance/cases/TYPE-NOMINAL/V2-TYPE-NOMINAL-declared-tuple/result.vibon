@@ -1,0 +1,1 @@
+{format: @value.v2 typeInfo: {kind: @declared path: @app.main.Pair seed: "sha256:b33d3254ae3d078f255cc8199e76c81c1b800048afda51128051a45d63d90eaa" arguments: []} value: {kind: @tuple typeInfo: {kind: @declared path: @app.main.Pair seed: "sha256:b33d3254ae3d078f255cc8199e76c81c1b800048afda51128051a45d63d90eaa" arguments: []} values: [1i32 "x"]}}

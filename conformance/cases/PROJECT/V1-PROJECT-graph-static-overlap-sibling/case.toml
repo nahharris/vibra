@@ -1,0 +1,13 @@
+id = "V1-PROJECT-graph-static-overlap-sibling"
+rule = "V1-PROJECT-graph-static-overlap-sibling"
+profile = "staticV2"
+operation = "sourceGraph"
+description = "04-programs-and-packages.md#discovery-and-the-source-snapshot: roots src/app and src/apps share a text prefix but neither contains the other, so they do not overlap"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+graph = "graph.vibon"

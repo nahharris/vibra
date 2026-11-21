@@ -1,0 +1,12 @@
+id = "V2-TYPE-INTERFACE-assoc-any-choice"
+rule = "V2-TYPE-INTERFACE-assoc-any-choice"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#associated-types: an implementation may choose any type for an associated type, which carries no bound"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

@@ -1,0 +1,12 @@
+id = "V2-TYPE-INTERFACE-iter-fold-empty"
+rule = "V2-TYPE-INTERFACE-iter-fold-empty"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#iteration: fold over an empty iterator returns initial"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

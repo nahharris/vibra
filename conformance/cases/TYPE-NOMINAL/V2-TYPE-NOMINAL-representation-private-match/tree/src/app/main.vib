@@ -1,0 +1,3 @@
+use @app.model enduse
+
+fn read takes {t: model.Token} returns r: U64 do return match t case model.Token(raw) raw endmatch endfn

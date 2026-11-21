@@ -1,0 +1,12 @@
+id = "V2-SRC-READER-closer-crossed-nested"
+rule = "V2-SRC-READER-closer-crossed-nested"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#lexical-structure: closers in the reverse order of their openers close each form without recovery"
+
+[inputs]
+data = ["input.vibon"]
+
+[expect]
+verdict = "accepted"
+tree = "tree.vibon"

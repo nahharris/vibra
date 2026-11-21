@@ -1,0 +1,12 @@
+id = "V2-RUNTIME-non-tail-depth"
+rule = "V2-RUNTIME-non-tail-depth"
+profile = "interpreterV2"
+operation = "interpret"
+description = "06-runtime.md#activations-and-memory: a deep non-tail recursion runs on interpreter-owned frames"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

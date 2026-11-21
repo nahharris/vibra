@@ -1,0 +1,18 @@
+interface Feed(S)
+  given {S: Ordered}
+  fn feed
+    takes {x: Self item: S}
+    returns r: U8
+  endfn
+  fn make
+    takes {x: Self}
+    returns r: Option(S)
+  endfn
+  impl U8
+    fn feed takes {x: Self item: S} returns r: U8 do return 1u8 endfn
+    fn make takes {x: Self} returns r: Option(S) do return Option.none() endfn
+  endimpl
+endinterface
+
+type Plain of U8 endtype
+fn f returns r: U8 do return Feed.feed(0u8 Plain(1u8)) endfn

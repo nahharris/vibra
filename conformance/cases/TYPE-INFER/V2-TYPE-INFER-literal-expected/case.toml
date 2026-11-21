@@ -1,0 +1,12 @@
+id = "V2-TYPE-INFER-literal-expected"
+rule = "V2-TYPE-INFER-literal-expected"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#scalars: an unsuffixed literal takes its expected type"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

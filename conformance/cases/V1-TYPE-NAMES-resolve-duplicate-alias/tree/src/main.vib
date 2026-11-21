@@ -1,3 +1,0 @@
-(import left @app.left)
-(import left @app.right)
-(defn run () void (do))

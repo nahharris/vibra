@@ -34,7 +34,7 @@ Created:
 | `crates/vibra-diagnostics/Cargo.toml` | package `vibra-diagnostics`, no dependency, workspace lints |
 | `crates/vibra-diagnostics/src/lib.rs` | re-exports of the four modules |
 | `crates/vibra-diagnostics/src/span.rs`, `line_index.rs`, `diagnostic.rs` | copies of the v1 files |
-| `crates/vibra-diagnostics/src/registry.rs` | the 115 codes of the specification table |
+| `crates/vibra-diagnostics/src/registry.rs` | the 118 codes of the specification table |
 | `crates/vibra-conformance/Cargo.toml` | package `vibra-conformance`, binary `vibra-conformance` at `src/bin/conformance.rs`; dependencies `vibra-diagnostics`, `toml`, `serde` |
 | `crates/vibra-conformance/src/lib.rs` | module list |
 | `crates/vibra-conformance/src/corpus.rs` | discovery under `conformance/cases` |
@@ -80,7 +80,7 @@ compared the v1 registry with a chapter that no longer describes it.
    a missing code, or a different level.
 4. Create `vibra-conformance`. `manifest` accepts:
    - `profile`: `readerV2`, `staticV2`, `interpreterV2`, `toolingV2`,
-     `nativeV1`, `wasmTransitionV2`, `fullV2`;
+     `nativeV1`, `fullV2`;
    - `operation`: the ten of the chapter's table, `reader`,
      `projectDecode`, `sourceGraph`, `resolve`, `workspaceCheck`,
      `format`, `query`, `interpret`, `workspaceRun`, `workspaceTest`;
@@ -94,7 +94,7 @@ compared the v1 registry with a chapter that no longer describes it.
      `level`, `source`, `span`, `related`, `notes`), and the snapshot keys
      `tree`, `formatted`, `graph`, `resolved`, `types`, `result`,
      `testRun`.
-   The new crate has no index, native, or Wasm code and no
+   The new crate has no index or native code and no
    option that writes an expectation. Invariant: an unknown key anywhere
    in `case.toml` is a corpus error.
 5. `corpus_root` is `conformance/cases`, discovered two levels deep
@@ -126,14 +126,14 @@ Host tests only; there is no case yet.
 | Test | Input | Expected |
 | --- | --- | --- |
 | registry membership | the chapter table | the implemented set equals the specified set; the test is not ignored |
-| registry count | the registry | 115 codes |
+| registry count | the registry | 118 codes |
 | registry levels | each code | `@type.suspiciousRow`, `@style.casing`, `@contract.unusedEffect` are `@warning`; every other code `@error` |
 | registry domain | each code | the domain's spelling is the code's first component; the counts are syntax 11, name 10, module 11, type 29, pattern 5, effect 4, external 3, data 5, project 11, runtime 3, style 1, contract 7, grant 6, tool 9 |
 | manifest: profile spellings | `profile = "readerV2"` … `"fullV2"` | accepted; `"reader-v1"` rejected as an unknown profile |
 | manifest: operation spellings | each of the ten | accepted; `"workspace-check"` rejected |
 | manifest: rule status | a case whose rule is `retired` or absent from the index | the corpus load fails naming the case |
 | manifest: identity shape | `V2-SRC-READER-x`, `V1-PROJECT-x` | accepted; `V3-SRC-READER-x`, `V2-SRC-x` (unknown prefix), `V2-SRC-READER-X` (upper case suffix) rejected |
-| manifest: unknown key | `[expect] wasm = true` | a corpus error naming the key |
+| manifest: unknown key | `[expect] extra = true` | a corpus error naming the key |
 | corpus layout | a case under the wrong prefix directory | a corpus error naming both |
 | runner: no write mode | the binary's options | `--root` only; `--write-native-parity` is an unknown option, exit 1 |
 | runner: unavailable | one valid `reader` case, no handler | exit 1; `readerV2 conformance: 0 passed, 0 failed, 0 unknown, 1 unavailable` |
@@ -142,7 +142,7 @@ Host tests only; there is no case yet.
 
 ## Diagnostics and schema changes
 
-The new registry is exactly the specification table (115 rows). No schema:
+The new registry is exactly the specification table (118 rows). No schema:
 `DiagnosticDocument` version 2 is rendered by `vibra-schema` in step 24.
 
 ## Validation
@@ -161,7 +161,7 @@ Read: `cargo test -p vibra-conformance` lists
 `the_registry_and_the_specification_table_have_the_same_codes` as `ok`, not
 `ignored`. The workspace run shows two ignored tests in
 `vibra-conformance-v1` (example inventory, native parity) besides the
-child-process helpers. The last command counts 115.
+child-process helpers. The last command counts 118.
 
 The new packages need no crate that is not already in `Cargo.lock`, so
 `--offline` holds; run `cargo metadata --offline` once without `--locked`
@@ -170,8 +170,7 @@ to add the two package entries, then commit the lock file.
 ## Excluded
 
 Any handler; any case; `DiagnosticDocument` rendering; a CI line for the
-new runner (step 03 adds it with the first cases); the Wasm executor
-column (step 27).
+new runner (step 03 adds it with the first cases).
 
 ## Completion evidence
 

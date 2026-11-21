@@ -14,7 +14,8 @@ and no declarations, so it is parsed and validated and never executed.
 
 The file extension selects the grammar before parsing; contents are never
 used to guess. A document presented to the wrong loader is
-`@data.invalidExtension` before its contents are read.
+`@data.invalidExtension` before its contents are read, at offset 0 of that
+document, whose source identity the diagnostic carries.
 
 A VIBON document is exactly one value:
 
@@ -35,13 +36,21 @@ their numeric suffixes, `true` and `false` are the booleans, and `//` starts
 a comment. `true` and `false` are the `boolean` production, and outside a
 field name they are the only identifiers the data grammar admits: any other
 identifier, a doc string, and an application such as
-`Option.some(value: 1i32)` are `@syntax.invalidForm` at the token. A typed
-decoder rejects a wrong shape afterwards, with `@data.invalidShape`. There
-are no commas. `{}` is the empty tuple, `[]` the empty
-list, and `[:]` the empty dict. A field name is an identifier, so no field
-of any schema is a reserved word or contains a hyphen. A record's fields are
-unique. A later duplicate dict key is an error in VIBON, `@data.duplicateKey`,
-where source would let it replace the earlier one.
+`Option.some(value: 1i32)` are `@syntax.invalidForm` at the token. An
+application is reported once, at its first token: no grammar fault inside
+its parentheses is reported, and a lexical fault there still is. A malformed
+identifier is `@syntax.invalidName` only. A typed decoder rejects a wrong
+shape afterwards, with `@data.invalidShape`. There are no commas. `{}` is
+the empty tuple, `[]` the empty list, and `[:]` the empty dict. A field
+name is an identifier, so no field of any schema is a reserved word or
+contains a hyphen; a reserved word written as a field name is
+`@syntax.invalidForm` at the word. A field or an entry with no value after
+its `:` is `@syntax.invalidForm` over the name or key and the `:`. A
+character that starts no token is `@syntax.invalidForm` at that character.
+A document that holds no value, only whitespace and comments or nothing, is
+`@syntax.invalidForm` over the whole document. A record's fields are
+unique. A later duplicate dict key is an error in VIBON,
+`@data.duplicateKey`, where source would let it replace the earlier one.
 
 This is the only VIBON grammar. Every compiler-owned document is written in
 it: project and lock files, host worlds, audit traces, build manifests,
@@ -91,6 +100,11 @@ A reader validates a document in this order, and reports one fault once:
 6. a repeated dict key, `@data.duplicateKey` at the later key. Keys are
    compared as decoded values of the key slot's type, so the comparison
    happens only after steps 3 to 5 have typed and accepted them.
+
+A boolean is the literal of a schema slot of boolean type. It is not the
+encoding of a `Bool` value: `Bool` is an ordinary declared type, and a
+[`@value.v2`](06-runtime.md#values) document writes a `Bool` as its variant
+record.
 
 An unsuffixed number is accepted by the grammar and typed by the schema slot
 it lands in. A slot with no number type rejects it. In canonical output every
@@ -147,8 +161,8 @@ by the decoded value and the schema, has no comment, and has no layout:
   written directly; a character likewise, with `\'` for the quote;
 - an integer as its minimal decimal digits and its exact suffix; a float as
   the [canonical text](06-runtime.md#floating-point-operations) of the
-  runtime chapter and its exact suffix; `true` and `false`; an atom as its
-  parts;
+  runtime chapter and its exact suffix; a boolean slot as `true` or `false`;
+  an atom as its parts;
 - a record's fields in schema order. An absent optional field is omitted,
   and so is a field whose value equals its schema default, whatever the
   input spelled;
@@ -202,11 +216,7 @@ A project is rooted by `project.vibon`, one `@project.v2` record:
       entry: @hello.main.main
       effects: [@std.env.EnvReadArgs @std.fs.DirReadText @std.io.StdoutText]
       grants: [
-        @args: {
-          provider: @host.env.args
-          resource: {kind: @processArguments}
-          after: []
-        }
+        @args: {provider: @host.env.args resource: {kind: @processArguments} after: []}
         @notes: {
           provider: @host.fs.directory
           resource: {kind: @argumentPath index: 0u64 source: @args}
@@ -224,11 +234,7 @@ A project is rooted by `project.vibon`, one `@project.v2` record:
           }
           after: [@args]
         }
-        @out: {
-          provider: @host.io.stdout
-          resource: {kind: @processStream}
-          after: []
-        }
+        @out: {provider: @host.io.stdout resource: {kind: @processStream} after: []}
       ]
     }
   ]
@@ -243,7 +249,7 @@ output.
 | Record | Fields, in canonical order | Constraint |
 | --- | --- | --- |
 | project | `format`, `package`, `targets`, `dependencies` | all required; `targets` a list with at least one target; `dependencies` a dict from `Str` name to dependency, possibly empty |
-| package | `name`, `version` | strings; `name` satisfies the source identifier grammar, is not a reserved word, and is camelCase; `version` is one semantic version, never a range |
+| package | `name`, `version` | strings; `name` satisfies the source identifier grammar, is not a reserved word, and is camelCase, which here means that its first letter is lower case; `version` is one semantic version, never a range |
 | target | `name`, `kind`, `root`, `entry`, `effects`, `grants` | `name` is a one-part atom whose part is not a reserved word; `kind` is `@bin` or `@lib`; `root` a `Str`; a binary requires `entry` (an entity reference), `effects` (a list of entity references), and `grants` (a dict from leaf atom to grant binding); a library omits all three |
 | grant binding | `provider`, `resource`, `policy`, `limits`, `after` | `provider`, `resource`, `after` required; `policy` and `limits` optional; a present `limits` holds at least one bound; see [Targets](#targets) |
 | limits | `invocations`, `inputBytes`, `outputBytes` | each an optional `U64`; at least one present |
@@ -271,22 +277,27 @@ Every target `root` MUST be a non-empty relative path without `.` or `..`
 parts. Its canonical directory MUST exist inside the canonical project root,
 compared by path components; otherwise it is `@project.invalidTargetRoot`.
 Canonical target roots MUST be pairwise disjoint, neither equal nor nested,
-or the later one is `@project.overlappingTargetRoots`. These checks finish
-before any source directory is listed.
+or the later one is `@project.overlappingTargetRoots` at its `root` value,
+with no related span. These checks finish before any source directory is
+listed.
 
 Below a root, a symbolic link or junction MUST resolve inside both the
 project root and its own source root. An escaping link or a directory cycle
 is `@module.pathEscape`; a dangling or unreadable link is
 `@module.ioError`. A canonical directory is walked once, and a linked file
 is admitted once, at its first path in sorted order. A source root MUST NOT
-itself be a link. No source byte is read before these checks pass.
+itself be a link. No source byte is read before these checks pass. Either
+diagnostic on a directory entry names that entry's project-relative path as
+its source, at offset 0.
 
 A regular file is a module only when its extension is exactly `.vib`. Every
 file and directory name on a module's path MUST satisfy the source identifier
 grammar and MUST NOT be a reserved word, or the path is
 `@module.invalidSegment`. Names are compared with
 exact case. Two paths under one root that differ only by case are
-`@module.caseCollision` on every host, and on a case-insensitive filesystem
+`@module.caseCollision` on every host, at offset 0 of the later path in
+source-identity order with no related span, and on a case-insensitive
+filesystem
 a reference whose case differs from the file's actual name is
 `@module.unknownPath`. A file `text.vib` beside a directory `text/` is
 `@module.fileDirectoryCollision`. Entries are sorted by project-relative
@@ -297,8 +308,11 @@ filesystem access.
 
 The optional top-level `tests/` directory is the source root of the reserved
 test unit `@tests`, walked under the same rules and required to be disjoint
-from every target root. A target or dependency named `tests` or `std` is
-`@project.reservedUnitName`.
+from every target root: a target root that overlaps it is
+`@project.overlappingTargetRoots` at that target's `root` value. A `tests`
+at the project root that is a link or not a directory is
+`@project.invalidTargetRoot` with the source `tests`, at offset 0. A target
+or dependency named `tests` or `std` is `@project.reservedUnitName`.
 
 ## Packages, units, and targets
 
@@ -309,7 +323,10 @@ Dependency selection is exact; there is no version solving.
 A **unit** is one local target, the reserved unit `@tests`, the embedded
 standard library `@std`, or one dependency name. The first part of every
 code-reference atom names a unit. Target and dependency names share one
-namespace with the two reserved units. Because roots are disjoint, every
+namespace with the two reserved units. Two targets with one name, or a
+target and a dependency with one name, are `@project.duplicateName` at the
+later name in the project file, a target's `name` value or a dependency's
+key, related to the earlier one. Because roots are disjoint, every
 module belongs to exactly one unit and has exactly one canonical path.
 
 The units a module can name are closed: its own unit, `@std`, and the
@@ -345,8 +362,11 @@ not change its visibility. An `entry` on a library is
 
 ```vibra
 use @std.env.EnvReadArgs enduse
+
 use @std.fs.DirReadText enduse
+
 use @std.io.StdoutText enduse
+
 use @std.process.ExitCode enduse
 
 proc main
@@ -365,7 +385,12 @@ operation interface, and the program calls that module to wrap it. A tuple
 of grants is not one either, because a binding names what it binds.
 
 `effects` is the target's **static admission ceiling**: a list of entity
-references to operation interfaces, without repeats. The entry's written
+references to operation interfaces, without repeats. The list is a row in
+data form, checked as a [row](03-effects.md#effect-ceilings) is: an entry
+that is not an operation interface, one that resolves to nothing included,
+is `@effect.invalidReference` at that entry, and a later repeat of an
+interface is `@effect.duplicateRoot` at the repeat, related to the first.
+The entry's written
 `performs` row, and the row of every startup step, MUST be contained in it,
 or the project is `@effect.outsideCeiling` at the `effects` field, related
 to the entry's `performs` entry or to the recipe. An interface in the list
@@ -427,7 +452,12 @@ A `@fixedPath` is absolute, or relative to the process's working directory
 at startup. A path taken from an argument or variable is read once, at
 startup, through the `source` leaf's grant; the read is a startup step whose
 row is that grant's interface, and it is recorded in the
-[audit trace](06-runtime.md#audit-trace). In each case the issuer opens the
+[audit trace](06-runtime.md#audit-trace). The read is an invocation of the
+`source` grant: it reserves on that grant's counters, so it counts against
+the `source` leaf's `limits` and leaves less to the entry. A typed error of
+the read that the issuer's row below does not list as a refusal, such as
+`limitExceeded` or `outcomeUnknown`, is a failure of the leaf that needed
+it. In each case the issuer opens the
 directory once and the grant holds that directory object; a path string is
 never authority. The table is closed; a project cannot add a provider.
 
@@ -479,10 +509,9 @@ report each leaf with these same three outcomes. A driver the platform does
 not support at all is a different case: it is rejected at admission, as
 `@tool.unavailable`, before any leaf is processed.
 
-On every ending of the process, including a failed startup, the acquired
-grants are released in reverse acquisition order. The
-[runtime chapter](06-runtime.md#entry-outcome) defines the outcomes, the
-release, and how the exit code is reported.
+The [runtime chapter](06-runtime.md#entry-outcome) defines the outcomes,
+the release of the acquired grants on every ending of the process, a
+failed startup included, and how the exit code is reported.
 
 ## Modules and imports
 
@@ -498,7 +527,9 @@ resolve against the module's declarations. A walk that reaches no module is
 
 ```vibra
 use @std.fs.DirReadText enduse
+
 use @hello.model enduse
+
 use @billing.cents as money enduse
 ```
 
@@ -514,19 +545,34 @@ Resolution is total and access is not. A path resolves to a private
 declaration as it does to a public one, and the referring position applies
 its own rule: an import of a private declaration is `@name.privateAccess`,
 relating the declaration, while a target's `entry` may name a private one.
+Access applies to members as to top-level declarations: a path from another
+module that reaches a private static member through its type is
+`@name.privateAccess` at the member's name, relating the member. A member of
+an interface or an `impl` has the interface's access, and a case or a record
+field the type's, as the
+[source chapter](01-source-language.md#declarations) states. Within its own
+module every declaration is visible.
 
 **Imports MUST NOT form a cycle.** An import whose target module imports,
 directly or through any chain of imports, the importing module is
-`@module.importCycle` at the later edge, relating the earlier edges. The
+`@module.importCycle` at the later edge, relating the earlier edges. The edges
+are taken in the order of the importing module's source identity, then of the
+start of the `use` path, and each is added to the graph unless its target
+already reaches its importer through the edges added before it. Such an edge is
+the later edge: it is reported at its path and left out, and its related spans
+are the paths of the shortest chain of added edges from its target back to its
+importer, in chain order. A module that imports itself has no related span. The
 same holds between units: package dependencies form a directed acyclic graph,
-and a dependency cycle is `@project.dependencyCycle`. Declarations inside
-one module may refer to each other freely.
+and a dependency cycle is `@project.dependencyCycle`. Declarations inside one
+module may refer to each other freely.
 
 String paths, relative imports, wildcard and selective imports, extension
 search, directory index modules, and re-exports do not exist.
 
 Apart from the prelude, the standard library is imported like any other
 package. The modules that declare the prelude are in every checked graph.
+A module path that the embedded library does not ship is `@module.unknownPath`,
+as for any other missing module.
 
 ## Dependencies and lock
 
@@ -540,7 +586,9 @@ target.
 `vibra project sync` exports each Git revision into `dep/<name>/` without
 repository metadata and writes `project-lock.vibon`, one `@projectLock.v2`
 record. Check, test, run, and build work offline from the project tree and
-the lock. Local dependencies are not copied and are fingerprinted in every
+the lock. A lock is required exactly when a Git dependency is declared:
+while every dependency is `@path`, `project-lock.vibon` is neither read nor
+required. Local dependencies are not copied and are fingerprinted in every
 snapshot.
 
 | Field | Type | Meaning |
@@ -577,11 +625,12 @@ vector of [Content hash](#content-hash).
 }
 ```
 
-The four commands reject, at the project-data span named: a lock whose
-`project` digest differs from the project file, or a dependency set that
-differs from the project's, `@project.staleLock` at the lock's `format`
-field; a missing vendor directory or vendored content whose content hash
-differs from the lock, `@project.staleLock` at that lock entry; a path
+The four commands reject, at the project-data span named: where a lock is
+required, a lock whose `project` digest differs from the project file, or a
+dependency set that differs from the project's, `@project.staleLock` at the
+lock's `format` field, and a missing vendor directory or vendored content
+whose content hash differs from the lock, `@project.staleLock` at that lock
+entry; a path
 dependency outside the project root, `@module.pathEscape` at its `path`;
 and an import of an undeclared unit, `@module.unknownPath` at the import as
 [Packages, units, and targets](#packages-units-and-targets) states.
@@ -628,7 +677,7 @@ fallback.
 | `format` | `@stdlibManifest.v2` | required |
 | `package` | record `name: Str`, `version: Str` | the embedded package |
 | `modules` | list of module entries sorted by `path` | every embedded module |
-| `symbols` | record `compiler`, `host`, `native`: each a list of `Str` sorted by UTF-8 bytes, possibly empty | the wire symbols the modules may bind. An empty `native` list is valid: acceleration is an optimization the manifest declares, and without it the interpreter runs every Vibra body |
+| `symbols` | record `compiler`, `host`, `nativeSymbol`: each a list of `Str` sorted by UTF-8 bytes, possibly empty | the wire symbols the modules may bind; `nativeSymbol` lists the `native` symbols, since the reserved word `native` is no field name. An empty `nativeSymbol` list is valid: acceleration is an optimization the manifest declares, and without it the interpreter runs every Vibra body |
 
 A module entry has `path` (the module atom), `digest` (`Str`, `sha256:` and
 the SHA-256 of the module's exact bytes), and `languageRoles` (list of role
@@ -653,7 +702,7 @@ atoms, possibly empty).
   symbols: {
     compiler: ["i32.addChecked" "list.length" "list.next"]
     host: ["io.stdoutText"]
-    native: []
+    nativeSymbol: []
   }
 }
 ```
@@ -670,12 +719,27 @@ The package enters resolution as unit `@std`. Its modules are:
 | `@std.assert` | assertions, usable only from `@tests` |
 | `@std.test` | `TestWorld` |
 | `@std.process` | `ExitCode` |
-| `@std.policy` | `ScopeError`, and the policy, selector, and limit types of the [scope policies](03-effects.md#scope-policies) |
-| `@std.io`, `@std.fs`, `@std.env`, `@std.time`, `@std.random` | the operation interfaces and error types of the host registry |
+| `@std.policy` | `ScopeError` and `GrantLimits`; it imports nothing, so every operation module can import it |
+| `@std.io` | the operation interfaces and error type of its host registry rows, and the procedures `readAllText` and `readAllBytes` |
+| `@std.fs` | the operation interfaces and error types of its host registry rows, `RelativePath`, and the policy and selector types of the [scope policies](03-effects.md#scope-policies): `FsPolicy`, `NameTest`, `FileDepth`, `DirDepth`, `FileAction`, `DirAction` |
+| `@std.env`, `@std.time`, `@std.random` | the operation interfaces and error types of the host registry |
+
+`readAllText` and `readAllBytes` read standard input to its end in source.
+Each takes the grant of `StdinText` or `StdinBytes`, has that interface as
+its row, and awaits the interface's `read` with a count of 65,536 until it
+returns the empty value; it returns the concatenation, or the first error.
+Each turn of the loop is an invocation, and the
+[runtime chapter](06-runtime.md#closed-operation-semantics) says what a
+read through a bound smaller than the input returns. A program that needs
+another count calls the member itself.
+
+The embedded library gets no exemption from the rule that imports do not
+form a cycle.
 
 Adding a module or symbol is a change to this specification and to the
 runtime registry. A project module whose source identity collides with an
-embedded one is `@module.sourceIdCollision`.
+embedded one is `@module.sourceIdCollision` at offset 0 of the project
+module.
 
 ## Tests
 
@@ -683,13 +747,17 @@ Every `.vib` file under `tests/` is a module of the unit `@tests`:
 `tests/math/add.vib` is `@tests.math.add`. Test modules are part of the
 snapshot but of no target. A target module cannot name `@tests`
 (`@module.unknownPath`). A `test` declaration outside `@tests` is
-`@module.testOutsideTests`.
+`@module.testOutsideTests` over the whole declaration.
 
 ```vibra
 use @std.assert enduse
+
 use @std.test.TestWorld enduse
+
 use @std.fs.DirReadText enduse
+
 use @std.fs.RelativePath enduse
+
 use @hello.notes enduse
 
 test "counts the lines of a note"
@@ -697,8 +765,7 @@ test "counts the lines of a note"
   performs {TestWorld DirReadText}
   do
     let Result.ok(value: path) be RelativePath(["a.txt"]) endlet
-    let {readText: reader} be
-      await TestWorld.directory(world files: [path: "x\ny"])
+    let {readText: reader} be await TestWorld.directory(world files: [path: "x\ny"])
     endlet
     assert.equal(Result.ok(value: 2u64) await notes.countLines(reader path))
 endtest
@@ -772,7 +839,7 @@ test's world are unusable in another. The members behave as follows:
 - `environment`, `clocks`, and `random` return grants over the world's one
   environment, one clock pair, and one random state, so two calls share
   state; `environment` sets the world's variables and arguments on each
-  call.
+  call. The `EnvReadVar` grant it returns permits every name.
 - `output` returns everything written through every stream grant the
   test's world issued, per stream, in write order.
 
@@ -794,16 +861,16 @@ assertion row, as a callee or as a value, is
 | `assert.false` | `Fn({Bool} Void)` | the operand is `false` |
 | `assert.equal(T)` | `Fn({T T} Void)`, expected then actual | both operands have the same canonical value encoding |
 
-An operand of `assert.equal` whose type contains a callable, plan, or grant
-type is `@type.functionNotEquatable`. The comparison uses the canonical
-value encoding and gives ordinary code no equality.
+An operand of `assert.equal` whose type contains a callable, plan, or grant type
+is `@type.functionNotEquatable`, once at each such operand. The comparison uses
+the canonical value encoding and gives ordinary code no equality.
 
 A false assertion records one structured failure, with the assertion's name,
 the canonical encodings of the expected and actual values, and the call's
 span, and stops that test's body. It is not a trap, a `Result`, or a host
 event. Each test ends as exactly one of `@test.passed`,
-`@test.assertionFailed`, `@test.invalid`, `@test.unavailable`, or
-`@test.trap`.
+`@test.assertionFailed`, `@test.invalid`, `@test.unavailable`,
+`@test.trap`, or `@test.exhausted`.
 
 Before any selected test runs, the runner checks every selected test module
 and its import closure. An error there makes every selected test
@@ -874,22 +941,25 @@ except `revision`, which is the workspace revision test vector of the
   ]
   dependencies: []
   effects: [
-    {path: @std.io.StdoutText seed: "sha256:213e3a01ef10d7c10032616f8ab0da9a97fb729b9f98d723f4beb3158a25e2ad"}
+    {
+      path: @std.io.StdoutText
+      seed: "sha256:213e3a01ef10d7c10032616f8ab0da9a97fb729b9f98d723f4beb3158a25e2ad"
+    }
   ]
-  grants: [
-    @out: {provider: @host.io.stdout resource: {kind: @processStream} after: []}
-  ]
+  grants: [@out: {provider: @host.io.stdout resource: {kind: @processStream} after: []}]
   registry: {major: 2u32 minor: 0u32 symbols: ["io.stdoutText"]}
   outputs: [
-    {path: "hello.exe" digest: "sha256:65c20520d3bde9ee2d53288d20df389fec9bce119c15722e95628d3005cf220f"}
+    {
+      path: "hello.exe"
+      digest: "sha256:65c20520d3bde9ee2d53288d20df389fec9bce119c15722e95628d3005cf220f"
+    }
   ]
   semanticIdentity: "sha256:65c20520d3bde9ee2d53288d20df389fec9bce119c15722e95628d3005cf220f"
   artifactIdentity: "sha256:65c20520d3bde9ee2d53288d20df389fec9bce119c15722e95628d3005cf220f"
 }
 ```
 
-The runtime chapter defines native execution and what the WebAssembly
-transition backend supports.
+The runtime chapter defines native execution.
 
 ## Exclusions
 

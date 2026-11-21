@@ -1,0 +1,2 @@
+fn main returns r: Option(I32) do let o: Option(I32) be none() endlet return o endfn
+fn none(T) returns r: Option(T) do return Option.none() endfn

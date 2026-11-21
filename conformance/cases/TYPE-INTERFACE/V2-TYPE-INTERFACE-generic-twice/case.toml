@@ -1,0 +1,12 @@
+id = "V2-TYPE-INTERFACE-generic-twice"
+rule = "V2-TYPE-INTERFACE-generic-twice"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#associated-types: one receiver implements From(I16) and From(I8), and each source selects its own"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

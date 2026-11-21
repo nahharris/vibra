@@ -1,0 +1,12 @@
+id = "V2-CONTRACT-where-anonymous-guards-ok"
+rule = "V2-CONTRACT-where-anonymous-guards-ok"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#type-invariants: an anonymous where operand converts with a requires that has else, and its bare ensures is proved at its returns"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

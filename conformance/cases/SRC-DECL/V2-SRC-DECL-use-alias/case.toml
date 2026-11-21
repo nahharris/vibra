@@ -1,0 +1,11 @@
+id = "V2-SRC-DECL-use-alias"
+rule = "V2-SRC-DECL-use-alias"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#use: an import renamed with as"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "accepted"

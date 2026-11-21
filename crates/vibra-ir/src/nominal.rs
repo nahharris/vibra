@@ -1,490 +1,424 @@
-//! Declared type identities and definitions.
+//! Declared types, interfaces, and implementations
+//! (`docs/spec/02-type-system.md`, "Declared types" and "Interfaces").
 //!
-//! `docs/spec/02-type-system.md` makes every `deftype` a new identity. The
-//! checked program carries one [`TypeDefinition`] per declared type it uses, so
-//! the interpreter and renderers never consult source or the resolver.
+//! A builtin declared `of Intrinsic(@tag)` has no definition here: its type
+//! is a scalar case or the `List` case of [`Type`].
 
-use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 
-use crate::{Expr, FunctionSignature, IrError, Type};
+use crate::types::is_identifier;
+use crate::{
+    Binder, Constant, ImplementationRecord, InterfaceKey, IrError, NamedTypes,
+    OpenScope, SignatureRecord, Type, TypeId,
+};
 
-/// The identity of one declared type.
-///
-/// `id` is the resolver's canonical declaration identity and decides equality;
-/// `path` is the canonical atom path, without its leading `@`, that the
-/// canonical value encoding renders.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct TypeId {
-    id: String,
-    path: String,
+/// The visibility of a type's representation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Visibility {
+    /// Exposed wherever the type is visible.
+    Public,
+    /// Hidden from every other module.
+    Private,
 }
 
-impl TypeId {
-    /// Creates a declared type identity.
+/// A case of a variant type: its name and its named fields, in declaration
+/// order, none for a case without fields.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Case {
+    /// The case name.
+    pub name: String,
+    /// The fields, in declaration order.
+    pub fields: Vec<(String, Type)>,
+}
+
+impl Case {
+    /// The case `name` with `fields`.
     #[must_use]
-    pub fn new(id: impl Into<String>, path: impl Into<String>) -> Self {
+    pub fn new(name: impl Into<String>, fields: Vec<(String, Type)>) -> Self {
         Self {
-            id: id.into(),
-            path: path.into(),
+            name: name.into(),
+            fields,
         }
     }
-
-    /// The canonical declaration identity.
-    #[must_use]
-    pub fn id(&self) -> &str {
-        &self.id
-    }
-
-    /// The canonical atom path without its leading `@`.
-    #[must_use]
-    pub fn path(&self) -> &str {
-        &self.path
-    }
 }
 
-/// The body of a declared type, in declaration order.
+/// The body of a declared type. Declaration order fixes discriminants,
+/// rendering, and comparison order.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TypeBody {
-    /// Closed, named fields.
+    /// `of {name: T …}`: a declared record, fields in declaration order.
     Record(Vec<(String, Type)>),
-    /// Variants, each with one payload slot; `void` marks a nullary variant.
-    Enum(Vec<(String, Type)>),
-    /// A distinct identity over one representation type.
-    Wrapper(Type),
-    /// Positional components.
+    /// `of {T U}`: a declared tuple.
     Tuple(Vec<Type>),
-    /// Member types, in declaration order, which fixes discriminants.
-    Union(Vec<Type>),
+    /// `of T` for any other `T`: a wrapper.
+    Wrapper(Type),
+    /// A `case` list: a variant type.
+    Variant(Vec<Case>),
 }
 
-impl TypeBody {
-    /// Every slot of the body with its name: a field, a variant, a tuple
-    /// component spelled by its index, or the unnamed representation.
-    #[must_use]
-    pub fn slots(&self) -> Vec<(String, Type)> {
-        match self {
-            Self::Record(members) | Self::Enum(members) => members.clone(),
-            Self::Wrapper(representation) => {
-                vec![(String::new(), representation.clone())]
-            }
-            Self::Tuple(components) | Self::Union(components) => components
-                .iter()
-                .enumerate()
-                .map(|(index, value)| (index.to_string(), value.clone()))
-                .collect(),
-        }
-    }
+/// A type invariant: `where P`, or `where P else E`.
+///
+/// The predicate is the function at this index of the module set, of type
+/// `Fn({R} Bool)` where `R` is the representation type.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Invariant {
+    /// The predicate function's index in the module set.
+    pub predicate: usize,
+    /// The constant consequence `E`, `None` for a bare `where`.
+    pub consequence: Option<Constant>,
 }
 
-/// One declared type of a checked program.
+/// One declared type.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TypeDefinition {
     id: TypeId,
-    parameters: Vec<String>,
+    parameters: Vec<Binder>,
     body: TypeBody,
+    invariant: Option<Invariant>,
+    representation: Visibility,
+}
+
+fn check_distinct<'a>(
+    what: &'static str,
+    names: impl IntoIterator<Item = &'a str>,
+) -> Result<(), IrError> {
+    let mut seen = BTreeSet::new();
+    for name in names {
+        if !is_identifier(name) {
+            return Err(IrError::InvalidName {
+                what,
+                name: name.to_owned(),
+            });
+        }
+        if !seen.insert(name) {
+            return Err(IrError::Duplicate {
+                what,
+                name: name.to_owned(),
+            });
+        }
+    }
+    Ok(())
 }
 
 impl TypeDefinition {
-    /// Creates a declared type definition with no generic parameters.
-    #[must_use]
-    pub const fn new(id: TypeId, body: TypeBody) -> Self {
-        Self {
-            id,
-            parameters: Vec::new(),
-            body,
-        }
-    }
-
-    /// The same definition with generic parameters, in `where:` order. The
-    /// body names them as [`Type::Param`].
-    #[must_use]
-    pub fn with_parameters(mut self, parameters: Vec<String>) -> Self {
-        self.parameters = parameters;
-        self
-    }
-
-    /// The generic parameter names in `where:` order.
-    #[must_use]
-    pub fn parameters(&self) -> &[String] {
-        &self.parameters
-    }
-
-    /// The body with its generic parameters replaced by `arguments`, or `None`
-    /// when the argument count differs from the parameter list.
-    #[must_use]
-    pub fn instantiate(&self, arguments: &[Type]) -> Option<TypeBody> {
-        if arguments.len() != self.parameters.len() {
-            return None;
-        }
-        let map: std::collections::BTreeMap<String, Type> = self
-            .parameters
-            .iter()
-            .cloned()
-            .zip(arguments.iter().cloned())
-            .collect();
-        let substitute = |members: &[(String, Type)]| {
-            members
+    /// The definition of the type `id` with the type parameters `parameters`,
+    /// each with its bound, whose body refers to them by binder position.
+    ///
+    /// # Errors
+    ///
+    /// A parameter, field, or case name is not an identifier or is repeated;
+    /// a type in a bound or in the body refers to a binder out of range or
+    /// holds `Self` or an association slot; a record or variant body is
+    /// empty; or a variant type has an invariant.
+    pub fn new(
+        id: TypeId,
+        parameters: Vec<Binder>,
+        body: TypeBody,
+        invariant: Option<Invariant>,
+        representation: Visibility,
+    ) -> Result<Self, IrError> {
+        check_distinct("type parameter", parameters.iter().map(Binder::name))?;
+        let scope = OpenScope::Binders(parameters.len());
+        for bound in parameters.iter().filter_map(Binder::bound) {
+            bound
+                .contract
+                .arguments
                 .iter()
-                .map(|(name, value)| (name.clone(), value.substitute(&map)))
-                .collect()
-        };
-        Some(match &self.body {
-            TypeBody::Record(fields) => TypeBody::Record(substitute(fields)),
-            TypeBody::Enum(variants) => TypeBody::Enum(substitute(variants)),
-            TypeBody::Wrapper(representation) => {
-                TypeBody::Wrapper(representation.substitute(&map))
-            }
-            TypeBody::Tuple(components) => TypeBody::Tuple(
-                components
+                .chain(bound.choices.entries().iter().map(|(_, ty)| ty))
+                .try_for_each(|ty| ty.validate(scope))?;
+        }
+        match &body {
+            TypeBody::Record(fields) => {
+                if fields.is_empty() {
+                    return Err(IrError::InvalidType(format!(
+                        "the record `{}` has no field",
+                        id.path()
+                    )));
+                }
+                check_distinct("field", fields.iter().map(|(name, _)| name.as_str()))?;
+                fields
                     .iter()
-                    .map(|value| value.substitute(&map))
-                    .collect(),
-            ),
-            TypeBody::Union(members) => TypeBody::Union(
-                members.iter().map(|value| value.substitute(&map)).collect(),
-            ),
+                    .try_for_each(|(_, value)| value.validate(scope))?;
+            }
+            TypeBody::Tuple(values) => {
+                values.iter().try_for_each(|value| value.validate(scope))?
+            }
+            TypeBody::Wrapper(value) => value.validate(scope)?,
+            TypeBody::Variant(cases) => {
+                if cases.is_empty() {
+                    return Err(IrError::InvalidType(format!(
+                        "the variant type `{}` has no case",
+                        id.path()
+                    )));
+                }
+                if invariant.is_some() {
+                    return Err(IrError::InvalidType(format!(
+                        "the variant type `{}` has an invariant",
+                        id.path()
+                    )));
+                }
+                check_distinct("case", cases.iter().map(|case| case.name.as_str()))?;
+                for case in cases {
+                    check_distinct(
+                        "field",
+                        case.fields.iter().map(|(name, _)| name.as_str()),
+                    )?;
+                    case.fields
+                        .iter()
+                        .try_for_each(|(_, value)| value.validate(scope))?;
+                }
+            }
+        }
+        Ok(Self {
+            id,
+            parameters,
+            body,
+            invariant,
+            representation,
         })
     }
 
-    /// The declared identity.
+    /// The type's identity.
     #[must_use]
     pub const fn id(&self) -> &TypeId {
         &self.id
     }
 
-    /// The declared body.
+    /// The type parameters with their bounds, in written order. Every
+    /// application of the type MUST satisfy them.
+    #[must_use]
+    pub fn parameters(&self) -> &[Binder] {
+        &self.parameters
+    }
+
+    /// The body, over binder references to the parameters.
     #[must_use]
     pub const fn body(&self) -> &TypeBody {
         &self.body
     }
 
-    /// The fields of a record body, in declaration order.
+    /// The invariant, when the type has one.
     #[must_use]
-    pub fn record_fields(&self) -> Option<&[(String, Type)]> {
-        match &self.body {
-            TypeBody::Record(fields) => Some(fields),
-            TypeBody::Enum(_)
-            | TypeBody::Wrapper(_)
-            | TypeBody::Tuple(_)
-            | TypeBody::Union(_) => None,
-        }
+    pub const fn invariant(&self) -> Option<&Invariant> {
+        self.invariant.as_ref()
     }
 
-    /// The variants of an enum body, in declaration order.
+    /// The representation's visibility.
     #[must_use]
-    pub fn enum_variants(&self) -> Option<&[(String, Type)]> {
+    pub const fn representation(&self) -> Visibility {
+        self.representation
+    }
+
+    /// The representation type `R` an invariant's predicate takes, open in
+    /// the parameters; `None` for a variant type.
+    #[must_use]
+    pub fn representation_type(&self) -> Option<Type> {
         match &self.body {
-            TypeBody::Enum(variants) => Some(variants),
-            TypeBody::Record(_)
-            | TypeBody::Wrapper(_)
-            | TypeBody::Tuple(_)
-            | TypeBody::Union(_) => None,
+            TypeBody::Record(fields) => NamedTypes::new(fields.iter().cloned())
+                .ok()
+                .map(Type::Record),
+            TypeBody::Tuple(values) => Some(Type::Tuple(values.clone())),
+            TypeBody::Wrapper(value) => Some(value.clone()),
+            TypeBody::Variant(_) => None,
         }
+    }
+
+    /// The case named `name` of a variant type.
+    #[must_use]
+    pub fn case(&self, name: &str) -> Option<&Case> {
+        match &self.body {
+            TypeBody::Variant(cases) => cases.iter().find(|case| case.name == name),
+            _ => None,
+        }
+    }
+
+    /// The type this definition declares, applied to its own parameters.
+    #[must_use]
+    pub fn self_type(&self) -> Type {
+        Type::Declared(
+            self.id.clone(),
+            (0..self.parameters.len()).map(Type::Binder).collect(),
+        )
     }
 }
 
-/// Orders anonymous record fields or enum variants canonically: by the UTF-8
-/// bytes of their names. Anonymous structural identity ignores written order.
-#[must_use]
-pub fn canonical_members(mut members: Vec<(String, Type)>) -> Vec<(String, Type)> {
-    members.sort_by(|left, right| left.0.as_bytes().cmp(right.0.as_bytes()));
-    members
+/// A member of an interface: a callable with its signature record, and the
+/// function holding its default body when it has one.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InterfaceMember {
+    /// The member name.
+    pub name: String,
+    /// The member's signature record, a member of the interface.
+    pub signature: SignatureRecord,
+    /// The index of the function holding the default body, `None` for an
+    /// abstract member.
+    pub default: Option<usize>,
 }
 
-/// Declared definitions keyed by identity.
-pub(crate) type TypeTable<'a> = BTreeMap<&'a TypeId, &'a TypeDefinition>;
-
-/// Indexes definitions, rejecting a repeated identity and any definition that
-/// names an undefined declared type.
-pub(crate) fn type_table(types: &[TypeDefinition]) -> Result<TypeTable<'_>, IrError> {
-    let mut table = BTreeMap::new();
-    for definition in types {
-        if table.insert(definition.id(), definition).is_some() {
-            return Err(invalid(format!(
-                "declared type `{}` is defined twice",
-                definition.id().id()
-            )));
-        }
-    }
-    for definition in types {
-        for (_, slot) in definition.body().slots() {
-            validate_declared_type(&slot, &table)?;
-        }
-    }
-    Ok(table)
+/// One interface.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InterfaceDefinition {
+    id: TypeId,
+    parameters: Vec<String>,
+    associated: Vec<String>,
+    members: Vec<InterfaceMember>,
 }
 
-/// Rejects a declared type with no definition, and a declared type applied to
-/// the wrong number of arguments.
-pub(crate) fn validate_declared_type(
-    value: &Type,
-    table: &TypeTable<'_>,
-) -> Result<(), IrError> {
-    match value {
-        Type::Declared(_) | Type::Applied(_, _) => {
-            declared_body(table, value)?;
-            if let Type::Applied(_, arguments) = value {
-                for argument in arguments {
-                    validate_declared_type(argument, table)?;
-                }
+impl InterfaceDefinition {
+    /// The interface `id` with its parameters, its associated types, and its
+    /// callable members.
+    ///
+    /// # Errors
+    ///
+    /// A name is not an identifier; the associated types and members share
+    /// one namespace and a name repeats in it; a member's record is not a
+    /// member of this interface; or a member's binders do not start with the
+    /// interface's parameters.
+    pub fn new(
+        id: TypeId,
+        parameters: Vec<String>,
+        associated: Vec<String>,
+        members: Vec<InterfaceMember>,
+    ) -> Result<Self, IrError> {
+        check_distinct("type parameter", parameters.iter().map(String::as_str))?;
+        check_distinct(
+            "interface member",
+            associated
+                .iter()
+                .map(String::as_str)
+                .chain(members.iter().map(|member| member.name.as_str())),
+        )?;
+        for member in &members {
+            if member.signature.associated() != Some(associated.as_slice()) {
+                return Err(IrError::InvalidType(format!(
+                    "the member `{}` of `{}` is not recorded as one of its members",
+                    member.name,
+                    id.path()
+                )));
             }
-            Ok(())
+            let inherited = member
+                .signature
+                .binders()
+                .iter()
+                .map(Binder::name)
+                .take(parameters.len());
+            if !inherited.eq(parameters.iter().map(String::as_str)) {
+                return Err(IrError::InvalidType(format!(
+                    "the binders of `{}.{}` do not start with the interface's parameters",
+                    id.path(),
+                    member.name
+                )));
+            }
         }
-        _ => value
-            .components()
+        Ok(Self {
+            id,
+            parameters,
+            associated,
+            members,
+        })
+    }
+
+    /// The interface's identity.
+    #[must_use]
+    pub const fn id(&self) -> &TypeId {
+        &self.id
+    }
+
+    /// The type parameters, in written order.
+    #[must_use]
+    pub fn parameters(&self) -> &[String] {
+        &self.parameters
+    }
+
+    /// The associated type names, in declaration order.
+    #[must_use]
+    pub fn associated(&self) -> &[String] {
+        &self.associated
+    }
+
+    /// The callable members, in declaration order.
+    #[must_use]
+    pub fn members(&self) -> &[InterfaceMember] {
+        &self.members
+    }
+
+    /// The member named `name`.
+    #[must_use]
+    pub fn member(&self, name: &str) -> Option<&InterfaceMember> {
+        self.members.iter().find(|member| member.name == name)
+    }
+}
+
+/// One implementation: its record and the function supplying each member.
+///
+/// The key is the interface, the receiver, and the positional arguments.
+/// Associated types are not part of it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Implementation {
+    record: ImplementationRecord,
+    members: Vec<(String, usize)>,
+}
+
+impl Implementation {
+    /// The implementation `record`, whose members are the functions at the
+    /// given indices of the module set.
+    ///
+    /// # Errors
+    ///
+    /// A member is supplied twice.
+    pub fn new(
+        record: ImplementationRecord,
+        members: Vec<(String, usize)>,
+    ) -> Result<Self, IrError> {
+        check_distinct(
+            "implementation member",
+            members.iter().map(|(name, _)| name.as_str()),
+        )?;
+        Ok(Self { record, members })
+    }
+
+    /// The implementation record.
+    #[must_use]
+    pub const fn record(&self) -> &ImplementationRecord {
+        &self.record
+    }
+
+    /// The binders the key is open in.
+    #[must_use]
+    pub fn binders(&self) -> &[Binder] {
+        self.record.binders()
+    }
+
+    /// The interface key.
+    #[must_use]
+    pub const fn contract(&self) -> &InterfaceKey {
+        self.record.contract()
+    }
+
+    /// The receiver type.
+    #[must_use]
+    pub const fn receiver(&self) -> &Type {
+        self.record.receiver()
+    }
+
+    /// The choices, by associated type name.
+    #[must_use]
+    pub const fn choices(&self) -> &NamedTypes {
+        self.record.choices()
+    }
+
+    /// The supplied members and the index of each one's function.
+    #[must_use]
+    pub fn members(&self) -> &[(String, usize)] {
+        &self.members
+    }
+
+    /// The function supplying the member `name`, when this implementation
+    /// supplies it.
+    #[must_use]
+    pub fn member(&self, name: &str) -> Option<usize> {
+        self.members
             .iter()
-            .try_for_each(|component| validate_declared_type(component, table)),
-    }
-}
-
-/// Validates every type a signature names.
-pub(crate) fn validate_declared_signature(
-    signature: &FunctionSignature,
-    table: &TypeTable<'_>,
-) -> Result<(), IrError> {
-    for parameter in signature.parameters() {
-        validate_declared_type(parameter, table)?;
-    }
-    for parameter in signature.labelled() {
-        validate_declared_type(&parameter.value_type(), table)?;
-    }
-    validate_declared_type(&signature.result(), table)
-}
-
-/// The instantiated body of a declared or applied type.
-pub(crate) fn declared_body(
-    table: &TypeTable<'_>,
-    value: &Type,
-) -> Result<TypeBody, IrError> {
-    let (id, arguments): (&TypeId, &[Type]) = match value {
-        Type::Declared(id) => (id, &[]),
-        Type::Applied(id, arguments) => (id, arguments),
-        _ => return Err(invalid(format!("{value} is not a declared type"))),
-    };
-    let definition = table.get(id).copied().ok_or_else(|| {
-        invalid(format!("declared type `{}` has no definition", id.id()))
-    })?;
-    definition.instantiate(arguments).ok_or_else(|| {
-        invalid(format!(
-            "`{}` takes {} type arguments, not {}",
-            id.id(),
-            definition.parameters().len(),
-            arguments.len()
-        ))
-    })
-}
-
-/// Checks every declared construction and projection in `expression` against
-/// its instantiated definition. Shape validation has already typed each
-/// operand; generic parameters are compared as written.
-pub(crate) fn validate_declared_expr(
-    expression: &Expr,
-    table: &TypeTable<'_>,
-) -> Result<(), IrError> {
-    let mut pending = vec![expression];
-    while let Some(expression) = pending.pop() {
-        validate_declared_type(&expression.result_type(), table)?;
-        match expression {
-            Expr::Record {
-                value_type: value_type @ (Type::Declared(_) | Type::Applied(_, _)),
-                fields,
-                ..
-            } => {
-                let TypeBody::Record(declared) = declared_body(table, value_type)?
-                else {
-                    return Err(invalid(format!("{value_type} is not a record")));
-                };
-                if declared.len() != fields.len() {
-                    return Err(invalid(format!(
-                        "{value_type} construction has the wrong fields"
-                    )));
-                }
-                for (name, value) in fields {
-                    let expected = member(&declared, name).ok_or_else(|| {
-                        invalid(format!("{value_type} has no field `{name}`"))
-                    })?;
-                    if !expected.same_shape(&value.result_type()) {
-                        return Err(invalid(format!(
-                            "{value_type} field `{name}` has type {}, expected {expected}",
-                            value.result_type()
-                        )));
-                    }
-                }
-            }
-            Expr::Variant {
-                value_type: value_type @ (Type::Declared(_) | Type::Applied(_, _)),
-                variant,
-                payload,
-                ..
-            } => {
-                let TypeBody::Enum(declared) = declared_body(table, value_type)? else {
-                    return Err(invalid(format!("{value_type} is not an enum")));
-                };
-                let expected = member(&declared, variant).ok_or_else(|| {
-                    invalid(format!("{value_type} has no variant `{variant}`"))
-                })?;
-                let actual = payload.as_deref().map_or(Type::Void, Expr::result_type);
-                if !expected.same_shape(&actual) {
-                    return Err(invalid(format!(
-                        "{value_type} variant `{variant}` payload has type {actual}, expected {expected}"
-                    )));
-                }
-            }
-            Expr::Wrap {
-                value_type: value_type @ (Type::Declared(_) | Type::Applied(_, _)),
-                value,
-                ..
-            } => {
-                let TypeBody::Wrapper(expected) = declared_body(table, value_type)?
-                else {
-                    return Err(invalid(format!("{value_type} is not a wrapper type")));
-                };
-                if !expected.same_shape(&value.result_type()) {
-                    return Err(invalid(format!(
-                        "{value_type} wraps {expected}, not {}",
-                        value.result_type()
-                    )));
-                }
-            }
-            Expr::Widen {
-                value_type: value_type @ (Type::Declared(_) | Type::Applied(_, _)),
-                value,
-                member,
-                ..
-            } => {
-                let TypeBody::Union(members) = declared_body(table, value_type)? else {
-                    return Err(invalid(format!("{value_type} is not a union")));
-                };
-                let actual = value.result_type();
-                if !member
-                    .and_then(|index| members.get(index))
-                    .is_some_and(|found| found.admits(&actual))
-                {
-                    return Err(invalid(format!(
-                        "{actual} is not a member of {value_type}"
-                    )));
-                }
-            }
-            Expr::Tuple {
-                value_type: value_type @ (Type::Declared(_) | Type::Applied(_, _)),
-                components,
-                ..
-            } => {
-                let TypeBody::Tuple(expected) = declared_body(table, value_type)?
-                else {
-                    return Err(invalid(format!("{value_type} is not a tuple")));
-                };
-                if expected.len() != components.len()
-                    || !expected
-                        .iter()
-                        .zip(components)
-                        .all(|(expected, component)| {
-                            expected.admits(&component.result_type())
-                        })
-                {
-                    return Err(invalid(format!(
-                        "{value_type} construction has the wrong components"
-                    )));
-                }
-            }
-            Expr::TupleProject {
-                tuple,
-                index,
-                value_type,
-                ..
-            } => {
-                let tuple_type = tuple.result_type();
-                if matches!(tuple_type, Type::Declared(_) | Type::Applied(_, _)) {
-                    let TypeBody::Tuple(components) =
-                        declared_body(table, &tuple_type)?
-                    else {
-                        return Err(invalid(format!(
-                            "projection from non-tuple {tuple_type}"
-                        )));
-                    };
-                    if !components
-                        .get(*index)
-                        .is_some_and(|found| found.admits(value_type))
-                    {
-                        return Err(invalid(format!(
-                            "{tuple_type} has no component {index} of type {value_type}"
-                        )));
-                    }
-                }
-            }
-            Expr::Project {
-                record,
-                field,
-                value_type,
-                ..
-            } => {
-                let record_type = record.result_type();
-                if matches!(record_type, Type::Declared(_) | Type::Applied(_, _)) {
-                    let TypeBody::Record(declared) =
-                        declared_body(table, &record_type)?
-                    else {
-                        return Err(invalid(format!(
-                            "projection from non-record {record_type}"
-                        )));
-                    };
-                    if !member(&declared, field)
-                        .is_some_and(|found| found.same_shape(value_type))
-                    {
-                        return Err(invalid(format!(
-                            "{record_type} has no field `{field}` of type {value_type}"
-                        )));
-                    }
-                }
-            }
-            _ => {}
-        }
-        pending.extend(children(expression));
-    }
-    Ok(())
-}
-
-fn member<'a>(members: &'a [(String, Type)], name: &str) -> Option<&'a Type> {
-    members
-        .iter()
-        .find(|(member, _)| member == name)
-        .map(|(_, value)| value)
-}
-
-fn invalid(message: String) -> IrError {
-    IrError::InvalidExpression(message)
-}
-
-/// Every direct subexpression, including closure bodies and callees.
-pub(crate) fn children(expression: &Expr) -> Vec<&Expr> {
-    match expression {
-        Expr::External { arguments, .. } | Expr::Host { arguments, .. } => {
-            arguments.iter().collect()
-        }
-        Expr::Sequence { expressions, .. } => expressions.iter().collect(),
-        Expr::Closure { captures, body, .. } => {
-            let mut children: Vec<&Expr> = captures.iter().collect();
-            children.push(body);
-            children
-        }
-        Expr::Let { value, body, .. } => vec![value, body],
-        Expr::Match {
-            scrutinee, arms, ..
-        } => std::iter::once(&**scrutinee)
-            .chain(arms.iter().map(|arm| &arm.body))
-            .collect(),
-        Expr::If {
-            condition,
-            then_branch,
-            else_branch,
-            ..
-        } => vec![condition, then_branch, else_branch],
-        Expr::Call {
-            target, arguments, ..
-        } => {
-            let mut children: Vec<&Expr> = target.callee().into_iter().collect();
-            children.extend(arguments);
-            children
-        }
-        _ => expression.data_operands(),
+            .find_map(|(member, function)| (member == name).then_some(*function))
     }
 }

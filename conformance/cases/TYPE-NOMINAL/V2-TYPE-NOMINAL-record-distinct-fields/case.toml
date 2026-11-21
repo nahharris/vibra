@@ -1,0 +1,12 @@
+id = "V2-TYPE-NOMINAL-record-distinct-fields"
+rule = "V2-TYPE-NOMINAL-record-distinct-fields"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#structural-types: a record type and a record value with distinct fields, written in any order, are one type"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

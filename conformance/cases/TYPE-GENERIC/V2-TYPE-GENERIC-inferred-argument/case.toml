@@ -1,0 +1,12 @@
+id = "V2-TYPE-GENERIC-inferred-argument"
+rule = "V2-TYPE-GENERIC-inferred-argument"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#generics: a type argument is inferred from the operands"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

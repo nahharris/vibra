@@ -1,6 +1,6 @@
 [package]
 name = "vibra-syntax"
-description = "Vibra lexer, lossless recovery CST, document modes, and AST."
+description = "The Vibra lexer, the lossless syntax tree with recovery, and the VIBON data grammar."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

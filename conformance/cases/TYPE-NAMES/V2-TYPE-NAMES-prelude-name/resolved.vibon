@@ -1,0 +1,26 @@
+{
+  format: @resolved.v2
+  package: {name: "hello" version: "0.1.0"}
+  modules: [{path: @app.main unit: @app sourceId: "src/app/main.vib"}]
+  declarations: [
+    {
+      identity: "sha256:afc52836ad7d7a85fc95b5856d9bd3e641abbcf3968a4c8dd528d1aa8e13a04c"
+      anchor: {
+        package: "hello"
+        version: "0.1.0"
+        module: @app.main
+        kind: @type
+        name: "A"
+      }
+      access: @private
+      span: {sourceId: "src/app/main.vib" start: 0u64 end: 21u64}
+    }
+  ]
+  imports: []
+  references: [
+    {
+      span: {sourceId: "src/app/main.vib" start: 10u64 end: 13u64}
+      to: "sha256:29dc059689d38a6e1e8b843c7c518b7bfe2d16d9f596ef242d758b9b970b1d8a"
+    }
+  ]
+}

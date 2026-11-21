@@ -1,591 +1,505 @@
-//! The interpreter's runtime values.
+//! Runtime values, under the runtime chapter's "Representation latitude".
 //!
-//! A value may be nested arbitrarily deep: the language bounds its depth only
-//! by memory (`docs/spec/06-runtime.md`, "The value arena" and
-//! "Reclamation"). Two properties follow from that and shape this module:
+//! `Str` is a Rust string, `Bytes` a byte vector, `Bool` an unboxed flag,
+//! `Option` a compact optional pointer, a case without fields a tag, and a
+//! user wrapper a box around the value it wraps. A value carries no type:
+//! an observation converts it to the neutral [`vibra_ir::Value`] at its
+//! static type (`crate::encode`), so no observation depends on the
+//! representation.
 //!
-//! - Values are immutable, so every compound value shares its parts. Reading
-//!   a binding copies a handle and not the structure beneath it, which keeps
-//!   a read as cheap for a value a hundred thousand levels deep as for a
-//!   scalar.
-//! - Releasing a value walks an explicit worklist and never recurses on the
-//!   host stack, whatever the nesting.
+//! Compound values are shared and immutable. Releasing one never recurses
+//! on the host stack: [`Val`]'s `Drop` moves the parts it owns alone onto a
+//! worklist.
 
-use std::collections::{BTreeMap, HashSet};
-use std::mem::size_of;
-use std::ops::Deref;
 use std::rc::Rc;
-use std::sync::Arc;
 
-use vibra_ir::{FunctionSignature, Type, Value};
+use vibra_ir::{ClosureBody, Type};
 
-/// The type arguments of one activation: each generic parameter the running
-/// function names, at the type this call instantiated it to.
-///
-/// Generics are not erased at run time. A value built in generic code carries
-/// its instantiated type, and a contract call selects its implementation from
-/// instantiated types (`docs/spec/06-runtime.md`, "Generic instantiation").
-pub(crate) type TypeMap = BTreeMap<String, Type>;
+use crate::frame::TypeEnv;
 
-/// A `lambda` body registered with the machine that runs it.
-///
-/// A closure value is not observed and never leaves the machine that made it,
-/// so it names its body by an index into that machine's table. The body stays
-/// in the checked program, which outlives every activation that runs it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct LambdaId(pub(crate) usize);
+/// A runtime value.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct Val<'a>(pub(crate) Repr<'a>);
 
-/// What a [`Shared`] edge points at: a value or the elements of one.
-pub(crate) trait Nested {
-    /// Moves the compound values held directly in this one into `out`,
-    /// leaving nothing nested beneath it.
-    fn detach(&mut self, out: &mut Vec<RuntimeValue>);
-
-    /// The storage this part holds directly, in bytes: its elements, not the
-    /// storage of the values in them. The count follows lengths rather than
-    /// capacities so it does not depend on how a vector grew.
-    fn size(&self) -> usize;
-
-    /// Pushes the values held directly in this part.
-    fn push_children<'v>(&'v self, out: &mut Vec<&'v RuntimeValue>);
+/// The representation of a runtime value.
+#[derive(Clone, Debug, Default)]
+pub(crate) enum Repr<'a> {
+    I8(i8),
+    I16(i16),
+    I32(i32),
+    I64(i64),
+    U8(u8),
+    U16(u16),
+    U32(u32),
+    U64(u64),
+    /// By its exact bits.
+    F32(u32),
+    /// By its exact bits.
+    F64(u64),
+    Char(char),
+    /// A value of the type playing `@bool`.
+    Bool(bool),
+    #[default]
+    Void,
+    Atom(&'a str),
+    /// A value of the type playing `@str`.
+    Str(Rc<str>),
+    /// A value of the type playing `@bytes`.
+    Bytes(Rc<Vec<u8>>),
+    /// A case without fields of a variant type.
+    Tag(&'a str),
+    /// A value of the type playing `@option`.
+    Opt(Option<Rc<Val<'a>>>),
+    /// A case with fields of a variant type.
+    Case(Rc<CaseVal<'a>>),
+    /// A value of a declared wrapper type other than `Str`, `Bytes`, and
+    /// `Dict`.
+    Wrapper(Rc<Val<'a>>),
+    Tuple(Rc<Vec<Val<'a>>>),
+    Record(Rc<Vec<(&'a str, Val<'a>)>>),
+    List(Rc<Vec<Val<'a>>>),
+    /// A value of the type playing `@dict`.
+    Dict(Rc<DictVal<'a>>),
+    Interface(Rc<Held<'a>>),
+    Function(Rc<FunctionVal>),
+    Closure(Rc<ClosureVal<'a>>),
 }
 
-/// A shared, immutable part of a value.
-///
-/// Clones share the part. When the last owner drops, the compound values it
-/// held are released through a worklist, so a chain of them is released with
-/// bounded stack.
-pub(crate) struct Shared<T: Nested>(Rc<T>);
+/// A case with fields.
+#[derive(Clone, Debug)]
+pub(crate) struct CaseVal<'a> {
+    pub(crate) case: &'a str,
+    pub(crate) fields: Vec<(&'a str, Val<'a>)>,
+}
 
-impl<T: Nested> Shared<T> {
-    pub(crate) fn new(part: T) -> Self {
-        Self(Rc::new(part))
-    }
+/// A dict: its closed key type, which orders it, and its entries in that
+/// order, one per key.
+#[derive(Clone, Debug)]
+pub(crate) struct DictVal<'a> {
+    pub(crate) key: Type,
+    pub(crate) entries: Vec<(Val<'a>, Val<'a>)>,
+}
 
-    /// The address that identifies this part among the others of a run.
-    fn address(&self) -> usize {
-        Rc::as_ptr(&self.0).addr()
-    }
+/// An interface value: the concrete value and its closed type, which
+/// selects the implementation at every call.
+#[derive(Clone, Debug)]
+pub(crate) struct Held<'a> {
+    pub(crate) held_type: Type,
+    pub(crate) value: Val<'a>,
+}
 
-    /// Hands the compound values this part alone holds to `out`. A part
-    /// another value also holds is left to that value.
-    fn detach_into(&mut self, out: &mut Vec<RuntimeValue>) {
-        if let Some(part) = Rc::get_mut(&mut self.0) {
-            part.detach(out);
-        }
+/// A module function as a value, at closed type arguments.
+#[derive(Clone, Debug)]
+pub(crate) struct FunctionVal {
+    pub(crate) function: usize,
+    pub(crate) type_arguments: Vec<Type>,
+}
+
+/// A closure: its body, its captured values, and the type arguments of the
+/// activation that created it.
+#[derive(Clone, Debug)]
+pub(crate) struct ClosureVal<'a> {
+    pub(crate) body: &'a ClosureBody,
+    pub(crate) captures: Vec<Val<'a>>,
+    pub(crate) env: Rc<TypeEnv>,
+}
+
+impl Repr<'_> {
+    const fn is_compound(&self) -> bool {
+        matches!(
+            self,
+            Self::Opt(Some(_))
+                | Self::Wrapper(_)
+                | Self::Case(_)
+                | Self::Tuple(_)
+                | Self::Record(_)
+                | Self::List(_)
+                | Self::Dict(_)
+                | Self::Interface(_)
+                | Self::Closure(_)
+        )
     }
 }
 
-impl<T: Nested> Clone for Shared<T> {
-    fn clone(&self) -> Self {
-        Self(Rc::clone(&self.0))
-    }
+fn take_repr<'a>(value: &mut Val<'a>) -> Repr<'a> {
+    std::mem::take(&mut value.0)
 }
 
-impl<T: Nested> Deref for Shared<T> {
-    type Target = T;
-
-    fn deref(&self) -> &T {
-        &self.0
-    }
-}
-
-impl<T: Nested + PartialEq> PartialEq for Shared<T> {
-    fn eq(&self, other: &Self) -> bool {
-        Rc::ptr_eq(&self.0, &other.0) || *self.0 == *other.0
-    }
-}
-
-impl<T: Nested + Eq> Eq for Shared<T> {}
-
-impl<T: Nested + std::fmt::Debug> std::fmt::Debug for Shared<T> {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(formatter)
-    }
-}
-
-impl<T: Nested> Drop for Shared<T> {
-    /// Releases the part with bounded host stack. The last owner hands the
-    /// compound values it holds to a worklist and then releases each of them
-    /// after handing over its own, so no release is more than one level deep.
+impl Drop for Val<'_> {
     fn drop(&mut self) {
-        let mut pending = Vec::new();
-        self.detach_into(&mut pending);
-        while let Some(mut value) = pending.pop() {
-            value.detach_children(&mut pending);
+        if !self.0.is_compound() {
+            return;
+        }
+        let mut pending = vec![take_repr(self)];
+        while let Some(repr) = pending.pop() {
+            match repr {
+                Repr::Opt(Some(inner)) | Repr::Wrapper(inner) => {
+                    if let Ok(mut inner) = Rc::try_unwrap(inner) {
+                        pending.push(take_repr(&mut inner));
+                    }
+                }
+                Repr::Case(case) => {
+                    if let Ok(case) = Rc::try_unwrap(case) {
+                        for (_, mut field) in case.fields {
+                            pending.push(take_repr(&mut field));
+                        }
+                    }
+                }
+                Repr::Tuple(values) | Repr::List(values) => {
+                    if let Ok(values) = Rc::try_unwrap(values) {
+                        for mut value in values {
+                            pending.push(take_repr(&mut value));
+                        }
+                    }
+                }
+                Repr::Record(fields) => {
+                    if let Ok(fields) = Rc::try_unwrap(fields) {
+                        for (_, mut field) in fields {
+                            pending.push(take_repr(&mut field));
+                        }
+                    }
+                }
+                Repr::Dict(dict) => {
+                    if let Ok(dict) = Rc::try_unwrap(dict) {
+                        for (mut key, mut value) in dict.entries {
+                            pending.push(take_repr(&mut key));
+                            pending.push(take_repr(&mut value));
+                        }
+                    }
+                }
+                Repr::Interface(held) => {
+                    if let Ok(mut held) = Rc::try_unwrap(held) {
+                        pending.push(take_repr(&mut held.value));
+                    }
+                }
+                Repr::Closure(closure) => {
+                    if let Ok(closure) = Rc::try_unwrap(closure) {
+                        for mut capture in closure.captures {
+                            pending.push(take_repr(&mut capture));
+                        }
+                    }
+                }
+                _ => {}
+            }
         }
     }
 }
 
-fn compound(value: RuntimeValue) -> Option<RuntimeValue> {
-    (!matches!(value, RuntimeValue::Primitive(_))).then_some(value)
-}
-
-impl Nested for RuntimeValue {
-    fn detach(&mut self, out: &mut Vec<RuntimeValue>) {
-        out.extend(compound(self.take()));
+impl<'a> Val<'a> {
+    pub(crate) const fn void() -> Self {
+        Self(Repr::Void)
     }
 
-    fn size(&self) -> usize {
-        size_of::<RuntimeValue>()
+    pub(crate) const fn boolean(value: bool) -> Self {
+        Self(Repr::Bool(value))
     }
 
-    fn push_children<'v>(&'v self, out: &mut Vec<&'v RuntimeValue>) {
-        out.push(self);
-    }
-}
-
-impl Nested for Vec<RuntimeValue> {
-    fn detach(&mut self, out: &mut Vec<RuntimeValue>) {
-        out.extend(std::mem::take(self).into_iter().filter_map(compound));
+    pub(crate) const fn tag(name: &'a str) -> Self {
+        Self(Repr::Tag(name))
     }
 
-    fn size(&self) -> usize {
-        self.len().saturating_mul(size_of::<RuntimeValue>())
+    pub(crate) const fn none() -> Self {
+        Self(Repr::Opt(None))
     }
 
-    fn push_children<'v>(&'v self, out: &mut Vec<&'v RuntimeValue>) {
-        out.extend(self);
-    }
-}
-
-impl Nested for Vec<(String, RuntimeValue)> {
-    fn detach(&mut self, out: &mut Vec<RuntimeValue>) {
-        out.extend(
-            std::mem::take(self)
-                .into_iter()
-                .filter_map(|(_, value)| compound(value)),
-        );
+    pub(crate) fn some(value: Self) -> Self {
+        Self(Repr::Opt(Some(Rc::new(value))))
     }
 
-    fn size(&self) -> usize {
-        let names: usize = self.iter().map(|(name, _)| name.len()).sum();
-        self.len()
-            .saturating_mul(size_of::<(String, RuntimeValue)>())
-            .saturating_add(names)
-    }
-
-    fn push_children<'v>(&'v self, out: &mut Vec<&'v RuntimeValue>) {
-        out.extend(self.iter().map(|(_, value)| value));
-    }
-}
-
-impl Nested for Vec<(RuntimeValue, RuntimeValue)> {
-    fn detach(&mut self, out: &mut Vec<RuntimeValue>) {
-        for (key, value) in std::mem::take(self) {
-            out.extend(compound(key));
-            out.extend(compound(value));
+    pub(crate) fn case(case: &'a str, fields: Vec<(&'a str, Self)>) -> Self {
+        if fields.is_empty() {
+            Self::tag(case)
+        } else {
+            Self(Repr::Case(Rc::new(CaseVal { case, fields })))
         }
     }
 
-    fn size(&self) -> usize {
-        self.len()
-            .saturating_mul(size_of::<(RuntimeValue, RuntimeValue)>())
+    /// `Result.ok(value: value)`.
+    pub(crate) fn ok(value: Self) -> Self {
+        Self::case("ok", vec![("value", value)])
     }
 
-    fn push_children<'v>(&'v self, out: &mut Vec<&'v RuntimeValue>) {
-        for (key, value) in self {
-            out.push(key);
-            out.push(value);
-        }
-    }
-}
-
-/// A value's elements.
-pub(crate) type Elements = Shared<Vec<RuntimeValue>>;
-/// A record's fields, in the order of the record type.
-pub(crate) type Fields = Shared<Vec<(String, RuntimeValue)>>;
-/// A dict's entries, in canonical key order.
-pub(crate) type Entries = Shared<Vec<(RuntimeValue, RuntimeValue)>>;
-/// The one value inside another.
-pub(crate) type Inner = Shared<RuntimeValue>;
-
-impl From<Vec<RuntimeValue>> for Elements {
-    fn from(values: Vec<RuntimeValue>) -> Self {
-        Self::new(values)
-    }
-}
-
-impl From<Vec<(String, RuntimeValue)>> for Fields {
-    fn from(fields: Vec<(String, RuntimeValue)>) -> Self {
-        Self::new(fields)
-    }
-}
-
-impl From<Vec<(RuntimeValue, RuntimeValue)>> for Entries {
-    fn from(entries: Vec<(RuntimeValue, RuntimeValue)>) -> Self {
-        Self::new(entries)
-    }
-}
-
-impl From<RuntimeValue> for Inner {
-    fn from(value: RuntimeValue) -> Self {
-        Self::new(value)
-    }
-}
-
-impl Inner {
-    /// The value inside, taken when this is its only owner and copied
-    /// otherwise.
-    pub(crate) fn into_value(mut self) -> RuntimeValue {
-        match Rc::get_mut(&mut self.0) {
-            Some(value) => value.take(),
-            None => RuntimeValue::clone(&self.0),
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum RuntimeValue {
-    Primitive(Value),
-    Function(Callable),
-    /// A record; fields are in type order (declaration order when declared,
-    /// canonical order when anonymous), whatever the evaluation order.
-    Record {
-        value_type: Type,
-        fields: Fields,
-    },
-    Enum {
-        value_type: Type,
-        variant: String,
-        payload: Option<Inner>,
-    },
-    Wrapper {
-        value_type: Type,
-        value: Inner,
-    },
-    Tuple {
-        value_type: Type,
-        values: Elements,
-    },
-    Array {
-        value_type: Type,
-        values: Elements,
-    },
-    /// Entries in canonical key order, so no host hash order is reachable.
-    Dict {
-        value_type: Type,
-        entries: Entries,
-    },
-    /// A union value: its discriminant, the member type, and the member
-    /// value.
-    Union {
-        value_type: Type,
-        member: usize,
-        member_type: Rc<Type>,
-        value: Inner,
-    },
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum Callable {
-    Named {
-        index: usize,
-        /// Shared with every other value of the same function, so making a
-        /// callable never copies the signature.
-        signature: Arc<FunctionSignature>,
-        captures: Elements,
-        /// The type arguments fixed so far: where the value was made, and
-        /// then by the call that invokes it.
-        types: Arc<TypeMap>,
-    },
-    Lambda {
-        signature: Arc<FunctionSignature>,
-        /// Activation slots, validated by checked IR to cover the body.
-        slot_count: usize,
-        /// The body, in the machine's table of closure bodies.
-        body: LambdaId,
-        captures: Elements,
-        /// The type arguments of the activation that made the closure, and
-        /// then its own from the call that invokes it.
-        types: Arc<TypeMap>,
-    },
-}
-
-impl Callable {
-    pub(crate) fn signature(&self) -> &FunctionSignature {
-        match self {
-            Self::Named { signature, .. } | Self::Lambda { signature, .. } => signature,
-        }
+    /// `Result.err(error: error)`.
+    pub(crate) fn err(error: Self) -> Self {
+        Self::case("err", vec![("error", error)])
     }
 
-    pub(crate) fn types_mut(&mut self) -> &mut Arc<TypeMap> {
-        match self {
-            Self::Named { types, .. } | Self::Lambda { types, .. } => types,
-        }
+    pub(crate) fn tuple(values: Vec<Self>) -> Self {
+        Self(Repr::Tuple(Rc::new(values)))
     }
 
-    pub(crate) fn captures(&self) -> &Elements {
-        match self {
-            Self::Named { captures, .. } | Self::Lambda { captures, .. } => captures,
-        }
+    pub(crate) fn list(values: Vec<Self>) -> Self {
+        Self(Repr::List(Rc::new(values)))
     }
 
-    fn captures_mut(&mut self) -> &mut Elements {
-        match self {
-            Self::Named { captures, .. } | Self::Lambda { captures, .. } => captures,
-        }
-    }
-}
-
-impl RuntimeValue {
-    /// Moves this value out, leaving the `void` value in its place.
-    pub(crate) fn take(&mut self) -> Self {
-        std::mem::replace(self, Self::Primitive(Value::Void))
+    pub(crate) fn string(text: &str) -> Self {
+        Self(Repr::Str(Rc::from(text)))
     }
 
-    /// The callable this value holds, when it holds one.
-    pub(crate) fn into_callable(self) -> Option<Callable> {
-        match self {
-            Self::Function(callable) => Some(callable),
+    pub(crate) fn bytes(bytes: Vec<u8>) -> Self {
+        Self(Repr::Bytes(Rc::new(bytes)))
+    }
+
+    pub(crate) fn dict(key: Type, entries: Vec<(Self, Self)>) -> Self {
+        Self(Repr::Dict(Rc::new(DictVal { key, entries })))
+    }
+
+    /// The case name of a value of a variant type.
+    pub(crate) fn case_name(&self) -> Option<&str> {
+        Some(match &self.0 {
+            Repr::Bool(true) => "true",
+            Repr::Bool(false) => "false",
+            Repr::Opt(None) => "none",
+            Repr::Opt(Some(_)) => "some",
+            Repr::Tag(name) => name,
+            Repr::Case(case) => case.case,
+            _ => return None,
+        })
+    }
+
+    /// The field `name` of a case with fields.
+    pub(crate) fn case_field(&self, name: &str) -> Option<Self> {
+        match &self.0 {
+            Repr::Opt(Some(inner)) if name == "value" => Some(inner.as_ref().clone()),
+            Repr::Case(case) => case
+                .fields
+                .iter()
+                .find_map(|(field, value)| (*field == name).then(|| value.clone())),
             _ => None,
         }
     }
 
-    /// Hands the compound values this one alone holds to `out`, so that it
-    /// can be released without recursion.
-    fn detach_children(&mut self, out: &mut Vec<Self>) {
-        match self {
-            Self::Primitive(_) => {}
-            Self::Function(callable) => callable.captures_mut().detach_into(out),
-            Self::Record { fields, .. } => fields.detach_into(out),
-            Self::Enum { payload, .. } => {
-                if let Some(payload) = payload {
-                    payload.detach_into(out);
-                }
-            }
-            Self::Wrapper { value, .. } | Self::Union { value, .. } => {
-                value.detach_into(out);
-            }
-            Self::Tuple { values, .. } | Self::Array { values, .. } => {
-                values.detach_into(out);
-            }
-            Self::Dict { entries, .. } => entries.detach_into(out),
+    pub(crate) const fn as_bool(&self) -> Option<bool> {
+        match self.0 {
+            Repr::Bool(value) => Some(value),
+            _ => None,
         }
     }
 
-    /// The storage this value owns directly, in bytes, as a value just built:
-    /// the elements, boxes, and text that hang off this node and not those of
-    /// the values nested in it. A scalar owns none.
-    pub(crate) fn built_bytes(&self) -> usize {
-        match self {
-            Self::Primitive(Value::Str(text)) => text.len(),
-            Self::Primitive(Value::Bytes(data)) => data.len(),
-            Self::Primitive(_) => 0,
-            Self::Function(callable) => callable.captures().size(),
-            Self::Record { fields, .. } => fields.size(),
-            Self::Enum {
-                variant, payload, ..
-            } => variant
-                .len()
-                .saturating_add(payload.as_ref().map_or(0, |payload| payload.size())),
-            Self::Wrapper { value, .. } | Self::Union { value, .. } => value.size(),
-            Self::Tuple { values, .. } | Self::Array { values, .. } => values.size(),
-            Self::Dict { entries, .. } => entries.size(),
+    pub(crate) const fn as_u64(&self) -> Option<u64> {
+        match self.0 {
+            Repr::U64(value) => Some(value),
+            _ => None,
         }
     }
 
-    /// Adds the storage this value and everything nested in it holds to
-    /// `bytes`, counting each shared part once across all the values `seen`
-    /// has visited. The walk uses an explicit worklist.
-    pub(crate) fn live_bytes(&self, seen: &mut HashSet<usize>, bytes: &mut usize) {
-        fn part<'v, T: Nested>(
-            shared: &'v Shared<T>,
-            seen: &mut HashSet<usize>,
-            bytes: &mut usize,
-            out: &mut Vec<&'v RuntimeValue>,
-        ) {
-            if seen.insert(shared.address()) {
-                *bytes = bytes.saturating_add(shared.size());
-                shared.push_children(out);
-            }
+    pub(crate) const fn as_u32(&self) -> Option<u32> {
+        match self.0 {
+            Repr::U32(value) => Some(value),
+            _ => None,
         }
-        let mut pending = vec![self];
-        while let Some(value) = pending.pop() {
-            match value {
-                Self::Primitive(Value::Str(text)) => {
-                    *bytes = bytes.saturating_add(text.len());
-                }
-                Self::Primitive(Value::Bytes(data)) => {
-                    *bytes = bytes.saturating_add(data.len());
-                }
-                Self::Primitive(_) => {}
-                Self::Function(callable) => {
-                    part(callable.captures(), seen, bytes, &mut pending);
-                }
-                Self::Record { fields, .. } => part(fields, seen, bytes, &mut pending),
-                Self::Enum {
-                    variant, payload, ..
-                } => {
-                    *bytes = bytes.saturating_add(variant.len());
-                    if let Some(payload) = payload {
-                        part(payload, seen, bytes, &mut pending);
-                    }
-                }
-                Self::Wrapper { value, .. } | Self::Union { value, .. } => {
-                    part(value, seen, bytes, &mut pending);
-                }
-                Self::Tuple { values, .. } | Self::Array { values, .. } => {
-                    part(values, seen, bytes, &mut pending);
-                }
-                Self::Dict { entries, .. } => part(entries, seen, bytes, &mut pending),
-            }
+    }
+
+    /// The elements of a list.
+    pub(crate) fn as_list(&self) -> Option<&Rc<Vec<Self>>> {
+        match &self.0 {
+            Repr::List(values) => Some(values),
+            _ => None,
         }
+    }
+
+    /// The values directly inside this one.
+    pub(crate) fn for_each_child(&self, mut visit: impl FnMut(&Self)) {
+        match &self.0 {
+            Repr::Opt(Some(inner)) | Repr::Wrapper(inner) => visit(inner),
+            Repr::Case(case) => case.fields.iter().for_each(|(_, value)| visit(value)),
+            Repr::Tuple(values) | Repr::List(values) => values.iter().for_each(visit),
+            Repr::Record(fields) => fields.iter().for_each(|(_, value)| visit(value)),
+            Repr::Dict(dict) => dict.entries.iter().for_each(|(key, value)| {
+                visit(key);
+                visit(value);
+            }),
+            Repr::Interface(held) => visit(&held.value),
+            Repr::Closure(closure) => closure.captures.iter().for_each(visit),
+            _ => {}
+        }
+    }
+
+    /// The address of the shared storage this value owns, and its size in
+    /// bytes, for the memory accounting; `None` for an unshared scalar.
+    pub(crate) fn storage(&self) -> Option<(usize, usize)> {
+        use std::mem::size_of;
+        let value = size_of::<Self>();
+        Some(match &self.0 {
+            Repr::Str(text) => (text.as_ptr().addr(), text.len()),
+            Repr::Bytes(bytes) => (Rc::as_ptr(bytes).addr(), bytes.len()),
+            Repr::Opt(Some(inner)) | Repr::Wrapper(inner) => {
+                (Rc::as_ptr(inner).addr(), value)
+            }
+            Repr::Case(case) => (
+                Rc::as_ptr(case).addr(),
+                size_of::<CaseVal<'_>>()
+                    .saturating_add(case.fields.len().saturating_mul(value + 16)),
+            ),
+            Repr::Tuple(values) | Repr::List(values) => (
+                Rc::as_ptr(values).addr(),
+                size_of::<Vec<Self>>()
+                    .saturating_add(values.len().saturating_mul(value)),
+            ),
+            Repr::Record(fields) => (
+                Rc::as_ptr(fields).addr(),
+                size_of::<Vec<Self>>()
+                    .saturating_add(fields.len().saturating_mul(value + 16)),
+            ),
+            Repr::Dict(dict) => (
+                Rc::as_ptr(dict).addr(),
+                size_of::<DictVal<'_>>()
+                    .saturating_add(dict.entries.len().saturating_mul(2 * value)),
+            ),
+            Repr::Interface(held) => (Rc::as_ptr(held).addr(), size_of::<Held<'_>>()),
+            Repr::Function(function) => (
+                Rc::as_ptr(function).addr(),
+                size_of::<FunctionVal>()
+                    .saturating_add(function.type_arguments.len().saturating_mul(32)),
+            ),
+            Repr::Closure(closure) => (
+                Rc::as_ptr(closure).addr(),
+                size_of::<ClosureVal<'_>>()
+                    .saturating_add(closure.captures.len().saturating_mul(value)),
+            ),
+            _ => return None,
+        })
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+/// An upper bound on the bytes that the runtime form of the neutral `value`
+/// stores, by the formulas of [`Val::storage`], found without building it.
+/// A held type and a type argument are counted as the runtime counts them.
+pub(crate) fn neutral_storage(value: &vibra_ir::Value) -> usize {
+    use std::mem::size_of;
 
-    /// A thread whose stack is far too small for a recursive drop of the
-    /// nesting below, so a recursion would end the process.
-    fn on_small_stack(body: impl FnOnce() + Send + 'static) {
-        std::thread::Builder::new()
-            .stack_size(128 * 1024)
-            .spawn(body)
-            .expect("thread")
-            .join()
-            .expect("the drop must not overflow the stack");
-    }
-
-    fn nested(
-        depth: usize,
-        wrap: impl Fn(RuntimeValue) -> RuntimeValue,
-    ) -> RuntimeValue {
-        let mut value = RuntimeValue::Primitive(Value::U8(1));
-        for _ in 0..depth {
-            value = wrap(value);
-        }
-        value
-    }
-
-    #[test]
-    fn every_nesting_shape_releases_with_bounded_stack() {
-        const DEPTH: usize = 300_000;
-        on_small_stack(|| {
-            let ty = || Type::Void;
-            drop(nested(DEPTH, |inner| RuntimeValue::Wrapper {
-                value_type: ty(),
-                value: inner.into(),
-            }));
-            drop(nested(DEPTH, |inner| RuntimeValue::Enum {
-                value_type: ty(),
-                variant: "some".to_owned(),
-                payload: Some(inner.into()),
-            }));
-            drop(nested(DEPTH, |inner| RuntimeValue::Union {
-                value_type: ty(),
-                member: 0,
-                member_type: Rc::new(ty()),
-                value: inner.into(),
-            }));
-            drop(nested(DEPTH, |inner| RuntimeValue::Array {
-                value_type: ty(),
-                values: vec![inner].into(),
-            }));
-            drop(nested(DEPTH, |inner| RuntimeValue::Tuple {
-                value_type: ty(),
-                values: vec![inner, RuntimeValue::Primitive(Value::Void)].into(),
-            }));
-            drop(nested(DEPTH, |inner| RuntimeValue::Record {
-                value_type: ty(),
-                fields: vec![("prev".to_owned(), inner)].into(),
-            }));
-            drop(nested(DEPTH, |inner| RuntimeValue::Dict {
-                value_type: ty(),
-                entries: vec![(RuntimeValue::Primitive(Value::U8(0)), inner)].into(),
-            }));
-            drop(nested(DEPTH, |inner| {
-                RuntimeValue::Function(Callable::Lambda {
-                    signature: Arc::new(FunctionSignature::new(Vec::new(), Type::Void)),
-                    slot_count: 0,
-                    body: LambdaId(0),
-                    captures: vec![inner].into(),
-                    types: Arc::default(),
-                })
-            }));
-        });
-    }
-
-    #[test]
-    fn a_mixed_deep_value_releases_with_bounded_stack() {
-        on_small_stack(|| {
-            let mut value = RuntimeValue::Primitive(Value::Str("leaf".to_owned()));
-            for level in 0..300_000 {
-                value = match level % 3 {
-                    0 => RuntimeValue::Record {
-                        value_type: Type::Void,
-                        fields: vec![("a".to_owned(), value)].into(),
-                    },
-                    1 => RuntimeValue::Array {
-                        value_type: Type::Void,
-                        values: vec![value].into(),
-                    },
-                    _ => RuntimeValue::Wrapper {
-                        value_type: Type::Void,
-                        value: value.into(),
-                    },
-                };
+    use vibra_ir::Value;
+    let slot = size_of::<Val<'_>>();
+    let field = slot.saturating_add(16);
+    let mut total = 0_usize;
+    let mut pending = vec![value];
+    while let Some(value) = pending.pop() {
+        let own = match value {
+            Value::Atom(text) | Value::Str(text) => text.len(),
+            Value::Bytes(bytes) => bytes.len(),
+            Value::Tuple(values) | Value::List(values) => {
+                pending.extend(values);
+                size_of::<Vec<Val<'_>>>()
+                    .saturating_add(values.len().saturating_mul(slot))
             }
-            drop(value);
-        });
-    }
-
-    #[test]
-    fn a_shared_part_outlives_the_value_that_dropped_first() {
-        on_small_stack(|| {
-            let deep = nested(200_000, |inner| RuntimeValue::Array {
-                value_type: Type::Void,
-                values: vec![inner].into(),
-            });
-            let second = deep.clone();
-            drop(deep);
-            // The second owner still holds the whole chain.
-            let mut seen = HashSet::new();
-            let mut bytes = 0;
-            second.live_bytes(&mut seen, &mut bytes);
-            assert_eq!(bytes, 200_000 * size_of::<RuntimeValue>());
-            drop(second);
-        });
-    }
-
-    #[test]
-    fn built_bytes_count_each_node_once_and_live_bytes_count_shared_parts_once() {
-        let leaf = RuntimeValue::Primitive(Value::Str("abcd".to_owned()));
-        assert_eq!(leaf.built_bytes(), 4);
-        assert_eq!(RuntimeValue::Primitive(Value::U64(9)).built_bytes(), 0);
-        let array = RuntimeValue::Array {
-            value_type: Type::Void,
-            values: vec![leaf.clone(), leaf.clone(), leaf].into(),
+            Value::Closure { captures } => {
+                pending.extend(captures);
+                size_of::<ClosureVal<'_>>()
+                    .saturating_add(captures.len().saturating_mul(slot))
+            }
+            Value::Dict(entries) => {
+                for (key, value) in entries {
+                    pending.push(key);
+                    pending.push(value);
+                }
+                size_of::<DictVal<'_>>().saturating_add(
+                    entries.len().saturating_mul(slot.saturating_mul(2)),
+                )
+            }
+            Value::Record(fields) | Value::Variant { fields, .. } => {
+                pending.extend(fields.iter().map(|(_, value)| value));
+                size_of::<CaseVal<'_>>()
+                    .max(size_of::<Vec<Val<'_>>>())
+                    .saturating_add(fields.len().saturating_mul(field))
+            }
+            Value::Wrapper(inner) => {
+                pending.push(inner);
+                slot
+            }
+            Value::Interface { held, .. } => {
+                pending.push(held);
+                size_of::<Held<'_>>()
+            }
+            Value::Function { type_arguments, .. } => size_of::<FunctionVal>()
+                .saturating_add(type_arguments.len().saturating_mul(32)),
+            _ => 0,
         };
-        assert_eq!(array.built_bytes(), 3 * size_of::<RuntimeValue>());
-        let mut seen = HashSet::new();
-        let mut bytes = 0;
-        array.live_bytes(&mut seen, &mut bytes);
-        assert_eq!(bytes, 3 * size_of::<RuntimeValue>() + 12);
-
-        // A second handle to the same array adds nothing.
-        let copy = array.clone();
-        copy.live_bytes(&mut seen, &mut bytes);
-        assert_eq!(bytes, 3 * size_of::<RuntimeValue>() + 12);
+        total = total.saturating_add(own);
     }
+    total
+}
 
-    #[test]
-    fn cloning_a_compound_value_shares_it() {
-        let array = RuntimeValue::Array {
-            value_type: Type::Void,
-            values: vec![RuntimeValue::Primitive(Value::U8(0)); 10].into(),
+/// Structural sameness: the equality a constant pattern tests. Floats
+/// compare by their bits, which no pattern holds.
+pub(crate) fn same(left: &Val<'_>, right: &Val<'_>) -> bool {
+    let mut pending = vec![(left, right)];
+    while let Some((left, right)) = pending.pop() {
+        let equal = match (&left.0, &right.0) {
+            (Repr::I8(a), Repr::I8(b)) => a == b,
+            (Repr::I16(a), Repr::I16(b)) => a == b,
+            (Repr::I32(a), Repr::I32(b)) => a == b,
+            (Repr::I64(a), Repr::I64(b)) => a == b,
+            (Repr::U8(a), Repr::U8(b)) => a == b,
+            (Repr::U16(a), Repr::U16(b)) => a == b,
+            (Repr::U32(a), Repr::U32(b)) => a == b,
+            (Repr::U64(a), Repr::U64(b)) => a == b,
+            (Repr::F32(a), Repr::F32(b)) => a == b,
+            (Repr::F64(a), Repr::F64(b)) => a == b,
+            (Repr::Char(a), Repr::Char(b)) => a == b,
+            (Repr::Bool(a), Repr::Bool(b)) => a == b,
+            (Repr::Void, Repr::Void) => true,
+            (Repr::Atom(a), Repr::Atom(b)) | (Repr::Tag(a), Repr::Tag(b)) => a == b,
+            (Repr::Str(a), Repr::Str(b)) => a == b,
+            (Repr::Bytes(a), Repr::Bytes(b)) => a == b,
+            (Repr::Opt(None), Repr::Opt(None)) => true,
+            (Repr::Opt(Some(a)), Repr::Opt(Some(b)))
+            | (Repr::Wrapper(a), Repr::Wrapper(b)) => {
+                pending.push((a, b));
+                true
+            }
+            (Repr::Case(a), Repr::Case(b)) => {
+                a.case == b.case
+                    && a.fields.len() == b.fields.len()
+                    && a.fields.iter().all(|(name, value)| {
+                        b.fields.iter().any(|(other, held)| {
+                            other == name && {
+                                pending.push((value, held));
+                                true
+                            }
+                        })
+                    })
+            }
+            (Repr::Tuple(a), Repr::Tuple(b)) | (Repr::List(a), Repr::List(b)) => {
+                a.len() == b.len() && {
+                    pending.extend(a.iter().zip(b.iter()));
+                    true
+                }
+            }
+            (Repr::Record(a), Repr::Record(b)) => {
+                a.len() == b.len()
+                    && a.iter().all(|(name, value)| {
+                        b.iter().any(|(other, held)| {
+                            other == name && {
+                                pending.push((value, held));
+                                true
+                            }
+                        })
+                    })
+            }
+            (Repr::Dict(a), Repr::Dict(b)) => {
+                a.entries.len() == b.entries.len() && {
+                    for ((ak, av), (bk, bv)) in a.entries.iter().zip(&b.entries) {
+                        pending.push((ak, bk));
+                        pending.push((av, bv));
+                    }
+                    true
+                }
+            }
+            (Repr::Interface(a), Repr::Interface(b)) => {
+                a.held_type == b.held_type && {
+                    pending.push((&a.value, &b.value));
+                    true
+                }
+            }
+            (Repr::Function(a), Repr::Function(b)) => {
+                a.function == b.function && a.type_arguments == b.type_arguments
+            }
+            (Repr::Closure(a), Repr::Closure(b)) => Rc::ptr_eq(a, b),
+            _ => false,
         };
-        let copy = array.clone();
-        let (
-            RuntimeValue::Array { values: left, .. },
-            RuntimeValue::Array { values: right, .. },
-        ) = (&array, &copy)
-        else {
-            panic!("arrays");
-        };
-        assert!(Rc::ptr_eq(&left.0, &right.0));
-        assert_eq!(copy, array);
+        if !equal {
+            return false;
+        }
     }
+    true
 }

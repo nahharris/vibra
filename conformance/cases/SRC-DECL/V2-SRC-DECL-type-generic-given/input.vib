@@ -1,0 +1,4 @@
+type Box(T)
+  of {item: T}
+  given {T: Printable}
+endtype

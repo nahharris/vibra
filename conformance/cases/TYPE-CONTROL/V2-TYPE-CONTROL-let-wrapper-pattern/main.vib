@@ -1,0 +1,2 @@
+fn main returns r: F64 do let Celsius(c) be Celsius(1.5f64) endlet return c endfn
+type Celsius of F64 endtype

@@ -1,0 +1,1 @@
+fn main returns r: Dict({I32 Str} Bool) do return [{1i32 "a"}: true] endfn

@@ -1,0 +1,4 @@
+type Meters of F64
+  visibility @public
+  representation @private
+endtype

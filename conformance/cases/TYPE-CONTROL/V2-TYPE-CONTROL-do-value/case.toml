@@ -1,0 +1,12 @@
+id = "V2-TYPE-CONTROL-do-value"
+rule = "V2-TYPE-CONTROL-do-value"
+profile = "interpreterV2"
+operation = "interpret"
+description = "01-source-language.md#if-match-do: a do block yields its final expression"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

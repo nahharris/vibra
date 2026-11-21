@@ -1,0 +1,18 @@
+id = "V2-CONTRACT-nonconstant-construction"
+rule = "V2-CONTRACT-nonconstant-construction"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#guards-with-else: a let pattern Result.ok over a construction from a parameter is refutable"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@pattern.refutableBinding"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 42, end = 61 }

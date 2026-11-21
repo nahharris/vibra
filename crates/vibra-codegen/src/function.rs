@@ -19,8 +19,8 @@ use vibra_exec::{
     Block, BlockId, Callee, Function, Inst, IntOp, ObjectKind, ScalarClass, ScalarOp,
     Slot, Terminator,
 };
-use vibra_ir::boundary::TrapCode;
-use vibra_ir::external::NumericType;
+use vibra_ir_v1::boundary::TrapCode;
+use vibra_ir_v1::external::NumericType;
 use vibra_nexus_bridge::{
     CLASS_F32, CLASS_F64, CLASS_I32, CLASS_I64, INT_TYPE_I8, INT_TYPE_I16,
     INT_TYPE_I32, INT_TYPE_I64, INT_TYPE_U8, INT_TYPE_U16, INT_TYPE_U32, INT_TYPE_U64,
@@ -34,8 +34,7 @@ use crate::error::EmitError;
 use crate::services::Services;
 
 /// The `nexus_op` code of `op`: the generator's one mapping, with no wildcard.
-/// The generator's tests hold it to the bridge's decoding, and `vibra-conformance`
-/// holds the stepper's mapping to the same names. A floating-point type has no integer operation, so
+/// The generator's tests hold it to the bridge's decoding. A floating-point type has no integer operation, so
 /// its code names no operation (the verifier refuses the program first).
 #[must_use]
 pub const fn op_code(op: ScalarOp) -> u32 {

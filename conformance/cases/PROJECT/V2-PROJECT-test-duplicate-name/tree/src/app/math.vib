@@ -1,0 +1,7 @@
+fn add
+  takes {left: I32 right: I32}
+  returns sum: I32
+  visibility @public
+  do
+    return I32.add(left right)
+endfn

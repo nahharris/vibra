@@ -1,0 +1,12 @@
+id = "V2-CONTRACT-where-bare-construction"
+rule = "V2-CONTRACT-where-bare-construction"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#bare-guards: GUARD-1: a construction of a type with a bare where from a constant is decided by evaluation, and its type is the type, not a Result"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

@@ -1,0 +1,18 @@
+id = "V2-TYPE-INFER-empty-list-ambiguous"
+rule = "V2-TYPE-INFER-empty-list-ambiguous"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#inference-and-checking: an empty list with no expected type leaves its element type undetermined"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.ambiguousInference"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 35, end = 37 }

@@ -1,0 +1,17 @@
+id = "V2-RUNTIME-memory-exhausted"
+rule = "V2-RUNTIME-memory-exhausted"
+profile = "interpreterV2"
+operation = "interpret"
+description = "06-runtime.md#activations-and-memory: an unbounded non-tail recursion ends with the host event memoryExhausted"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "unknown"
+hostEvent = "@runtime.memoryExhausted"
+
+[[expect.diagnostics]]
+code = "@runtime.memoryExhausted"
+level = "@error"
+span = { start = 0, end = 0 }

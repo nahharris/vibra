@@ -1,0 +1,5 @@
+type Once of Option(U8)
+  impl Iter
+    type Item of U8 endtype
+  endimpl
+endtype

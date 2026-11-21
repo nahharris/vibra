@@ -1,0 +1,7 @@
+use @std.core.ConversionError enduse
+
+fn main
+  returns r: {Result(Str ConversionError) Result(Str ConversionError)}
+  do
+    return {Str.fromUtf8(Str.toUtf8("é")) Str.fromUtf8(Bytes([255u8]))}
+endfn

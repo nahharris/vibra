@@ -1,0 +1,19 @@
+id = "V2-TYPE-CONTROL-match-constant-where-else"
+rule = "V2-TYPE-CONTROL-match-constant-where-else"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#constant-expressions-and-constant-patterns: a construction of a type whose where has an else is no constant expression, so a pattern name of a module value it initializes is @name.redeclaration, related to that value"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@name.redeclaration"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 278, end = 283 }
+related = [{ source = "src/app/main.vib", span = { start = 146, end = 151 } }]

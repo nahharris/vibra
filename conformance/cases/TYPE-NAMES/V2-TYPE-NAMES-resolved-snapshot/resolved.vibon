@@ -1,0 +1,52 @@
+{
+  format: @resolved.v2
+  package: {name: "hello" version: "0.1.0"}
+  modules: [
+    {path: @app.main unit: @app sourceId: "src/app/main.vib"}
+    {path: @app.model unit: @app sourceId: "src/app/model.vib"}
+  ]
+  declarations: [
+    {
+      identity: "sha256:1c675ba878a07d7324ef2fa82283b36fc5777d53f15f1edfe540bc93276180bd"
+      anchor: {
+        package: "hello"
+        version: "0.1.0"
+        module: @app.main
+        kind: @type
+        name: "Account"
+      }
+      access: @private
+      span: {sourceId: "src/app/main.vib" start: 23u64 end: 57u64}
+    }
+    {
+      identity: "sha256:ab9ab700ecafc45005e26482ae70ef043dcc6afeb827589f4f9c7d38950d21de"
+      anchor: {
+        package: "hello"
+        version: "0.1.0"
+        module: @app.model
+        kind: @type
+        name: "User"
+      }
+      access: @public
+      span: {sourceId: "src/app/model.vib" start: 0u64 end: 53u64}
+    }
+  ]
+  imports: [
+    {
+      span: {sourceId: "src/app/main.vib" start: 0u64 end: 21u64}
+      path: @app.model
+      name: "model"
+      to: "sha256:975ffd1b26f44e995f3fe66cc5238f90177361d5dc250174e230e06fa3df23e8"
+    }
+  ]
+  references: [
+    {
+      span: {sourceId: "src/app/main.vib" start: 39u64 end: 49u64}
+      to: "sha256:ab9ab700ecafc45005e26482ae70ef043dcc6afeb827589f4f9c7d38950d21de"
+    }
+    {
+      span: {sourceId: "src/app/model.vib" start: 20u64 end: 23u64}
+      to: "sha256:29dc059689d38a6e1e8b843c7c518b7bfe2d16d9f596ef242d758b9b970b1d8a"
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+id = "V2-TYPE-CONVERT-no-from-narrowing"
+rule = "V2-TYPE-CONVERT-no-from-narrowing"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#conversion: no From implementation narrows, so the destination is @type.unsatisfiedBound at the expected type, related to From"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.unsatisfiedBound"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 41, end = 43 }
+related = [{ span = { start = 2614, end = 2618 } }]

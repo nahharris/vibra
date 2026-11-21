@@ -1,0 +1,18 @@
+id = "V2-TYPE-CONTROL-try-wrong-carrier"
+rule = "V2-TYPE-CONTROL-try-wrong-carrier"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#try: an Option operand in a callable returning a Result is an invalid try"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.invalidTry"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 67, end = 72 }

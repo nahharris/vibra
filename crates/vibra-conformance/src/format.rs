@@ -1,79 +1,59 @@
-//! Snapshot-backed formatter conformance adapter.
+//! The `format` operation under `toolingV2`.
+//!
+//! `docs/spec/07-diagnostics-and-conformance.md`, "Case operations and
+//! inputs": a `format` case has one confined tree with its `project.vibon`
+//! and one document of that tree, and observes the formatted text and the
+//! diagnostics. The handler runs the document through the workspace
+//! engine's format plan, the one `vibra fmt` uses: a captured module is
+//! checked with its candidate text, any other document is formatted by
+//! syntax alone, and a recovered document is kept byte for byte. Whether the
+//! text changed is the comparison of the observed text with the input.
 
-use std::path::{Path, PathBuf};
-
-use vibra_workspace::WorkspaceSnapshot;
-use vibra_workspace::format_plan::plan_format;
+use vibra_workspace::{Discovery, WorkspaceCapture, plan_format};
 
 use crate::corpus::Case;
-use crate::manifest::ConformanceOperation;
-use crate::runner::{CaseObservation, HandlerError, ProfileHandler};
+use crate::manifest::Verdict;
+use crate::profile::{
+    CaseObservation, ConformanceOperation, HandlerError, ProfileHandler,
+};
 
-/// Formats one source input from its confined workspace snapshot.
+/// The `format` handler: captures the declared tree as a project root,
+/// searching no ancestor, and plans the format of the declared document.
 #[derive(Clone, Copy, Debug, Default)]
-pub struct ToolingV1FormatHandler;
+pub struct FormatHandler;
 
-impl ProfileHandler for ToolingV1FormatHandler {
+impl ProfileHandler for FormatHandler {
     fn can_run(&self, case: &Case) -> bool {
         case.manifest().operation == ConformanceOperation::Format
     }
 
     fn run(&self, case: &Case) -> Result<CaseObservation, HandlerError> {
-        let manifest = case.manifest();
-        let tree = manifest.inputs.tree.as_deref().ok_or_else(|| {
-            HandlerError::new("format case has no confined tree input")
-        })?;
-        let source = manifest
-            .inputs
-            .source
-            .as_deref()
-            .ok_or_else(|| HandlerError::new("format case has no source input"))?;
-        let input_documents = case
-            .input_documents()
-            .map_err(|error| HandlerError::new(error.to_string()))?;
-        case.tree_files()
-            .map_err(|error| HandlerError::new(error.to_string()))?;
-
-        let relative = Path::new(source).strip_prefix(tree).map_err(|_| {
-            HandlerError::new("format source is outside its declared workspace tree")
-        })?;
-        let relative = relative.to_str().ok_or_else(|| {
-            HandlerError::new("format source path is not valid UTF-8")
-        })?;
-        let root = case
-            .tree_path()
-            .map_err(|error| HandlerError::new(error.to_string()))?;
-        let workspace = WorkspaceSnapshot::load_confined(&root)
-            .map_err(|error| HandlerError::new(error.to_string()))?;
-        let plan = plan_format(&root, PathBuf::from(relative))
-            .map_err(|error| HandlerError::new(error.to_string()))?;
-        let declared_source = input_documents
-            .iter()
-            .find(|document| document.source_id == source)
-            .ok_or_else(|| HandlerError::new("format source input was not acquired"))?;
-        if declared_source.text != plan.original_text() {
+        let inputs = &case.manifest().inputs;
+        let (Some(tree), Some(source)) =
+            (inputs.tree.as_deref(), inputs.source.as_deref())
+        else {
             return Err(HandlerError::new(
-                "format tree source differs from the declared immutable source input",
+                "a format case declares one tree and one document",
             ));
-        }
-        if !workspace
-            .source()
-            .documents()
-            .any(|document| document.source_id() == plan.relative_path())
-        {
-            return Err(HandlerError::new(
-                "format target is absent from its captured workspace source snapshot",
-            ));
-        }
-        let diagnostics = plan.diagnostics().to_vec();
-        let accepted = !diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.level() == vibra_diagnostics::Level::Error);
-        Ok(CaseObservation {
-            accepted,
-            diagnostics,
-            formatted: Some(plan.formatted_text().to_owned()),
-            ..CaseObservation::default()
-        })
+        };
+        let path = source
+            .strip_prefix(tree)
+            .and_then(|rest| rest.strip_prefix('/'))
+            .ok_or_else(|| HandlerError::new("the document is beneath the tree"))?;
+        let directory = case
+            .tree_directory()
+            .map_err(|error| HandlerError::new(error.to_string()))?
+            .ok_or_else(|| HandlerError::new("a format case declares one tree"))?;
+        let capture = WorkspaceCapture::capture(&directory, Discovery::Exact);
+        let plan = plan_format(&directory, &capture, path)
+            .map_err(|error| HandlerError::new(error.to_string()))?;
+        let mut observation = CaseObservation::new(if plan.has_errors() {
+            Verdict::Refuted
+        } else {
+            Verdict::Accepted
+        });
+        observation.diagnostics = plan.diagnostics().to_vec();
+        observation.formatted = plan.text().map(str::to_owned);
+        Ok(observation)
     }
 }

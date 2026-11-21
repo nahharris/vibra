@@ -1,0 +1,3 @@
+type U of {name: Str}
+  fn name takes {u: Self} returns s: Str do return u.name endfn
+endtype

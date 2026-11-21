@@ -1,0 +1,25 @@
+fn main
+  returns r: Celsius
+  do
+    let c: Celsius be widen(2i16) endlet
+    return c
+endfn
+
+fn widen(T)
+  takes {n: I16}
+  returns r: T
+  given {T: From(I16)}
+  do
+    return From.convert(n)
+endfn
+
+type Celsius of I32
+  impl From(I16)
+    fn convert
+      takes {value: I16}
+      returns converted: Self
+      do
+        return Celsius(From.convert(value))
+    endfn
+  endimpl
+endtype

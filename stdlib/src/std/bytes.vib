@@ -1,50 +1,61 @@
-; Byte sequences. Every operation is Vibra over the bytes a `bytes` value is
-; written over; `native:` names the implementation a toolchain may run instead.
-(import core @std.core)
+// The byte-string type, which plays the `@bytes` role: a wrapper over its
+// bytes, in order. Its length, concatenation, and slicing are bound to
+// `@compiler` intrinsics, and its order is the lexicographic walk of
+// `compareLexicographic`.
 
-; The standard byte-sequence type, which plays the `@bytes` role. It is written
-; over its bytes, and the toolchain represents it directly; `(bytes items)` and
-; the pattern `(bytes items)` convert between it and its `(array u8)`.
-(deftype bytes (array u8)
-  role: @bytes
-  visibility: @public
-  (defn length (value bytes) u64
-    visibility: @public
-    native: "bytes.length"
-    (let (bytes items) value)
-    (array.length items))
-  (defn concat (left bytes right bytes) bytes
-    visibility: @public
-    native: "bytes.concat"
-    (let (bytes first) left)
-    (let (bytes second) right)
-    (bytes (array.concat first second)))
-  (defn slice (value bytes start u64 end u64) (option bytes)
-    visibility: @public
-    native: "bytes.slice"
-    (let (bytes items) value)
-    (match (array.slice items start end)
-      (option.some part) (option.some (bytes part))
-      (option.none) (option.none)))
-  (impl equatable
-    (defn equal (left self right self) bool
-      native: "bytes.equal"
-      (match (ordered.compare left right) (core.ordering.equal) true - false)))
-  (impl ordered
-    (defn compare (left self right self) core.ordering
-      native: "bytes.compare"
-      (let (bytes first) left)
-      (let (bytes second) right)
-      (order first second 0u64))))
+use @std.iter.compareLexicographic enduse
 
-; Lexicographic order from `index`: the first differing byte decides, and a
-; proper prefix is less.
-(defn order (first (array u8) second (array u8) index u64) core.ordering
-  (match (tupleof (first index) (second index))
-    (tupleof (option.none) (option.none)) (core.ordering.equal)
-    (tupleof (option.none) -) (core.ordering.less)
-    (tupleof - (option.none)) (core.ordering.greater)
-    (tupleof (option.some left) (option.some right))
-      (match (ordered.compare left right)
-        (core.ordering.equal) (order first second (u64.add index 1u64))
-        decided decided)))
+type Bytes of List(U8)
+  role @bytes
+  visibility @public
+  fn length
+    takes {value: Self}
+    returns count: U64
+    visibility @public
+    external @compiler
+    symbol "bytes.length"
+  endfn
+  fn concat
+    takes {left: Self right: Self}
+    returns joined: Self
+    visibility @public
+    external @compiler
+    symbol "bytes.concat"
+  endfn
+  fn slice
+    takes {value: Self start: U64 end: U64}
+    returns part: Option(Self)
+    visibility @public
+    external @compiler
+    symbol "bytes.slice"
+  endfn
+  impl Equatable
+    fn equal
+      takes {left: Self right: Self}
+      returns same: Bool
+      external @compiler
+      symbol "bytes.equal"
+    endfn
+  endimpl
+  impl Ordered
+    fn compare
+      takes {left: Self right: Self}
+      returns order: Ordering
+      do
+        return compareLexicographic(left right)
+    endfn
+  endimpl
+  impl Iter
+    type Item of U8 endtype
+    fn next
+      takes {value: Self}
+      returns step: Option({Item Self})
+      do
+        let Bytes(items) be value endlet
+        let Option.some(value: {first rest}) be Iter.next(items) else
+          return Option.none()
+        endlet
+        return Option.some(value: {first Bytes(rest)})
+    endfn
+  endimpl
+endtype

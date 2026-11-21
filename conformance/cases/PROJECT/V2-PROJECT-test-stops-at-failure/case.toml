@@ -1,0 +1,13 @@
+id = "V2-PROJECT-test-stops-at-failure"
+rule = "V2-PROJECT-test-stops-at-failure"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "04-programs-and-packages.md#assertions: the first false assertion stops the body, so only its failure is recorded"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+testRun = "test-run.vibon"

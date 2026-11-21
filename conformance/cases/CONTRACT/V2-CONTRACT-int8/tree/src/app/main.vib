@@ -1,0 +1,2 @@
+fn gtReq takes {a: I32 b: I32} returns r: I32 requires Ordered.greater(a b) do return a endfn
+fn f takes {x: I32 y: I32 z: I32} returns r: I32 do if Ordered.greater(x 5i32) then return gtReq(x 3i32) else return 0i32 endif endfn

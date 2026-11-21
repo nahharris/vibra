@@ -1,0 +1,18 @@
+{
+  format: @tree.v2
+  root: {
+    kind: @source
+    children: [
+      {
+        kind: @use
+        children: [
+          {kind: @reservedWord text: "use"}
+          {kind: @whitespace text: " "}
+          {kind: @atom text: "@std.io"}
+          {kind: @whitespace text: " "}
+          {kind: @reservedWord text: "enduse"}
+        ]
+      }
+    ]
+  }
+}

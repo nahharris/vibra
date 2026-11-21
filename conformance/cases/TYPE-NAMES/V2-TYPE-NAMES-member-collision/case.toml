@@ -1,0 +1,19 @@
+id = "V2-TYPE-NAMES-member-collision"
+rule = "V2-TYPE-NAMES-member-collision"
+profile = "staticV2"
+operation = "resolve"
+description = "02-type-system.md#declared-types: a field and a nested member of one type share a namespace; the later is @name.memberCollision, related to the field"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@name.memberCollision"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 27, end = 31 }
+related = [{ source = "src/app/main.vib", span = { start = 11, end = 15 } }]

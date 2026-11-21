@@ -1,0 +1,1 @@
+type Positive of I32 where Ordered.greater(1i32 0i32) endtype

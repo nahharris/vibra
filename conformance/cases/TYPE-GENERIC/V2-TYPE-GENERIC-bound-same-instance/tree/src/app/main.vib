@@ -1,0 +1,27 @@
+fn main returns r: I32 do return 1i32 endfn
+
+fn show(U)
+  takes {v: U}
+  returns r: Str
+  given {U: Printable}
+  do
+    return Printable.render(v)
+endfn
+
+interface Printable
+  fn render
+    takes {value: Self}
+    returns text: Str
+  endfn
+endinterface
+
+type Box(T) of T
+  impl Printable
+    fn render
+      takes {value: Self}
+      returns text: Str
+      do
+        return show(value)
+    endfn
+  endimpl
+endtype

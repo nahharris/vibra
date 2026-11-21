@@ -1,0 +1,1 @@
+{format: @value.v2 typeInfo: {kind: @declared path: @std.option.Option seed: "sha256:2c4d0fae44c3fe19a0b016f8f69e3c9d1607eae1c5e54789cb3777ebb5b80578" arguments: [@i32]} value: {kind: @enum typeInfo: {kind: @declared path: @std.option.Option seed: "sha256:2c4d0fae44c3fe19a0b016f8f69e3c9d1607eae1c5e54789cb3777ebb5b80578" arguments: [@i32]} variant: @some payload: {value: 3i32}}}

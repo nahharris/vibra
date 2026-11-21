@@ -1,0 +1,2 @@
+fn main returns r: U64 do return pad(width: 2u64 "x") endfn
+fn pad takes {s: Str} labelled {width: U64 be 4u64} returns r: U64 do return width endfn

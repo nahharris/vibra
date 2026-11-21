@@ -1,0 +1,12 @@
+id = "V2-CONTRACT-label-default-same"
+rule = "V2-CONTRACT-label-default-same"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#bare-guards: GUARD-4: an omitted label holds its default in its own slot, so lt(b: x) matches lt(a: 0i32 b: x)"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

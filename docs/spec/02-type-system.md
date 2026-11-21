@@ -55,7 +55,6 @@ type List(T) of Intrinsic(@list)
     fn next
       takes {value: Self}
       returns step: Option({T Self})
-      visibility @public
       external @compiler
       symbol "list.next"
     endfn
@@ -101,16 +100,17 @@ toolchain defect, reported as `@runtime.invalidCheckedProgram` when the
 library is loaded, never as a fallback. Adding a role is a change to this
 table.
 
-The standard library declares `Bool` as a variant type with the cases
-`false` and `true`, `Str` as a wrapper over `List(Char)`, and `Bytes` as a
-wrapper over `List(U8)`. Their constructors and patterns are the declared
-ones: `Bool.true()`, `Str(scalars)`, `Bytes(items)`. The `Bool` module also
-declares the two public module values `true` and `false`, which are the only
-way source writes a boolean. `Dict(K V)` is a wrapper over `List({K V})`,
-sorted by the `Ordered.compare` of its keys with one entry per key; its
-representation is private, so it is built by a dict literal or by conversion
-and read by lookup and `Dict.entries`. A toolchain may represent any of these
-values directly, as the [runtime chapter](06-runtime.md) allows.
+The standard library declares `Bool` as a variant type with the cases `false`
+and `true`, `Option(T)` as one with the cases `none` and `some {value: T}`, in
+that order, `Str` as a wrapper over `List(Char)`, and `Bytes` as a wrapper over
+`List(U8)`. Their constructors and patterns are the declared ones:
+`Bool.true()`, `Str(scalars)`, `Bytes(items)`. The `Bool` module also declares
+the two public module values `true` and `false`, which are the only way source
+writes a boolean. `Dict(K V)` is a wrapper over `List({K V})`, sorted by the
+`Ordered.compare` of its keys with one entry per key; its representation is
+private, so it is built by a dict literal or by conversion and read by lookup
+and `Dict.entries`. A toolchain may represent any of these values directly, as
+the [runtime chapter](06-runtime.md) allows.
 
 Every operation over a library type is standard-library Vibra, which a
 toolchain may accelerate with a native implementation whose meaning stays its
@@ -180,6 +180,15 @@ package `hello` version `0.1.0`, module `@hello.main`, no owner, kind
 `@proc`, name `main` gives
 `sha256:213e3a01ef10d7c10032616f8ab0da9a97fb729b9f98d723f4beb3158a25e2ad`.
 
+An `impl` block is no declaration, but it has an identity hashed the same
+way: its anchor has its module's package, version, and path, the type or
+interface it is nested in as owner path, the kind `@impl`, and its target as
+the name. The target is its source text with every run of white space
+dropped next to `(`, `)`, `{`, `}`, and `:`, and shortened to one space
+elsewhere, so `Iter( U8 )` and `Iter(U8)` name one block. A member of an
+`impl` block is identified by the block's identity followed by `.` and the
+member's name.
+
 | Body | Declares | Constructor | Pattern |
 | --- | --- | --- | --- |
 | `of {name: T …}` | declared record | `User(name: n id: i)` | `User(name: p)` |
@@ -218,12 +227,18 @@ invariant. Its operand is a predicate: a pure function value of type
 `Fn({R} Bool)`, where `R` is the representation type. A `where` on a variant
 type is `@type.invalidInvariant`. The operand is an expression like any
 other function value: an anonymous `fn`, or the name of a `fn`, which
-resolves in the flat module scope and so may be declared after the type.
+resolves in the flat module scope and so may be declared after the type. It
+converts to `Fn({R} Bool)` under
+[Guards and callable types](#guards-and-callable-types), and an anonymous
+operand's guards and calls state their obligations for the type.
 
 ```vibra
 type Percent of U8
-  where fn takes {value: U8} returns valid: Bool do
-    return Ordered.lessOrEqual(value 100u8)
+  where fn
+    takes {value: U8}
+    returns valid: Bool
+    do
+      return Ordered.lessOrEqual(value 100u8)
   endfn
 endtype
 
@@ -260,7 +275,19 @@ are the same when they have the same arity and equal component types in
 order. Two record types are the same when they have the same set of field
 names with equal types, in any written order; a record's canonical field
 order sorts names by their UTF-8 bytes. `{}` is the empty tuple. Both forms
-are accepted in every type position.
+are accepted in every type position. A record type or a record value names
+each field once: `{a: I32 a: I32}` and `{a: 1i32 a: 2i32}` are
+`@name.redeclaration` at the later field, related to the earlier.
+
+A type nests at most 64 levels. A type with no component is one level, and
+every other type is one level more than its deepest component: an element,
+a tuple component, a field, a parameter, a result, a type argument, or the
+choice of an associated type. A written type nested deeper, and an
+expression whose type is, is `@type.depthExceeded` at the type or the
+expression. A declared callable's own type is a type of the program too, so
+a parameter or result type of depth 64 makes it 65 deep, which is
+`@type.depthExceeded` at the deepest written parameter or result type. The
+limit is part of the language and is the same in every tool.
 
 An anonymous type has no owner: it declares no members and receives no
 `impl`. It conforms to `Any` and, under the structural rule of
@@ -269,20 +296,22 @@ An anonymous type has no owner: it declares no members and receives no
 
 ### Recursive types
 
-A declared type may refer to itself and to other declared types of its
-module, by name. A reference to a type is symbolic and is not a dependency
-that must be complete first. Every declared type MUST have a finite size:
-recursion through `List`, `Dict`, or a callable type is permitted, and direct
-infinite expansion is `@type.infiniteSize` at the declaration whose
-expansion first repeats. Values are immutable and are built from values that
-already exist, so no value contains itself.
+A declared type may refer to itself and to other declared types of its module,
+by name. A reference to a type is symbolic and is not a dependency that must be
+complete first. Every declared type MUST have a finite size: recursion through
+`List`, `Dict`, or a callable type is permitted, and direct infinite expansion
+is `@type.infiniteSize` over the whole declaration, `type` to `endtype`, of the
+type whose expansion first repeats. Values are immutable and are built from
+values that already exist, so no value contains itself.
 
 ### Callable types
 
 `Fn({A B} R)` is the type of a pure function with required positional types
 `A` and `B` and result `R`. Labelled parameters follow the positional ones in
 the input vector: `Fn({I32 verbose: Bool} Bool)`. Defaults belong to the
-function value and are not part of its type.
+function value and are not part of its type. Each label names one input: a
+label written twice in the input vector of a `Fn` or `Proc` type is
+`@type.typeArgumentMismatch` at the second.
 
 `Proc({A} R {Row})` is the type of a procedure, and `Intent(R {Row})` the
 type of a plan; the [effects chapter](03-effects.md) defines both. A row is a
@@ -337,8 +366,10 @@ is then not defined. There is no hashed collection and no hashing interface.
 
 Dict keys MUST implement `Ordered`. The standard library writes the
 implementations of `Bool`, `Char`, `Str`, `Bytes`, and the integer types
-where each type is declared. `Atom`, every atom singleton type, and an
-anonymous tuple or record whose every component implements `Ordered` conform
+where each type is declared, and that of `RelativePath`, whose order the
+[effects chapter](03-effects.md#filesystem-policies) gives. `Atom`, every
+atom singleton type, and an anonymous tuple or record whose every component
+implements `Ordered` conform
 to `Equatable` and `Ordered` **structurally**, with no declaration. This
 structural conformance is ordinary evidence: it satisfies a bound, it admits
 the type as a dict key, and it is the implementation `Ordered.compare` and
@@ -405,15 +436,19 @@ required; a path that resolves to another kind is `@name.wrongEntityKind`
 and names what it found. Tooling MUST return the resolved kind and identity,
 never a dotted string.
 
-An `impl` block has no name. Its identity is the pair of its applied
-interface target and its receiver type, and a member's identity adds the
-contract member. Nothing addresses an implementation at a use site; dispatch
-selects it.
+An `impl` block has no name. It is keyed by the pair of its applied
+interface target and its receiver type, and it and its members have the
+identities of [Declared types](#declared-types). Nothing addresses an
+implementation at a use site; dispatch selects it.
 
 ## Functions as values
 
 A `fn` or `proc` path in expression position is a first-class value of its
-callable type. Constructors, field reads, and lookups are not.
+callable type. Constructors, field reads, and lookups are not. A declared
+type or case named in value position without being applied is
+`@type.mismatch` at the name, whether a function value, another type, or no
+type is expected there; as an argument it does not fit its slot. An
+anonymous `fn` wraps a constructor where a function value is needed.
 
 A contract member named as a value is instantiated from its written expected
 callable type, which fixes the receiver exactly as a call's operands would;
@@ -438,12 +473,14 @@ Inference is local:
   ceiling.
 
 Inference MUST NOT invent a parameter or result type, a generic bound, an
-interface implementation, a numeric conversion, an effect ceiling, or an
-error conversion, and never uses a later use to type an earlier binding.
-`Never` is never inferred. When no unique type follows for a literal, an
-empty `[]` or `[:]`, an absent `Option`, or a generic argument, the checker
-reports `@type.ambiguousInference` with one note per missing constraint and
-the places where a written type would supply it.
+interface implementation, a numeric conversion, an effect ceiling, or an error
+conversion, and never uses a later use to type an earlier binding. Inference
+never invents `Never`, but a written type that fixes a type argument to `Never`
+binds it: `Result.ok(value: void)` checked against a written `Result(Void
+Never)` is accepted. When no unique type follows for a literal, an empty `[]` or
+`[:]`, an absent `Option`, or a generic argument, the checker reports
+`@type.ambiguousInference` with one note per missing constraint and the places
+where a written type would supply it.
 
 There are no call-site type arguments. A call whose type arguments its
 operands and written expected type do not determine is rejected.
@@ -491,6 +528,24 @@ bound. When an application's shape is itself invalid, only
 named or defaulted type arguments, multiple bounds on one parameter, and
 run-time type tests do not exist.
 
+A generic callable MUST NOT reach itself at a type built around one of its
+own type parameters. Each call of a generic callable, and each reference to
+one as a value, inside the body or the guards of a generic callable is an
+instantiation. So is each member of the implementation that a contract
+call's receiver selects there, and of each implementation that satisfies a
+bound of the callable being instantiated. A type argument of an
+instantiation carries a type parameter of the enclosing callable to the
+parameter it is for when it mentions it, and expands it when it mentions it
+and is not that parameter alone. Every chain of instantiations that leads a
+type parameter back to itself MUST hand it on unchanged at every step; a
+type argument that mentions no type parameter is on no such chain. An
+expanding type argument on such a chain is `@type.expandingInstantiation` at
+its call or reference, related to the other instantiations of the chain.
+A `fn f(T)` that calls `f` with a `List(T)` operand is rejected, and so is
+one that calls a `g(U)` at `List(T)` when `g` calls `f` at `U`. A call of
+`f` at `T` or at `U8` inside `f` is accepted, and so are two callables that
+exchange their parameters unchanged.
+
 ### Bounds
 
 A bound is an interface, written exactly as the interface is written in any
@@ -504,17 +559,21 @@ fn largest(T)
   given {T: Ordered}
   visibility @public
   do
-    return Iter.fold(items Option.none() fn
-      takes {best: Option(T) item: T}
-      returns next: Option(T)
-      do
-        match best
-          case Option.none()
-            return Option.some(value: item)
-          case Option.some(value: current)
-            return Option.some(value: Ordered.max(current item))
-        endmatch
-    endfn)
+    return Iter.fold(
+      items
+      Option.none()
+      fn
+        takes {best: Option(T) item: T}
+        returns next: Option(T)
+        do
+          match best
+            case Option.none()
+              return Option.some(value: item)
+            case Option.some(value: current)
+              return Option.some(value: Ordered.max(current item))
+          endmatch
+      endfn
+    )
 endfn
 ```
 
@@ -533,6 +592,15 @@ endfn
   choice. If another operand or the expected type also fixes `T`, the two
   MUST agree, or the operand is `@type.mismatch`; and `T` MUST then satisfy
   its own bound, or the application is `@type.unsatisfiedBound`.
+- A bound that leaves an associated type open names it all the same. Inside
+  the generic the associated type is abstract: it equals only itself, so it
+  satisfies no bound that fixes the label to another type, and a label of
+  another bound that names a parameter determines that parameter as it. At
+  each use it is the choice of the implementation the bound selects, as if a
+  label had bound it to a parameter. This holds for an anonymous callable,
+  a member, and an implementation in a generic type alike; an
+  implementation's parameter that a bound's label names is determined when
+  the implementation is selected.
 - A positional argument of a bound may likewise name a parameter of the same
   header: `given {T: From(S)}`. The bound's implementation is selected by
   its [key](#implementations): the interface, the actual type of the bounded
@@ -558,9 +626,11 @@ additional ones; redeclaring an inherited name is
 `@name.genericRedeclaration`. An `impl` block declares none: inside a `type`
 it passes the type's parameters through, and inside an `interface` its target
 MUST be a closed type expression. An anonymous callable sees the parameters
-of every enclosing declaration and may declare its own; a generic anonymous
-callable bound by `let` stays generic, and anywhere else it is instantiated
-from its written expected type.
+of every enclosing declaration and may declare its own, with bounds in
+`given` as any generic declaration's; a generic anonymous callable bound by
+`let` stays generic, and anywhere else it is instantiated from its written
+expected type. Each instantiation satisfies its bounds, as a call of a
+generic `fn` does; a breach is `@type.unsatisfiedBound`.
 
 Specialization strategy is not observable.
 
@@ -619,7 +689,12 @@ So `impl From(I16)` in `type Cents` has the key `From`, `Cents`, `I16`, and
 one receiver may implement `From(I16)` and `From(I8)`. An implementation
 written in a generic interface covers every application of that interface
 to its receiver. A key may be open in the parameters of its enclosing
-declaration and in nothing else. A target admits no label
+declaration and in nothing else. The arguments written in a target inside a
+`type` are type arguments of the interface, so each MUST implement its
+parameter's bound, where a parameter of the enclosing type has no bound:
+`impl Feed(Plain)`, where `Feed(S)` has `given {S: Ordered}` and `Plain`
+implements no `Ordered`, is `@type.unsatisfiedBound` at `Plain`, related to
+the bound. A target admits no label
 (`@type.typeArgumentMismatch` at the label), so a key is always visibly
 positional. Two keys of the same interface whose receivers and positional
 arguments unify [overlap](#overlap): the later implementation is
@@ -628,9 +703,15 @@ different interfaces never overlap, so `Iter` and `Ordered` on one receiver
 are two keys.
 
 For each implementation the checker MUST find every abstract contract member
-exactly once and verify that, under the implementation's
+exactly once. A contract member the interface binds with `external` has no
+body to inherit, so it is abstract for every `impl`, as the
+[effects chapter](03-effects.md#operation-interfaces) states for the
+members of an operation interface. The checker verifies that, under the
+implementation's
 [substitution](#substitution), the parameter and result types, labelled
-names and default values, guards, and effect row are those of the contract.
+names and default values, the member's own type parameters and their
+bounds, guards, and effect row are those of the contract, the member's
+type parameters matched in order whatever their names.
 
 | Condition | Diagnostic |
 | --- | --- |
@@ -639,7 +720,7 @@ names and default values, guards, and effect row are those of the contract.
 | a callable member supplied twice in one `impl` | `@name.memberCollision`, the later name, related to the first |
 | an associated type chosen twice in one `impl` | `@name.redeclaration`, the later choice, related to the first |
 | a default member supplied again | `@type.defaultOverride`, the member's name, related to the default |
-| a member whose signature differs from the contract under the substitution | `@type.mismatch`, the differing type, related to the contract member |
+| a member whose signature differs from the contract under the substitution | `@type.mismatch`, the differing type, default value, or written bound (the type parameter when none is written), or the member's name for a differing count of parameters or set of labels, related to the contract's counterpart |
 
 An implementation member declares no guard of its own: the contract's
 `requires` and `ensures` are its guards, as
@@ -761,15 +842,18 @@ selected.
 1. **Receiver constraint.** A member with a
    [receiver slot](#interfaces) is dispatched on that argument (receiver
    dispatch): the argument's type is the receiver. A member with no
-   receiver slot is dispatched on the written expected type at the call
-   (destination dispatch): the checker matches that type against the
+   receiver slot is dispatched on the expected type at the call
+   (destination dispatch), from whichever declaration or annotation
+   supplies it: any [written expected type](#widening), the parameter type
+   of an enclosing call and the field type of an enclosing construction
+   included. The checker matches that type against the
    member's written result type, structurally and only through the
    positions of the `Self` map, and collects the type found at every
    position where `Self` is written. All of them MUST be one type, which is
    the receiver. An expected type whose shape has no such position, or
    positions that give different types, as when `{Self Self}` meets
-   `{U8 U16}`, is `@type.mismatch` at the application. With no written
-   expected type the call is `@type.ambiguousDestination`.
+   `{U8 U16}`, is `@type.mismatch` at the application. Only a call with no
+   expected type is `@type.ambiguousDestination`.
 2. **Positional constraints.** Wherever a parameter of the interface is
    written in the member's parameter types or result type, the matching
    operand type or part of the expected type constrains it, by the ordinary
@@ -795,7 +879,12 @@ selected.
    select the implementations of this interface whose key unifies with them
    without fixing a type parameter in scope. None is
    `@type.unsatisfiedBound` at the receiver operand or the expected type,
-   related to the interface. More than one, which happens only when a
+   related to the interface, unless a positional constraint fixes a
+   parameter of the interface to a type that does not implement that
+   parameter's bound: the call is then `@type.unsatisfiedBound` at the
+   operand or the expected type that fixes it, related to the bound. A
+   parameter that only the expected type fixes is checked against its bound
+   once it is fixed, like any other. More than one, which happens only when a
    positional argument is still undetermined, is
    `@type.ambiguousImplementation` at the application.
 5. **Checking.** The selected implementation's substitution, or the
@@ -993,12 +1082,13 @@ each type.
 
 ### Joins
 
-`if` requires a `Bool` condition. When the value of an `if` or `match` is
-used, the branches that can complete MUST have one common type, which is the
-type of the form; branches of type `Never` are skipped, and a form all of
-whose branches have type `Never` has type `Never`. This is the only join the
-checker computes. It never searches for an interface that covers two
-differing types.
+`if` requires a `Bool` condition. When the value of an `if` or `match` is used,
+the branches that can complete MUST have one common type, which is the type of
+the form; branches of type `Never` are skipped, and a form all of whose branches
+have type `Never` has type `Never`. When the form has no expected type, the
+first branch that completes with a type fixes it, and each later branch is
+checked at that type as its expected type. This is the only join the checker
+computes. It never searches for an interface that covers two differing types.
 
 ### Coverage
 
@@ -1017,12 +1107,17 @@ binding pattern is the same check with one arm.
 
 A `match` that does not cover its subject is `@pattern.nonExhaustive` at the
 `match`, with a note naming the first uncovered shape in declaration order,
-in pattern spelling with `_` for a position only a binder can cover. An arm
+in pattern spelling with `_` for a position only a binder can cover. A case
+is spelled as its constructor pattern, so `Bool`'s is `Bool.false()`; a
+record lists every field, in declaration order or, for a structural record,
+canonical order, as in `{a: _ b: Bool.false()}`; and a list is spelled at
+the shortest length no arm covers, as `[_ _]` after `[]` and `[_]`. An arm
 no value can reach is `@pattern.unreachableArm`, relating the earliest arm
 that covers it. A refutable pattern where an irrefutable one is required is
 `@pattern.refutableBinding`; an irrefutable pattern in a `let … else` is
 `@pattern.irrefutableLetElse`. When the checker cannot establish coverage
-within its limits it reports `@pattern.unsupportedCoverage`; it never
+within its limits it reports `@pattern.unsupportedCoverage`, at the
+`match` or at the `let` or parameter pattern; it never
 assumes coverage.
 
 ### Constant expressions and constant patterns
@@ -1031,16 +1126,37 @@ A **constant expression** is a literal, an atom, or `void`; a construction,
 tuple, record, list, or dict whose operands are all constant expressions and
 whose type has no `where … else`; or the name of a module value whose
 initializer is a constant expression. A function call is never a constant
-expression, so the property is decidable without evaluation.
+expression, so the property is decidable without evaluation. Neither is a
+dict whose canonical key order uses a declared type's own `Ordered`
+implementation, since ordering its entries would run that implementation.
 
 A name in pattern position that resolves to a constant module value is a
 constant pattern: it means the pattern of that value and binds nothing.
 Adding a module value named `x` therefore turns an existing pattern `x` from
 a binder into a value match. Coverage treats a constant pattern as its
-expanded value.
+expanded value. The pattern of a string, character, integer, or atom is its
+literal; that of a tuple, record, or list is the tuple, record, or list
+pattern of its components' patterns; and that of a construction of a case
+or a declared type is the constructor pattern of its fields' patterns. A
+float, `void`, or a dict has no pattern form, so a constant whose value is
+or holds one is `@pattern.invalidConstant` at the pattern.
 
 Labelled defaults are constant expressions. Two defaults are the same when
-they denote the same value.
+they denote the same value. The value of a constant dict is the value its
+literal evaluates to: its entries in canonical key order, where a later
+duplicate key replaces the earlier value.
+
+A default is checked at its label's type with the callable's type parameters
+in it, and in a member of an interface with `Self` and the interface's
+associated types in it, so a default whose type mentions one is valid
+exactly when it checks at that type for every instantiation, as `[]` at
+`List(T)` or `List(Item)` and `Option.none()` at `Option(T)` or
+`Option(Self)` do. Such a value holds nothing of that type, and at each
+instantiation of the callable, an anonymous one included, the default is
+that value at the instantiated label type. A default that holds a value
+where such a type is required, such as `[1i32]` at `List(T)`, is
+`@type.mismatch` at that value. A guard's consequence is checked with no
+expected type, so a constant consequence never has an open type.
 
 ### `try`
 
@@ -1051,13 +1167,18 @@ innermost enclosing callable with that absence or error. Any other use is
 `@type.invalidTry`. `try` never converts an error type and is always invalid
 directly in a `test` body.
 
-When a `try` expression has a written expected type `T`, its operand is
-checked at the expected type `Option(T)` or `Result(T E)` of the enclosing
-carrier, so a destination-dispatched operand needs no extra annotation:
+When a `try` expression has an expected type `T`, whatever supplies it, a
+written type or the type an earlier branch fixed for a [join](#joins), its
+operand is checked at the expected type `Option(T)` or `Result(T E)` of the
+enclosing carrier, so a destination-dispatched operand needs no extra
+annotation:
 
 ```vibra
 let port: U16 be try TryFrom.convert(text) endlet
+let other be if quick then 80u16 else try TryFrom.convert(text) endif endlet
 ```
+
+A `try` with no expected type checks its operand with none.
 
 ### Fallible values
 
@@ -1077,7 +1198,10 @@ a call of a callable whose result type is `Never`, or an `if`, `match`, or
 `Never` is admitted at any expected type; this is not widening. It may appear
 only as a statement, including the last statement of a branch, arm, block, or
 fallback; in an operand position it is `@type.unreachableCode`. A statement
-after a statement of type `Never` is `@type.unreachableCode` as well.
+after a statement of type `Never` is `@type.unreachableCode` as well. The
+operand of `return` is the exception: `return spin(n)`, where `spin` returns
+`Never`, is a tail call and is accepted, and a later statement is reported
+only as after any `return`, never because of the call.
 
 A type is **uninhabited** when it is `Never`, a tuple, record, or wrapper
 with an uninhabited component, or a variant type all of whose cases have an
@@ -1099,7 +1223,12 @@ expressions: built only from parameters and constants, constructions, field
 reads, `if` and `match` with full coverage, the primitive comparison and
 `Bool` operations, and calls of certified functions. A certified function is
 a `fn` whose body is certified and that is not recursive, directly or
-through other functions. A recursive `fn` is outside the fragment, and a
+through other functions. The primitive comparison is a call of a member of
+the interfaces playing `@equatable` and `@ordered`, at a closed receiver,
+whose selected implementation is declared in the embedded library. A call
+whose selected implementation is a program's own `impl` is an ordinary call
+of the member it selects, certified only when that member is. A recursive
+`fn` is outside the fragment, and a
 predicate that calls one is `@contract.unsupportedPredicate` at the call. A
 certified expression cannot fault. A predicate that is
 not of type `Bool`, or a `where` operand that is not a `Fn({R} Bool)`, is
@@ -1148,6 +1277,14 @@ lists when the rule is used:
 7. **Certified results (`GUARD-7`).** After a call returns, the callee's
    proven `ensures` holds for the result, provided its `requires` was
    discharged.
+
+An obligation is formed by substituting the actual arguments into the
+predicate; that substitution is not a rule use. A fact the body's own
+`requires` supplies is that predicate substituted at the parameters, so it
+is recorded as `GUARD-4`. The negation a false branch supplies is read
+through the defining relations of the
+[integer facts](07-diagnostics-and-conformance.md#integer-facts): the
+negation of `Ordered.greater(x y)` is x ≤ y, which uses no `INT` fact.
 
 A discharged guard leaves no code. An obligation the rules refute is
 `@contract.refuted`; one they cannot establish is `@contract.unproved`, and
@@ -1205,6 +1342,14 @@ establish that `requires`; otherwise the conversion is
 `@contract.obligationLost`. A callable whose `requires` has an `else`
 converts freely, and the resulting value keeps its entry and exit checks.
 
+An anonymous callable's guards are those of any callable. Its bare
+`requires` states an obligation at each call whose callee is statically that
+callable: the anonymous callable written as the callee, or a name a `let` of
+the same activation binds to it, directly or through another such name.
+Every other use of it, a capture of that name included, converts it to its
+callable type under the rule above. A call through any other function value
+states no obligation, since no value of a callable type carries one.
+
 A bare `requires` on a `proc` is discharged where the plan is built, from the
 arguments the plan captures. A `requires … else` and an `ensures … else` on a
 `proc` run on each `await` of its plan.
@@ -1214,7 +1359,16 @@ checked under the contract's `requires` and MUST establish the contract's
 `ensures`. A contract guard with `else` runs on every call of every
 implementation, as part of the member: the checker copies it into each
 implementation's checked function, so static and dynamic dispatch behave
-alike. An implementation member declares no guard of its own; a `requires`,
+alike. A call of a contract member whose `requires` is bare states one
+obligation. At a closed receiver whose implementation is a program's own
+and not generic, it is the guard copied into the member that implementation
+supplies. At any other receiver, such as a bounded type parameter, an
+interface value, or a type a generic implementation serves, it is the
+contract's predicate at the call's arguments, decided once, with the
+contract's default for each label the call does not write. A contract guard
+that does not check under an implementation's substitution is the
+contract's own fault, reported where the contract is declared. An
+implementation member declares no guard of its own; a `requires`,
 `ensures`, or `where` section on one is `@syntax.invalidSection`, and the
 checks it needs are written in its body.
 
@@ -1266,8 +1420,8 @@ interface TryFrom(Source)
 endinterface
 ```
 
-Both members are destination-dispatched: the written expected type at the
-call fixes the destination. There is no `Into`. Each `TryFrom`
+Both members are destination-dispatched: the expected type at the call
+fixes the destination. There is no `Into`. Each `TryFrom`
 implementation chooses its `Error`. The standard library's implementations
 all choose `ConversionError`, a public variant type with the cases
 `outOfRange`, `invalidFormat`, and `unrepresentable`.

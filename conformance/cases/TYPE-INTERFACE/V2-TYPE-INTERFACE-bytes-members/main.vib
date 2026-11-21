@@ -1,0 +1,6 @@
+fn main
+  returns r: {U64 Option(Bytes)}
+  do
+    let b be Str.toUtf8("é") endlet
+    return {Bytes.length(b) Bytes.slice(b 0u64 1u64)}
+endfn

@@ -1,0 +1,1 @@
+fn main returns r: I32 do let t: {I32 I32} be {1i32 2i32 3i32} endlet return 1i32 endfn

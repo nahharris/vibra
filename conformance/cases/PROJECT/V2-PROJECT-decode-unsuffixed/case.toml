@@ -1,0 +1,17 @@
+id = "V2-PROJECT-decode-unsuffixed"
+rule = "V2-PROJECT-decode-unsuffixed"
+profile = "staticV2"
+operation = "projectDecode"
+description = "04-programs-and-packages.md#schemas: an unsuffixed number in a slot with no number type is a value fault"
+
+[inputs]
+project = "project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@data.invalidValue"
+level = "@error"
+source = "project.vibon"
+span = { start = 54, end = 55 }

@@ -1,0 +1,28 @@
+type Bare of U8 endtype
+fn main returns r: U8 do let f: Fn({Bare extra: U8} U8) be Pad.wide endlet return 0u8 endfn
+
+interface Pad
+  fn pad
+    takes {value: Self}
+    returns r: U8
+  endfn
+  fn wide
+    takes {value: Self}
+    labelled {extra: U8 be 1u8}
+    returns r: U8
+    do
+      return U8.add(Pad.pad(value) extra)
+  endfn
+endinterface
+
+type Cell of U8
+  impl Pad
+    fn pad
+      takes {value: Self}
+      returns r: U8
+      do
+        let Cell(n) be value endlet
+        return n
+    endfn
+  endimpl
+endtype

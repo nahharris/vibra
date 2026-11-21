@@ -1,28 +1,25 @@
-//! Number text: the integer and float `to-str` and `parse` rows.
+//! Number text: the integer and float `toStr` and `parse` rows.
 //!
-//! `docs/spec/06-runtime.md`, "M3 compiler intrinsic registry": these are the
+//! `docs/spec/06-runtime.md`, "Compiler intrinsic registry": these are the
 //! primitive rows whose algorithm loops, so they have no Vibra body and are the
-//! toolchain's own code, written once. The reference interpreter calls these
-//! functions over its values and a module reaches them through an import, so the
-//! two backends print and read numbers by the same code.
+//! toolchain's own code, written once.
 //!
-//! - `to-str` of an integer is its shortest decimal digits with a leading `-`
+//! - `toStr` of an integer is its shortest decimal digits with a leading `-`
 //!   only for a negative value; of a float it is the canonical float
 //!   serialization of the runtime chapter, `nan`, `inf`, `-inf`, or the shortest
-//!   digits that round-trip, which `vibra_ir::canonical_f64_text` writes once for
-//!   this row and for the canonical value encoding.
+//!   digits that round-trip, which is the text the canonical value encoding
+//!   writes before its width suffix.
 //! - `parse` of an integer is an optional `-` (signed types only) and one or
-//!   more ASCII decimal digits and nothing else; `invalid-format` otherwise, and
-//!   `out-of-range` for a well-formed value outside the type.
+//!   more ASCII decimal digits and nothing else; `invalidFormat` otherwise, and
+//!   `outOfRange` for a well-formed value outside the type.
 //! - `parse` of a float is the unsuffixed decimal float grammar, rounded to the
-//!   nearest value of the type with ties to even; `invalid-format` otherwise, and
-//!   `out-of-range` when the rounded value is infinite.
+//!   nearest value of the type with ties to even; `invalidFormat` otherwise, and
+//!   `outOfRange` when the rounded value is infinite.
 //!
 //! Neither direction keeps a NaN's sign or payload: every NaN is written as
 //! `nan`, and `parse` has no text for one.
 
-use vibra_ir::external::NumericType;
-use vibra_ir::{canonical_f32_text, canonical_f64_text};
+use vibra_ir::external::{FloatType, IntegerType};
 
 use crate::{Sink, Source};
 
@@ -31,34 +28,55 @@ use crate::{Sink, Source};
 pub enum Parsed<T> {
     /// The number the text spells.
     Value(T),
-    /// The text is not in the grammar: `invalid-format`.
+    /// The text is not in the grammar: `invalidFormat`.
     InvalidFormat,
     /// The text is well formed and the number lies outside the type:
-    /// `out-of-range`.
+    /// `outOfRange`.
     OutOfRange,
 }
 
-/// `T.to-str` of an integer type: the shortest decimal digits of `value`.
+/// `T.toStr` of an integer type: the shortest decimal digits of `value`.
 pub fn integer_to_str<K: Sink<Unit = u32> + ?Sized>(value: i128, out: &mut K) {
     put_text(&value.to_string(), out);
 }
 
-/// `T.to-str` of `f32` or `f64`: the canonical float serialization, without a
+/// `T.toStr` of `F32` or `F64`: the canonical float serialization, without a
 /// suffix, of the value whose IEEE bits are `bits` (the low 32 bits for `f32`).
 /// Every NaN is `nan` whatever its sign and payload.
 pub fn float_to_str<K: Sink<Unit = u32> + ?Sized>(
-    numeric: NumericType,
+    float: FloatType,
     bits: u64,
     out: &mut K,
 ) {
-    let text = if numeric == NumericType::F32 {
-        canonical_f32_text(f32::from_bits(
-            u32::try_from(bits & 0xFFFF_FFFF).unwrap_or(0),
-        ))
-    } else {
-        canonical_f64_text(f64::from_bits(bits))
+    let text = match float {
+        FloatType::F32 => {
+            let value = f32::from_bits(u32::try_from(bits & 0xFFFF_FFFF).unwrap_or(0));
+            canonical_text(value, value.is_nan(), value.is_infinite(), value < 0.0)
+        }
+        FloatType::F64 => {
+            let value = f64::from_bits(bits);
+            canonical_text(value, value.is_nan(), value.is_infinite(), value < 0.0)
+        }
     };
     put_text(&text, out);
+}
+
+/// The canonical float text of the runtime chapter: `nan`, `inf`, `-inf`, or
+/// the shortest digits that round-trip, decimal for zero and a magnitude in
+/// [1e-4, 1e16) and scientific otherwise, which is Rust's debug format.
+fn canonical_text(
+    finite: impl std::fmt::Debug,
+    nan: bool,
+    infinite: bool,
+    negative: bool,
+) -> String {
+    if nan {
+        "nan".to_owned()
+    } else if infinite {
+        if negative { "-inf" } else { "inf" }.to_owned()
+    } else {
+        format!("{finite:?}")
+    }
 }
 
 fn put_text<K: Sink<Unit = u32> + ?Sized>(text: &str, out: &mut K) {
@@ -80,7 +98,7 @@ fn ascii<S: Source<Unit = u32>>(source: &S) -> Option<String> {
 /// `T.parse` of an integer type: an optional `-` (signed types only) followed by
 /// one or more ASCII decimal digits and nothing else.
 pub fn parse_integer<S: Source<Unit = u32>>(
-    numeric: NumericType,
+    numeric: IntegerType,
     text: &S,
 ) -> Parsed<i128> {
     let Some(text) = ascii(text) else {
@@ -105,20 +123,17 @@ pub fn parse_integer<S: Source<Unit = u32>>(
     }
 }
 
-/// `T.parse` of `f32` or `f64`: the unsuffixed decimal float literal grammar,
+/// `T.parse` of `F32` or `F64`: the unsuffixed decimal float literal grammar,
 /// rounded to nearest with ties to even. The value is the IEEE bits of the
 /// result, in the low 32 bits for `f32`.
-pub fn parse_float<S: Source<Unit = u32>>(
-    numeric: NumericType,
-    text: &S,
-) -> Parsed<u64> {
+pub fn parse_float<S: Source<Unit = u32>>(numeric: FloatType, text: &S) -> Parsed<u64> {
     let Some(text) = ascii(text) else {
         return Parsed::InvalidFormat;
     };
     if !is_float_literal(&text) {
         return Parsed::InvalidFormat;
     }
-    let bits = if numeric == NumericType::F32 {
+    let bits = if numeric == FloatType::F32 {
         text.parse::<f32>()
             .ok()
             .filter(|value| value.is_finite())
@@ -200,7 +215,7 @@ mod tests {
         }
     }
 
-    fn float_text(numeric: NumericType, bits: u64) -> String {
+    fn float_text(numeric: FloatType, bits: u64) -> String {
         let mut out = Collect(String::new());
         float_to_str(numeric, bits, &mut out);
         out.0
@@ -211,14 +226,14 @@ mod tests {
         for payload in [0_u64, 1, 0x7_FFFF_FFFF_FFFF, 0x4_0000_0000_0000] {
             for sign in [0_u64, 1 << 63] {
                 let bits = sign | 0x7FF0_0000_0000_0000 | payload.max(1);
-                assert_eq!(float_text(NumericType::F64, bits), "nan", "{bits:#x}");
+                assert_eq!(float_text(FloatType::F64, bits), "nan", "{bits:#x}");
             }
         }
         for payload in [1_u32, 0x40_0000, 0x7F_FFFF, 0x12_3456] {
             for sign in [0_u32, 1 << 31] {
                 let bits = sign | 0x7F80_0000 | payload;
                 assert_eq!(
-                    float_text(NumericType::F32, u64::from(bits)),
+                    float_text(FloatType::F32, u64::from(bits)),
                     "nan",
                     "{bits:#x}"
                 );
@@ -244,21 +259,21 @@ mod tests {
     #[test]
     fn integer_text_follows_the_grammar_and_the_type_range() {
         let parse = |numeric, text: &str| parse_integer(numeric, &Text::of(text));
-        assert_eq!(parse(NumericType::I8, "-128"), Parsed::Value(-128));
-        assert_eq!(parse(NumericType::I8, "-129"), Parsed::OutOfRange);
-        assert_eq!(parse(NumericType::U8, "255"), Parsed::Value(255));
-        assert_eq!(parse(NumericType::U8, "256"), Parsed::OutOfRange);
-        assert_eq!(parse(NumericType::U8, "-0"), Parsed::InvalidFormat);
-        assert_eq!(parse(NumericType::I8, "-0"), Parsed::Value(0));
-        assert_eq!(parse(NumericType::I8, "-"), Parsed::InvalidFormat);
-        assert_eq!(parse(NumericType::I8, "\u{661}"), Parsed::InvalidFormat);
+        assert_eq!(parse(IntegerType::I8, "-128"), Parsed::Value(-128));
+        assert_eq!(parse(IntegerType::I8, "-129"), Parsed::OutOfRange);
+        assert_eq!(parse(IntegerType::U8, "255"), Parsed::Value(255));
+        assert_eq!(parse(IntegerType::U8, "256"), Parsed::OutOfRange);
+        assert_eq!(parse(IntegerType::U8, "-0"), Parsed::InvalidFormat);
+        assert_eq!(parse(IntegerType::I8, "-0"), Parsed::Value(0));
+        assert_eq!(parse(IntegerType::I8, "-"), Parsed::InvalidFormat);
+        assert_eq!(parse(IntegerType::I8, "\u{661}"), Parsed::InvalidFormat);
         assert_eq!(
-            parse(NumericType::U64, &"9".repeat(60)),
+            parse(IntegerType::U64, &"9".repeat(60)),
             Parsed::OutOfRange,
             "beyond even i128 is out of range"
         );
         assert_eq!(
-            parse(NumericType::U64, &format!("{}x", "9".repeat(60))),
+            parse(IntegerType::U64, &format!("{}x", "9".repeat(60))),
             Parsed::InvalidFormat,
             "the format is checked before the range"
         );

@@ -1,781 +1,505 @@
-//! Confined, revision-checked canonical formatting plans.
+//! The format plan: one confined document, formatted by its extension.
+//!
+//! `docs/spec/05-tooling.md`, "Formatting" and the `PATH` operand of
+//! "Command surface":
+//!
+//! 1. The extension selects the grammar: `.vib` is source, `.vibon` is
+//!    VIBON, and any other path is invalid input before anything is read.
+//! 2. `PATH` is workspace-relative and confined beneath the workspace root
+//!    after links are resolved; an escape is `@module.pathEscape` and an
+//!    unreadable file `@module.ioError`, each at offset 0 of the path.
+//! 3. A VIBON document gets the source-preserving formatter. A source
+//!    document that is not a captured module is formatted by syntax alone.
+//!    A captured module is formatted, and the candidate text is checked in
+//!    place of the captured bytes. When the check of the module is
+//!    unavailable (`@tool.unavailable`), formatting proceeds from syntax
+//!    alone and the incomplete check reports nothing.
+//! 4. A document the reader recovered from is kept byte for byte. A
+//!    document that is not UTF-8 plans no edit and has no text: it is never
+//!    decoded lossily.
+//!
+//! The plan is a preview. [`FormatPlan::write`] replaces the file atomically
+//! when the text changed and no error diagnostic is present.
 
-use std::ffi::OsString;
-use std::fmt;
 use std::fs;
+use std::io::ErrorKind;
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use sha2::{Digest, Sha256};
-use vibra_diagnostics::{Diagnostic, DiagnosticCode, DocumentRevision};
-use vibra_fmt::format_source_with_facts;
-use vibra_syntax::{
-    ApplicationBinding, DocumentMode, EffectRowOrder, parse_data, parse_source,
-};
+use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode, Level};
+use vibra_fmt::format_document;
+use vibra_syntax::{DocumentMode, parse};
 
-use crate::confined_fs::ConfinedDir;
-use crate::semantic::check_document;
-use crate::{WorkspaceError, WorkspaceSnapshot};
+use crate::discovery::{DiscoveredProject, discover_project, discover_project_at};
+use crate::revision::workspace_revision;
+use crate::semantic::check_snapshot;
+use crate::snapshot::SourceSnapshot;
 
-static NEXT_TEMP_FILE: AtomicU64 = AtomicU64::new(0);
+/// A counter, not the clock, makes a temporary name unique in the process.
+static NEXT_TEMPORARY: AtomicU64 = AtomicU64::new(0);
 
-/// A failure while planning or applying one canonical format operation.
-#[derive(Debug)]
-pub enum FormatPlanError {
-    /// The requested path is invalid or outside the workspace.
-    InvalidPath(String),
-    /// The extension does not select `.vib` or `.vibon`.
-    UnsupportedExtension(String),
-    /// The workspace cannot be loaded from its exact project marker.
-    Workspace(WorkspaceError),
-    /// A file could not be read or atomically replaced.
-    Io(String),
-    /// The document is not valid UTF-8.
-    InvalidUtf8(String),
-    /// The formatter rejected its supplied syntax or binding facts.
-    Format(String),
-    /// Reparse, semantic checking, or idempotence failed before writing.
-    Postcondition(String),
-    /// The workspace or target document changed after planning.
-    StaleRevision {
-        /// Revision used when the plan was created.
-        expected: String,
-        /// Revision observed when application was attempted.
-        actual: String,
-    },
+/// How the project of a workspace is found.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Discovery {
+    /// The nearest `project.vibon` at or above the workspace root.
+    Search,
+    /// The `project.vibon` of exactly the workspace root: a confined tree.
+    Exact,
 }
 
-impl fmt::Display for FormatPlanError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::InvalidPath(message)
-            | Self::Io(message)
-            | Self::InvalidUtf8(message)
-            | Self::Format(message)
-            | Self::Postcondition(message) => formatter.write_str(message),
-            Self::UnsupportedExtension(path) => write!(
-                formatter,
-                "formatter accepts only `.vib` and `.vibon` paths: {path}"
-            ),
-            Self::Workspace(error) => error.fmt(formatter),
-            Self::StaleRevision { expected, actual } => write!(
-                formatter,
-                "format plan is stale (expected {expected}, observed {actual})"
-            ),
-        }
-    }
-}
-
-impl std::error::Error for FormatPlanError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Workspace(error) => Some(error),
-            _ => None,
-        }
-    }
-}
-
-/// One previewable formatting plan tied to an immutable workspace snapshot.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct FormatPlan {
-    workspace_root: PathBuf,
-    path: PathBuf,
-    parent_relative: PathBuf,
-    file_name: OsString,
-    relative_path: String,
-    workspace_revision: DocumentRevision,
-    document_revision: DocumentRevision,
-    original_bytes: Vec<u8>,
-    original_text: String,
-    formatted_text: String,
-    changed: bool,
+/// The project found for a workspace, captured once.
+#[derive(Clone, Debug)]
+pub struct WorkspaceCapture {
+    project: Option<DiscoveredProject>,
+    snapshot: Option<SourceSnapshot>,
     diagnostics: Vec<Diagnostic>,
-    mode: DocumentMode,
-    source_was_checked: bool,
-    source_checker_unavailable: bool,
+    revision: Option<String>,
+}
+
+impl WorkspaceCapture {
+    /// Discovers the project of `workspace` and captures its snapshot.
+    ///
+    /// The revision is that of the snapshot. When the walk fails, it covers
+    /// the project record alone, the only input admitted; when discovery
+    /// fails there is none.
+    #[must_use]
+    pub fn capture(workspace: &Path, discovery: Discovery) -> Self {
+        let discovered = match discovery {
+            Discovery::Search => discover_project(workspace),
+            Discovery::Exact => discover_project_at(workspace),
+        };
+        let project = match discovered {
+            Ok(project) => project,
+            Err(diagnostics) => {
+                return Self {
+                    project: None,
+                    snapshot: None,
+                    diagnostics,
+                    revision: None,
+                };
+            }
+        };
+        match SourceSnapshot::capture(project.clone()) {
+            Ok(snapshot) => {
+                let revision = workspace_revision(&snapshot.revision_records()).ok();
+                Self {
+                    project: Some(project),
+                    snapshot: Some(snapshot),
+                    diagnostics: Vec::new(),
+                    revision,
+                }
+            }
+            Err(diagnostics) => {
+                let records = [crate::revision::RevisionRecord::new(
+                    crate::revision::RevisionKind::Project,
+                    crate::project::PROJECT_FILE_NAME,
+                    project.bytes(),
+                )];
+                Self {
+                    revision: workspace_revision(&records).ok(),
+                    project: Some(project),
+                    snapshot: None,
+                    diagnostics,
+                }
+            }
+        }
+    }
+
+    /// The discovered project, when discovery succeeded.
+    #[must_use]
+    pub const fn project(&self) -> Option<&DiscoveredProject> {
+        self.project.as_ref()
+    }
+
+    /// The snapshot, when discovery and the walk succeeded.
+    #[must_use]
+    pub const fn snapshot(&self) -> Option<&SourceSnapshot> {
+        self.snapshot.as_ref()
+    }
+
+    /// The faults of discovery or of the walk.
+    #[must_use]
+    pub fn diagnostics(&self) -> &[Diagnostic] {
+        &self.diagnostics
+    }
+
+    /// The workspace revision, `None` only when discovery failed.
+    #[must_use]
+    pub fn revision(&self) -> Option<&str> {
+        self.revision.as_deref()
+    }
+}
+
+/// Why a path is not a document `fmt` formats: invalid input.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InvalidPath {
+    reason: String,
+}
+
+impl InvalidPath {
+    /// What is wrong with the path.
+    #[must_use]
+    pub fn reason(&self) -> &str {
+        &self.reason
+    }
+}
+
+impl std::fmt::Display for InvalidPath {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.reason)
+    }
+}
+
+impl std::error::Error for InvalidPath {}
+
+/// One formatted document, before anything is written.
+#[derive(Clone, Debug)]
+pub struct FormatPlan {
+    path: String,
+    file: Option<PathBuf>,
+    changed: bool,
+    text: Option<String>,
+    diagnostics: Vec<Diagnostic>,
+    revision: Option<String>,
 }
 
 impl FormatPlan {
-    /// The canonical workspace-relative path selected by the plan.
+    /// The workspace-relative path, written with `/`.
     #[must_use]
-    pub fn relative_path(&self) -> &str {
-        &self.relative_path
+    pub fn path(&self) -> &str {
+        &self.path
     }
 
-    /// Workspace revision against which formatting was planned.
-    #[must_use]
-    pub const fn workspace_revision(&self) -> &DocumentRevision {
-        &self.workspace_revision
-    }
-
-    /// Exact target document revision against which formatting was planned.
-    #[must_use]
-    pub const fn document_revision(&self) -> &DocumentRevision {
-        &self.document_revision
-    }
-
-    /// Canonical preview text. Recovered input is retained byte-for-byte.
-    #[must_use]
-    pub fn formatted_text(&self) -> &str {
-        &self.formatted_text
-    }
-
-    /// Exact UTF-8 input used to derive formatter diagnostics and output.
-    #[must_use]
-    pub fn original_text(&self) -> &str {
-        &self.original_text
-    }
-
-    /// Whether the canonical text differs from the captured input bytes.
+    /// Whether the input bytes differ from the formatted bytes.
     #[must_use]
     pub const fn changed(&self) -> bool {
         self.changed
     }
 
-    /// Parser and safe label-normalization diagnostics from the source snapshot.
+    /// The formatted text, or the planned text when diagnostics prevent
+    /// writing; the file's bytes unchanged when the reader recovered.
+    /// `None` when the file was never read or is not UTF-8. Every span of
+    /// [`Self::diagnostics`] that names the path is an offset into it.
+    #[must_use]
+    pub fn text(&self) -> Option<&str> {
+        self.text.as_deref()
+    }
+
+    /// The diagnostics of the document, in order.
     #[must_use]
     pub fn diagnostics(&self) -> &[Diagnostic] {
         &self.diagnostics
     }
+
+    /// Whether any diagnostic is an error.
+    #[must_use]
+    pub fn has_errors(&self) -> bool {
+        self.diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.level() == Level::Error)
+    }
+
+    /// The workspace revision of the captured snapshot, `None` when no
+    /// project was found.
+    #[must_use]
+    pub fn revision(&self) -> Option<&str> {
+        self.revision.as_deref()
+    }
+
+    /// Replaces the file with the formatted text, atomically, and returns
+    /// whether it wrote: only a changed text with no error diagnostic is
+    /// written.
+    ///
+    /// # Errors
+    ///
+    /// `@project.ioError` at offset 0 of the path when the file cannot be
+    /// replaced; the file is then left as it was.
+    pub fn write(&self) -> Result<bool, Box<Diagnostic>> {
+        let (Some(file), Some(text)) = (&self.file, &self.text) else {
+            return Ok(false);
+        };
+        if !self.changed || self.has_errors() {
+            return Ok(false);
+        }
+        let fault = |message: String| {
+            Box::new(
+                Diagnostic::new(
+                    DiagnosticCode::ProjectIoError,
+                    ByteSpan::empty_at(0),
+                    message,
+                )
+                .with_source_id(&self.path),
+            )
+        };
+        let parent = file
+            .parent()
+            .ok_or_else(|| fault("the file has no directory".to_owned()))?;
+        let name = file
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let temporary = parent.join(format!(
+            ".{name}.{}-{}.vibra-fmt",
+            std::process::id(),
+            NEXT_TEMPORARY.fetch_add(1, Ordering::Relaxed)
+        ));
+        if let Err(error) = fs::write(&temporary, text.as_bytes()) {
+            let _ = fs::remove_file(&temporary);
+            return Err(fault(format!("cannot write the formatted text: {error}")));
+        }
+        if let Err(error) = fs::rename(&temporary, file) {
+            let _ = fs::remove_file(&temporary);
+            return Err(fault(format!("cannot replace the file: {error}")));
+        }
+        Ok(true)
+    }
 }
 
-/// Builds a formatter preview from one confined workspace snapshot.
-pub fn plan_format(
-    workspace_root: impl AsRef<Path>,
-    relative_path: impl AsRef<Path>,
-) -> Result<FormatPlan, FormatPlanError> {
-    let workspace_root = canonical_workspace_root(workspace_root.as_ref())?;
-    let requested = relative_path.as_ref();
-    let mode = document_mode(requested)?;
-    let (path, relative_path, parent_relative, file_name) =
-        resolve_target(&workspace_root, requested)?;
-    let workspace = WorkspaceSnapshot::load_confined(&workspace_root)
-        .map_err(FormatPlanError::Workspace)?;
-    let root_dir = ConfinedDir::open(&workspace_root).map_err(|error| {
-        FormatPlanError::InvalidPath(format!(
-            "cannot open workspace without following links {}: {error}",
-            workspace_root.display()
-        ))
-    })?;
-    let parent_dir = root_dir.open_dir(&parent_relative).map_err(|error| {
-        FormatPlanError::InvalidPath(format!(
-            "formatter parent path is no longer confined: {error}"
-        ))
-    })?;
-    let original_bytes = parent_dir.read_file(&file_name).map_err(|error| {
-        FormatPlanError::Io(format!("cannot read {}: {error}", path.display()))
-    })?;
-    let text = std::str::from_utf8(&original_bytes).map_err(|error| {
-        FormatPlanError::InvalidUtf8(format!(
-            "{} is not valid UTF-8: {error}",
-            path.display()
-        ))
-    })?;
-
-    let snapshot_document = workspace
-        .source()
-        .documents()
-        .find(|document| document.source_id() == relative_path);
-    if let Some(document) = snapshot_document
-        && document.bytes() != original_bytes
-    {
-        return Err(stale_document(workspace.revision(), &original_bytes));
-    }
-
-    let document = parse_by_mode(&relative_path, text, mode)?;
-    let mut diagnostics = document
-        .diagnostics()
-        .iter()
-        .cloned()
-        .map(|diagnostic| diagnostic.with_source_id(&relative_path))
-        .collect::<Vec<_>>();
-    let source_check = (mode == DocumentMode::Source)
-        .then(|| check_in_workspace(&workspace, &relative_path, text))
-        .flatten();
-    // A source that is not a module of the workspace is not checked, and a
-    // check that reports `@tool.unavailable` is incomplete: either way the
-    // document is formatted syntax-only.
-    let source_checker_unavailable = mode == DocumentMode::Source
-        && source_check.as_ref().is_none_or(|checked| {
-            checked
-                .diagnostics
-                .iter()
-                .any(|diagnostic| diagnostic.code() == DiagnosticCode::ToolUnavailable)
-        });
-    // Incomplete standalone checking cannot authorize reordering or block a
-    // syntax-only format; its cascaded semantic diagnostics are not facts.
-    if !source_checker_unavailable {
-        diagnostics.extend(source_check.iter().flat_map(|checked| {
-            checked
-                .diagnostics
-                .iter()
-                .cloned()
-                .map(|diagnostic| diagnostic.with_source_id(&relative_path))
-        }));
-    }
-    let source_was_checked = source_check
-        .as_ref()
-        .is_some_and(|checked| checked.accepted);
-    let bindings = source_check
-        .as_ref()
-        .filter(|checked| checked.accepted)
-        .map_or(&[][..], |checked| checked.bindings.as_slice());
-    let effect_rows = source_check
-        .as_ref()
-        .filter(|checked| checked.accepted)
-        .map_or(&[][..], |checked| checked.effect_rows.as_slice());
-    let formatted =
-        format_source_with_facts(&relative_path, text, bindings, effect_rows)
-            .map_err(|error| FormatPlanError::Format(error.to_string()))?;
-    for diagnostic in formatted.diagnostics() {
-        let checker_reported_order = diagnostic.code()
-            == DiagnosticCode::StyleArgumentOrder
-            && !source_checker_unavailable
-            && source_check.as_ref().is_some_and(|checked| {
-                checked.diagnostics.iter().any(|checked_diagnostic| {
-                    checked_diagnostic.code() == diagnostic.code()
-                        && checked_diagnostic.primary_span()
-                            == diagnostic.primary_span()
-                })
-            });
-        if !checker_reported_order {
-            diagnostics.push(diagnostic.clone());
-        }
-    }
-    deduplicate_diagnostics(&mut diagnostics);
-    let original_text = text.to_owned();
-
-    validate_postcondition(
-        &workspace,
-        &relative_path,
-        text,
-        formatted.text(),
-        mode,
-        source_was_checked,
-        false,
-    )?;
-
-    Ok(FormatPlan {
-        workspace_root,
-        path,
-        parent_relative,
-        file_name,
-        relative_path,
-        workspace_revision: workspace.revision().clone(),
-        document_revision: document_revision(&original_bytes),
-        changed: original_bytes != formatted.text().as_bytes(),
-        original_bytes,
-        original_text,
-        formatted_text: formatted.text().to_owned(),
-        diagnostics,
-        mode,
-        source_was_checked,
-        source_checker_unavailable,
+/// The grammar of `path` by its extension.
+///
+/// # Errors
+///
+/// Any other extension is invalid input.
+pub fn format_mode(path: &str) -> Result<DocumentMode, InvalidPath> {
+    DocumentMode::from_path(path).ok_or_else(|| InvalidPath {
+        reason: format!("`{path}` is neither a `.vib` nor a `.vibon` file"),
     })
 }
 
-/// Applies a current format plan by atomically replacing its one target file.
-///
-/// The workspace and document revisions are checked immediately before the
-/// replacement. A stale plan leaves all workspace bytes untouched.
-pub fn apply_format(plan: &FormatPlan) -> Result<(), FormatPlanError> {
-    if is_vendor_path(Path::new(&plan.relative_path)) {
-        return Err(FormatPlanError::InvalidPath(
-            "formatter may not write vendored dependencies".to_owned(),
-        ));
+/// The path with `\` written as `/`, `.` parts removed, and `..` parts
+/// applied, or `None` when it is absolute or leaves the workspace.
+fn normalize(path: &str) -> Option<String> {
+    let written = path.replace('\\', "/");
+    if written.starts_with('/') || Path::new(path).is_absolute() {
+        return None;
     }
-    let root_dir = ConfinedDir::open(&plan.workspace_root).map_err(|error| {
-        FormatPlanError::InvalidPath(format!(
-            "cannot reopen workspace without following links: {error}"
-        ))
-    })?;
-    let parent_dir = root_dir.open_dir(&plan.parent_relative).map_err(|error| {
-        FormatPlanError::InvalidPath(format!(
-            "format target parent is no longer confined: {error}"
-        ))
-    })?;
-    let current_workspace = WorkspaceSnapshot::load_confined(&plan.workspace_root)
-        .map_err(FormatPlanError::Workspace)?;
-    if current_workspace.revision() != &plan.workspace_revision {
-        return Err(FormatPlanError::StaleRevision {
-            expected: plan.workspace_revision.as_str().to_owned(),
-            actual: current_workspace.revision().as_str().to_owned(),
-        });
-    }
-    ensure_current_target(plan, &parent_dir)?;
-    if !plan.changed {
-        return Ok(());
-    }
-    validate_postcondition(
-        &current_workspace,
-        &plan.relative_path,
-        std::str::from_utf8(&plan.original_bytes)
-            .map_err(|error| FormatPlanError::InvalidUtf8(error.to_string()))?,
-        &plan.formatted_text,
-        plan.mode,
-        plan.source_was_checked,
-        !plan.source_checker_unavailable,
-    )?;
-
-    let target_permissions =
-        parent_dir
-            .file_permissions(&plan.file_name)
-            .map_err(|error| {
-                FormatPlanError::Io(format!(
-                    "cannot inspect target permissions: {error}"
-                ))
-            })?;
-    let temporary_name = write_temporary(
-        &parent_dir,
-        &plan.file_name,
-        &plan.formatted_text,
-        &target_permissions,
-    )?;
-    let final_check = recheck_revisions(plan, &parent_dir, &temporary_name);
-    if let Err(error) = final_check {
-        let _ = parent_dir.remove_file(&temporary_name);
-        return Err(error);
-    }
-    let final_parent = match ConfinedDir::open(&plan.workspace_root)
-        .and_then(|root| root.open_dir(&plan.parent_relative))
+    if Path::new(path)
+        .components()
+        .any(|component| matches!(component, Component::Prefix(_) | Component::RootDir))
     {
-        Ok(parent) => parent,
-        Err(error) => {
-            let _ = parent_dir.remove_file(&temporary_name);
-            return Err(FormatPlanError::InvalidPath(format!(
-                "format target parent changed before replacement: {error}"
-            )));
-        }
-    };
-    let same_parent = match final_parent.same_as(&parent_dir) {
-        Ok(same) => same,
-        Err(error) => {
-            let _ = parent_dir.remove_file(&temporary_name);
-            return Err(FormatPlanError::Io(format!(
-                "cannot verify format target parent before replacement: {error}"
-            )));
-        }
-    };
-    if !same_parent {
-        let _ = parent_dir.remove_file(&temporary_name);
-        return Err(FormatPlanError::InvalidPath(
-            "format target parent changed before replacement".to_owned(),
-        ));
+        return None;
     }
-    if let Err(error) =
-        parent_dir.rename_to(&temporary_name, &parent_dir, &plan.file_name)
-    {
-        let _ = parent_dir.remove_file(&temporary_name);
-        return Err(FormatPlanError::Io(format!(
-            "cannot atomically replace {}: {error}",
-            plan.path.display()
-        )));
+    let mut parts: Vec<&str> = Vec::new();
+    for part in written.split('/') {
+        match part {
+            "" | "." => {}
+            ".." => {
+                parts.pop()?;
+            }
+            part => parts.push(part),
+        }
     }
-    Ok(())
+    (!parts.is_empty()).then(|| parts.join("/"))
 }
 
-fn canonical_workspace_root(root: &Path) -> Result<PathBuf, FormatPlanError> {
-    let canonical = fs::canonicalize(root).map_err(|error| {
-        FormatPlanError::InvalidPath(format!(
-            "cannot resolve workspace root {}: {error}",
-            root.display()
-        ))
-    })?;
-    if !canonical.is_dir() {
-        return Err(FormatPlanError::InvalidPath(format!(
-            "workspace root is not a directory: {}",
-            canonical.display()
-        )));
-    }
-    Ok(canonical)
+fn path_fault(code: DiagnosticCode, path: &str, message: String) -> Box<Diagnostic> {
+    Box::new(Diagnostic::new(code, ByteSpan::empty_at(0), message).with_source_id(path))
 }
 
-fn document_mode(path: &Path) -> Result<DocumentMode, FormatPlanError> {
-    match path.extension().and_then(std::ffi::OsStr::to_str) {
-        Some("vib") => Ok(DocumentMode::Source),
-        Some("vibon") => Ok(DocumentMode::Data),
-        _ => Err(FormatPlanError::UnsupportedExtension(
-            path.display().to_string(),
+/// Where a confined path leads: its canonical file, or the fault.
+fn confine(root: &Path, relative: &str) -> Result<PathBuf, Box<Diagnostic>> {
+    let escape = || {
+        path_fault(
+            DiagnosticCode::ModulePathEscape,
+            relative,
+            "the path leaves the workspace root".to_owned(),
+        )
+    };
+    let lexical = root.join(relative);
+    match fs::canonicalize(&lexical) {
+        Ok(canonical) if canonical.starts_with(root) => Ok(canonical),
+        Ok(_) => Err(escape()),
+        Err(error) if error.kind() == ErrorKind::NotFound => {
+            // The file is missing: its nearest existing ancestor must still
+            // be inside the root, so a link cannot hide an escape.
+            let mut ancestor = lexical.parent();
+            while let Some(directory) = ancestor {
+                if let Ok(canonical) = fs::canonicalize(directory) {
+                    if !canonical.starts_with(root) {
+                        return Err(escape());
+                    }
+                    break;
+                }
+                ancestor = directory.parent();
+            }
+            Err(path_fault(
+                DiagnosticCode::ModuleIoError,
+                relative,
+                "the file does not exist".to_owned(),
+            ))
+        }
+        Err(error) => Err(path_fault(
+            DiagnosticCode::ModuleIoError,
+            relative,
+            format!("cannot resolve the path: {error}"),
         )),
     }
 }
 
-fn resolve_target(
-    root: &Path,
-    requested: &Path,
-) -> Result<(PathBuf, String, PathBuf, OsString), FormatPlanError> {
-    if requested.as_os_str().is_empty() || requested.is_absolute() {
-        return Err(FormatPlanError::InvalidPath(
-            "formatter path must be a non-empty workspace-relative path".to_owned(),
-        ));
-    }
-    let components = requested
+/// The project-relative source identity of the canonical `file`.
+fn source_id_in(project: &DiscoveredProject, file: &Path) -> Option<String> {
+    let relative = file.strip_prefix(project.root()).ok()?;
+    let parts = relative
         .components()
-        .filter(|component| !matches!(component, Component::CurDir))
-        .collect::<Vec<_>>();
-    if components.is_empty() {
-        return Err(FormatPlanError::InvalidPath(
-            "formatter path must name a file".to_owned(),
-        ));
-    }
-    let mut relative = PathBuf::new();
-    for component in components.iter() {
-        match component {
-            Component::CurDir => {}
-            Component::Normal(name) => relative.push(name),
-            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
-                return Err(FormatPlanError::InvalidPath(
-                    "formatter path may not escape the workspace root".to_owned(),
-                ));
-            }
-        }
-    }
-    if is_vendor_path(&relative) {
-        return Err(FormatPlanError::InvalidPath(
-            "formatter may not target vendored dependencies".to_owned(),
-        ));
-    }
-    let file_name = relative.file_name().map(OsString::from).ok_or_else(|| {
-        FormatPlanError::InvalidPath("formatter path must name a file".to_owned())
-    })?;
-    let parent_relative = relative
-        .parent()
-        .unwrap_or_else(|| Path::new(""))
-        .to_path_buf();
-    let relative_string = relative
-        .to_str()
-        .ok_or_else(|| {
-            FormatPlanError::InvalidPath(
-                "formatter path is not a Unicode workspace path".to_owned(),
-            )
-        })?
-        .replace('\\', "/");
-    let path = root.join(&relative);
-    let root_dir = ConfinedDir::open(root).map_err(|error| {
-        FormatPlanError::InvalidPath(format!(
-            "cannot safely open workspace root: {error}"
-        ))
-    })?;
-    let parent_dir = root_dir.open_dir(&parent_relative).map_err(|error| {
-        FormatPlanError::InvalidPath(format!(
-            "formatter path contains a link or invalid parent: {error}"
-        ))
-    })?;
-    parent_dir.read_file(&file_name).map_err(|error| {
-        FormatPlanError::Io(format!("cannot read {}: {error}", path.display()))
-    })?;
-    Ok((path, relative_string, parent_relative, file_name))
-}
-
-fn is_vendor_path(relative: &Path) -> bool {
-    relative
-        .components()
-        .next()
-        .and_then(|component| match component {
-            Component::Normal(name) => name.to_str(),
+        .map(|component| match component {
+            Component::Normal(part) => part.to_str(),
             _ => None,
         })
-        .is_some_and(|name| {
-            name.eq_ignore_ascii_case("dep") || name.eq_ignore_ascii_case("vendor")
-        })
+        .collect::<Option<Vec<_>>>()?;
+    Some(parts.join("/"))
 }
 
-fn parse_by_mode(
+/// Plans the format of `path`, a workspace-relative document, in the
+/// workspace `capture` holds, whose root is `workspace`.
+///
+/// # Errors
+///
+/// [`InvalidPath`] when the extension selects no grammar or the path is
+/// empty.
+pub fn plan_format(
+    workspace: &Path,
+    capture: &WorkspaceCapture,
     path: &str,
-    text: &str,
-    mode: DocumentMode,
-) -> Result<vibra_syntax::Document, FormatPlanError> {
-    match mode {
-        DocumentMode::Source => parse_source(Path::new(path), text),
-        DocumentMode::Data => parse_data(Path::new(path), text),
-    }
-    .map_err(|error| FormatPlanError::Format(error.to_string()))
-}
-
-fn validate_postcondition(
-    workspace: &WorkspaceSnapshot,
-    path: &str,
-    original: &str,
-    formatted: &str,
-    mode: DocumentMode,
-    source_was_checked: bool,
-    require_accepted_source: bool,
-) -> Result<(), FormatPlanError> {
-    let original_document = parse_by_mode(path, original, mode)?;
-    if original_document.recovered() {
-        if original.as_bytes() != formatted.as_bytes() {
-            return Err(FormatPlanError::Postcondition(
-                "formatting changed a recovered document".to_owned(),
+) -> Result<FormatPlan, InvalidPath> {
+    let mode = format_mode(path)?;
+    let revision = capture.revision().map(str::to_owned);
+    let refused = |relative: &str, diagnostic: Box<Diagnostic>| FormatPlan {
+        path: relative.to_owned(),
+        file: None,
+        changed: false,
+        text: None,
+        diagnostics: vec![*diagnostic],
+        revision: revision.clone(),
+    };
+    let written = path.replace('\\', "/");
+    let Some(relative) = normalize(path) else {
+        return Ok(refused(
+            &written,
+            path_fault(
+                DiagnosticCode::ModulePathEscape,
+                &written,
+                "the path leaves the workspace root".to_owned(),
+            ),
+        ));
+    };
+    let root = match fs::canonicalize(workspace) {
+        Ok(root) => root,
+        Err(error) => {
+            return Ok(refused(
+                &relative,
+                path_fault(
+                    DiagnosticCode::ModuleIoError,
+                    &relative,
+                    format!("cannot resolve the workspace root: {error}"),
+                ),
             ));
         }
-        return Ok(());
-    }
-    let reparsed = parse_by_mode(path, formatted, mode)?;
-    if !reparsed.accepted() || reparsed.recovered() {
-        return Err(FormatPlanError::Postcondition(
-            "formatted document did not reparse cleanly".to_owned(),
-        ));
-    }
-    let checked = (mode == DocumentMode::Source)
-        .then(|| check_in_workspace(workspace, path, formatted))
-        .flatten();
-    let formatted_source_accepted =
-        checked.as_ref().is_some_and(|value| value.accepted);
-    if mode == DocumentMode::Source
-        && ((require_accepted_source && !source_was_checked)
-            || (source_was_checked && !formatted_source_accepted))
-    {
-        return Err(FormatPlanError::Postcondition(
-            "source must pass semantic checks before and after formatting".to_owned(),
-        ));
-    }
-    let bindings = checked
-        .as_ref()
-        .filter(|value| value.accepted)
-        .map_or(&[][..], |value| value.bindings.as_slice());
-    let effect_rows = checked
-        .as_ref()
-        .filter(|value| value.accepted)
-        .map_or(&[][..], |value| value.effect_rows.as_slice());
-    let idempotent =
-        format_source_with_facts(path, formatted, bindings, effect_rows)
-            .map_err(|error| FormatPlanError::Postcondition(error.to_string()))?;
-    if idempotent.text() != formatted {
-        return Err(FormatPlanError::Postcondition(
-            "formatted document is not idempotent".to_owned(),
-        ));
-    }
-    Ok(())
-}
-
-fn deduplicate_diagnostics(diagnostics: &mut Vec<Diagnostic>) {
-    let mut unique = Vec::<Diagnostic>::with_capacity(diagnostics.len());
-    for diagnostic in diagnostics.drain(..) {
-        let duplicate = unique.iter().position(|existing| {
-            existing.code() == diagnostic.code()
-                && existing.primary_span() == diagnostic.primary_span()
-                && existing.message() == diagnostic.message()
-        });
-        if let Some(index) = duplicate {
-            if let Some(existing) = unique.get_mut(index)
-                && existing.source_id().is_none()
-                && diagnostic.source_id().is_some()
-            {
-                *existing = diagnostic;
-            }
-        } else {
-            unique.push(diagnostic);
-        }
-    }
-    *diagnostics = unique;
-}
-
-fn ensure_current_target(
-    plan: &FormatPlan,
-    parent: &ConfinedDir,
-) -> Result<(), FormatPlanError> {
-    let current = parent.read_file(&plan.file_name).map_err(|error| {
-        FormatPlanError::Io(format!("cannot reread {}: {error}", plan.path.display()))
-    })?;
-    let actual_revision = document_revision(&current);
-    if actual_revision != plan.document_revision || current != plan.original_bytes {
-        return Err(FormatPlanError::StaleRevision {
-            expected: plan.document_revision.as_str().to_owned(),
-            actual: actual_revision.as_str().to_owned(),
-        });
-    }
-    Ok(())
-}
-
-fn recheck_revisions(
-    plan: &FormatPlan,
-    expected_parent: &ConfinedDir,
-    temporary_name: &std::ffi::OsStr,
-) -> Result<(), FormatPlanError> {
-    if is_vendor_path(Path::new(&plan.relative_path)) {
-        return Err(FormatPlanError::InvalidPath(
-            "formatter may not write vendored dependencies".to_owned(),
-        ));
-    }
-    let root_dir = ConfinedDir::open(&plan.workspace_root).map_err(|error| {
-        FormatPlanError::InvalidPath(format!(
-            "workspace path changed before formatter write: {error}"
-        ))
-    })?;
-    let parent_dir = root_dir.open_dir(&plan.parent_relative).map_err(|error| {
-        FormatPlanError::InvalidPath(format!(
-            "format target parent changed before write: {error}"
-        ))
-    })?;
-    if !parent_dir.same_as(expected_parent).map_err(|error| {
-        FormatPlanError::Io(format!(
-            "cannot verify format target parent identity: {error}"
-        ))
-    })? {
-        return Err(FormatPlanError::InvalidPath(
-            "format target parent changed before write".to_owned(),
-        ));
-    }
-    let current_workspace = WorkspaceSnapshot::load_confined(&plan.workspace_root)
-        .map_err(FormatPlanError::Workspace)?;
-    if current_workspace.revision() != &plan.workspace_revision {
-        return Err(FormatPlanError::StaleRevision {
-            expected: plan.workspace_revision.as_str().to_owned(),
-            actual: current_workspace.revision().as_str().to_owned(),
-        });
-    }
-    ensure_current_target(plan, &parent_dir)?;
-    let temporary = parent_dir.read_file(temporary_name).map_err(|error| {
-        FormatPlanError::Io(format!("format temporary file moved or changed: {error}"))
-    })?;
-    if temporary != plan.formatted_text.as_bytes() {
-        return Err(FormatPlanError::Io(
-            "format temporary file content changed before replacement".to_owned(),
-        ));
-    }
-    Ok(())
-}
-
-fn write_temporary(
-    parent: &ConfinedDir,
-    target_name: &std::ffi::OsStr,
-    contents: &str,
-    permissions: &fs::Permissions,
-) -> Result<OsString, FormatPlanError> {
-    let file_name = target_name.to_str().ok_or_else(|| {
-        FormatPlanError::InvalidPath("format target has no Unicode filename".to_owned())
-    })?;
-    for _ in 0..32 {
-        let nonce = NEXT_TEMP_FILE.fetch_add(1, Ordering::Relaxed);
-        let temporary = OsString::from(format!(
-            ".{file_name}.vibra-{}-{nonce}.tmp",
-            std::process::id()
-        ));
-        match parent.write_new_file(&temporary, contents.as_bytes(), Some(permissions))
-        {
-            Ok(()) => return Ok(temporary),
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+    };
+    let file = match confine(&root, &relative) {
+        Ok(file) => file,
+        Err(diagnostic) => return Ok(refused(&relative, diagnostic)),
+    };
+    let module = capture.snapshot().and_then(|snapshot| {
+        let source_id = source_id_in(capture.project()?, &file)?;
+        snapshot
+            .modules()
+            .find(|module| module.source_id() == source_id)
+            .map(|module| (snapshot, source_id, module.bytes().to_vec()))
+    });
+    let bytes = match &module {
+        Some((_, _, bytes)) if mode == DocumentMode::Source => bytes.clone(),
+        _ => match fs::read(&file) {
+            Ok(bytes) => bytes,
             Err(error) => {
-                return Err(FormatPlanError::Io(format!(
-                    "cannot create or write temporary file for {}: {error}",
-                    target_name.to_string_lossy()
-                )));
+                return Ok(refused(
+                    &relative,
+                    path_fault(
+                        DiagnosticCode::ModuleIoError,
+                        &relative,
+                        format!("cannot read the file: {error}"),
+                    ),
+                ));
             }
-        }
+        },
+    };
+    let document = parse(mode, Some(&relative), &bytes);
+    let mut diagnostics = document.diagnostics().to_vec();
+    let text = format_document(&document)
+        .or_else(|| std::str::from_utf8(&bytes).ok().map(str::to_owned));
+    if mode == DocumentMode::Source
+        && diagnostics.is_empty()
+        && let Some((snapshot, source_id, _)) = &module
+        && let Some(text) = &text
+    {
+        diagnostics.extend(check_candidate(snapshot, source_id, &relative, text));
     }
-    Err(FormatPlanError::Io(
-        "cannot allocate a unique format temporary file".to_owned(),
-    ))
+    Ok(FormatPlan {
+        changed: text.as_ref().is_some_and(|text| bytes != text.as_bytes()),
+        path: relative,
+        file: Some(file),
+        text,
+        diagnostics,
+        revision,
+    })
 }
 
-fn document_revision(bytes: &[u8]) -> DocumentRevision {
-    let digest = Sha256::digest(bytes);
-    let mut identifier = String::from("sha256:");
-    for byte in digest {
-        use std::fmt::Write as _;
-        let _ = write!(identifier, "{byte:02x}");
-    }
-    DocumentRevision::new(identifier)
-}
-
-fn stale_document(
-    workspace_revision: &DocumentRevision,
-    bytes: &[u8],
-) -> FormatPlanError {
-    FormatPlanError::StaleRevision {
-        expected: workspace_revision.as_str().to_owned(),
-        actual: document_revision(bytes).as_str().to_owned(),
-    }
-}
-
-/// What checking one source in its workspace gives the formatter.
-struct SourceCheck {
-    diagnostics: Vec<Diagnostic>,
-    accepted: bool,
-    bindings: Vec<ApplicationBinding>,
-    effect_rows: Vec<EffectRowOrder>,
-}
-
-/// Checks the module `source_id` as `text` writes it, in the workspace that
-/// holds it, through the check `vibra check` runs. `None` when the source is
-/// not a module of the workspace or the workspace cannot be checked.
-fn check_in_workspace(
-    workspace: &WorkspaceSnapshot,
+/// The diagnostics of the captured module `source_id` when `candidate`
+/// replaces its bytes, named by `path`: none when the check of the module
+/// is unavailable.
+fn check_candidate(
+    snapshot: &SourceSnapshot,
     source_id: &str,
-    text: &str,
-) -> Option<SourceCheck> {
-    let stdlib = vibra_types::load_stdlib().ok()?;
-    let checked = check_document(workspace, source_id, text, &stdlib)?;
-    let diagnostics = checked
+    path: &str,
+    candidate: &str,
+) -> Vec<Diagnostic> {
+    let Some(replaced) = snapshot.with_module_bytes(source_id, candidate.as_bytes())
+    else {
+        return Vec::new();
+    };
+    let check = check_snapshot(&replaced, None);
+    let own = check
         .diagnostics()
         .iter()
-        .filter(|diagnostic| diagnostic.source_id() == Some(source_id))
-        .cloned()
+        .filter(|diagnostic| {
+            diagnostic
+                .source_id()
+                .is_none_or(|owner| owner == source_id)
+        })
         .collect::<Vec<_>>();
-    Some(SourceCheck {
-        accepted: diagnostics
-            .iter()
-            .all(|diagnostic| diagnostic.level() != vibra_diagnostics::Level::Error),
-        bindings: checked.application_bindings(source_id).to_vec(),
-        effect_rows: checked.effect_row_orders(source_id).to_vec(),
-        diagnostics,
-    })
+    if own
+        .iter()
+        .any(|diagnostic| diagnostic.code() == DiagnosticCode::ToolUnavailable)
+    {
+        return Vec::new();
+    }
+    own.into_iter()
+        .map(|diagnostic| {
+            if diagnostic.source_id().is_some() {
+                diagnostic.clone().with_source_id(path)
+            } else {
+                diagnostic.clone()
+            }
+        })
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{FormatPlanError, apply_format, plan_format};
-    use std::fs;
-    use std::path::Path;
-    use std::sync::atomic::{AtomicU64, Ordering};
-
-    static NEXT_ROOT: AtomicU64 = AtomicU64::new(0);
-
-    struct TempWorkspace(std::path::PathBuf);
-
-    impl TempWorkspace {
-        fn new() -> Self {
-            let nonce = NEXT_ROOT.fetch_add(1, Ordering::Relaxed);
-            let path = std::env::temp_dir().join(format!(
-                "vibra-format-plan-unit-{}-{nonce}",
-                std::process::id()
-            ));
-            fs::create_dir_all(path.join("src/hello")).expect("create source root");
-            fs::write(
-                path.join("project.vibon"),
-                "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @bin root: \"src/hello\" entry: @app.main.main effects: (array))) dependencies: (dict))\n",
-            )
-            .expect("write project marker");
-            fs::write(
-                path.join("src/hello/main.vib"),
-                "(defn main () void    (do))\n",
-            )
-            .expect("write source");
-            Self(path)
-        }
-    }
-
-    impl Drop for TempWorkspace {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
-        }
-    }
+    use super::normalize;
 
     #[test]
-    fn apply_rejects_a_plan_with_a_vendored_dependency_path() {
-        let root = TempWorkspace::new();
-        let mut plan = plan_format(&root.0, Path::new("src/hello/main.vib"))
-            .expect("create a regular format plan");
-        plan.relative_path = "dep/std/src/main.vib".to_owned();
-
-        let error =
-            apply_format(&plan).expect_err("apply must reject vendored paths too");
-
-        assert!(matches!(error, FormatPlanError::InvalidPath(_)));
+    fn a_path_is_normalized_or_refused() {
         assert_eq!(
-            fs::read_to_string(root.0.join("src/hello/main.vib"))
-                .expect("read source after refusal"),
-            "(defn main () void    (do))\n"
+            normalize("src/app/main.vib").as_deref(),
+            Some("src/app/main.vib")
         );
+        assert_eq!(
+            normalize("src\\..\\src/./app/main.vib").as_deref(),
+            Some("src/app/main.vib")
+        );
+        assert_eq!(normalize("../other/a.vib"), None);
+        assert_eq!(normalize("src/../../a.vib"), None);
+        assert_eq!(normalize("/a.vib"), None);
+        assert_eq!(normalize("."), None);
     }
 }

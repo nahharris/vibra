@@ -96,9 +96,9 @@ use vibra_exec::{
     INTEGER_TYPES, Inst, IntOp, MAX_SLOTS, ObjectKind, OriginId, Program, ScalarClass,
     ScalarOp, Slot, Terminator,
 };
-use vibra_ir::boundary::TrapCode;
-use vibra_ir::external::{CompilerIntrinsic, IntegerOp, NumericType};
-use vibra_ir::{
+use vibra_ir_v1::boundary::TrapCode;
+use vibra_ir_v1::external::{CompilerIntrinsic, IntegerOp, NumericType};
+use vibra_ir_v1::{
     CallTarget, CheckedProgram, Expr, FunctionSignature, SourceOrigin, Value,
 };
 
@@ -1220,7 +1220,7 @@ impl<'a, 'p> Body<'a, 'p> {
     /// the block that continues begins.
     fn host(
         &mut self,
-        row: &'static vibra_ir::external::host::HostRow,
+        row: &'static vibra_ir_v1::external::host::HostRow,
         arguments: &[Expr],
         origin: &SourceOrigin,
         dest: Slot,

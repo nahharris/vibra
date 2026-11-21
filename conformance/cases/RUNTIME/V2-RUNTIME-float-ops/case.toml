@@ -1,0 +1,12 @@
+id = "V2-RUNTIME-float-ops"
+rule = "V2-RUNTIME-float-ops"
+profile = "interpreterV2"
+operation = "interpret"
+description = "06-runtime.md#floating-point-operations: division produces infinities and NaNs as values, and a NaN is unequal to itself"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

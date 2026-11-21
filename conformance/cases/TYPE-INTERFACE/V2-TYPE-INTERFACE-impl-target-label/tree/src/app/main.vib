@@ -1,0 +1,12 @@
+fn main returns r: I32 do return 1i32 endfn
+
+type Once of Option(U8)
+  impl Iter(Item: U8)
+    fn next
+      takes {value: Self}
+      returns step: Option({U8 Self})
+      do
+        return Option.none()
+    endfn
+  endimpl
+endtype

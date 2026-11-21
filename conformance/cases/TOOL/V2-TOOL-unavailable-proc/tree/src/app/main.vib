@@ -1,0 +1,3 @@
+fn answer returns r: I32 do return 42i32 endfn
+
+proc run returns r: Void do return void endproc

@@ -1,0 +1,12 @@
+id = "V2-SRC-FMT-comment-in-module-value"
+rule = "V2-SRC-FMT-comment-in-module-value"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#canonical-format: comments of a module value with sections stay at the end of their lines"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "accepted"
+formatted = "formatted.vib"

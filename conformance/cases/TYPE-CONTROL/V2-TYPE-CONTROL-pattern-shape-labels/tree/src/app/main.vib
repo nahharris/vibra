@@ -1,0 +1,2 @@
+type Celsius of F64 endtype
+fn f takes {c: Celsius} returns r: F64 do match c case Celsius(value: v) return v endmatch endfn

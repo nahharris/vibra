@@ -1,0 +1,17 @@
+id = "V2-SRC-READER-closer-by-kind"
+rule = "V2-SRC-READER-closer-by-kind"
+profile = "readerV2"
+operation = "reader"
+description = "07-diagnostics-and-conformance.md#recovery: endfn closes the match inside the fn as missing and then the fn"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@syntax.unmatchedDelimiter"
+level = "@error"
+span = { start = 31, end = 36 }
+related = [{ span = { start = 23, end = 28 } }]

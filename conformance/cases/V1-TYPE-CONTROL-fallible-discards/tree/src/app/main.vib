@@ -1,8 +1,0 @@
-(defn attempt () (result void str) (result.ok))
-
-(defn discards () i32
-  (do (let - (attempt)))
-  (do (let @- (attempt)))
-  (do (let -: (attempt)))
-  (option.some 1i32)
-  0i32)

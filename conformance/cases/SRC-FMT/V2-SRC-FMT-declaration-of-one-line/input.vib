@@ -1,0 +1,5 @@
+type Celsius
+  of F64
+endtype
+
+type Pair of {I32 Str} endtype

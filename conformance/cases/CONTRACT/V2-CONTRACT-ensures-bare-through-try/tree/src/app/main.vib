@@ -1,0 +1,2 @@
+fn isOk takes {r: Result(I32 I32)} returns b: Bool do match r case Result.ok(value: _) return true case Result.err(error: _) return false endmatch endfn
+fn t takes {x: Result(I32 I32)} returns r: Result(I32 I32) ensures isOk(r) do let v be try x endlet return Result.ok(value: v) endfn

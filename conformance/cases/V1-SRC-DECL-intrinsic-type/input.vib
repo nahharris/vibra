@@ -1,1 +1,0 @@
-(deftype i32 (intrinsic-type @i32) visibility: @public (defn zero () i32 0i32))

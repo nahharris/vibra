@@ -1,0 +1,10 @@
+{
+  format: @testRun.v2
+  result: @command.ok
+  tests: [
+    {name: "@tests.a::\"zeta\"" result: @test.passed auditTrace: {format: @auditTrace.v2 revision: "sha256:867ba315973b65f7e5ceab8c0c4e127ce165d4d1f0011ca725779b466fec317a" drivers: [{provider: @hostWorld.v2 version: "0.0.2"}] policies: [:] redaction: @none events: []}}
+    {name: "@tests.a::\"alpha\"" result: @test.passed auditTrace: {format: @auditTrace.v2 revision: "sha256:867ba315973b65f7e5ceab8c0c4e127ce165d4d1f0011ca725779b466fec317a" drivers: [{provider: @hostWorld.v2 version: "0.0.2"}] policies: [:] redaction: @none events: []}}
+    {name: "@tests.b::\"second\"" result: @test.passed auditTrace: {format: @auditTrace.v2 revision: "sha256:867ba315973b65f7e5ceab8c0c4e127ce165d4d1f0011ca725779b466fec317a" drivers: [{provider: @hostWorld.v2 version: "0.0.2"}] policies: [:] redaction: @none events: []}}
+    {name: "@tests.b::\"first\"" result: @test.passed auditTrace: {format: @auditTrace.v2 revision: "sha256:867ba315973b65f7e5ceab8c0c4e127ce165d4d1f0011ca725779b466fec317a" drivers: [{provider: @hostWorld.v2 version: "0.0.2"}] policies: [:] redaction: @none events: []}}
+  ]
+}

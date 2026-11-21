@@ -1,13 +1,11 @@
-//! Toolchain-owned native code, written once and called by both backends.
+//! Toolchain-owned native code, written once against the shared value-storage
+//! interface.
 //!
 //! `docs/spec/06-runtime.md`, "Native implementations": every native
 //! implementation, and every primitive row whose algorithm needs a loop, is
-//! native code that the toolchain owns. The reference interpreter calls it
-//! directly, over its own values. A WebAssembly module reaches the same
-//! functions through an import from `vibra_native_v1`, which the runner
-//! supplies over the instance's linear memory, so the two backends cannot drift
-//! apart. The Vibra body of a native stays its meaning, and the conformance
-//! suite holds this code to it.
+//! native code that the toolchain owns. A runtime calls these functions over
+//! the value arena it owns. The Vibra body of a native stays its meaning, and
+//! the shared sample vectors hold this code to it.
 //!
 //! # The value-access interface
 //!
@@ -15,40 +13,37 @@
 //! through [`Source`] and build one through [`Sink`], and a backend implements
 //! the two for its own values:
 //!
-//! - the reference interpreter implements them over its strings, byte vectors,
-//!   and arrays of runtime values;
-//! - [`arena`] implements them over the arena objects of a module's linear
-//!   memory, which is what the runner calls. A `str` is read as its Unicode
-//!   scalars, `bytes` as its bytes, and an `array` or `dict` as its cells, so a
-//!   function never branches on a value kind.
+//! - [`arena`] implements them over the arena objects of a runtime's value
+//!   arena, which is what a runtime calls. A `Str` is read as its Unicode
+//!   scalars, a `Bytes` as its bytes, and a `List` or `Dict` as its cells, so
+//!   a function never branches on a value kind;
+//! - the host tests implement them over slices.
 //!
 //! [`number`] is the same code for the rows that print and read numbers: it
-//! reads the scalars of a `str` through a [`Source`] and writes them through a
+//! reads the scalars of a `Str` through a [`Source`] and writes them through a
 //! [`Sink`], and takes and answers a number as a value (an integer as an `i128`,
 //! a float as its IEEE bits), so it is the one implementation of integer and
-//! float `to-str` and `parse` that the interpreter and a module share.
+//! float `toStr` and `parse`.
 //!
 //! A [`Sink`] can also only count, so a row that builds an object of a size it
 //! does not know in advance runs once to measure and once to fill, which is how
-//! a module's own allocator stays the one allocator. The code never allocates
-//! in a module, never drops, and calls back into nothing.
+//! the arena's own allocator stays the one allocator. The code never allocates
+//! in an arena, never drops, and calls back into nothing.
 //!
-//! This crate depends on `vibra-ir` for the closed table of native imports and
-//! the shape of an arena object. It has no engine dependency, and the emitter
-//! does not depend on it.
+//! This crate depends on `vibra-ir` for the closed table of native rows and
+//! the shape of an arena object, and on nothing else.
 
 pub mod arena;
 pub mod number;
 mod utf8;
 
-use std::cmp::Ordering;
 use std::marker::PhantomData;
 
 pub use utf8::{decode, encode};
 
 /// One cell of the cells layout: what the cell holds, and its 64 bits. A cell of
 /// the reference class holds the offset of an arena object in its low 32 bits.
-/// This is the unit of an `array`, and of the entries of a `dict`.
+/// This is the unit of a `List`, and of the entries of a `Dict`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Element {
     /// The class byte of `vibra_ir::arena::class`.
@@ -57,8 +52,8 @@ pub struct Element {
     pub bits: u64,
 }
 
-/// A sequence of units to read: the scalars of a `str`, the bytes of `bytes`,
-/// or the elements of an `array`.
+/// A sequence of units to read: the scalars of a `Str`, the bytes of a
+/// `Bytes`, or the elements of a `List`.
 pub trait Source {
     /// One unit.
     type Unit: Copy;
@@ -115,8 +110,8 @@ impl<U: Copy> Sink for Count<U> {
     }
 }
 
-/// All of `source`: `str.to-chars`, `str.from-chars`, `bytes.to-array`,
-/// `bytes.from-array`, and `dict.entries` copy a sequence into the unit of
+/// All of `source`: `str.toChars`, `str.fromChars`, `bytes.toList`,
+/// `bytes.fromList`, and `dict.entries` copy a sequence into the unit of
 /// another kind of object.
 pub fn copy<S: Source, K: Sink<Unit = S::Unit> + ?Sized>(source: &S, out: &mut K) {
     for unit in source.range(0, source.len()) {
@@ -124,7 +119,7 @@ pub fn copy<S: Source, K: Sink<Unit = S::Unit> + ?Sized>(source: &S, out: &mut K
     }
 }
 
-/// `str.concat`, `bytes.concat`, and `array.concat`: the units of `first`, then
+/// `str.concat`, `bytes.concat`, and `list.concat`: the units of `first`, then
 /// those of `second`.
 pub fn concat<S, T, K>(first: &S, second: &T, out: &mut K)
 where
@@ -136,7 +131,7 @@ where
     copy(second, out);
 }
 
-/// `array.append`: the units of `source`, then one more.
+/// `list.append`: the units of `source`, then one more.
 pub fn append<S: Source, K: Sink<Unit = S::Unit> + ?Sized>(
     source: &S,
     unit: S::Unit,
@@ -146,7 +141,7 @@ pub fn append<S: Source, K: Sink<Unit = S::Unit> + ?Sized>(
     out.put(unit);
 }
 
-/// `str.slice`, `bytes.slice`, and `array.slice`: the units in the half-open
+/// `str.slice`, `bytes.slice`, and `list.slice`: the units in the half-open
 /// range `start..end`, or `false` and nothing when `start` exceeds `end` or
 /// `end` exceeds the length.
 pub fn slice<S: Source, K: Sink<Unit = S::Unit> + ?Sized>(
@@ -162,27 +157,6 @@ pub fn slice<S: Source, K: Sink<Unit = S::Unit> + ?Sized>(
         out.put(unit);
     }
     true
-}
-
-/// `str.compare` and `bytes.compare`: lexicographic by unit, so the first
-/// differing unit decides and a proper prefix is less. The scalar value of a
-/// `char` and a byte are their own order.
-pub fn compare<S, T>(first: &S, second: &T) -> Ordering
-where
-    S: Source,
-    T: Source<Unit = S::Unit>,
-    S::Unit: Ord,
-{
-    let pairs = first
-        .range(0, first.len())
-        .zip(second.range(0, second.len()));
-    for (left, right) in pairs {
-        let order = left.cmp(&right);
-        if order != Ordering::Equal {
-            return order;
-        }
-    }
-    first.len().cmp(&second.len())
 }
 
 /// `str.length`, `bytes.length`: the number of units.
@@ -204,24 +178,7 @@ where
             .all(|(left, right)| left == right)
 }
 
-/// `array.of`, `dict.of`: the packed tail the call received, which is already
-/// the collection it builds.
-#[must_use]
-pub const fn identity<T>(packed: T) -> T {
-    packed
-}
-
-/// `-1`, `0`, or `1`: how an `ordering` crosses the native import boundary.
-#[must_use]
-pub const fn order_code(order: Ordering) -> i32 {
-    match order {
-        Ordering::Less => -1,
-        Ordering::Equal => 0,
-        Ordering::Greater => 1,
-    }
-}
-
-/// `str.to-utf8`: the UTF-8 encoding of the scalars of `source`.
+/// `str.toUtf8`: the UTF-8 encoding of the scalars of `source`.
 pub fn to_utf8<S, K>(source: &S, out: &mut K)
 where
     S: Source<Unit = u32>,
@@ -232,7 +189,7 @@ where
     }
 }
 
-/// `str.from-utf8`: the scalars of well-formed UTF-8, or `false` for an
+/// `str.fromUtf8`: the scalars of well-formed UTF-8, or `false` for an
 /// ill-formed sequence: an overlong form, a surrogate, a value above U+10FFFF, a
 /// stray continuation byte, or a truncated sequence. What a sink received before
 /// `false` is of no use.
@@ -312,21 +269,6 @@ mod tests {
             "an empty range at the end is some"
         );
         assert!(out.0.is_empty());
-    }
-
-    #[test]
-    fn compare_is_lexicographic_and_a_proper_prefix_is_less() {
-        let cases: [(&[u32], &[u32], Ordering); 6] = [
-            (&[1, 2], &[1, 3], Ordering::Less),
-            (&[1, 2], &[1], Ordering::Greater),
-            (&[1], &[1, 2], Ordering::Less),
-            (&[], &[], Ordering::Equal),
-            (&[0xFFFF], &[0x1_D11E], Ordering::Less),
-            (&[7, 7], &[7, 7], Ordering::Equal),
-        ];
-        for (a, b, want) in cases {
-            assert_eq!(compare(&Slice(a), &Slice(b)), want, "{a:?} {b:?}");
-        }
     }
 
     #[test]

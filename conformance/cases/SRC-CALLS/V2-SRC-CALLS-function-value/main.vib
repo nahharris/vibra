@@ -1,0 +1,3 @@
+fn inc takes {x: I32} returns r: I32 do return I32.add(x 1i32) endfn
+fn apply takes {f: Fn({I32} I32) v: I32} returns r: I32 do return f(v) endfn
+fn main returns r: I32 do return apply(inc 41i32) endfn

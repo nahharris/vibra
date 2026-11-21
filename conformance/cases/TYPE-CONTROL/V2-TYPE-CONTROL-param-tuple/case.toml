@@ -1,0 +1,12 @@
+id = "V2-TYPE-CONTROL-param-tuple"
+rule = "V2-TYPE-CONTROL-param-tuple"
+profile = "interpreterV2"
+operation = "interpret"
+description = "01-source-language.md#fn-and-proc: a tuple parameter pattern binds each component"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

@@ -1,0 +1,2 @@
+fn main returns r: I32 do return f({2i32 3i32}) endfn
+fn f takes {{a b}: {I32 I32}} returns r: I32 do return I32.add(a b) endfn

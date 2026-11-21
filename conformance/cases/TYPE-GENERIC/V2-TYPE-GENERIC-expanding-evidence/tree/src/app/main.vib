@@ -1,0 +1,27 @@
+fn main returns r: Void do return Walk.go(Seed(0u8) 1u8) endfn
+
+interface Walk
+  fn go(T)
+    takes {x: Self item: T}
+    returns r: Void
+  endfn
+endinterface
+
+fn step(W T)
+  takes {w: W item: T}
+  returns r: Void
+  given {W: Walk}
+  do
+    return Walk.go(w item)
+endfn
+
+type Seed of U8
+  impl Walk
+    fn go(T)
+      takes {x: Self item: T}
+      returns r: Void
+      do
+        return step(x [item])
+    endfn
+  endimpl
+endtype

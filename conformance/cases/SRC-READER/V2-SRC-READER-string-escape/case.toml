@@ -1,0 +1,26 @@
+id = "V2-SRC-READER-string-escape"
+rule = "V2-SRC-READER-string-escape"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#lexical-structure: an unknown escape, a surrogate, and a scalar beyond U+10FFFF"
+
+[inputs]
+data = ["input.vibon"]
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@syntax.invalidStringLiteral"
+level = "@error"
+span = { start = 4, end = 8 }
+
+[[expect.diagnostics]]
+code = "@syntax.invalidStringLiteral"
+level = "@error"
+span = { start = 12, end = 22 }
+
+[[expect.diagnostics]]
+code = "@syntax.invalidStringLiteral"
+level = "@error"
+span = { start = 26, end = 38 }

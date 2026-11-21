@@ -1,0 +1,1 @@
+fn main returns r: I32 do let v be do let x be 1i32 endlet enddo endlet return v endfn

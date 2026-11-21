@@ -1,0 +1,23 @@
+use @app.temp.Celsius enduse
+
+fn show
+  takes {c: Celsius}
+  returns text: Str
+  do
+    return Printable.render(c)
+endfn
+
+interface Printable
+  fn render
+    takes {value: Self}
+    returns text: Str
+  endfn
+  impl Celsius
+    fn render
+      takes {value: Self}
+      returns text: Str
+      do
+        return "warm"
+    endfn
+  endimpl
+endinterface

@@ -1,0 +1,18 @@
+id = "V2-TYPE-NAMES-reserved-binder"
+rule = "V2-TYPE-NAMES-reserved-binder"
+profile = "staticV2"
+operation = "resolve"
+description = "02-type-system.md#the-prelude: binding a prelude name is @name.reservedDeclaration"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@name.reservedDeclaration"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 52, end = 58 }

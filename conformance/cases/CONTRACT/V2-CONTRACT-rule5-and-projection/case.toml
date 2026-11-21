@@ -1,0 +1,12 @@
+id = "V2-CONTRACT-rule5-and-projection"
+rule = "V2-CONTRACT-rule5-and-projection"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#bare-guards: GUARD-5: each operand of a fact Bool.and holds"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

@@ -1,0 +1,18 @@
+id = "V2-TYPE-GENERIC-dict-key-other-bound"
+rule = "V2-TYPE-GENERIC-dict-key-other-bound"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#dict-keys-equality-and-order: a bound other than Ordered does not admit its parameter as a key, even where the dict type is inferred"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.invalidDictKey"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 102, end = 105 }

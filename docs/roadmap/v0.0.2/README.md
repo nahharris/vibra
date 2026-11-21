@@ -1,6 +1,6 @@
 # Vibra v0.0.2
 
-**Planned pre-alpha release.** The language of the active specification runs
+**Pre-alpha release in progress.** The language of the active specification runs
 on the reference interpreter with written effect ceilings and bound grants,
 an agent can inspect, repair, and retest a project through structured tools,
 and one checked slice runs as native code.
@@ -8,7 +8,7 @@ and one checked slice runs as native code.
 | Order | Milestone | Evidence |
 | --- | --- | --- |
 | M0 | [Specification and transition](m0/README.md) | No contradictory active rule; every supported form has a test, diagnostic, and schema owner; Windows file-scope feasibility recorded. |
-| M1 | [Pure language](m1/README.md) | The pure language passes its corpus on the interpreter, including static contract discharge and rejection. |
+| M1 | [Pure language](m1/README.md) | The pure language passes its corpus on the interpreter, including static contract discharge and rejection. Exited: [exit record](m1/exit.md). |
 | M2 | [Operations and authority](m2/README.md) | A command-line program runs with bound grants; forbidden and unbound operations are rejected or denied as specified. The model-writing pilot is run. |
 | M3 | [Identity and repair loop](m3/README.md) | An agent starts from a seeded defect, inspects, repairs, and retests it; stale and replaced approvals are rejected. |
 | M4 | [First native slice](m4/README.md) | One new checked slice agrees across interpreter, stepper, and a linked Windows executable. |
@@ -38,12 +38,8 @@ After M0, M1 through M3 are ordered by their gates. Native foundation work
 for M4 that depends only on M0's contracts may proceed alongside them; M4's
 gate is claimed last.
 
-The interpreter is the execution path of this release. The WebAssembly
-backend keeps running the v0.0.1 corpus under the fail-closed transition
-profile of the [runtime chapter](../../spec/06-runtime.md#wasm-transition);
-it is not extended to grants, plans, or the new entry contract. This release
-does not ship `vibra build` and does not claim the clean-machine distribution
-gate.
+The interpreter is the execution path of this release. This release does not
+ship `vibra build` and does not claim the clean-machine distribution gate.
 
 Out of this release: dependency acquisition and locking beyond local inputs,
 MCP and editor adapters, concurrency, network operations, a content-addressed
@@ -60,10 +56,10 @@ optionally reports a metric.
 1. Check, format, and test it. Its tests obtain every grant from
    `TestWorld`.
 2. Run it with `vibra run` under the target's grant bindings. Show: a
-   callback limited to the log grant cannot reach the reader; an unbound
-   optional grant arrives as `Option.none()`; a required grant that cannot
-   be acquired fails startup before the entry runs; a request outside a
-   grant's policy returns a typed denial.
+   callback limited to the log grant cannot reach the reader; an optional
+   grant whose leaf is refused arrives as `Option.none()`; a required grant
+   that cannot be acquired fails startup before the entry runs; a request
+   outside a grant's policy returns a typed denial.
 3. Start from an independently seeded defect and a failing test. Through
    machine-mode CLI only, read the failure, query the declaration, its type,
    contracts, and effects, preview a revision-checked edit, apply it, and

@@ -1,0 +1,12 @@
+id = "V2-TYPE-CONTROL-match-bool"
+rule = "V2-TYPE-CONTROL-match-bool"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#coverage: Bool is covered by the constant patterns true and false"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

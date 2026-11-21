@@ -1,0 +1,28 @@
+let n: U8 be
+  match v
+    case _
+      0u8
+    case 0i32
+      0u8
+    case "a"
+      0u8
+    case 'x'
+      0u8
+    case @ok
+      0u8
+    case Lookup.found(value: v)
+      0u8
+    case User(name: n)
+      0u8
+    case Celsius(c)
+      0u8
+    case Pair(a b)
+      0u8
+    case {p q}
+      0u8
+    case {name: p}
+      0u8
+    case [p q]
+      0u8
+  endmatch
+endlet

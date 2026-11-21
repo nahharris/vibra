@@ -1,0 +1,12 @@
+id = "V2-CONTRACT-member-requires-constant"
+rule = "V2-CONTRACT-member-requires-constant"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#guards-and-callable-types: GUARD-1: a call of a contract member whose requires is bare, at a closed receiver, is the obligation of the implementation the receiver selects, decided over constant arguments"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

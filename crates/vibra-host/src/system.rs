@@ -1,6 +1,6 @@
 //! The system provider of `run`.
 //!
-//! `docs/spec/06-runtime.md`, "The host world": `run` uses the real standard
+//! `docs/spec/06-runtime.md`, "Host world": `run` uses the real standard
 //! streams, filesystem, environment, clocks, and the operating system's random
 //! source. This is the one module of the toolchain's execution crates that reads
 //! ambient state, so that every ambient read of a running program passes through

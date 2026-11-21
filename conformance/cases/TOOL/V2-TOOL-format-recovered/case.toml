@@ -1,0 +1,21 @@
+id = "V2-TOOL-format-recovered"
+rule = "V2-TOOL-format-recovered"
+profile = "toolingV2"
+operation = "format"
+description = "07-diagnostics-and-conformance.md#recovery: an endfn met while the brace of takes is open closes the do expression opened inside the brace and the brace as missing, with one unmatched delimiter at the closer related to the innermost opener, the do; the formatter keeps the recovered bytes"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+source = "tree/src/app/main.vib"
+
+[expect]
+verdict = "refuted"
+formatted = "formatted.vib"
+
+[[expect.diagnostics]]
+code = "@syntax.unmatchedDelimiter"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 46, end = 51 }
+related = [{ source = "src/app/main.vib", span = { start = 34, end = 36 } }]

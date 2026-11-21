@@ -1,0 +1,12 @@
+id = "V2-TYPE-GENERIC-contract-same-instance"
+rule = "V2-TYPE-GENERIC-contract-same-instance"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#generics: a contract call that selects its own implementation at the same receiver hands every parameter on unchanged"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

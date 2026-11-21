@@ -1,0 +1,16 @@
+id = "V2-SRC-DECL-type-both-of-and-case"
+rule = "V2-SRC-DECL-type-both-of-and-case"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#type: a type with both of and a case is an invalid form over the form"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@syntax.invalidForm"
+level = "@error"
+span = { start = 0, end = 27 }

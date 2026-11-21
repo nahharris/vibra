@@ -1,0 +1,12 @@
+id = "V2-TYPE-NOMINAL-field-read"
+rule = "V2-TYPE-NOMINAL-field-read"
+profile = "interpreterV2"
+operation = "interpret"
+description = "01-source-language.md#names-and-paths: a field read on a declared record yields the field"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

@@ -1,0 +1,12 @@
+id = "V2-TYPE-INTERFACE-fold-member-local"
+rule = "V2-TYPE-INTERFACE-fold-member-local"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#dispatch: Iter.fold(once initial step) selects the impl Iter in Once and infers the member-local Acc from initial and step"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

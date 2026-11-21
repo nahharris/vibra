@@ -31,8 +31,8 @@ mod context;
 mod host;
 pub mod store;
 
-use vibra_ir::boundary::TrapCode;
-use vibra_ir::external::host::{HOST_REGISTRY_MINOR, host_row};
+use vibra_ir_v1::boundary::TrapCode;
+use vibra_ir_v1::external::host::{HOST_REGISTRY_MINOR, host_row};
 
 pub use arith::IntOp;
 pub use context::{Context, Halt, ScalarOp, Stats, Trap};

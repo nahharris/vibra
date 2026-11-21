@@ -1,0 +1,18 @@
+id = "V2-CONTRACT-constant-construction-err"
+rule = "V2-CONTRACT-constant-construction-err"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#guards-with-else: a let pattern Result.ok over a constant construction the checker evaluates to err is refutable"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@pattern.refutableBinding"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 30, end = 49 }

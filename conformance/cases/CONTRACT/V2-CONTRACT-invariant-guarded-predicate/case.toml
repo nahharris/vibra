@@ -1,0 +1,18 @@
+id = "V2-CONTRACT-invariant-guarded-predicate"
+rule = "V2-CONTRACT-invariant-guarded-predicate"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#bare-guards: GUARD-2: a type invariant whose named predicate has a guard with else supplies the predicate call, not its body, so it does not establish the body's comparison"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "unknown"
+[[expect.diagnostics]]
+code = "@contract.unproved"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 362, end = 370 }
+related = [{ source = "src/app/main.vib", span = { start = 183, end = 186 } }]

@@ -1,0 +1,12 @@
+id = "V2-CONTRACT-int6"
+rule = "V2-CONTRACT-int6"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "07-diagnostics-and-conformance.md#integer-facts: INT-6: x < y and y <= z give x < z"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

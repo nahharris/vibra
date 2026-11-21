@@ -1,0 +1,2 @@
+type Celsius of F64 endtype
+fn main returns r: F64 do return F64.add(Celsius(1.0f64) 2.0f64) endfn

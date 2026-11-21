@@ -1,0 +1,1 @@
+fn f takes {o: Option(I32)} returns r: I32 do let v be try o endlet return v endfn

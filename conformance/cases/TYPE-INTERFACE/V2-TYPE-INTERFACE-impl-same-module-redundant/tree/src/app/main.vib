@@ -1,0 +1,18 @@
+fn main returns r: I32 do return 1i32 endfn
+
+type Celsius of I32 endtype
+
+interface Printable
+  fn render
+    takes {value: Self}
+    returns text: Str
+  endfn
+  impl Celsius
+    fn render
+      takes {value: Self}
+      returns text: Str
+      do
+        return "warm"
+    endfn
+  endimpl
+endinterface

@@ -1,0 +1,6 @@
+fn main returns r: I64 do return first(splitCents(Cents(10i64) 0i32)) endfn
+type Cents of I64 endtype
+type SplitError case noParts endtype
+fn splitCents takes {total: Cents parts: I32} labelled {roundUp: Bool be false} returns shares: Result(List(Cents) SplitError) requires Ordered.greaterOrEqual(parts 1i32) else Result.err(error: SplitError.noParts()) do return Result.ok(value: divide(total parts roundUp: roundUp)) endfn
+fn divide takes {total: Cents parts: I32} labelled {roundUp: Bool be false} returns shares: List(Cents) do return [total] endfn
+fn first takes {shares: Result(List(Cents) SplitError)} returns cents: I64 do match shares case Result.ok(value: [Cents(raw)]) return raw case Result.ok(value: _) return -1i64 case Result.err(error: SplitError.noParts()) return -2i64 endmatch endfn

@@ -1,0 +1,12 @@
+id = "V2-SRC-FMT-idempotence-9"
+rule = "V2-SRC-FMT-idempotence"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#canonical-format: formatting is idempotent; a one-line project document: its targets list does not fit and breaks one entry per line"
+
+[inputs]
+data = ["input.vibon"]
+
+[expect]
+verdict = "accepted"
+formatted = "formatted.vibon"

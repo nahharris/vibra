@@ -1,1 +1,8 @@
-(record format: @project.v1 package: (record name: "seed" version: "0.1.0"))
+{
+  name: "seed"
+  count: 3u64
+  ratio: 1.5e-3f64
+  tags: [@a @b.c]
+  index: ["k": 'x' "\u{41}": "a\tb"]
+  empty: [:]
+}

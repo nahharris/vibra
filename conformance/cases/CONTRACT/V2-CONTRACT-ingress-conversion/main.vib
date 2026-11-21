@@ -1,0 +1,13 @@
+type PositiveError case notPositive endtype
+type Positive of I32
+  where fn takes {raw: I32} returns ok: Bool do return Ordered.greater(raw 0i32) endfn else PositiveError.notPositive()
+  impl TryFrom(I32)
+    type Error of PositiveError endtype
+    fn convert takes {value: I32} returns converted: Result(Self PositiveError) do return Positive(value) endfn
+  endimpl
+endtype
+fn main returns r: {Result(Positive PositiveError) Result(Positive PositiveError)} do
+  let a: Result(Positive PositiveError) be TryFrom.convert(0i32) endlet
+  let b: Result(Positive PositiveError) be TryFrom.convert(1i32) endlet
+  return {a b}
+endfn

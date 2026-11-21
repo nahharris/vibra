@@ -1,0 +1,2 @@
+fn h takes {a: I32 b: I32} returns r: I32 requires Bool.and(Ordered.greater(a 0i32) Ordered.greater(b 0i32)) do return a endfn
+fn f takes {a: I32 b: I32} returns r: I32 do if Ordered.greater(a 0i32) then if Ordered.greater(b 0i32) then return h(a b) else return 0i32 endif else return 0i32 endif endfn

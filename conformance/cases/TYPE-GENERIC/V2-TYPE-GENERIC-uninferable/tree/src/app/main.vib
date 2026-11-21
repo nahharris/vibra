@@ -1,0 +1,2 @@
+fn make(T) returns r: Option(T) do return Option.none() endfn
+fn main returns r: I32 do make() return 1i32 endfn

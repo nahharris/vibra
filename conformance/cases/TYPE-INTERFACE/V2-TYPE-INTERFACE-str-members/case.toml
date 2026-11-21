@@ -1,0 +1,12 @@
+id = "V2-TYPE-INTERFACE-str-members"
+rule = "V2-TYPE-INTERFACE-str-members"
+profile = "interpreterV2"
+operation = "interpret"
+description = "06-runtime.md#character-sequence-and-dictionary-operations: Str.length counts scalars, concat joins, and slice is a half-open scalar range or none"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

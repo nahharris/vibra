@@ -1,0 +1,12 @@
+id = "V2-CONTRACT-no-runtime-check"
+rule = "V2-CONTRACT-no-runtime-check"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#bare-guards: a bare requires discharged at every call runs no check: the call returns its argument"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

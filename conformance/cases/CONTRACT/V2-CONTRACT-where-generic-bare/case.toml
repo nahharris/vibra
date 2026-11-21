@@ -1,0 +1,12 @@
+id = "V2-CONTRACT-where-generic-bare"
+rule = "V2-CONTRACT-where-generic-bare"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#bare-guards: GUARD-1: a constant construction of a generic type with a bare where is decided by its predicate at the construction's type arguments"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

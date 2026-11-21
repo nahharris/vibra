@@ -1,0 +1,19 @@
+id = "V2-TYPE-NAMES-pattern-twice"
+rule = "V2-TYPE-NAMES-pattern-twice"
+profile = "staticV2"
+operation = "resolve"
+description = "01-source-language.md#patterns: a pattern may not bind one name twice; @name.redeclaration at the second binder"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@name.redeclaration"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 61, end = 62 }
+related = [{ source = "src/app/main.vib", span = { start = 59, end = 60 } }]

@@ -1,6 +1,6 @@
-//! The six filesystem operations through both providers (Milestone 4, Step 17).
+//! The six filesystem operations through both providers.
 //!
-//! `docs/spec/06-runtime.md`, "The host registry". Each operation is written once
+//! The major-1 host rows of `vibra_ir::external::host`. Each operation is written once
 //! in `vibra-host`: a call is read from the arguments by [`HostCall::read`], run
 //! by [`perform`], and built back by [`build_reply`]. These tests drive that path
 //! with the reference tree implementation of [`HostValues`], once over the
@@ -54,7 +54,7 @@ fn metadata(kind: &str, size: u64) -> Tree {
 }
 
 fn names(entries: &[&str]) -> Tree {
-    ok(Some(Tree::Array(
+    ok(Some(Tree::List(
         entries
             .iter()
             .map(|name| Tree::Text((*name).to_owned()))
@@ -134,7 +134,7 @@ impl Pair {
 fn reads_of_files_in_both_providers_agree_including_non_ascii_and_the_empty_file() {
     let mut pair = Pair::new(
         "reads",
-        r#"(record format: @host-world.v1 files: (dict "/h.txt" "héllo 😀\n" "/raw.bin" (record kind: @bytes values: (array 0u8 255u8 104u8)) "/empty" ""))"#,
+        r#"{format: @hostWorld.v1 files: ["/h.txt": "héllo 😀\n" "/raw.bin": {kind: @bytes values: [0u8 255u8 104u8]} "/empty": ""]}"#,
     );
     pair.seed(&[
         ("h.txt", Some("héllo 😀\n".as_bytes())),
@@ -152,7 +152,7 @@ fn reads_of_files_in_both_providers_agree_including_non_ascii_and_the_empty_file
     );
     assert_eq!(
         pair.both("fs.read-text", "raw.bin", &[]),
-        fs_err("invalid-text")
+        fs_err("invalidText")
     );
     assert_eq!(pair.both("fs.read-file", "empty", &[]), bytes(&[]));
     assert_eq!(pair.both("fs.read-text", "empty", &[]), text(""));
@@ -172,7 +172,7 @@ fn reads_of_files_in_both_providers_agree_including_non_ascii_and_the_empty_file
 fn entries_are_sorted_by_scalar_order_and_a_stat_has_a_size_only_for_a_file() {
     let mut pair = Pair::new(
         "entries",
-        r#"(record format: @host-world.v1 directories: (array "/box/empty" "/box/Zeta") files: (dict "/box/b" "" "/box/é" "" "/box/a" "" "/box/😀" "" "/box/10" "" "/box/9" "abc"))"#,
+        r#"{format: @hostWorld.v1 directories: ["/box/empty" "/box/Zeta"] files: ["/box/b": "" "/box/é": "" "/box/a": "" "/box/😀": "" "/box/10": "" "/box/9": "abc"]}"#,
     );
     pair.seed(&[
         ("box/empty", None),
@@ -211,49 +211,49 @@ fn entries_are_sorted_by_scalar_order_and_a_stat_has_a_size_only_for_a_file() {
 fn every_error_variant_of_every_row_is_the_same_in_both_providers() {
     let mut pair = Pair::new(
         "errors",
-        r#"(record format: @host-world.v1 files: (dict "/dir/file.txt" "x"))"#,
+        r#"{format: @hostWorld.v1 files: ["/dir/file.txt": "x"]}"#,
     );
     pair.seed(&[("dir/file.txt", Some(b"x"))]);
     for symbol in ["fs.read-file", "fs.read-text", "fs.metadata-stat"] {
         assert_eq!(
             pair.both(symbol, "missing", &[]),
-            fs_err("not-found"),
+            fs_err("notFound"),
             "{symbol}"
         );
         assert_eq!(
             pair.both(symbol, "missing/inner", &[]),
-            fs_err("not-found"),
+            fs_err("notFound"),
             "{symbol}"
         );
         // A file where a directory is needed, as a parent.
         assert_eq!(
             pair.both(symbol, "dir/file.txt/below", &[]),
-            fs_err("not-a-directory"),
+            fs_err("notADirectory"),
             "{symbol}"
         );
     }
     assert_eq!(
         pair.both("fs.read-entries", "missing", &[]),
-        fs_err("not-found")
+        fs_err("notFound")
     );
     assert_eq!(
         pair.both("fs.read-entries", "dir/file.txt", &[]),
-        fs_err("not-a-directory")
+        fs_err("notADirectory")
     );
     assert_eq!(
         pair.both("fs.read-entries", "dir/file.txt/below", &[]),
-        fs_err("not-a-directory")
+        fs_err("notADirectory")
     );
     // A directory where a file is read or replaced.
-    assert_eq!(pair.both("fs.read-file", "dir", &[]), fs_err("not-a-file"));
-    assert_eq!(pair.both("fs.read-text", "dir", &[]), fs_err("not-a-file"));
+    assert_eq!(pair.both("fs.read-file", "dir", &[]), fs_err("notAFile"));
+    assert_eq!(pair.both("fs.read-text", "dir", &[]), fs_err("notAFile"));
     assert_eq!(
         pair.both("fs.write-file", "dir", &[Tree::Bytes(vec![1])]),
-        fs_err("not-a-file")
+        fs_err("notAFile")
     );
     assert_eq!(
         pair.both("fs.write-text", "dir", &[Tree::Text("x".to_owned())]),
-        fs_err("not-a-file")
+        fs_err("notAFile")
     );
     // A missing parent for a write, and a file as the parent of a write.
     assert_eq!(
@@ -262,7 +262,7 @@ fn every_error_variant_of_every_row_is_the_same_in_both_providers() {
             "no/such/dir/f",
             &[Tree::Text("x".to_owned())]
         ),
-        fs_err("not-found")
+        fs_err("notFound")
     );
     assert_eq!(
         pair.both(
@@ -270,7 +270,7 @@ fn every_error_variant_of_every_row_is_the_same_in_both_providers() {
             "dir/file.txt/below",
             &[Tree::Bytes(vec![1])]
         ),
-        fs_err("not-a-directory")
+        fs_err("notADirectory")
     );
     // A NUL is `invalid-path` for every row, and no row traps.
     for symbol in [
@@ -281,12 +281,12 @@ fn every_error_variant_of_every_row_is_the_same_in_both_providers() {
     ] {
         assert_eq!(
             call(&mut pair.system, symbol, &[path("a\0b")]),
-            fs_err("invalid-path"),
+            fs_err("invalidPath"),
             "{symbol}"
         );
         assert_eq!(
             call(&mut pair.world, symbol, &[path("a\0b")]),
-            fs_err("invalid-path"),
+            fs_err("invalidPath"),
             "{symbol}"
         );
     }
@@ -302,7 +302,7 @@ fn every_error_variant_of_every_row_is_the_same_in_both_providers() {
         ] {
             assert_eq!(
                 call(provider, symbol, &[path("\0"), contents.clone()]),
-                fs_err("invalid-path"),
+                fs_err("invalidPath"),
                 "{symbol}"
             );
         }
@@ -314,7 +314,7 @@ fn a_write_creates_or_replaces_the_whole_file_and_a_failed_write_leaves_the_prio
  {
     let mut pair = Pair::new(
         "writes",
-        r#"(record format: @host-world.v1 files: (dict "/log.txt" "zero" "/ro/keep" "kept"))"#,
+        r#"{format: @hostWorld.v1 files: ["/log.txt": "zero" "/ro/keep": "kept"]}"#,
     );
     pair.seed(&[("log.txt", Some(b"zero")), ("ro/keep", Some(b"kept"))]);
     let void = ok(None);
@@ -350,11 +350,11 @@ fn a_write_creates_or_replaces_the_whole_file_and_a_failed_write_leaves_the_prio
     // The operation is not atomic, but a refused write changes nothing here.
     assert_eq!(
         pair.both("fs.write-text", "ro", &[Tree::Text("x".to_owned())]),
-        fs_err("not-a-file")
+        fs_err("notAFile")
     );
     assert_eq!(
         pair.both("fs.write-text", "absent/f", &[Tree::Text("x".to_owned())]),
-        fs_err("not-found")
+        fs_err("notFound")
     );
     assert_eq!(pair.both("fs.read-text", "ro/keep", &[]), text("kept"));
     // The system provider wrote to the real directory, and the world did not:
@@ -410,9 +410,9 @@ fn a_four_mebibyte_file_and_a_path_of_a_thousand_components() {
     let too_long = format!("{root}{}", "/x".repeat(5000));
     let reply = call(&mut system, "fs.read-file", &[path(&too_long)]);
     #[cfg(unix)]
-    assert_eq!(reply, fs_err("invalid-path"));
+    assert_eq!(reply, fs_err("invalidPath"));
     assert!(
-        reply == fs_err("invalid-path") || reply == fs_err("not-found"),
+        reply == fs_err("invalidPath") || reply == fs_err("notFound"),
         "{reply:?}"
     );
 }
@@ -423,19 +423,19 @@ fn a_directory_of_ten_thousand_entries_lists_sorted_in_both_providers() {
     let root = scratch.root();
     let mut system = SystemProvider::new();
     std::fs::create_dir_all(scratch.path().join("many")).expect("directory");
-    let mut world_text = String::from("(record format: @host-world.v1 files: (dict");
+    let mut world_text = String::from("{format: @hostWorld.v1 files: [");
     let mut expected = Vec::new();
     for number in 0..10_000_u32 {
         let name = format!("f{number:05}");
         std::fs::write(scratch.path().join("many").join(&name), []).expect("entry");
-        world_text.push_str(&format!(" \"/many/{name}\" \"\""));
+        world_text.push_str(&format!(" \"/many/{name}\": \"\""));
         expected.push(name);
     }
-    world_text.push_str("))");
+    world_text.push_str("]}");
     let mut world = WorldProvider::new(
         &HostWorld::decode("world.vibon", &world_text).expect("a world"),
     );
-    let expected = ok(Some(Tree::Array(
+    let expected = ok(Some(Tree::List(
         expected.into_iter().map(Tree::Text).collect(),
     )));
     assert_eq!(
@@ -468,7 +468,7 @@ fn a_name_that_is_not_unicode_is_invalid_text() {
     let mut system = SystemProvider::new();
     assert_eq!(
         call(&mut system, "fs.read-entries", &[path(&scratch.root())]),
-        fs_err("invalid-text")
+        fs_err("invalidText")
     );
 }
 
@@ -496,14 +496,14 @@ fn a_refusal_by_the_host_is_permission_denied() {
     let reply = call(&mut system, "fs.read-file", std::slice::from_ref(&at));
     // A process that may read any file (root) cannot be refused.
     if std::fs::read(&file).is_err() {
-        assert_eq!(reply, fs_err("permission-denied"));
+        assert_eq!(reply, fs_err("permissionDenied"));
         assert_eq!(
             call(
                 &mut system,
                 "fs.write-text",
                 &[at, Tree::Text("y".to_owned())]
             ),
-            fs_err("permission-denied")
+            fs_err("permissionDenied")
         );
     }
 }

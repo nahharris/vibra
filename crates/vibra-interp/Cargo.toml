@@ -1,18 +1,16 @@
 [package]
 name = "vibra-interp"
-description = "Deterministic reference execution for checked Vibra IR."
+description = "The reference interpreter of Vibra over the checked IR."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-publish = false
+publish.workspace = true
 
 [dependencies]
 vibra-diagnostics.workspace = true
-vibra-host.workspace = true
 vibra-ir.workspace = true
-vibra-native.workspace = true
 
 [lints]
 workspace = true

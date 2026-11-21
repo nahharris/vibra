@@ -1,0 +1,6 @@
+fn main returns r: I32 do match Positive(0i32) case Result.ok(value: p) return unwrap(p) case Result.err(error: e) return errorCode(e) endmatch endfn
+fn errorCode takes {e: PositiveError} returns r: I32 do match e case PositiveError.notPositive() return 42i32 endmatch endfn
+type PositiveError case notPositive endtype
+type Positive of I32 where fn takes {raw: I32} returns ok: Bool do return Ordered.greater(raw 0i32) endfn else PositiveError.notPositive() endtype
+fn unwrap takes {p: Positive} returns raw: I32 do let Positive(raw) be p endlet return raw endfn
+fn code takes {p: Result(Positive PositiveError)} returns r: I32 do match p case Result.ok(value: q) return unwrap(q) case Result.err(error: PositiveError.notPositive()) return -1i32 endmatch endfn

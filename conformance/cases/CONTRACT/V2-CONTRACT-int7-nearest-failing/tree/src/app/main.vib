@@ -1,0 +1,2 @@
+fn leReq takes {a: I32 b: I32} returns r: I32 requires Ordered.lessOrEqual(a b) do return a endfn
+fn f takes {x: I32 y: I32 z: I32} returns r: I32 do if Ordered.lessOrEqual(x y) then return if Ordered.lessOrEqual(z y) then leReq(x z) else 0i32 endif else return 0i32 endif endfn

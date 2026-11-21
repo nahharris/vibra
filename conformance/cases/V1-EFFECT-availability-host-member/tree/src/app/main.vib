@@ -1,4 +1,0 @@
-(deffect audit
-  (defn record (message str) void
-    external: @host
-    symbol: "audit.record"))

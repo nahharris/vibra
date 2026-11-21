@@ -1,0 +1,2 @@
+type Celsius of F64 endtype
+fn f returns r: I32 do let g: Fn({F64} Celsius) be Celsius endlet return 1i32 endfn

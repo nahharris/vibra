@@ -1,0 +1,18 @@
+fn main returns r: I32 do return 1i32 endfn
+
+type Rank of U8
+  impl Ordered
+    fn compare
+      takes {left: Self right: Self}
+      returns order: Ordering
+      do
+        return Ordering.equal()
+    endfn
+    fn less
+      takes {left: Self right: Self}
+      returns less: Bool
+      do
+        return false
+    endfn
+  endimpl
+endtype

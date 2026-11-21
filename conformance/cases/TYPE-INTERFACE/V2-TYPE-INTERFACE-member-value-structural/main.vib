@@ -1,0 +1,1 @@
+fn main returns r: {Bool Bool} do let eq: Fn({{I32 I32} {I32 I32}} Bool) be Equatable.equal endlet return {eq({1i32 2i32} {1i32 2i32}) eq({1i32 2i32} {2i32 1i32})} endfn

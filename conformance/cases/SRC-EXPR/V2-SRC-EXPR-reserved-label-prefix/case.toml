@@ -1,0 +1,12 @@
+id = "V2-SRC-EXPR-reserved-label-prefix"
+rule = "V2-SRC-EXPR-reserved-label-prefix"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#reserved-words: a label that begins with a reserved word but is longer is an identifier, kept on one line"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "accepted"
+formatted = "formatted.vib"

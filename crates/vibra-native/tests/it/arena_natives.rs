@@ -1,8 +1,8 @@
-//! The natives over linear memory (milestone 4 Step 8b), without an engine.
+//! The natives over arena memory.
 //!
 //! These tests lay arena objects out by hand, in the layout of
-//! `vibra_ir::arena`, and call each native as the runner does. They hold the
-//! protocol the import table states: a row measures with no destination and
+//! `vibra_ir::arena`, and call each native as a runtime does. They hold the
+//! protocol the table of native rows states: a row measures with no destination and
 //! fills the one it is given, takes one `dup` for each reference it copies,
 //! and refuses an operand that is not an object of the row, instead of reading
 //! outside the memory.
@@ -22,10 +22,10 @@ impl Heap {
         self.put(at + 24, bytes);
     }
 
-    /// An array of cells `(class, bits)`.
+    /// A list of cells `(class, bits)`.
     fn cells(&mut self, at: usize, cells: &[(u8, u64)]) {
         let len = u32::try_from(cells.len()).unwrap();
-        self.header(at, kind::ARRAY, 8, len);
+        self.header(at, kind::LIST, 8, len);
         let first = at + usize::try_from(arena::cells_offset(len)).unwrap();
         for (index, (class, bits)) in cells.iter().enumerate() {
             self.put(at + 24 + index, &[*class]);
@@ -91,36 +91,25 @@ fn a_partial_row_measures_minus_one_when_it_has_no_object() {
 }
 
 #[test]
-fn a_native_that_orders_answers_minus_one_zero_or_one() {
-    let mut heap = Heap::new();
-    heap.text(A, "ab");
-    heap.text(B, "b");
-    let (a, b) = (A as i64, B as i64);
-    assert_eq!(heap.run(CompilerIntrinsic::StrCompare, &[a, b]), Ok(-1));
-    assert_eq!(heap.run(CompilerIntrinsic::StrCompare, &[b, a]), Ok(1));
-    assert_eq!(heap.run(CompilerIntrinsic::StrCompare, &[a, a]), Ok(0));
-}
-
-#[test]
-fn building_an_array_takes_one_dup_for_each_reference_it_copies() {
+fn building_a_list_takes_one_dup_for_each_reference_it_copies() {
     let mut heap = Heap::new();
     // Two elements, the first a reference to the text at B.
     heap.text(B, "x");
     heap.cells(A, &[(class::REF, B as u64), (class::I32, 7)]);
-    heap.header(OUT, kind::ARRAY, 8, 3);
+    heap.header(OUT, kind::LIST, 8, 3);
     let appended = heap.run(
-        CompilerIntrinsic::ArrayAppend,
+        CompilerIntrinsic::ListAppend,
         &[A as i64, B as i64, i64::from(class::REF), OUT as i64],
     );
     assert_eq!(appended, Ok(3));
     // The copy of the first element and the appended one are two more counts of
-    // the text, and the source array keeps its own.
+    // the text, and the source list keeps its own.
     assert_eq!(heap.count(B), 1 + 2);
     assert_eq!(heap.count(A), 1);
     // Measuring takes no count.
     let before = heap.count(B);
     assert_eq!(
-        heap.run(CompilerIntrinsic::ArrayConcat, &[A as i64, A as i64, 0]),
+        heap.run(CompilerIntrinsic::ListConcat, &[A as i64, A as i64, 0]),
         Ok(4)
     );
     assert_eq!(heap.count(B), before);
@@ -131,24 +120,21 @@ fn an_operand_that_is_not_an_object_of_the_row_is_a_fault_and_never_a_read() {
     let mut heap = Heap::new();
     heap.text(A, "abc");
     heap.bytes(B, &[1, 2]);
-    let compare = |heap: &mut Heap, left: i64, right: i64| {
-        heap.run(CompilerIntrinsic::StrCompare, &[left, right])
+    let equal = |heap: &mut Heap, left: i64, right: i64| {
+        heap.run(CompilerIntrinsic::StrEqual, &[left, right])
     };
     // An offset past the end of the memory, and a header that ends there.
+    assert_eq!(equal(&mut heap, 1 << 20, A as i64), Err(Fault::OutOfBounds));
+    assert_eq!(equal(&mut heap, 4090, A as i64), Err(Fault::OutOfBounds));
+    // A `Bytes` where a `Str` is taken.
     assert_eq!(
-        compare(&mut heap, 1 << 20, A as i64),
-        Err(Fault::OutOfBounds)
-    );
-    assert_eq!(compare(&mut heap, 4090, A as i64), Err(Fault::OutOfBounds));
-    // `bytes` where a `str` is taken.
-    assert_eq!(
-        compare(&mut heap, B as i64, A as i64),
+        equal(&mut heap, B as i64, A as i64),
         Err(Fault::WrongObject)
     );
     // A header whose length reaches past its block.
     heap.header(OUT, kind::STR, 4, 1000);
     assert_eq!(
-        compare(&mut heap, OUT as i64, A as i64),
+        equal(&mut heap, OUT as i64, A as i64),
         Err(Fault::OutOfBounds)
     );
     // A destination that is not sized to the result.

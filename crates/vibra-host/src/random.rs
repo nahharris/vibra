@@ -1,6 +1,6 @@
 //! The deterministic generator of a host world: SplitMix64.
 //!
-//! `docs/spec/06-runtime.md`, "The host world": the generator is SplitMix64
+//! `docs/spec/06-runtime.md`, "Host world": the generator is SplitMix64
 //! started from `seed`. A call for `count` bytes takes `ceil(count / 8)` outputs
 //! in turn, writes each as 8 little-endian bytes, and keeps the first `count`
 //! of them. The state continues across calls, and the unused bytes of a call are

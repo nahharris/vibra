@@ -1,0 +1,12 @@
+id = "V2-CONTRACT-in-range-relation"
+rule = "V2-CONTRACT-in-range-relation"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "07-diagnostics-and-conformance.md#integer-facts: Ordered.inRange(x low high) is read as low <= x and x <= high"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

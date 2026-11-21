@@ -1,0 +1,8 @@
+fn main returns r: Str do return Printable.render(1i32) endfn
+
+interface Printable
+  fn render
+    takes {value: Self}
+    returns text: Str
+  endfn
+endinterface

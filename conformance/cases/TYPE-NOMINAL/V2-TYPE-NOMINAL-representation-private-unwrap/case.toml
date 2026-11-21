@@ -1,0 +1,19 @@
+id = "V2-TYPE-NOMINAL-representation-private-unwrap"
+rule = "V2-TYPE-NOMINAL-representation-private-unwrap"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#representation-visibility: a private representation cannot be unwrapped by a let pattern from another module"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@name.inaccessibleRepresentation"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 76, end = 87 }
+related = [{ source = "src/app/model.vib", span = { start = 5, end = 10 } }]

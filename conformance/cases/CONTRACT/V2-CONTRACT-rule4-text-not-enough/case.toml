@@ -1,0 +1,19 @@
+id = "V2-CONTRACT-rule4-text-not-enough"
+rule = "V2-CONTRACT-rule4-text-not-enough"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#bare-guards: GUARD-4: two predicates written alike are the same only when they denote the same declaration"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "unknown"
+
+[[expect.diagnostics]]
+code = "@contract.unproved"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 250, end = 258 }
+related = [{ source = "src/app/main.vib", span = { start = 106, end = 111 } }]

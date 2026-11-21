@@ -1,0 +1,12 @@
+id = "V2-TYPE-INTERFACE-impl-in-interface"
+rule = "V2-TYPE-INTERFACE-impl-in-interface"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#implementations: an impl nested in an interface for a type of another module is selected by dispatch"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

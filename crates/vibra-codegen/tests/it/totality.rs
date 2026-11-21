@@ -10,8 +10,8 @@ use vibra_exec::{
     BlockId, Callee, ConstId, Constant, FuncId, GlobalId, Inst, ObjectKind, OriginId,
     Program, ScalarClass, ScalarOp, Slot, Terminator, verified,
 };
-use vibra_ir::boundary::TrapCode;
-use vibra_ir::external::CompilerIntrinsic;
+use vibra_ir_v1::boundary::TrapCode;
+use vibra_ir_v1::external::CompilerIntrinsic;
 
 use crate::programs::{block, build, constant, function, host, program, ret, scalar};
 use crate::{TARGETS, inputs};
@@ -242,7 +242,7 @@ fn terminators() -> Vec<Terminator> {
             args: Vec::new(),
         },
         Terminator::Host {
-            row: vibra_ir::external::host::host_row("io.stdin-text").expect("row"),
+            row: vibra_ir_v1::external::host::host_row("io.stdin-text").expect("row"),
             args: Vec::new(),
             dst: slot,
             resume: target,

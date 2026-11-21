@@ -1,0 +1,21 @@
+interface Holder
+  type Item endtype
+  fn first takes {value: Self} returns r: Item endfn
+  fn weigh takes {value: Self item: Item} returns r: I32 endfn
+endinterface
+type Box of I32
+  impl Holder
+    type Item of I32 endtype
+    fn first takes {value: Self} returns r: I32 do let Box(x) be value endlet return x endfn
+    fn weigh takes {value: Self item: I32} returns r: I32 do return I32.add(item 1i32) endfn
+  endimpl
+endtype
+type Flag of Bool
+  impl Holder
+    type Item of Bool endtype
+    fn first takes {value: Self} returns r: Bool do let Flag(x) be value endlet return x endfn
+    fn weigh takes {value: Self item: Bool} returns r: I32 do if item then return 10i32 else return 20i32 endif endfn
+  endimpl
+endtype
+fn weight(T) takes {t: T} returns r: I32 given {T: Holder} do return Holder.weigh(t 1i32) endfn
+fn main returns r: I32 do return weight(Box(4i32)) endfn

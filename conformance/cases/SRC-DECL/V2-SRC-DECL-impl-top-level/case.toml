@@ -1,0 +1,16 @@
+id = "V2-SRC-DECL-impl-top-level"
+rule = "V2-SRC-DECL-impl-top-level"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#impl: an impl at the top level is an invalid form over the form"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@syntax.invalidForm"
+level = "@error"
+span = { start = 0, end = 22 }

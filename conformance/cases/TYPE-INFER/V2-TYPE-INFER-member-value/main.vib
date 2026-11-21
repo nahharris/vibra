@@ -1,0 +1,2 @@
+type U of {n: List(I32)} fn len takes {u: Self} returns r: U64 do return List.length(u.n) endfn endtype
+fn main returns r: U64 do let f be U.len endlet return f(U(n: [1i32 2i32])) endfn

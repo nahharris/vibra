@@ -1,0 +1,12 @@
+id = "V2-SRC-READER-golden-labelled"
+rule = "V2-SRC-READER-golden-labelled"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#fn-and-proc: the labelled section is a @labelled node inside the @signature"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "accepted"
+tree = "tree.vibon"

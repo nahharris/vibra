@@ -1,0 +1,16 @@
+id = "V2-SRC-READER-data-extension"
+rule = "V2-SRC-READER-data-extension"
+profile = "readerV2"
+operation = "reader"
+description = "04-programs-and-packages.md#vibon-data-documents: a data document is a .vibon file; the loader reads nothing else"
+
+[inputs]
+data = ["input.vib"]
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@data.invalidExtension"
+level = "@error"
+span = { start = 0, end = 0 }

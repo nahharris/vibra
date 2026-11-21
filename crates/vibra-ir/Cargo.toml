@@ -1,6 +1,6 @@
 [package]
 name = "vibra-ir"
-description = "Checked semantic types, values, origins, and program IR for Vibra."
+description = "The checked IR of Vibra: types, values, expressions, and their canonical encodings."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

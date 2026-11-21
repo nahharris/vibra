@@ -1,0 +1,2 @@
+fn count takes {n: I32 acc: I32} returns r: I32 do if Equatable.equal(n 0i32) then return acc else return count(I32.sub(n 1i32) I32.add(acc 1i32)) endif endfn
+fn main returns r: I32 do return count(10000000i32 0i32) endfn

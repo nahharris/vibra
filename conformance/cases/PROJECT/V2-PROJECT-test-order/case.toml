@@ -1,0 +1,13 @@
+id = "V2-PROJECT-test-order"
+rule = "V2-PROJECT-test-order"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "04-programs-and-packages.md#tests: tests are discovered by module path bytes, then in declaration order"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

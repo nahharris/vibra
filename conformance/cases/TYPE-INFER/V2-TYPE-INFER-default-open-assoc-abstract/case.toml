@@ -1,0 +1,12 @@
+id = "V2-TYPE-INFER-default-open-assoc-abstract"
+rule = "V2-TYPE-INFER-default-open-assoc-abstract"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#constant-expressions-and-constant-patterns: a contract member's labelled default of a type that mentions an associated type matches the implementation's default under its choice"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

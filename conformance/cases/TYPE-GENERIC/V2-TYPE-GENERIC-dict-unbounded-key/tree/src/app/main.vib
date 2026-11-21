@@ -1,0 +1,6 @@
+fn one(K V)
+  takes {key: K value: V}
+  returns single: Dict(K V)
+  do
+    return [key: value]
+endfn

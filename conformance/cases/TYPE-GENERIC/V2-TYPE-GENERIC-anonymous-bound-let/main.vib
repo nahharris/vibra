@@ -1,0 +1,4 @@
+fn main returns r: I32 do
+  let larger be fn(T) takes {a: T b: T} returns m: T given {T: Ordered} do if Ordered.greater(a b) then return a else return b endif endfn endlet
+  if larger(Bool.false() Bool.true()) then return larger(3i32 7i32) else return 0i32 endif
+endfn

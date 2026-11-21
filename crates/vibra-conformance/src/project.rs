@@ -1,79 +1,87 @@
-//! Static-v1 project-schema conformance adapter.
+//! The `projectDecode` and `sourceGraph` operations under `staticV2`.
+//!
+//! `docs/spec/07-diagnostics-and-conformance.md`, "Case operations and
+//! inputs": a `projectDecode` case has exactly one `project.vibon` and
+//! observes the typed decode and its diagnostics, with no discovery; a
+//! `sourceGraph` case has one confined tree with its `project.vibon` and
+//! observes the `@sourceGraph.v1` snapshot.
 
-use vibra_fmt::format_document;
-use vibra_syntax::parse_data;
-use vibra_workspace::project::{ProjectDecoder, ProjectOrigin};
+use vibra_workspace::{
+    PROJECT_FILE_NAME, SourceGraph, SourceSnapshot, decode_project, discover_project_at,
+};
 
 use crate::corpus::Case;
-use crate::manifest::ConformanceOperation;
-use crate::runner::{CaseObservation, HandlerError, ProfileHandler};
+use crate::manifest::Verdict;
+use crate::profile::{
+    CaseObservation, ConformanceOperation, HandlerError, ProfileHandler,
+};
 
-/// Runs the pure M2 project decoder without a filesystem or source graph.
-///
-/// The handler deliberately accepts only a declared project input. It reads
-/// the case fixture, lets the extension-selected data loader validate the
-/// generic VIBON grammar, then passes the resulting tree and case-relative
-/// source identity to `vibra-workspace`. No path is opened by the decoder.
+/// No module is embedded in this release, so no project module collides
+/// with an embedded source identity.
+const EMBEDDED_SOURCE_IDS: &[&str] = &[];
+
+fn refuted(diagnostics: Vec<vibra_diagnostics::Diagnostic>) -> CaseObservation {
+    let mut observation = CaseObservation::new(Verdict::Refuted);
+    observation.diagnostics = diagnostics;
+    observation
+}
+
+/// The `projectDecode` handler: decodes the declared `project.vibon` alone.
 #[derive(Clone, Copy, Debug, Default)]
-pub struct StaticV1ProjectHandler;
+pub struct ProjectDecodeHandler;
 
-impl ProfileHandler for StaticV1ProjectHandler {
+impl ProfileHandler for ProjectDecodeHandler {
     fn can_run(&self, case: &Case) -> bool {
         case.manifest().operation == ConformanceOperation::ProjectDecode
     }
 
     fn run(&self, case: &Case) -> Result<CaseObservation, HandlerError> {
-        let relative = case.manifest().inputs.project.as_ref().ok_or_else(|| {
-            HandlerError::new("static-v1 project case needs a project input")
-        })?;
-        let source = case
-            .read_file(relative)
+        let inputs = &case.manifest().inputs;
+        let (Some(project), None, [], None) = (
+            &inputs.project,
+            &inputs.source,
+            inputs.data.as_slice(),
+            &inputs.tree,
+        ) else {
+            return Err(HandlerError::new(
+                "a projectDecode case declares exactly one project document",
+            ));
+        };
+        let bytes = case
+            .read_bytes(project)
             .map_err(|error| HandlerError::new(error.to_string()))?;
-        let path = case
-            .file(relative)
-            .map_err(|error| HandlerError::new(error.to_string()))?;
-        let document = parse_data(&path, &source)
-            .map_err(|error| HandlerError::new(error.to_string()))?;
-        let mut diagnostics = document
-            .diagnostics()
-            .iter()
-            .cloned()
-            .map(|diagnostic| diagnostic.with_source_id(relative.as_str()))
-            .collect::<Vec<_>>();
-        let mut accepted = document.accepted();
-        let mut formatted = document.data().map(|_| format_document(&document));
+        Ok(match decode_project(PROJECT_FILE_NAME, &bytes) {
+            Ok(_) => CaseObservation::new(Verdict::Accepted),
+            Err(diagnostics) => refuted(diagnostics),
+        })
+    }
+}
 
-        if let Some(root) = document.data() {
-            let decoded = ProjectDecoder::decode(root, ProjectOrigin::new(relative));
-            accepted &= decoded.accepted();
-            diagnostics.extend(decoded.diagnostics().iter().cloned());
-            if let Some(project) = decoded.project() {
-                formatted = Some(project.canonical_vibon());
-            }
-        } else {
-            accepted = false;
-        }
+/// The `sourceGraph` handler: captures the declared tree as a project root,
+/// searching no ancestor, and observes its graph.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SourceGraphHandler;
 
-        if let Some(output) = &formatted {
-            let reparsed = parse_data(&path, output)
-                .map_err(|error| HandlerError::new(error.to_string()))?;
-            if !reparsed.accepted() {
-                return Err(HandlerError::new(
-                    "project formatter output is not accepted by the data loader",
-                ));
-            }
-            if format_document(&reparsed) != *output {
-                return Err(HandlerError::new(
-                    "project formatter output is not idempotent",
-                ));
-            }
-        }
+impl ProfileHandler for SourceGraphHandler {
+    fn can_run(&self, case: &Case) -> bool {
+        case.manifest().operation == ConformanceOperation::SourceGraph
+    }
 
-        Ok(CaseObservation {
-            accepted,
-            diagnostics,
-            formatted,
-            ..CaseObservation::default()
+    fn run(&self, case: &Case) -> Result<CaseObservation, HandlerError> {
+        let tree = case
+            .tree_directory()
+            .map_err(|error| HandlerError::new(error.to_string()))?
+            .ok_or_else(|| HandlerError::new("a sourceGraph case declares one tree"))?;
+        let graph = discover_project_at(&tree)
+            .and_then(SourceSnapshot::capture)
+            .and_then(|snapshot| SourceGraph::build(&snapshot, EMBEDDED_SOURCE_IDS));
+        Ok(match graph {
+            Ok(graph) => {
+                let mut observation = CaseObservation::new(Verdict::Accepted);
+                observation.graph = Some(graph.canonical_text());
+                observation
+            }
+            Err(diagnostics) => refuted(diagnostics),
         })
     }
 }

@@ -1,0 +1,19 @@
+id = "V2-TYPE-GENERIC-bound-impl-target-parameter"
+rule = "V2-TYPE-GENERIC-bound-impl-target-parameter"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#implementations: a parameter of the enclosing type has no bound, so an impl target argument naming it breaks a bounded interface parameter"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.unsatisfiedBound"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 172, end = 173 }
+related = [{ source = "src/app/main.vib", span = { start = 30, end = 37 } }]

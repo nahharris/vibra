@@ -1,7 +1,9 @@
-//! The `@host-world.v1` decoder, the default world, and the world provider
-//! (Milestone 4, Step 16a; ledger D20).
+//! The `@hostWorld.v1` decoder, the default world, and the world provider
+//! in the data grammar.
 //!
-//! `docs/spec/06-runtime.md`, "The host world".
+//! `docs/spec/06-runtime.md`, "Host world"; the order of the diagnostics is
+//! that of `docs/spec/04-programs-and-packages.md`, "Schemas": the grammar,
+//! then the format, then the shape and the values.
 
 use vibra_diagnostics::DiagnosticCode;
 use vibra_host::{
@@ -11,7 +13,7 @@ use vibra_host::{
 
 use crate::support::{done, provider, world};
 
-const DEFAULT_WORLD: &str = "(record format: @host-world.v1)\n";
+const DEFAULT_WORLD: &str = "{format: @hostWorld.v1}\n";
 
 fn codes(text: &str) -> Vec<DiagnosticCode> {
     match HostWorld::decode("world.vibon", text) {
@@ -55,18 +57,18 @@ fn the_default_world_matches_the_runtime_chapter_field_for_field() {
 #[test]
 fn a_world_with_every_field_decodes_and_serves_each_root() {
     let mut p = provider(
-        r#"(record
-  format: @host-world.v1
+        r#"{
+  format: @hostWorld.v1
   stdin: "line one\nline two\n"
-  directories: (array "/empty" "/a/b")
-  files: (dict
-    "/in.txt" "hi"
-    "/data/raw.bin" (record kind: @bytes values: (array 0u8 255u8 16u8))
-    "/data/text.txt" "caf\u{e9}")
-  env: (dict "HOME" "/home/me" "EMPTY" "")
-  args: (array "first" "second")
-  clock: (record wall: 1700000000000000000i64 monotonic: 5u64 step: 10u64)
-  random: (record seed: 1234567u64))
+  directories: ["/empty" "/a/b"]
+  files: [
+    "/in.txt": "hi"
+    "/data/raw.bin": {kind: @bytes values: [0u8 255u8 16u8]}
+    "/data/text.txt": "caf\u{e9}"]
+  env: ["HOME": "/home/me" "EMPTY": ""]
+  args: ["first" "second"]
+  clock: {wall: 1700000000000000000i64 monotonic: 5u64 step: 10u64}
+  random: {seed: 1234567u64}}
 "#,
     );
     assert_eq!(done(p.stdin_text()), Ok("line one\nline two\n".to_owned()));
@@ -107,18 +109,16 @@ fn a_world_with_every_field_decodes_and_serves_each_root() {
 
 #[test]
 fn stdin_may_be_a_bytes_record_and_the_position_ends_after_any_call() {
-    let mut p = provider(
-        "(record format: @host-world.v1 stdin: (record kind: @bytes values: (array 104u8 105u8)))",
-    );
+    let mut p =
+        provider("{format: @hostWorld.v1 stdin: {kind: @bytes values: [104u8 105u8]}}");
     assert_eq!(done(p.stdin_bytes()), Ok(b"hi".to_vec()));
     // A second call returns the empty value.
     assert_eq!(done(p.stdin_bytes()), Ok(Vec::new()));
     assert_eq!(done(p.stdin_text()), Ok(String::new()));
 
     // Invalid UTF-8 as text: `invalid-text`, with the position at the end.
-    let mut bad = provider(
-        "(record format: @host-world.v1 stdin: (record kind: @bytes values: (array 255u8 254u8)))",
-    );
+    let mut bad =
+        provider("{format: @hostWorld.v1 stdin: {kind: @bytes values: [255u8 254u8]}}");
     assert_eq!(done(bad.stdin_text()), Err(IoError::InvalidText));
     assert_eq!(done(bad.stdin_bytes()), Ok(Vec::new()));
 }
@@ -136,10 +136,10 @@ fn output_operations_deliver_and_never_fail_in_a_world() {
 
 fn fs_world() -> WorldProvider {
     provider(
-        r#"(record
-  format: @host-world.v1
-  directories: (array "/dir/sub")
-  files: (dict "/dir/file.txt" "abc" "/top" "t"))
+        r#"{
+  format: @hostWorld.v1
+  directories: ["/dir/sub"]
+  files: ["/dir/file.txt": "abc" "/top": "t"]}
 "#,
     )
 }
@@ -260,8 +260,8 @@ fn metadata_reports_kind_and_a_size_that_is_zero_for_non_files() {
 #[test]
 fn directory_entries_sort_by_unicode_scalar_order() {
     let mut p = provider(
-        r#"(record format: @host-world.v1
-  files: (dict "/b" "" "/B" "" "/\u{e9}" "" "/z" "" "/\u{1d11e}" "" "/a" ""))"#,
+        r#"{format: @hostWorld.v1
+  files: ["/b": "" "/B": "" "/\u{e9}": "" "/z": "" "/\u{1d11e}": "" "/a": ""]}"#,
     );
     // Scalar order, not locale or UTF-16 order: U+1D11E sorts after U+00E9.
     assert_eq!(
@@ -280,7 +280,7 @@ fn a_path_of_many_components_and_a_one_mebibyte_file() {
     }
     let big = "x".repeat(1 << 20);
     let text = format!(
-        "(record format: @host-world.v1 directories: (array \"{deep}\") files: (dict \"/big\" \"{big}\"))"
+        "{{format: @hostWorld.v1 directories: [\"{deep}\"] files: [\"/big\": \"{big}\"]}}"
     );
     let mut p = provider(&text);
     assert_eq!(done(p.read_entries(&deep)), Ok(Vec::new()));
@@ -300,7 +300,7 @@ fn a_path_of_many_components_and_a_one_mebibyte_file() {
 
 #[test]
 fn names_no_environment_can_hold_are_not_present() {
-    let mut p = provider("(record format: @host-world.v1 env: (dict \"A\" \"1\"))");
+    let mut p = provider("{format: @hostWorld.v1 env: [\"A\": \"1\"]}");
     assert_eq!(done(p.env_var("")), Err(EnvError::NotPresent));
     assert_eq!(done(p.env_var("A=B")), Err(EnvError::NotPresent));
     assert_eq!(done(p.env_var("A\0")), Err(EnvError::NotPresent));
@@ -312,7 +312,7 @@ fn names_no_environment_can_hold_are_not_present() {
 #[test]
 fn a_zero_step_keeps_the_monotonic_clock_constant() {
     let mut p = provider(
-        "(record format: @host-world.v1 clock: (record wall: -5i64 monotonic: 7u64 step: 0u64))",
+        "{format: @hostWorld.v1 clock: {wall: -5i64 monotonic: 7u64 step: 0u64}}",
     );
     assert_eq!(done(p.now_wall()), Ok(-5));
     assert_eq!(done(p.now_monotonic()), Ok(7));
@@ -321,15 +321,14 @@ fn a_zero_step_keeps_the_monotonic_clock_constant() {
 
 #[test]
 fn a_monotonic_read_past_the_u64_range_is_unavailable() {
-    let mut p = provider(
-        "(record format: @host-world.v1 clock: (record monotonic: 18446744073709551615u64))",
-    );
+    let mut p =
+        provider("{format: @hostWorld.v1 clock: {monotonic: 18446744073709551615u64}}");
     assert_eq!(done(p.now_monotonic()), Ok(u64::MAX));
     assert_eq!(done(p.now_monotonic()), Err(TimeError::Unavailable));
     assert_eq!(done(p.now_monotonic()), Err(TimeError::Unavailable));
 
     let mut stepped = provider(
-        "(record format: @host-world.v1 clock: (record monotonic: 18446744073709551600u64 step: 10u64))",
+        "{format: @hostWorld.v1 clock: {monotonic: 18446744073709551600u64 step: 10u64}}",
     );
     assert_eq!(
         done(stepped.now_monotonic()),
@@ -347,7 +346,7 @@ fn a_monotonic_read_past_the_u64_range_is_unavailable() {
 
 #[test]
 fn the_clock_record_defaults_each_missing_field() {
-    let mut p = provider("(record format: @host-world.v1 clock: (record step: 3u64))");
+    let mut p = provider("{format: @hostWorld.v1 clock: {step: 3u64}}");
     assert_eq!(done(p.now_wall()), Ok(0));
     assert_eq!(done(p.now_monotonic()), Ok(0));
     assert_eq!(done(p.now_monotonic()), Ok(3));
@@ -357,7 +356,7 @@ fn the_clock_record_defaults_each_missing_field() {
 
 fn outputs(seed: u64, count: usize) -> Vec<u8> {
     let mut p = provider(&format!(
-        "(record format: @host-world.v1 random: (record seed: {seed}u64))"
+        "{{format: @hostWorld.v1 random: {{seed: {seed}u64}}}}"
     ));
     done(p.random_bytes(count as u64)).unwrap()
 }
@@ -405,7 +404,7 @@ fn the_generator_state_continues_across_calls_and_discards_unused_bytes() {
         0x06C4_5D18_8009_454F,
         0xF88B_B8A8_724C_81EC,
     ]);
-    let mut p = provider("(record format: @host-world.v1)");
+    let mut p = provider("{format: @hostWorld.v1}");
     // 3 bytes take one output; its other 5 bytes are discarded.
     assert_eq!(done(p.random_bytes(3)), Ok(all[..3].to_vec()));
     // The next call starts at the second output.
@@ -426,7 +425,7 @@ fn the_world_has_a_generator_so_random_is_never_unavailable_for_small_counts() {
 #[test]
 fn each_provider_is_a_fresh_copy_and_shares_nothing() {
     let shared = world(
-        "(record format: @host-world.v1 stdin: \"in\" files: (dict \"/f\" \"orig\") clock: (record step: 2u64))",
+        "{format: @hostWorld.v1 stdin: \"in\" files: [\"/f\": \"orig\"] clock: {step: 2u64}}",
     );
     let mut first = WorldProvider::new(&shared);
     let mut second = WorldProvider::new(&shared);
@@ -451,67 +450,63 @@ fn each_provider_is_a_fresh_copy_and_shares_nothing() {
 
 #[test]
 fn a_world_that_is_not_a_record_or_has_another_format_is_rejected() {
-    assert_eq!(codes("(array)"), [DiagnosticCode::DataInvalidShape]);
+    assert_eq!(codes("[]"), [DiagnosticCode::DataInvalidShape]);
     assert_eq!(
-        codes("(record format: @host-world.v2)"),
+        codes("{format: @hostWorld.v2}"),
         [DiagnosticCode::DataInvalidValue]
     );
     assert_eq!(
-        codes("(record format: \"host-world.v1\")"),
-        [DiagnosticCode::DataInvalidShape]
+        codes("{format: \"hostWorld.v1\"}"),
+        [DiagnosticCode::DataInvalidValue]
     );
-    assert_eq!(codes("(record)"), [DiagnosticCode::DataInvalidShape]);
+    assert_eq!(codes("{}"), [DiagnosticCode::DataInvalidShape]);
 }
 
 #[test]
 fn an_unknown_field_is_rejected() {
     assert_eq!(
-        codes("(record format: @host-world.v1 network: (array))"),
+        codes("{format: @hostWorld.v1 network: []}"),
         [DiagnosticCode::DataInvalidShape]
     );
     assert_eq!(
-        codes("(record format: @host-world.v1 clock: (record wall: 0i64 sleep: 1u64))"),
+        codes("{format: @hostWorld.v1 clock: {wall: 0i64 sleep: 1u64}}"),
         [DiagnosticCode::DataInvalidShape]
     );
     assert_eq!(
-        codes(
-            "(record format: @host-world.v1 random: (record seed: 0u64 algorithm: @x))"
-        ),
+        codes("{format: @hostWorld.v1 random: {seed: 0u64 algorithm: @x}}"),
         [DiagnosticCode::DataInvalidShape]
     );
 }
 
 #[test]
 fn a_duplicate_key_or_field_is_rejected() {
-    let duplicate_field =
-        codes("(record format: @host-world.v1 stdin: \"a\" stdin: \"b\")");
+    let duplicate_field = codes("{format: @hostWorld.v1 stdin: \"a\" stdin: \"b\"}");
     assert!(!duplicate_field.is_empty());
     let duplicate_key =
-        codes("(record format: @host-world.v1 env: (dict \"A\" \"1\" \"A\" \"2\"))");
+        codes("{format: @hostWorld.v1 env: [\"A\": \"1\" \"A\": \"2\"]}");
     assert!(!duplicate_key.is_empty());
-    let duplicate_file = codes(
-        "(record format: @host-world.v1 files: (dict \"/a\" \"1\" \"/a\" \"2\"))",
-    );
+    let duplicate_file =
+        codes("{format: @hostWorld.v1 files: [\"/a\": \"1\" \"/a\": \"2\"]}");
     assert!(!duplicate_file.is_empty());
 }
 
 #[test]
 fn a_wrong_value_kind_is_rejected() {
     let shapes = [
-        "(record format: @host-world.v1 stdin: 7u8)",
-        "(record format: @host-world.v1 stdin: (array))",
-        "(record format: @host-world.v1 directories: \"/a\")",
-        "(record format: @host-world.v1 directories: (array 1u8))",
-        "(record format: @host-world.v1 files: (array))",
-        "(record format: @host-world.v1 files: (dict \"/a\" 1u8))",
-        "(record format: @host-world.v1 files: (dict 1u8 \"x\"))",
-        "(record format: @host-world.v1 env: (dict \"A\" (array)))",
-        "(record format: @host-world.v1 args: (dict))",
-        "(record format: @host-world.v1 args: (array 3u8))",
-        "(record format: @host-world.v1 clock: 0u64)",
-        "(record format: @host-world.v1 clock: (record wall: \"0\"))",
-        "(record format: @host-world.v1 random: (array))",
-        "(record format: @host-world.v1 random: (record seed: \"0\"))",
+        "{format: @hostWorld.v1 stdin: 7u8}",
+        "{format: @hostWorld.v1 stdin: []}",
+        "{format: @hostWorld.v1 directories: \"/a\"}",
+        "{format: @hostWorld.v1 directories: [1u8]}",
+        "{format: @hostWorld.v1 files: []}",
+        "{format: @hostWorld.v1 files: [\"/a\": 1u8]}",
+        "{format: @hostWorld.v1 files: [1u8: \"x\"]}",
+        "{format: @hostWorld.v1 env: [\"A\": []]}",
+        "{format: @hostWorld.v1 args: [:]}",
+        "{format: @hostWorld.v1 args: [3u8]}",
+        "{format: @hostWorld.v1 clock: 0u64}",
+        "{format: @hostWorld.v1 clock: {wall: \"0\"}}",
+        "{format: @hostWorld.v1 random: []}",
+        "{format: @hostWorld.v1 random: {seed: \"0\"}}",
     ];
     for text in shapes {
         assert_eq!(codes(text), [DiagnosticCode::DataInvalidShape], "{text}");
@@ -522,21 +517,21 @@ fn a_wrong_value_kind_is_rejected() {
 fn a_value_out_of_its_type_is_invalid_value() {
     let values = [
         // The suffix must be the field's type.
-        "(record format: @host-world.v1 clock: (record wall: 0u64))",
-        "(record format: @host-world.v1 clock: (record monotonic: 0i64))",
-        "(record format: @host-world.v1 clock: (record step: 1))",
-        "(record format: @host-world.v1 random: (record seed: 0i64))",
+        "{format: @hostWorld.v1 clock: {wall: 0u64}}",
+        "{format: @hostWorld.v1 clock: {monotonic: 0i64}}",
+        "{format: @hostWorld.v1 clock: {step: 1}}",
+        "{format: @hostWorld.v1 random: {seed: 0i64}}",
         // Out of range.
-        "(record format: @host-world.v1 clock: (record wall: 9223372036854775808i64))",
-        "(record format: @host-world.v1 clock: (record monotonic: 18446744073709551616u64))",
-        "(record format: @host-world.v1 random: (record seed: -1u64))",
+        "{format: @hostWorld.v1 clock: {wall: 9223372036854775808i64}}",
+        "{format: @hostWorld.v1 clock: {monotonic: 18446744073709551616u64}}",
+        "{format: @hostWorld.v1 random: {seed: -1u64}}",
         // A bytes record needs `u8` literals and the right kind.
-        "(record format: @host-world.v1 stdin: (record kind: @bytes values: (array 256u8)))",
-        "(record format: @host-world.v1 stdin: (record kind: @bytes values: (array 1)))",
-        "(record format: @host-world.v1 stdin: (record kind: @text values: (array)))",
+        "{format: @hostWorld.v1 stdin: {kind: @bytes values: [256u8]}}",
+        "{format: @hostWorld.v1 stdin: {kind: @bytes values: [1]}}",
+        "{format: @hostWorld.v1 stdin: {kind: @text values: []}}",
         // A NUL in a path.
-        "(record format: @host-world.v1 directories: (array \"/a\\u{0}b\"))",
-        "(record format: @host-world.v1 files: (dict \"/a\\u{0}b\" \"x\"))",
+        "{format: @hostWorld.v1 directories: [\"/a\\u{0}b\"]}",
+        "{format: @hostWorld.v1 files: [\"/a\\u{0}b\": \"x\"]}",
     ];
     for text in values {
         let found = codes(text);
@@ -549,31 +544,28 @@ fn a_value_out_of_its_type_is_invalid_value() {
         );
     }
     assert_eq!(
-        codes("(record format: @host-world.v1 clock: (record wall: 0u64))"),
+        codes("{format: @hostWorld.v1 clock: {wall: 0u64}}"),
         [DiagnosticCode::DataInvalidValue]
     );
 }
 
 #[test]
 fn an_odd_dict_is_rejected() {
-    assert!(
-        !codes("(record format: @host-world.v1 env: (dict \"A\" \"1\" \"B\"))")
-            .is_empty()
-    );
-    assert!(!codes("(record format: @host-world.v1 files: (dict \"/a\"))").is_empty());
+    assert!(!codes("{format: @hostWorld.v1 env: [\"A\": \"1\" \"B\":]}").is_empty());
+    assert!(!codes("{format: @hostWorld.v1 files: [\"/a\":]}").is_empty());
 }
 
 #[test]
 fn a_path_that_is_both_a_file_and_a_directory_is_invalid_value() {
     for text in [
         // A file that is also an explicit directory.
-        "(record format: @host-world.v1 directories: (array \"/a\") files: (dict \"/a\" \"x\"))",
+        "{format: @hostWorld.v1 directories: [\"/a\"] files: [\"/a\": \"x\"]}",
         // A file that needs another file as its ancestor.
-        "(record format: @host-world.v1 files: (dict \"/a\" \"x\" \"/a/b\" \"y\"))",
+        "{format: @hostWorld.v1 files: [\"/a\": \"x\" \"/a/b\": \"y\"]}",
         // The root is a directory.
-        "(record format: @host-world.v1 files: (dict \"/\" \"x\"))",
+        "{format: @hostWorld.v1 files: [\"/\": \"x\"]}",
         // Two spellings of one path.
-        "(record format: @host-world.v1 files: (dict \"/a\" \"x\" \"/./a\" \"y\"))",
+        "{format: @hostWorld.v1 files: [\"/a\": \"x\" \"/./a\": \"y\"]}",
     ] {
         assert_eq!(codes(text), [DiagnosticCode::DataInvalidValue], "{text}");
     }
@@ -583,7 +575,7 @@ fn a_path_that_is_both_a_file_and_a_directory_is_invalid_value() {
 fn every_diagnostic_names_the_world_document() {
     let diagnostics = HostWorld::decode(
         "cases/world.vibon",
-        "(record format: @host-world.v1 clock: (record wall: 0u64) random: (record seed: \"x\"))",
+        "{format: @hostWorld.v1 clock: {wall: 0u64} random: {seed: \"x\"}}",
     )
     .expect_err("rejected");
     assert!(diagnostics.len() >= 2, "{diagnostics:?}");
@@ -594,12 +586,73 @@ fn every_diagnostic_names_the_world_document() {
 
 #[test]
 fn text_that_is_not_data_is_rejected_with_the_reader_diagnostics() {
-    assert!(
-        HostWorld::decode("world.vibon", "(record format: @host-world.v1").is_err()
-    );
+    assert!(HostWorld::decode("world.vibon", "{format: @hostWorld.v1").is_err());
     assert!(HostWorld::decode("world.vibon", "").is_err());
-    assert!(
-        HostWorld::decode("world.vibon", "(record format: @host-world.v1) (array)")
-            .is_err()
+    assert!(HostWorld::decode("world.vibon", "{format: @hostWorld.v1} []").is_err());
+}
+
+// --- the data grammar -------------------------------------------------------------
+
+/// The example of the runtime chapter, under the format this reader implements.
+const CHAPTER_WORLD: &str = r#"{
+  format: @hostWorld.v1
+  stdin: "x\ny"
+  directories: ["/notes"]
+  files: ["/notes/a.txt": "hello" "/notes/raw.bin": {kind: @bytes values: [0u8 255u8]}]
+  env: ["HOME": "/home/vibra"]
+  args: ["/notes"]
+  clock: {wall: 1700000000000000000i64 monotonic: 0u64 step: 1000u64}
+  random: {seed: 42u64}
+}
+"#;
+
+/// `host_world_decodes_data_grammar`: the document in the data grammar is
+/// the world it describes, whatever its layout, field order, or comments.
+#[test]
+fn host_world_decodes_data_grammar() {
+    let decoded = world(CHAPTER_WORLD);
+    let respelled = world(
+        "// the same world\n{random: {seed: 42u64} clock: {step: 1000u64 wall: \
+         1700000000000000000i64} args: [\"/notes\"] env: [\"HOME\": \"/home/vibra\"] \
+         files: [\"/notes/raw.bin\": {values: [0u8 255u8] kind: @bytes} \
+         \"/notes/a.txt\": \"hel\\u{6C}o\"] directories: [\"/notes\"] stdin: \"x\\ny\" \
+         format: @hostWorld.v1}",
+    );
+    assert_eq!(decoded, respelled);
+    assert_ne!(decoded, HostWorld::default());
+    let mut p = WorldProvider::new(&decoded);
+    assert_eq!(done(p.stdin_text()), Ok("x\ny".to_owned()));
+    assert_eq!(
+        done(p.read_entries("/notes")),
+        Ok(vec!["a.txt".to_owned(), "raw.bin".to_owned()])
+    );
+    assert_eq!(done(p.read_text("/notes/a.txt")), Ok("hello".to_owned()));
+    assert_eq!(done(p.read_file("/notes/raw.bin")), Ok(vec![0, 255]));
+    assert_eq!(done(p.env_var("HOME")), Ok("/home/vibra".to_owned()));
+    assert_eq!(done(p.env_args()), Ok(vec!["/notes".to_owned()]));
+    assert_eq!(done(p.now_wall()), Ok(1_700_000_000_000_000_000));
+    assert_eq!(done(p.now_monotonic()), Ok(0));
+    assert_eq!(done(p.now_monotonic()), Ok(1000));
+    let mut seeded = provider("{format: @hostWorld.v1 random: {seed: 42u64}}");
+    assert_eq!(done(p.random_bytes(16)), done(seeded.random_bytes(16)));
+}
+
+/// `host_world_rejects_other_format`: the document under `@hostWorld.v2`,
+/// the major-2 format this reader does not implement, is one
+/// `@data.invalidValue` at the format value and nothing else.
+#[test]
+fn host_world_rejects_other_format() {
+    let text = CHAPTER_WORLD.replace("@hostWorld.v1", "@hostWorld.v2");
+    let diagnostics = HostWorld::decode("world.vibon", &text).expect_err("rejected");
+    assert_eq!(
+        diagnostics.iter().map(|d| d.code()).collect::<Vec<_>>(),
+        [DiagnosticCode::DataInvalidValue]
+    );
+    let span = diagnostics[0].primary_span();
+    assert_eq!(text.get(span.start()..span.end()), Some("@hostWorld.v2"));
+    // The format is selected before the shape is read.
+    assert_eq!(
+        codes("{format: @hostWorld.v2 stdin: 7u8 network: []}"),
+        [DiagnosticCode::DataInvalidValue]
     );
 }

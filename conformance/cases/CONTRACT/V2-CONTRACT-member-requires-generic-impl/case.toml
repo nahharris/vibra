@@ -1,0 +1,12 @@
+id = "V2-CONTRACT-member-requires-generic-impl"
+rule = "V2-CONTRACT-member-requires-generic-impl"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#guards-and-callable-types: a call of a contract member whose requires is bare at a type a generic implementation serves is decided from the contract's predicate"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

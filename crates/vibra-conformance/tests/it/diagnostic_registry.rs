@@ -1,19 +1,16 @@
-//! Checks the implemented registry against the specification's canonical
+//! Checks the registry of `vibra-diagnostics` against the specification's
 //! table.
 //!
-//! `docs/spec/07-diagnostics-and-conformance.md` carries the canonical table
-//! of codes and levels and requires, under `V1-DIAG`, that the queryable
-//! registry and that table agree on membership, level, domain, and fix
-//! capability. This test is that check. Without it the two could drift, and
-//! the release gate's requirement that a code's registered level match what it
-//! emits would rest on nobody having made a typo.
+//! `docs/spec/07-diagnostics-and-conformance.md`, "Diagnostics are a language
+//! surface", says the table is the single authority and every other mention
+//! of a code or its level must agree with it. These tests are that check for
+//! the compiler's registry: membership, level, domain, and fix capability.
 
-// A test asserts by panicking.
 use crate::support::workspace_root;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
-use vibra_diagnostics::{DiagnosticCode, FixCapability, Level};
+use vibra_diagnostics::{DiagnosticCode, Domain, FixCapability, Level};
 
 const CHAPTER: &str = "docs/spec/07-diagnostics-and-conformance.md";
 
@@ -62,7 +59,6 @@ fn implemented_registry() -> BTreeMap<String, String> {
 }
 
 #[test]
-#[ignore = "the specification describes the redesigned language; restored by v0.0.2 M0 and M1 (docs/roadmap/v0.0.2/m0/README.md)"]
 fn the_registry_and_the_specification_table_have_the_same_codes() {
     let specified = specification_table();
     let implemented = implemented_registry();
@@ -84,27 +80,76 @@ fn the_registry_and_the_specification_table_have_the_same_codes() {
         extra.is_empty(),
         "implemented but not in the specification table: {extra:?}"
     );
+
+    let different: Vec<String> = specified
+        .iter()
+        .filter_map(|(code, level)| {
+            implemented
+                .get(code)
+                .filter(|implemented| *implemented != level)
+                .map(|implemented| format!("{code}: {implemented}, specified {level}"))
+        })
+        .collect();
+    assert!(
+        different.is_empty(),
+        "levels that differ from the specification table: {different:?}"
+    );
 }
 
 #[test]
-fn every_registered_level_matches_the_specification_table() {
-    let specified = specification_table();
+fn the_registry_is_in_specification_table_order() {
+    // The registry order breaks ties when diagnostics sort, so it is the
+    // table's order.
+    let path = workspace_root().join(CHAPTER);
+    let text = std::fs::read_to_string(&path).expect("the chapter is readable");
+    let specified: Vec<&str> = text
+        .lines()
+        .filter_map(|line| {
+            let cells: Vec<&str> = line.split('|').map(str::trim).collect();
+            let [_, code, level, _] = cells.as_slice() else {
+                return None;
+            };
+            let code = code.strip_prefix('`')?.strip_suffix('`')?;
+            let level = level.strip_prefix('`')?.strip_suffix('`')?;
+            (code.starts_with('@') && matches!(level, "@error" | "@warning"))
+                .then_some(code)
+        })
+        .collect();
+    let implemented: Vec<&str> = DiagnosticCode::ALL
+        .iter()
+        .map(|code| code.as_atom())
+        .collect();
+    assert_eq!(implemented, specified);
+}
 
+#[test]
+fn the_registry_has_119_codes() {
+    assert_eq!(DiagnosticCode::ALL.len(), 119);
+    let unique = DiagnosticCode::ALL
+        .iter()
+        .map(|code| code.as_atom())
+        .collect::<BTreeSet<_>>();
+    assert_eq!(unique.len(), 119);
+}
+
+#[test]
+fn exactly_three_codes_are_warnings() {
     for code in DiagnosticCode::ALL {
-        let Some(expected) = specified.get(code.as_atom()) else {
-            continue; // Membership is the other test's failure to report.
+        let expected = if matches!(
+            code.as_atom(),
+            "@type.suspiciousRow" | "@style.casing" | "@contract.unusedEffect"
+        ) {
+            Level::Warning
+        } else {
+            Level::Error
         };
-        assert_eq!(
-            code.level().as_atom(),
-            expected,
-            "{} has the wrong level; the specification table governs",
-            code.as_atom()
-        );
+        assert_eq!(code.level(), expected, "for {code}");
     }
 }
 
 #[test]
-fn every_registered_domain_is_the_first_component_of_its_code() {
+fn every_domain_is_the_first_component_of_its_code_with_the_specified_counts() {
+    let mut counts = BTreeMap::<&str, usize>::new();
     for code in DiagnosticCode::ALL {
         let atom = code.as_atom();
         let spelled = atom
@@ -112,47 +157,48 @@ fn every_registered_domain_is_the_first_component_of_its_code() {
             .and_then(|path| path.split('.').next())
             .unwrap_or_else(|| panic!("{atom} has no domain component"));
         assert_eq!(code.domain().as_str(), spelled, "for {atom}");
+        *counts.entry(code.domain().as_str()).or_default() += 1;
     }
+    let expected = [
+        ("syntax", 11),
+        ("name", 10),
+        ("module", 11),
+        ("type", 31),
+        ("pattern", 6),
+        ("effect", 4),
+        ("external", 3),
+        ("data", 5),
+        ("project", 12),
+        ("runtime", 3),
+        ("style", 1),
+        ("contract", 7),
+        ("grant", 6),
+        ("tool", 9),
+    ];
+    assert_eq!(
+        Domain::ALL
+            .iter()
+            .map(|domain| domain.as_str())
+            .collect::<Vec<_>>(),
+        expected
+            .iter()
+            .map(|(domain, _)| *domain)
+            .collect::<Vec<_>>(),
+        "the fourteen domains"
+    );
+    assert_eq!(counts, BTreeMap::from(expected));
 }
 
 #[test]
-fn every_fix_capability_is_one_of_the_two_specified_atoms() {
+fn every_code_has_fix_capability_none() {
     for code in DiagnosticCode::ALL {
-        let capability = code.fix_capability().as_atom();
-        assert!(
-            matches!(capability, "@safe" | "@none"),
-            "{} has fix capability {capability}, which the specification does not define",
-            code.as_atom()
-        );
+        assert_eq!(code.fix_capability(), FixCapability::None, "for {code}");
     }
 }
 
 #[test]
-fn both_levels_are_populated() {
-    // If one level had no members the two-level design would carry no
-    // information, which is the reasoning recorded for the two warnings.
-    for level in [Level::Error, Level::Warning] {
-        assert!(
-            DiagnosticCode::ALL.iter().any(|code| code.level() == level),
-            "no code is registered at {level}"
-        );
-    }
-}
-
-#[test]
-fn a_fix_capability_is_only_claimed_for_a_code_the_chapter_calls_fixable() {
-    // The chapter says presentation with one unambiguous semantic binding may
-    // parse with a style diagnostic and a safe formatter fix. A code claiming
-    // `@safe` outside that reading needs the chapter changed first.
+fn no_code_is_spelled_with_a_hyphen() {
     for code in DiagnosticCode::ALL {
-        if code.fix_capability() == FixCapability::Safe {
-            assert_eq!(
-                code.level(),
-                Level::Warning,
-                "{} claims a safe fix; v1 only offers fixes for normalized \
-                 presentation, which is never an error",
-                code.as_atom()
-            );
-        }
+        assert!(!code.as_atom().contains('-'), "{code} has a hyphen");
     }
 }

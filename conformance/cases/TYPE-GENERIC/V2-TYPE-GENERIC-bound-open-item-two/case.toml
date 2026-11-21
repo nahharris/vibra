@@ -1,0 +1,18 @@
+id = "V2-TYPE-GENERIC-bound-open-item-two"
+rule = "V2-TYPE-GENERIC-bound-open-item-two"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#bounds: the open associated types of two parameters bounded by the same interface are distinct, so one in the place of the other is @type.argumentMismatch"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.argumentMismatch"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 820, end = 835 }

@@ -1,0 +1,23 @@
+id = "V2-SRC-READER-tree-recovered"
+rule = "V2-SRC-READER-tree-recovered"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#lexical-structure: the second @tree.v2 example: an unmatched closer and a missing one"
+
+[inputs]
+data = ["input.vibon"]
+
+[expect]
+verdict = "refuted"
+tree = "tree.vibon"
+formatted = "formatted.vibon"
+
+[[expect.diagnostics]]
+code = "@syntax.unmatchedDelimiter"
+level = "@error"
+span = { start = 0, end = 1 }
+
+[[expect.diagnostics]]
+code = "@syntax.unmatchedDelimiter"
+level = "@error"
+span = { start = 4, end = 5 }

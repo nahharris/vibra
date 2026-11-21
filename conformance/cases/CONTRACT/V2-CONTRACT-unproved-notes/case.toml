@@ -1,0 +1,20 @@
+id = "V2-CONTRACT-unproved-notes"
+rule = "V2-CONTRACT-unproved-notes"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#bare-guards: @contract.unproved names the three repairs in its notes"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "unknown"
+
+[[expect.diagnostics]]
+code = "@contract.unproved"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 133, end = 139 }
+related = [{ source = "src/app/main.vib", span = { start = 3, end = 6 } }]
+notes = ["branch on the same predicate", "pass a value of a type whose invariant states it", "give the guard an `else`"]

@@ -1,0 +1,18 @@
+id = "V2-TYPE-CONTROL-let-refutable-no-else"
+rule = "V2-TYPE-CONTROL-let-refutable-no-else"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "01-source-language.md#let: a refutable pattern without else is reported at the pattern"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@pattern.refutableBinding"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 52, end = 73 }

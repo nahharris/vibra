@@ -1,0 +1,18 @@
+id = "V2-TYPE-NOMINAL-tuple-arity"
+rule = "V2-TYPE-NOMINAL-tuple-arity"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#structural-types: a tuple of three components is not a tuple of two"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.mismatch"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 46, end = 62 }

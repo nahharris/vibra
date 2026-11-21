@@ -1,0 +1,8 @@
+fn main
+  returns r: {Str Str Str}
+  do
+    let a: Str be From.convert(100.0f64) endlet
+    let b: Str be From.convert(0.0025f64) endlet
+    let c: Str be From.convert(1e20f64) endlet
+    return {a b c}
+endfn

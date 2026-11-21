@@ -1,0 +1,12 @@
+id = "V2-CONTRACT-rule3-if-true-branch"
+rule = "V2-CONTRACT-rule3-if-true-branch"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#bare-guards: GUARD-3: the condition of an if holds in its then branch"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

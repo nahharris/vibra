@@ -1,0 +1,4 @@
+test "adds one"
+  do
+    assert.equal(2u64 add(1u64 1u64))
+endtest

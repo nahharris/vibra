@@ -1,0 +1,19 @@
+id = "V2-TYPE-INTERFACE-default-override"
+rule = "V2-TYPE-INTERFACE-default-override"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#implementations: an impl that supplies a default member again is @type.defaultOverride at its name, related to the default"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.defaultOverride"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 216, end = 220 }
+related = [{ span = { start = 808, end = 812 } }]

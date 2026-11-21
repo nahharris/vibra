@@ -1,0 +1,12 @@
+id = "V2-CONTRACT-ingress-interface-value"
+rule = "V2-CONTRACT-ingress-interface-value"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#bare-guards: a value of a type with a bare where crosses an interface value unchanged: its construction is the only obligation, discharged once"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

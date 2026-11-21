@@ -1,0 +1,1 @@
+fn f returns r: I32 takes {x: I32} do return x endfn

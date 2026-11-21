@@ -1,0 +1,12 @@
+id = "V2-TYPE-NOMINAL-variant-fields"
+rule = "V2-TYPE-NOMINAL-variant-fields"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#declared-types: a case with fields is built with labels and encodes a payload; a fieldless case has no payload"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

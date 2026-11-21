@@ -1,0 +1,8 @@
+fn one(K V)
+  takes {key: K value: V}
+  returns n: I32
+  given {K: Equatable}
+  do
+    let single be [key: value] endlet
+    return 0i32
+endfn

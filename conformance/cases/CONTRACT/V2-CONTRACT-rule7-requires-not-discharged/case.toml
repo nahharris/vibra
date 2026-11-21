@@ -1,0 +1,19 @@
+id = "V2-CONTRACT-rule7-requires-not-discharged"
+rule = "V2-CONTRACT-rule7-requires-not-discharged"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#bare-guards: GUARD-7: the ensures of a callee whose requires has an else, and is not discharged, does not hold of its result"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "unknown"
+
+[[expect.diagnostics]]
+code = "@contract.unproved"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 262, end = 272 }
+related = [{ source = "src/app/main.vib", span = { start = 3, end = 6 } }]

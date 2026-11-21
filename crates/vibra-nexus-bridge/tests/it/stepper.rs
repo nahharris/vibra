@@ -7,10 +7,10 @@ use vibra_exec::{
     Block, BlockId, Callee, ConstId, Constant, FuncId, Function, GlobalId, Inst,
     ObjectKind, OriginId, Program, ScalarClass, ScalarOp, Slot, Terminator,
 };
-use vibra_host::{HostWorld, WorldProvider};
-use vibra_ir::SourceOrigin;
-use vibra_ir::boundary::TrapCode;
-use vibra_ir::external::host::host_row;
+use vibra_host_v1::{HostWorld, WorldProvider};
+use vibra_ir_v1::SourceOrigin;
+use vibra_ir_v1::boundary::TrapCode;
+use vibra_ir_v1::external::host::host_row;
 use vibra_nexus::{Context, Outcome, admit, run};
 use vibra_nexus_eval::Evaluator;
 
@@ -73,7 +73,7 @@ fn stdout(arg: u32, dst: u32, resume: u32, origin: u32) -> Terminator {
 fn origin(start: usize) -> SourceOrigin {
     SourceOrigin::new(
         "app/main.vib",
-        vibra_diagnostics::ByteSpan::new(start, start + 1),
+        vibra_diagnostics_v1::ByteSpan::new(start, start + 1),
     )
 }
 

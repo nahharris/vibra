@@ -1,0 +1,13 @@
+id = "V2-TYPE-NAMES-resolved-impl-member"
+rule = "V2-TYPE-NAMES-resolved-impl-member"
+profile = "staticV2"
+operation = "resolve"
+description = "07-diagnostics-and-conformance.md#persistent-observations: a member of an impl block has a declaration record, identified by its block's identity, a dot, and its name, with the block's anchor of kind @impl and its member name"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+resolved = "resolved.vibon"

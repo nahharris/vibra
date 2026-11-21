@@ -1,0 +1,1 @@
+fn f returns r: I32 do if 1i32 then return 1i32 endif return 2i32 endfn

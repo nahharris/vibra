@@ -1,0 +1,5 @@
+use @std.assert enduse
+
+test "second" do assert.true(true) endtest
+
+test "first" do assert.true(true) endtest

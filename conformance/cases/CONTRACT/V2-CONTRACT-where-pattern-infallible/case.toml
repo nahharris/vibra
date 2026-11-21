@@ -1,0 +1,12 @@
+id = "V2-CONTRACT-where-pattern-infallible"
+rule = "V2-CONTRACT-where-pattern-infallible"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#guards-with-else: a pattern on a type with an invariant is infallible"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

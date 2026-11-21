@@ -1,0 +1,18 @@
+fn pos takes {x: I32} returns r: I32 requires Ordered.greater(x 0i32) do return x endfn
+interface Sized
+  fn size
+    takes {value: Self n: I32}
+    returns r: I32
+    requires Ordered.greater(n 0i32)
+  endfn
+endinterface
+type Box of I32
+  impl Sized
+    fn size
+      takes {value: Self m: I32}
+      returns s: I32
+      do
+        return pos(m)
+    endfn
+  endimpl
+endtype

@@ -1,0 +1,2 @@
+type Shape case empty case dot {x: I32} endtype
+fn main returns r: I32 do let s be Shape.dot(x: 2i32) endlet return match s case Shape.dot(x: x) x case Shape.empty() 0i32 endmatch endfn

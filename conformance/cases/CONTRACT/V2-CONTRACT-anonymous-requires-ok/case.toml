@@ -1,0 +1,12 @@
+id = "V2-CONTRACT-anonymous-requires-ok"
+rule = "V2-CONTRACT-anonymous-requires-ok"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#guards-and-callable-types: a bare requires of an anonymous callable is discharged at each call whose callee is the callable, through its let name or a name bound to that one"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

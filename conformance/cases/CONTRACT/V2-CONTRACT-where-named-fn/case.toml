@@ -1,0 +1,12 @@
+id = "V2-CONTRACT-where-named-fn"
+rule = "V2-CONTRACT-where-named-fn"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#type-invariants: a where operand may name a certified fn declared after the type"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

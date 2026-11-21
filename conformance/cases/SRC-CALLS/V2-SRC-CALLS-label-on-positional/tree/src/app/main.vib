@@ -1,0 +1,2 @@
+fn inc takes {x: I32} returns r: I32 do return I32.add(x 1i32) endfn
+fn main returns r: I32 do return inc(x: 1i32) endfn

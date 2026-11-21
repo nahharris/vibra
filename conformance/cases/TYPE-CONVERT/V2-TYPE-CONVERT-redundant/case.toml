@@ -1,0 +1,19 @@
+id = "V2-TYPE-CONVERT-redundant"
+rule = "V2-TYPE-CONVERT-redundant"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#conversion: one receiver whose From and TryFrom sources unify is @type.redundantConversion at the later, related to the earlier"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.redundantConversion"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 225, end = 241 }
+related = [{ source = "src/app/main.vib", span = { start = 67, end = 80 } }]

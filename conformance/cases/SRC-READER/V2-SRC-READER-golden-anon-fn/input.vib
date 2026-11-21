@@ -1,0 +1,1 @@
+let f: Fn({} I32) be fn returns r: I32 do return 1i32 endfn endlet

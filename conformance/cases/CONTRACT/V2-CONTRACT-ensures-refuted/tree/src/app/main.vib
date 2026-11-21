@@ -1,0 +1,1 @@
+fn bad returns r: I32 ensures Ordered.greater(r 0i32) do return 0i32 endfn

@@ -1,0 +1,14 @@
+id = "V2-TOOL-format-outside-unit"
+rule = "V2-TOOL-format-outside-unit"
+profile = "toolingV2"
+operation = "format"
+description = "05-tooling.md#formatting: a file outside every target root is not a module and is formatted by syntax alone: its unknown name is not reported"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+source = "tree/notes/scratch.vib"
+
+[expect]
+verdict = "accepted"
+formatted = "formatted.vib"

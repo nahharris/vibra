@@ -1,0 +1,13 @@
+id = "V2-PROJECT-test-fails"
+rule = "V2-PROJECT-test-fails"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "04-programs-and-packages.md#assertions: a false assert.equal records its name, the canonical encodings, and the call's span"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+testRun = "test-run.vibon"

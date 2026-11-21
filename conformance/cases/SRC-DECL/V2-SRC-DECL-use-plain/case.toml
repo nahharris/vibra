@@ -1,0 +1,13 @@
+id = "V2-SRC-DECL-use-plain"
+rule = "V2-SRC-DECL-use-plain"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#use: an import of one module under the last part of its path"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "accepted"
+tree = "tree.vibon"
+formatted = "formatted.vib"

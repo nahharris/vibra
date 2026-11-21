@@ -1,0 +1,2 @@
+type Pair of {I32 Str} endtype
+fn main returns r: Pair do return Pair(1i32 "x") endfn

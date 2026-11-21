@@ -1,0 +1,6 @@
+fn f
+  takes {s: Self}
+  returns r: I32
+  do
+    return 0i32
+endfn

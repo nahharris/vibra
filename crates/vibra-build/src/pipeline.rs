@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use vibra_codegen::{Inputs, Target, emit};
 use vibra_exec::{Program, verified};
-use vibra_ir::{CheckedProgram, Type, TypeBody, vocabulary};
+use vibra_ir_v1::{CheckedProgram, Type, TypeBody, vocabulary};
 
 use crate::error::BuildError;
 use crate::link::{LinkCommand, link_command, link_environment, run_link};

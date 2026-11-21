@@ -1,0 +1,18 @@
+id = "V2-CONTRACT-label-order-unproved"
+rule = "V2-CONTRACT-label-order-unproved"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#bare-guards: GUARD-4: a call's operands are compared in the callee's parameter-slot order, so lt(a: x b: y) does not establish lt(b: x a: y)"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "unknown"
+[[expect.diagnostics]]
+code = "@contract.unproved"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 276, end = 285 }
+related = [{ source = "src/app/main.vib", span = { start = 102, end = 106 } }]

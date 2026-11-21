@@ -1,0 +1,12 @@
+id = "V2-CONTRACT-folded-guard-evaluates-operands"
+rule = "V2-CONTRACT-folded-guard-evaluates-operands"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#guards-with-else: a guard with else whose predicate is a constant true is removed and the arguments are still evaluated"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

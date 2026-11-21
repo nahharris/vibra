@@ -48,6 +48,12 @@ Proposed: `vibra-types::pattern` (coverage, irrefutability, binding types).
    pattern spelling; `@pattern.unreachableArm` related to the earliest
    covering arm; `@pattern.unsupportedCoverage` when the checker cannot
    decide within its limits (a host test forces it with a deep product).
+   The checked IR does not check coverage: it trusts that every `match`
+   the checker lowers has an arm for every value of its subject, and a
+   value no arm matches is the defect `@runtime.invalidCheckedProgram`
+   (the [architecture's table of what it
+   trusts](../architecture.md#what-the-checked-ir-validates-and-what-it-trusts-the-checker-for)).
+   Coverage is this step's obligation for every pattern kind.
 3. `let`: without `else` the pattern MUST be irrefutable
    (`@pattern.refutableBinding` at the pattern); with `else` it MUST be
    refutable (`@pattern.irrefutableLetElse`); the fallback has type `Never`

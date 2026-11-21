@@ -10,15 +10,15 @@
 use std::collections::BTreeSet;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-use vibra_diagnostics::ByteSpan;
+use vibra_diagnostics_v1::ByteSpan;
 use vibra_exec::{
     Block, BlockId, Callee, ConstId, Constant, FuncId, Function, GlobalId, Inst, IntOp,
     ObjectKind, OriginId, Program, ScalarClass, ScalarOp, Slot, Terminator, verify,
 };
-use vibra_ir::SourceOrigin;
-use vibra_ir::boundary::TrapCode;
-use vibra_ir::external::host::{HOST_ROWS, HostRow, host_row};
-use vibra_ir::external::{CompilerIntrinsic, NumericType};
+use vibra_ir_v1::SourceOrigin;
+use vibra_ir_v1::boundary::TrapCode;
+use vibra_ir_v1::external::host::{HOST_ROWS, HostRow, host_row};
+use vibra_ir_v1::external::{CompilerIntrinsic, NumericType};
 
 /// The seed every run starts from.
 const SEED: u64 = 0x5EED_0000_F0E1;

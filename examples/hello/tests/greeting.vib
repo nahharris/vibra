@@ -1,0 +1,13 @@
+use @std.assert enduse
+
+use @hello.greeting enduse
+
+test "greets the world"
+  do
+    assert.equal("Hello, world!" greeting.message(greeting.Greeting.world()))
+endtest
+
+test "greets by name"
+  do
+    assert.equal("Hello, Ada!" greeting.message(greeting.Greeting.named(name: "Ada")))
+endtest

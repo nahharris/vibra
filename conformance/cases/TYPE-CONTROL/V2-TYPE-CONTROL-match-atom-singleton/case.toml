@@ -1,0 +1,12 @@
+id = "V2-TYPE-CONTROL-match-atom-singleton"
+rule = "V2-TYPE-CONTROL-match-atom-singleton"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#coverage: an atom singleton type is covered by its one atom"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

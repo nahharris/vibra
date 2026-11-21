@@ -1,0 +1,31 @@
+fn main
+  returns r: List(U64)
+  do
+    return Iter.collect(Iter.take(Iter.filter(Iter.map(Iter.skip(Naturals(0u64) 1u64) double) multipleOfFour) 2u64))
+endfn
+
+fn double takes {n: U64} returns r: U64 do return U64.mul(n 2u64) endfn
+
+fn multipleOfFour
+  takes {n: U64}
+  returns r: Bool
+  do
+    match U64.remChecked(n 4u64)
+      case Result.ok(value: 0u64)
+        return true
+      case _
+        return false
+    endmatch
+endfn
+type Naturals of U64
+  impl Iter
+    type Item of U64 endtype
+    fn next
+      takes {value: Self}
+      returns step: Option({Item Self})
+      do
+        let Naturals(n) be value endlet
+        return Option.some(value: {n Naturals(U64.add(n 1u64))})
+    endfn
+  endimpl
+endtype

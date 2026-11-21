@@ -1,0 +1,16 @@
+id = "V2-SRC-READER-vibon-identifier"
+rule = "V2-SRC-READER-vibon-identifier"
+profile = "readerV2"
+operation = "reader"
+description = "04-programs-and-packages.md#vibon-data-documents: an identifier is not a value"
+
+[inputs]
+data = ["input.vibon"]
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@syntax.invalidForm"
+level = "@error"
+span = { start = 4, end = 7 }

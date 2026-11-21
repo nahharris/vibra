@@ -1,0 +1,18 @@
+id = "V2-CONTRACT-where-else-plain-type"
+rule = "V2-CONTRACT-where-else-plain-type"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#guards-with-else: the constructor of a type whose where has an else does not return the type itself"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.mismatch"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 57, end = 68 }

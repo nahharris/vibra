@@ -1,0 +1,2 @@
+fn main returns r: I32 do return make(7i32)(0i32) endfn
+fn make takes {v: I32} returns f: Fn({I32} I32) do return fn takes {x: I32} returns r: I32 do return v endfn endfn

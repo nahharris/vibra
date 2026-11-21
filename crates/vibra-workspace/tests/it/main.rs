@@ -1,23 +1,20 @@
-//! The `vibra-workspace` integration tests, one target: a module for each
-//! subject and a `support` module for what they share.
-//!
-//! Run them with `cargo test --locked -p vibra-workspace --test it`.
+//! The `vibra-workspace` integration tests, one test target.
 
 #![allow(
     clippy::expect_used,
     clippy::indexing_slicing,
     clippy::panic,
-    clippy::unwrap_used
+    clippy::unwrap_used,
+    missing_docs
 )]
 
-mod check_and_run;
-mod effect_metadata;
-mod format_plan;
-mod project_decoder;
-mod semantic_queries;
-mod source_graph;
-mod source_graph_tests;
 mod support;
-mod target_consent;
+
+mod discovery;
+mod format;
+mod graph;
+mod project;
+mod resolve;
+mod revision;
+mod snapshot;
 mod test_runner;
-mod workspace_tests;

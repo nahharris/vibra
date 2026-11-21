@@ -1,0 +1,1 @@
+fn main returns r: F32 do return 1e39f32 endfn

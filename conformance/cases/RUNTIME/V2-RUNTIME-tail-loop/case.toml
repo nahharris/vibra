@@ -1,0 +1,12 @@
+id = "V2-RUNTIME-tail-loop"
+rule = "V2-RUNTIME-tail-loop"
+profile = "interpreterV2"
+operation = "interpret"
+description = "06-runtime.md#tail-calls: a return of a call replaces the activation"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

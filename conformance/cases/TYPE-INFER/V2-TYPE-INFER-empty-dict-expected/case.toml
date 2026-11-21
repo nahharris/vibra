@@ -1,0 +1,12 @@
+id = "V2-TYPE-INFER-empty-dict-expected"
+rule = "V2-TYPE-INFER-empty-dict-expected"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#inference-and-checking: an empty dict takes its key and value types from the written type"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

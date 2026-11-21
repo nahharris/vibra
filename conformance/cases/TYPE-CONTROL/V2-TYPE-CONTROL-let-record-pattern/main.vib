@@ -1,0 +1,1 @@
+fn main returns r: Str do let user be {name: "Ada" id: 1u64} endlet let {name: n id: i} be user endlet return n endfn

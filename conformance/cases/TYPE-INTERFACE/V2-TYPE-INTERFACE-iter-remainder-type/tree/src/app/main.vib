@@ -1,0 +1,24 @@
+fn f
+  takes {once: Once}
+  returns r: Option({U8 Once})
+  do
+    let step: Option({U8 Once}) be Iter.next(once) endlet
+    return step
+endfn
+
+type Once of Option(U8)
+  impl Iter
+    type Item of U8 endtype
+    fn next
+      takes {value: Self}
+      returns step: Option({Item Self})
+      do
+        match value
+          case Once(Option.some(value: item))
+            return Option.some(value: {item Once(Option.none())})
+          case Once(Option.none())
+            return Option.none()
+        endmatch
+    endfn
+  endimpl
+endtype

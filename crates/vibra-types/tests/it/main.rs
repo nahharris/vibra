@@ -3,12 +3,12 @@
 //!
 //! Run them with `cargo test --locked -p vibra-types --test it`.
 
-#![allow(clippy::expect_used, clippy::indexing_slicing, missing_docs)]
+#![allow(clippy::expect_used)]
 
-mod contract_members;
-mod effects;
-mod generics;
-mod nominal_types;
-mod primitive_table;
-mod reserved_binders;
+mod externals;
+mod library;
+mod loader;
+mod manifest;
+mod modules;
+mod roles;
 mod support;

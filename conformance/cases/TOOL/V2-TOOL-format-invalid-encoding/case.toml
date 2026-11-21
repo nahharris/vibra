@@ -1,0 +1,19 @@
+id = "V2-TOOL-format-invalid-encoding"
+rule = "V2-TOOL-format-invalid-encoding"
+profile = "toolingV2"
+operation = "format"
+description = "05-tooling.md#formatting: a file that is not valid UTF-8 is reported and plans no edit; it is never decoded lossily"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+source = "tree/src/app/main.vib"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@syntax.invalidEncoding"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 4, end = 5 }

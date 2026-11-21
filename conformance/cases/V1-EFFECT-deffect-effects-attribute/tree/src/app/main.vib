@@ -1,3 +1,0 @@
-(deffect write
-  effects: (write)
-  (defn text (target str) void (do)))

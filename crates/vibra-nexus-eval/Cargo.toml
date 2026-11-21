@@ -10,12 +10,12 @@ publish.workspace = true
 
 [dependencies]
 vibra-exec.workspace = true
-vibra-ir.workspace = true
+vibra-ir-v1.workspace = true
 vibra-nexus.workspace = true
 
 [dev-dependencies]
-vibra-diagnostics.workspace = true
-vibra-host.workspace = true
+vibra-diagnostics-v1.workspace = true
+vibra-host-v1.workspace = true
 
 [lints]
 workspace = true

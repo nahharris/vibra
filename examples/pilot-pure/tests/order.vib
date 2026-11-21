@@ -1,0 +1,16 @@
+use @std.assert enduse
+
+use @pilot.order enduse
+
+test "ordered bounds choose the upper"
+  do
+    assert.equal(Result.ok(value: 5i32) order.orderedChoice(2i32 5i32))
+endtest
+
+test "reversed bounds are an error"
+  do
+    assert.equal(
+      Result.err(error: order.OrderError.reversed())
+      order.orderedChoice(5i32 2i32)
+    )
+endtest

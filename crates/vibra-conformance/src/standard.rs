@@ -1,52 +1,202 @@
-//! The dispatcher of the internal corpus runner.
+//! The dispatcher and the standard set of handlers.
 
-use crate::format::ToolingV1FormatHandler;
-use crate::graph::StaticV1SourceGraphHandler;
-use crate::profile::ConformanceProfile;
-use crate::project::StaticV1ProjectHandler;
-use crate::reader::ReaderV1Handler;
-use crate::resolve::StaticV1ResolveHandler;
-use crate::runner::ProfileDispatcher;
-use crate::types::InterpreterV1Handler;
-use crate::workspace_index::ToolingV1IndexHandler;
-use crate::workspace_query::ToolingV1QueryHandler;
-use crate::workspace_semantic::{
-    InterpreterV1WorkspaceRunHandler, InterpreterV1WorkspaceTestHandler,
-    StaticV1WorkspaceCheckHandler,
+use std::collections::BTreeMap;
+use std::fmt;
+
+use crate::corpus::Case;
+use crate::format::FormatHandler;
+use crate::interpret::InterpretHandler;
+use crate::profile::{
+    CaseObservation, ConformanceProfile, HandlerError, ProfileHandler,
 };
+use crate::project::{ProjectDecodeHandler, SourceGraphHandler};
+use crate::reader::ReaderV2Handler;
+use crate::resolve::ResolveHandler;
+use crate::workspace_check::WorkspaceCheckHandler;
+use crate::workspace_test::WorkspaceTestHandler;
 
-/// Every real handler the workspace has, registered where its profile puts it.
+/// Selects the closest registered handler that can run each case.
+#[derive(Default)]
+pub struct ProfileDispatcher {
+    handlers: BTreeMap<ConformanceProfile, Vec<Box<dyn ProfileHandler>>>,
+}
+
+type HandlerCandidate<'a> = (ConformanceProfile, &'a dyn ProfileHandler);
+type HandlerSelection<'a> =
+    Result<Option<HandlerCandidate<'a>>, (ConformanceProfile, String)>;
+
+impl fmt::Debug for ProfileDispatcher {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ProfileDispatcher")
+            .field("profiles", &self.handlers.keys().collect::<Vec<_>>())
+            .finish()
+    }
+}
+
+impl ProfileDispatcher {
+    /// A dispatcher with no handler.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Adds a handler under `profile`, beside the handlers already there.
+    pub fn register<H>(&mut self, profile: ConformanceProfile, handler: H)
+    where
+        H: ProfileHandler + 'static,
+    {
+        self.handlers
+            .entry(profile)
+            .or_default()
+            .push(Box::new(handler));
+    }
+
+    /// Builder form of [`Self::register`].
+    #[must_use]
+    pub fn with_handler<H>(mut self, profile: ConformanceProfile, handler: H) -> Self
+    where
+        H: ProfileHandler + 'static,
+    {
+        self.register(profile, handler);
+        self
+    }
+
+    /// Dispatches one case to the closest handler that can run it.
+    ///
+    /// The candidates are the handlers whose profile includes the case's and
+    /// that claim the case; the closest is the one whose profile is the
+    /// fewest levels above the case's. Two closest candidates are a failure,
+    /// never a choice.
+    #[must_use]
+    pub fn dispatch(&self, case: &Case) -> DispatchResult {
+        let required = case.manifest().profile;
+        let selection = match self.best_handler(required, case) {
+            Ok(selection) => selection,
+            Err((provided, reason)) => {
+                return DispatchResult::Failed {
+                    required,
+                    provided,
+                    error: HandlerError::new(reason),
+                };
+            }
+        };
+        let Some((provided, handler)) = selection else {
+            return DispatchResult::Unavailable {
+                required,
+                reason: format!(
+                    "no handler runs operation `{}` under {required}",
+                    case.manifest().operation
+                ),
+            };
+        };
+        match handler.run(case) {
+            Ok(observation) => DispatchResult::Executed {
+                required,
+                provided,
+                observation: Box::new(observation),
+            },
+            Err(error) => DispatchResult::Failed {
+                required,
+                provided,
+                error,
+            },
+        }
+    }
+
+    fn best_handler(
+        &self,
+        required: ConformanceProfile,
+        case: &Case,
+    ) -> HandlerSelection<'_> {
+        let candidates = self
+            .handlers
+            .iter()
+            .filter(|(profile, _)| profile.supports(required))
+            .flat_map(|(profile, handlers)| {
+                handlers
+                    .iter()
+                    .filter(|handler| handler.can_run(case))
+                    .map(move |handler| (*profile, handler.as_ref()))
+            })
+            .collect::<Vec<_>>();
+        let distance = |profile: ConformanceProfile| {
+            profile.depth().saturating_sub(required.depth())
+        };
+        let Some(closest) = candidates
+            .iter()
+            .map(|(profile, _)| distance(*profile))
+            .min()
+        else {
+            return Ok(None);
+        };
+        let mut matching = candidates
+            .into_iter()
+            .filter(|(profile, _)| distance(*profile) == closest);
+        let Some(first) = matching.next() else {
+            return Ok(None);
+        };
+        if matching.next().is_some() {
+            return Err((
+                first.0,
+                format!(
+                    "several handlers claim operation `{}` at profile distance {closest}",
+                    case.manifest().operation
+                ),
+            ));
+        }
+        Ok(Some(first))
+    }
+}
+
+/// The result of dispatching one case, before comparison.
+#[derive(Debug)]
+pub enum DispatchResult {
+    /// A handler returned observations.
+    Executed {
+        /// The case's profile.
+        required: ConformanceProfile,
+        /// The profile of the handler that ran it.
+        provided: ConformanceProfile,
+        /// The observations.
+        observation: Box<CaseObservation>,
+    },
+    /// No registered handler runs the case.
+    Unavailable {
+        /// The case's profile.
+        required: ConformanceProfile,
+        /// Why no handler was selected.
+        reason: String,
+    },
+    /// The selected handler failed, or the selection was ambiguous.
+    Failed {
+        /// The case's profile.
+        required: ConformanceProfile,
+        /// The profile of the handler that failed.
+        provided: ConformanceProfile,
+        /// The failure.
+        error: HandlerError,
+    },
+}
+
+/// Every handler the workspace has, registered under its profile.
 ///
-/// The `interpreter-v1` handlers also run the WebAssembly backend on each
-/// accepted executable case, because both backends receive the one checked
-/// program (`docs/spec/07-diagnostics-and-conformance.md`, "Differential
-/// execution"). The `vibra-conformance` binary and the host tests that run the
-/// corpus build the same dispatcher, so the two cannot disagree about which
-/// handlers exist.
+/// The reader runs under `readerV2`; the project decoder, the source graph,
+/// resolution, and the workspace check run under `staticV2`; `interpret` and
+/// `workspaceTest` run under `interpreterV2`; `format` runs under
+/// `toolingV2`. Every other
+/// operation has no handler yet.
+/// The binary and the host tests build this one dispatcher, so the two cannot
+/// disagree about which handlers exist.
 #[must_use]
 pub fn standard_dispatcher() -> ProfileDispatcher {
     ProfileDispatcher::new()
-        .with_handler(ConformanceProfile::ReaderV1, ReaderV1Handler)
-        .with_handler(ConformanceProfile::StaticV1, StaticV1ProjectHandler)
-        .with_additional_handler(
-            ConformanceProfile::StaticV1,
-            StaticV1SourceGraphHandler,
-        )
-        .with_additional_handler(ConformanceProfile::StaticV1, StaticV1ResolveHandler)
-        .with_additional_handler(
-            ConformanceProfile::StaticV1,
-            StaticV1WorkspaceCheckHandler,
-        )
-        .with_handler(ConformanceProfile::InterpreterV1, InterpreterV1Handler)
-        .with_additional_handler(
-            ConformanceProfile::InterpreterV1,
-            InterpreterV1WorkspaceRunHandler,
-        )
-        .with_additional_handler(
-            ConformanceProfile::InterpreterV1,
-            InterpreterV1WorkspaceTestHandler,
-        )
-        .with_handler(ConformanceProfile::ToolingV1, ToolingV1QueryHandler)
-        .with_additional_handler(ConformanceProfile::ToolingV1, ToolingV1FormatHandler)
-        .with_additional_handler(ConformanceProfile::ToolingV1, ToolingV1IndexHandler)
+        .with_handler(ConformanceProfile::ReaderV2, ReaderV2Handler)
+        .with_handler(ConformanceProfile::StaticV2, ProjectDecodeHandler)
+        .with_handler(ConformanceProfile::StaticV2, SourceGraphHandler)
+        .with_handler(ConformanceProfile::StaticV2, ResolveHandler)
+        .with_handler(ConformanceProfile::StaticV2, WorkspaceCheckHandler)
+        .with_handler(ConformanceProfile::InterpreterV2, InterpretHandler)
+        .with_handler(ConformanceProfile::InterpreterV2, WorkspaceTestHandler)
+        .with_handler(ConformanceProfile::ToolingV2, FormatHandler)
 }

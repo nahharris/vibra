@@ -1,0 +1,12 @@
+id = "V2-PROJECT-member-public"
+rule = "V2-PROJECT-member-public"
+profile = "staticV2"
+operation = "resolve"
+description = "04-programs-and-packages.md#modules-and-imports: a static member with visibility @public is reachable through its type from another module"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

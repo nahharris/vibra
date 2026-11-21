@@ -1,0 +1,13 @@
+id = "V2-TYPE-NAMES-longest-prefix"
+rule = "V2-TYPE-NAMES-longest-prefix"
+profile = "staticV2"
+operation = "resolve"
+description = "01-source-language.md#names-and-paths: the longest prefix naming an entity is the path, model.User.nameLength, and the remaining parts read fields of its value"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+resolved = "resolved.vibon"

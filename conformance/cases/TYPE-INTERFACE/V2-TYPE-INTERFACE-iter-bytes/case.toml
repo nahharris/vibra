@@ -1,0 +1,12 @@
+id = "V2-TYPE-INTERFACE-iter-bytes"
+rule = "V2-TYPE-INTERFACE-iter-bytes"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#iteration: a Bytes iterates its bytes in order"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

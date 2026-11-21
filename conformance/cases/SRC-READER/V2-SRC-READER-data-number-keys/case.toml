@@ -1,0 +1,11 @@
+id = "V2-SRC-READER-data-number-keys"
+rule = "V2-SRC-READER-data-number-keys"
+profile = "readerV2"
+operation = "reader"
+description = "04-programs-and-packages.md#vibon-data-documents: without a schema a suffix is part of the key"
+
+[inputs]
+data = ["input.vibon"]
+
+[expect]
+verdict = "accepted"

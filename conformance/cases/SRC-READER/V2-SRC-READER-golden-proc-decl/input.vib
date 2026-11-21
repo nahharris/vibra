@@ -1,0 +1,1 @@
+proc p returns r: Void do return void endproc

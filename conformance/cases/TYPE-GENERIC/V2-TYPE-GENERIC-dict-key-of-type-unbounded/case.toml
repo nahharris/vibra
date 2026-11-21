@@ -1,0 +1,18 @@
+id = "V2-TYPE-GENERIC-dict-key-of-type-unbounded"
+rule = "V2-TYPE-GENERIC-dict-key-of-type-unbounded"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#dict-keys-equality-and-order: a parameter of a declared type without the bound Ordered keys no dict in its representation"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.invalidDictKey"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 22, end = 23 }

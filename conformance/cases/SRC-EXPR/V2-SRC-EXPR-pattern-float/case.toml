@@ -1,0 +1,16 @@
+id = "V2-SRC-EXPR-pattern-float"
+rule = "V2-SRC-EXPR-pattern-float"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#patterns: a float literal is no pattern: the smallest enclosing construct, the `match`, is an invalid form"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@syntax.invalidForm"
+level = "@error"
+span = { start = 13, end = 45 }

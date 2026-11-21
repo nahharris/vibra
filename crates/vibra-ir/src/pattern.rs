@@ -1,153 +1,174 @@
-//! Checked patterns (M3 Step 5).
+//! Checked patterns: what a `match` arm and a `let` test and bind.
 //!
-//! A checked pattern is already resolved against its expected type: a binder
-//! names its activation slot and type, a constructor names its variant, and a
-//! record pattern keeps only the fields it wrote. `match` arms, destructuring
-//! `let`, and destructuring parameters all lower to these patterns.
+//! There is no member pattern: a constant pattern is a [`Pattern::Literal`],
+//! whatever constant expression it was written as.
 
-use crate::{Type, Value};
+use crate::expr::{Checker, Node, Shape, expect};
+use crate::{Constant, IrError, Type};
 
-/// One checked pattern.
+/// A pattern.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Pattern {
-    /// A discard: matches every value and binds nothing.
-    Wildcard,
-    /// A binder: matches every value and stores it in `slot`.
-    Bind {
-        /// The activation slot the matched value is stored in.
-        slot: usize,
-        /// The statically checked type of the bound value.
-        value_type: Type,
+    /// `_`: matches anything and binds nothing.
+    Discard,
+    /// Binds the subject to a slot.
+    Bind(usize),
+    /// A constant pattern: matches the subject equal to the constant.
+    Literal(Constant),
+    /// A tuple's components, every one.
+    Tuple(Vec<Self>),
+    /// Some fields of a record, by name.
+    Record(Vec<(String, Self)>),
+    /// A list of exactly this many elements.
+    List(Vec<Self>),
+    /// A wrapper's representation: `Str(chars)`, `Bytes(bytes)`, or a
+    /// user wrapper.
+    Wrapper(Box<Self>),
+    /// A case of a variant type and some of its fields.
+    Case {
+        /// The case name.
+        case: String,
+        /// The fields matched, by name.
+        fields: Vec<(String, Self)>,
     },
-    /// A literal: matches exactly one value.
-    Literal(Value),
-    /// An enum variant, declared or anonymous, with its payload pattern;
-    /// `None` for a `void` payload.
-    Variant {
-        /// The selected variant name.
-        variant: String,
-        /// The payload pattern, when the variant carries one.
-        payload: Option<Box<Pattern>>,
-    },
-    /// A record, declared or anonymous; omitted fields match anything.
-    Record(Vec<(String, Pattern)>),
-    /// A tuple, declared or anonymous, with one pattern per component.
-    Tuple(Vec<Pattern>),
-    /// A wrapper type's representation.
-    Wrap(Box<Pattern>),
-    /// An array of exactly these elements.
-    Array(Vec<Pattern>),
-    /// One union member, `(as t p)`, with the pattern for its payload.
-    Member {
-        /// The discriminant: the member's index in the union's member list.
-        index: usize,
-        /// The member type.
-        member: Type,
-        /// The payload pattern, checked at the member type.
-        pattern: Box<Pattern>,
-    },
+}
+
+/// Dropping a pattern moves its sub-patterns to a work list, so that no
+/// host stack grows with its depth.
+impl Drop for Pattern {
+    fn drop(&mut self) {
+        let mut pending = Vec::new();
+        self.take_inner(&mut pending);
+        while let Some(mut pattern) = pending.pop() {
+            pattern.take_inner(&mut pending);
+        }
+    }
 }
 
 impl Pattern {
-    /// Every binder in the pattern as `(slot, type)`, in written order.
-    #[must_use]
-    pub fn bindings(&self) -> Vec<(usize, Type)> {
-        let mut found = Vec::new();
-        self.collect_bindings(&mut found);
-        found
-    }
-
-    fn collect_bindings(&self, found: &mut Vec<(usize, Type)>) {
+    fn take_inner(&mut self, pending: &mut Vec<Self>) {
         match self {
-            Self::Wildcard | Self::Literal(_) => {}
-            Self::Bind { slot, value_type } => found.push((*slot, value_type.clone())),
-            Self::Variant { payload, .. } => {
-                if let Some(payload) = payload {
-                    payload.collect_bindings(found);
-                }
+            Self::Tuple(patterns) | Self::List(patterns) => pending.append(patterns),
+            Self::Record(fields) | Self::Case { fields, .. } => {
+                pending.extend(fields.drain(..).map(|(_, pattern)| pattern));
             }
-            Self::Record(fields) => {
-                for (_, field) in fields {
-                    field.collect_bindings(found);
-                }
+            Self::Wrapper(inner) => {
+                pending.push(std::mem::replace(&mut **inner, Self::Discard));
             }
-            Self::Tuple(items) | Self::Array(items) => {
-                for item in items {
-                    item.collect_bindings(found);
-                }
-            }
-            Self::Wrap(inner) | Self::Member { pattern: inner, .. } => {
-                inner.collect_bindings(found);
-            }
-        }
-    }
-
-    /// The canonical encoding of the pattern, for checked-program output.
-    #[must_use]
-    pub fn canonical_vibon(&self) -> String {
-        match self {
-            Self::Wildcard => "(record kind: @wildcard)".to_owned(),
-            Self::Bind { slot, value_type } => format!(
-                "(record kind: @bind slot: {slot}u64 type: {})",
-                crate::canonical_type(value_type)
-            ),
-            Self::Literal(value) => {
-                format!("(record kind: @literal value: {})", value.canonical_vibon())
-            }
-            Self::Variant { variant, payload } => format!(
-                "(record kind: @variant variant: @{variant}{})",
-                payload
-                    .as_deref()
-                    .map(|payload| format!(" payload: {}", payload.canonical_vibon()))
-                    .unwrap_or_default()
-            ),
-            Self::Record(fields) => format!(
-                "(record kind: @record fields: (record{}))",
-                fields
-                    .iter()
-                    .map(|(name, field)| format!(
-                        " {name}: {}",
-                        field.canonical_vibon()
-                    ))
-                    .collect::<String>()
-            ),
-            Self::Tuple(items) => {
-                format!("(record kind: @tuple items: {})", encode_all(items))
-            }
-            Self::Wrap(inner) => {
-                format!("(record kind: @wrap value: {})", inner.canonical_vibon())
-            }
-            Self::Array(items) => {
-                format!("(record kind: @array items: {})", encode_all(items))
-            }
-            Self::Member {
-                index,
-                member,
-                pattern,
-            } => format!(
-                "(record kind: @member index: {index}u64 type: {} value: {})",
-                crate::canonical_type(member),
-                pattern.canonical_vibon()
-            ),
+            Self::Discard | Self::Bind(_) | Self::Literal(_) => {}
         }
     }
 }
 
-fn encode_all(items: &[Pattern]) -> String {
-    format!(
-        "(array{})",
-        items
-            .iter()
-            .map(|item| format!(" {}", item.canonical_vibon()))
-            .collect::<String>()
-    )
-}
-
-/// One `match` arm: a pattern and the result evaluated when it matches.
+/// One arm of a `match`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MatchArm {
-    /// The checked pattern.
+    /// The pattern.
     pub pattern: Pattern,
-    /// The result expression, evaluated with the pattern's binders in scope.
-    pub body: crate::Expr,
+    /// The body run when the pattern matches, with its slots bound.
+    pub body: Node,
+}
+
+impl Checker<'_> {
+    /// Checks `pattern` against a subject of type `subject`, binding its
+    /// slots; `bound` records what each slot held before. The pattern is
+    /// walked with a work list, first sub-pattern first, and each type a
+    /// sub-pattern is checked against nests at most [`Type::MAX_DEPTH`]
+    /// levels.
+    pub(crate) fn check_pattern(
+        &mut self,
+        pattern: &Pattern,
+        subject: &Type,
+        bound: &mut Vec<(usize, Option<Type>)>,
+    ) -> Result<(), IrError> {
+        let mut pending = vec![(pattern, subject.clone())];
+        while let Some((pattern, subject)) = pending.pop() {
+            subject.check_depth()?;
+            let mut inner = match pattern {
+                Pattern::Discard => Vec::new(),
+                Pattern::Bind(slot) => {
+                    let held = self.bind(*slot, subject)?;
+                    bound.push((*slot, held));
+                    Vec::new()
+                }
+                Pattern::Literal(constant) => {
+                    self.check_constant(constant)?;
+                    if matches!(constant.value_type(), Type::F32 | Type::F64) {
+                        return Err(IrError::InvalidExpression(
+                            "a float literal is not a pattern".to_owned(),
+                        ));
+                    }
+                    expect(&subject, constant.value_type())?;
+                    Vec::new()
+                }
+                Pattern::Tuple(components) => match self.shape(&subject)? {
+                    Shape::Tuple(types) if types.len() == components.len() => {
+                        components.iter().zip(types).collect()
+                    }
+                    _ => return Err(mismatch("tuple", &subject)),
+                },
+                Pattern::Record(fields) => match self.shape(&subject)? {
+                    Shape::Record(declared) => named(&declared, fields)?,
+                    _ => return Err(mismatch("record", &subject)),
+                },
+                Pattern::List(elements) => match self.shape(&subject)? {
+                    Shape::List(element) => elements
+                        .iter()
+                        .map(|pattern| (pattern, element.clone()))
+                        .collect(),
+                    _ => return Err(mismatch("list", &subject)),
+                },
+                Pattern::Wrapper(inner) => match self.shape(&subject)? {
+                    Shape::Wrapper(representation) => {
+                        vec![(inner.as_ref(), representation)]
+                    }
+                    _ => return Err(mismatch("wrapper", &subject)),
+                },
+                Pattern::Case { case, fields } => match self.shape(&subject)? {
+                    Shape::Variant(cases, arguments) => {
+                        let declared = cases
+                            .iter()
+                            .find(|declared| declared.name == *case)
+                            .ok_or_else(|| {
+                                IrError::InvalidExpression(format!("no case `{case}`"))
+                            })?;
+                        let declared = declared
+                            .fields
+                            .iter()
+                            .map(|(name, value)| {
+                                (name.clone(), value.instantiate(&arguments))
+                            })
+                            .collect::<Vec<_>>();
+                        named(&declared, fields)?
+                    }
+                    _ => return Err(mismatch("case", &subject)),
+                },
+            };
+            inner.reverse();
+            pending.append(&mut inner);
+        }
+        Ok(())
+    }
+}
+
+/// The sub-patterns of a record or case pattern, each with its field's
+/// type, once the written fields are some of the declared ones.
+fn named<'p>(
+    declared: &[(String, Type)],
+    fields: &'p [(String, Pattern)],
+) -> Result<Vec<(&'p Pattern, Type)>, IrError> {
+    Checker::check_field_subset(declared, fields)?;
+    fields
+        .iter()
+        .map(|(name, pattern)| {
+            declared
+                .iter()
+                .find_map(|(field, ty)| (field == name).then(|| (pattern, ty.clone())))
+                .ok_or_else(|| IrError::InvalidExpression(format!("no field `{name}`")))
+        })
+        .collect()
+}
+
+fn mismatch(what: &str, subject: &Type) -> IrError {
+    IrError::InvalidExpression(format!("a {what} pattern on {subject}"))
 }

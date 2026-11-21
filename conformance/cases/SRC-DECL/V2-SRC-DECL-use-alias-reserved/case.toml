@@ -1,0 +1,16 @@
+id = "V2-SRC-DECL-use-alias-reserved"
+rule = "V2-SRC-DECL-use-alias-reserved"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#reserved-words: a reserved word as the import name is a reserved declaration at the word"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@name.reservedDeclaration"
+level = "@error"
+span = { start = 22, end = 27 }

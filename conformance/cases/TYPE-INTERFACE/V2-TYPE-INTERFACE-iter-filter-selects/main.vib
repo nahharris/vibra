@@ -1,0 +1,17 @@
+fn main
+  returns r: List(I32)
+  do
+    return Iter.collect(Iter.filter([1i32 2i32 3i32 4i32] isEven))
+endfn
+
+fn isEven
+  takes {x: I32}
+  returns r: Bool
+  do
+    match I32.remChecked(x 2i32)
+      case Result.ok(value: 0i32)
+        return true
+      case _
+        return false
+    endmatch
+endfn

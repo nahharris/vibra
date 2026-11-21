@@ -11,5 +11,6 @@
 )]
 
 mod arena_natives;
+mod native_vectors;
 mod number_natives;
 mod support;

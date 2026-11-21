@@ -1,0 +1,6 @@
+fn main
+  returns r: Str
+  do
+    let s: Str be From.convert(-7i32) endlet
+    return s
+endfn

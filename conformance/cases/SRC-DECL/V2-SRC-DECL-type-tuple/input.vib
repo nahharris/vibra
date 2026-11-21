@@ -1,0 +1,1 @@
+type Pair of {I32 Str} endtype

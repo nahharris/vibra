@@ -1,0 +1,3 @@
+type Meters of F64
+  doc """A length in meters."""
+endtype

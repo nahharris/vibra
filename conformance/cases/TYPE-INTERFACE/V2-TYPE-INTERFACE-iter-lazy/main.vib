@@ -1,0 +1,13 @@
+fn main returns r: List(U64) do return Iter.collect(Iter.take(Naturals(0u64) 3u64)) endfn
+type Naturals of U64
+  impl Iter
+    type Item of U64 endtype
+    fn next
+      takes {value: Self}
+      returns step: Option({Item Self})
+      do
+        let Naturals(n) be value endlet
+        return Option.some(value: {n Naturals(U64.add(n 1u64))})
+    endfn
+  endimpl
+endtype

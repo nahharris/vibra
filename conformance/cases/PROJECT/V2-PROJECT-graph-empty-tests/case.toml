@@ -1,0 +1,13 @@
+id = "V2-PROJECT-graph-empty-tests"
+rule = "V2-PROJECT-graph-empty-tests"
+profile = "staticV2"
+operation = "sourceGraph"
+description = "07-diagnostics-and-conformance.md#persistent-observations: every graph has the @tests unit, even when empty"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+graph = "graph.vibon"

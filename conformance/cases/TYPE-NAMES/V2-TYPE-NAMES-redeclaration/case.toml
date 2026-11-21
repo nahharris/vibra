@@ -1,0 +1,19 @@
+id = "V2-TYPE-NAMES-redeclaration"
+rule = "V2-TYPE-NAMES-redeclaration"
+profile = "staticV2"
+operation = "resolve"
+description = "02-type-system.md#namespaces-and-resolution: a repeated top-level name is @name.redeclaration at the later name, related to the earlier"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@name.redeclaration"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 26, end = 27 }
+related = [{ source = "src/app/main.vib", span = { start = 5, end = 6 } }]

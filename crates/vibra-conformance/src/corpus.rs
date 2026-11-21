@@ -1,13 +1,16 @@
 //! Discovery and safe loading of the conformance corpus.
+//!
+//! The corpus lives at `conformance/cases`, one directory per section prefix
+//! and one directory per case below it:
+//! `conformance/cases/<PREFIX>/<case identity>/case.toml`. The rule index,
+//! `conformance/rules.tsv`, lies beside the corpus root.
 
 use std::collections::BTreeSet;
 use std::fmt;
 use std::path::{Component, Path, PathBuf};
 
 use crate::manifest::{CaseManifest, MANIFEST_FILE_NAME, ManifestError};
-use vibra_diagnostics::Diagnostic;
-use vibra_host::HostWorld;
-use vibra_syntax::DocumentMode;
+use crate::rules::{RULES_FILE_NAME, RuleIndex, RuleStatus, RulesError};
 
 /// The workspace root, found from this crate's manifest.
 #[must_use]
@@ -22,31 +25,29 @@ pub fn corpus_root() -> PathBuf {
     workspace_root().join("conformance/cases")
 }
 
-/// One immutable document supplied to a profile handler.
+/// One input document of a case, as exact bytes.
 ///
-/// The path is the neutral source identity used by diagnostics and snapshots;
-/// handlers do not need to reconstruct it from a filesystem path or merge
-/// documents into one synthetic source string.
+/// The path is the case-relative source identity used by diagnostics and
+/// snapshots. The bytes are not decoded: an encoding error is the reader's to
+/// report.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CaseInputDocument {
     /// The case-relative document identity.
     pub source_id: String,
-    /// The grammar selected by the manifest role and extension.
-    pub mode: DocumentMode,
-    /// The document bytes decoded as UTF-8.
-    pub text: String,
-}
-
-/// One exact file acquired from a manifest-declared tree input.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CaseTreeFile {
-    /// Case-relative slash-separated source identity.
-    pub source_id: String,
-    /// Exact bytes on disk.
+    /// The exact bytes on disk.
     pub bytes: Vec<u8>,
 }
 
-/// A loaded case and its manifest directory.
+/// One file acquired from a declared tree input.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CaseTreeFile {
+    /// The case-relative, slash-separated source identity.
+    pub source_id: String,
+    /// The exact bytes on disk.
+    pub bytes: Vec<u8>,
+}
+
+/// A loaded case and its directory.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Case {
     directory: PathBuf,
@@ -55,28 +56,34 @@ pub struct Case {
 }
 
 impl Case {
-    /// The directory containing this case's inputs and snapshots.
+    /// The directory holding this case's inputs and snapshots.
     #[must_use]
     pub fn directory(&self) -> &Path {
         &self.directory
     }
 
-    /// The path to this case's `case.toml`.
+    /// The path of this case's `case.toml`.
     #[must_use]
     pub fn manifest_path(&self) -> &Path {
         &self.manifest_path
     }
 
-    /// The decoded case manifest.
+    /// The decoded manifest.
     #[must_use]
     pub fn manifest(&self) -> &CaseManifest {
         &self.manifest
     }
 
-    /// Resolves a case-relative path after validating that it is a regular
-    /// file inside this case directory.
+    /// Resolves a case-relative path after checking that it is a regular file
+    /// inside this case directory.
     pub fn file(&self, relative: &str) -> Result<PathBuf, CorpusError> {
         resolve_file(&self.directory, relative, &self.manifest.id)
+    }
+
+    /// Reads a case-relative file as exact bytes.
+    pub fn read_bytes(&self, relative: &str) -> Result<Vec<u8>, CorpusError> {
+        let path = self.file(relative)?;
+        std::fs::read(&path).map_err(|source| CorpusError::Io { path, source })
     }
 
     /// Reads a case-relative UTF-8 file.
@@ -86,129 +93,62 @@ impl Case {
             .map_err(|source| CorpusError::Io { path, source })
     }
 
-    /// Loads every declared input as an explicit, source-identified document.
-    ///
-    /// Declaration order is source, project, then data paths, matching the
-    /// manifest roles. The returned order is stable and each text remains
-    /// independently addressable.
+    /// Every declared document input, in the order source, project, data.
     pub fn input_documents(&self) -> Result<Vec<CaseInputDocument>, CorpusError> {
         let inputs = &self.manifest.inputs;
-        let mut documents = Vec::new();
-        if let Some(path) = &inputs.source {
-            documents.push(self.load_input(path, DocumentMode::Source)?);
-        }
-        if let Some(path) = &inputs.project {
-            documents.push(self.load_input(path, DocumentMode::Data)?);
-        }
-        for path in &inputs.data {
-            documents.push(self.load_input(path, DocumentMode::Data)?);
-        }
-        Ok(documents)
-    }
-
-    /// Acquires every regular file under the optional confined tree input.
-    ///
-    /// The tree is walked in stable path order. Symlink and junction targets
-    /// must stay inside both the tree and case directory; canonical directory
-    /// identities suppress aliases and cycles.
-    pub fn tree_files(&self) -> Result<Vec<CaseTreeFile>, CorpusError> {
-        if self.manifest.inputs.tree.is_none() {
-            return Ok(Vec::new());
-        }
-        let tree = self.tree_path()?;
-        let case_root = std::fs::canonicalize(&self.directory).map_err(|source| {
-            CorpusError::Io {
-                path: self.directory.clone(),
-                source,
-            }
-        })?;
-        let tree_root =
-            std::fs::canonicalize(&tree).map_err(|source| CorpusError::Io {
-                path: tree.clone(),
-                source,
-            })?;
-        let mut files = Vec::new();
-        let mut visited = BTreeSet::new();
-        collect_tree_files(&tree, &case_root, &tree_root, &mut visited, &mut files)?;
-        files.sort_by(|left, right| left.0.cmp(&right.0));
-        files
-            .into_iter()
-            .map(|(source_id, path)| {
-                let bytes = std::fs::read(&path).map_err(|source| CorpusError::Io {
-                    path: path.clone(),
-                    source,
-                })?;
-                Ok(CaseTreeFile { source_id, bytes })
+        inputs
+            .source
+            .iter()
+            .chain(&inputs.project)
+            .chain(&inputs.data)
+            .map(|source_id| {
+                Ok(CaseInputDocument {
+                    source_id: source_id.clone(),
+                    bytes: self.read_bytes(source_id)?,
+                })
             })
             .collect()
     }
 
-    /// The host world of the case: the decoded `host-world` input, or the
-    /// default world when the case supplies none.
-    ///
-    /// Each call decodes the document again, so a caller owns a fresh copy; a
-    /// test and a backend never share one. A document that fails to decode is
-    /// the data diagnostics of its violation, each reported once at the
-    /// document, and it fails this case only.
-    pub fn host_world(&self) -> Result<HostWorld, HostWorldError> {
-        let Some(path) = self.manifest.inputs.host_world.as_deref() else {
-            return Ok(HostWorld::default());
-        };
-        let text = self.read_file(path).map_err(HostWorldError::Corpus)?;
-        HostWorld::decode(path, &text).map_err(HostWorldError::Invalid)
+    /// The canonical directory of the declared tree input, after checking
+    /// that it is a regular directory inside this case directory and not a
+    /// link; `None` when the case declares no tree.
+    pub fn tree_directory(&self) -> Result<Option<PathBuf>, CorpusError> {
+        self.manifest
+            .inputs
+            .tree
+            .as_deref()
+            .map(|relative| {
+                resolve_directory(&self.directory, relative, &self.manifest.id)
+            })
+            .transpose()
     }
 
-    /// Resolves the manifest-declared tree root as a canonical directory.
-    pub(crate) fn tree_path(&self) -> Result<PathBuf, CorpusError> {
+    /// Acquires every regular file under the declared tree input, in stable
+    /// path order. Link targets must stay inside both the tree and the case
+    /// directory; canonical directory identities suppress aliases and cycles.
+    pub fn tree_files(&self) -> Result<Vec<CaseTreeFile>, CorpusError> {
         let Some(relative) = self.manifest.inputs.tree.as_deref() else {
-            return Err(CorpusError::InvalidCase {
-                path: self.directory.clone(),
-                message: "source-graph case has no declared tree input".to_owned(),
-            });
+            return Ok(Vec::new());
         };
-        resolve_directory(&self.directory, relative, &self.manifest.id)
-    }
-
-    fn load_input(
-        &self,
-        source_id: &str,
-        mode: DocumentMode,
-    ) -> Result<CaseInputDocument, CorpusError> {
-        Ok(CaseInputDocument {
-            source_id: source_id.to_owned(),
-            mode,
-            text: self.read_file(source_id)?,
-        })
-    }
-}
-
-/// Why a case's host world could not be loaded.
-#[derive(Debug)]
-pub enum HostWorldError {
-    /// The document could not be read.
-    Corpus(CorpusError),
-    /// The document does not decode as `@host-world.v1`.
-    Invalid(Vec<Diagnostic>),
-}
-
-impl fmt::Display for HostWorldError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Corpus(error) => error.fmt(formatter),
-            Self::Invalid(diagnostics) => {
-                write!(
-                    formatter,
-                    "the host world has {} diagnostics",
-                    diagnostics.len()
-                )
-            }
-        }
+        let tree = resolve_directory(&self.directory, relative, &self.manifest.id)?;
+        let case_root = canonical(&self.directory)?;
+        let mut files = Vec::new();
+        let mut visited = BTreeSet::new();
+        collect_tree_files(&tree, &case_root, &tree, &mut visited, &mut files)?;
+        files.sort_by(|left, right| left.0.cmp(&right.0));
+        files
+            .into_iter()
+            .map(|(source_id, path)| {
+                let bytes = std::fs::read(&path)
+                    .map_err(|source| CorpusError::Io { path, source })?;
+                Ok(CaseTreeFile { source_id, bytes })
+            })
+            .collect()
     }
 }
 
-impl std::error::Error for HostWorldError {}
-
-/// A deterministic collection of loaded corpus cases.
+/// A deterministic collection of loaded cases.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Corpus {
     root: PathBuf,
@@ -216,7 +156,14 @@ pub struct Corpus {
 }
 
 impl Corpus {
-    /// Discovers every `case.toml` below `root`.
+    /// Discovers every case under `root`.
+    ///
+    /// Every entry of `root` is a prefix directory, every entry of a prefix
+    /// directory is a case directory, and every case directory holds a
+    /// `case.toml`. A case's directory is named by its identity and lies in
+    /// the directory of its identity's prefix. When the corpus has a case,
+    /// the rule index `rules.tsv` beside `root` must list the case's rule as
+    /// `active`.
     pub fn discover(root: impl AsRef<Path>) -> Result<Self, CorpusError> {
         let root = root.as_ref();
         let metadata = std::fs::metadata(root).map_err(|source| CorpusError::Io {
@@ -226,24 +173,55 @@ impl Corpus {
         if !metadata.is_dir() {
             return Err(CorpusError::InvalidRoot(root.to_path_buf()));
         }
-        let root = std::fs::canonicalize(root).map_err(|source| CorpusError::Io {
-            path: root.to_path_buf(),
-            source,
-        })?;
+        let root = canonical(root)?;
 
-        let mut manifest_paths = Vec::new();
-        let mut visited_directories = BTreeSet::new();
-        collect_manifests(&root, &root, &mut visited_directories, &mut manifest_paths)?;
+        let mut found = Vec::new();
+        for prefix_directory in sorted_entries(&root)? {
+            if !is_directory_inside(&prefix_directory, &root)? {
+                return Err(CorpusError::InvalidCase {
+                    path: prefix_directory,
+                    message: "the corpus root holds only prefix directories".to_owned(),
+                });
+            }
+            for case_directory in sorted_entries(&prefix_directory)? {
+                if !is_directory_inside(&case_directory, &root)? {
+                    return Err(CorpusError::InvalidCase {
+                        path: case_directory,
+                        message: "a prefix directory holds only case directories"
+                            .to_owned(),
+                    });
+                }
+                let manifest_path = case_directory.join(MANIFEST_FILE_NAME);
+                if !manifest_path.is_file() {
+                    return Err(CorpusError::InvalidCase {
+                        path: case_directory,
+                        message: format!(
+                            "the case directory has no {MANIFEST_FILE_NAME}"
+                        ),
+                    });
+                }
+                found.push((prefix_directory.clone(), case_directory, manifest_path));
+            }
+        }
+        if found.is_empty() {
+            return Ok(Self {
+                root,
+                cases: Vec::new(),
+            });
+        }
 
-        let mut cases = Vec::with_capacity(manifest_paths.len());
-        for manifest_path in manifest_paths {
-            let directory = manifest_path
-                .parent()
-                .ok_or_else(|| CorpusError::InvalidCase {
-                    path: manifest_path.clone(),
-                    message: "manifest has no parent directory".to_owned(),
-                })?
-                .to_path_buf();
+        let rules_path = root.parent().map_or_else(
+            || PathBuf::from(RULES_FILE_NAME),
+            |parent| parent.join(RULES_FILE_NAME),
+        );
+        let rules =
+            RuleIndex::from_path(&rules_path).map_err(|source| CorpusError::Rules {
+                path: rules_path.clone(),
+                source,
+            })?;
+
+        let mut cases = Vec::with_capacity(found.len());
+        for (prefix_directory, directory, manifest_path) in found {
             let manifest =
                 CaseManifest::from_path(&manifest_path).map_err(|source| {
                     CorpusError::Manifest {
@@ -251,7 +229,8 @@ impl Corpus {
                         source,
                     }
                 })?;
-            validate_case_directory(&directory, &manifest)?;
+            validate_layout(&prefix_directory, &directory, &manifest)?;
+            validate_rule(&rules, &directory, &manifest)?;
             validate_declared_files(&directory, &manifest)?;
             cases.push(Case {
                 directory,
@@ -259,54 +238,36 @@ impl Corpus {
                 manifest,
             });
         }
-
-        cases.sort_by(|left, right| {
-            left.manifest
-                .id
-                .cmp(&right.manifest.id)
-                .then_with(|| left.manifest_path.cmp(&right.manifest_path))
-        });
-
+        cases.sort_by(|left, right| left.manifest.id.cmp(&right.manifest.id));
         for pair in cases.windows(2) {
-            let Some(left) = pair.first() else {
-                continue;
-            };
-            let Some(right) = pair.get(1) else {
-                continue;
-            };
-            if left.manifest.id == right.manifest.id {
+            if let [left, right] = pair
+                && left.manifest.id == right.manifest.id
+            {
                 return Err(CorpusError::DuplicateCaseId(left.manifest.id.clone()));
             }
         }
-
         Ok(Self { root, cases })
     }
 
-    /// Alias for [`Self::discover`], useful to callers that already use
-    /// "load" for corpus setup.
-    pub fn load(root: impl AsRef<Path>) -> Result<Self, CorpusError> {
-        Self::discover(root)
-    }
-
-    /// The canonicalized corpus root.
+    /// The canonical corpus root.
     #[must_use]
     pub fn root(&self) -> &Path {
         &self.root
     }
 
-    /// Loaded cases in deterministic order.
+    /// The loaded cases, ordered by identity.
     #[must_use]
     pub fn cases(&self) -> &[Case] {
         &self.cases
     }
 
-    /// Number of loaded cases.
+    /// The number of loaded cases.
     #[must_use]
     pub fn len(&self) -> usize {
         self.cases.len()
     }
 
-    /// Whether the corpus has no cases.
+    /// Whether the corpus has no case.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.cases.is_empty()
@@ -322,33 +283,40 @@ impl<'a> IntoIterator for &'a Corpus {
     }
 }
 
-/// Corpus discovery or layout failure.
+/// A corpus discovery or layout failure.
 #[derive(Debug)]
 pub enum CorpusError {
-    /// The requested root exists but is not a directory.
+    /// The root exists but is not a directory.
     InvalidRoot(PathBuf),
     /// A filesystem operation failed.
     Io {
-        /// The path involved in the operation.
+        /// The path involved.
         path: PathBuf,
         /// The underlying failure.
         source: std::io::Error,
     },
-    /// The case manifest could not be decoded.
+    /// A case manifest could not be decoded.
     Manifest {
         /// The manifest path.
         path: PathBuf,
         /// The decoding failure.
         source: ManifestError,
     },
-    /// The case directory and manifest identifier disagree.
+    /// The rule index could not be decoded.
+    Rules {
+        /// The index path.
+        path: PathBuf,
+        /// The decoding failure.
+        source: RulesError,
+    },
+    /// A case violates the corpus layout or addresses an inactive rule.
     InvalidCase {
-        /// The case or manifest path.
+        /// The case or directory path.
         path: PathBuf,
         /// A human-readable explanation.
         message: String,
     },
-    /// Two directories use the same stable case identifier.
+    /// Two directories use one case identity.
     DuplicateCaseId(String),
 }
 
@@ -366,6 +334,9 @@ impl fmt::Display for CorpusError {
                 write!(formatter, "{}: {source}", path.display())
             }
             Self::Manifest { path, source } => {
+                write!(formatter, "{}: {source}", path.display())
+            }
+            Self::Rules { path, source } => {
                 write!(formatter, "{}: {source}", path.display())
             }
             Self::InvalidCase { path, message } => {
@@ -387,6 +358,7 @@ impl std::error::Error for CorpusError {
         match self {
             Self::Io { source, .. } => Some(source),
             Self::Manifest { source, .. } => Some(source),
+            Self::Rules { source, .. } => Some(source),
             Self::InvalidRoot(_)
             | Self::InvalidCase { .. }
             | Self::DuplicateCaseId(_) => None,
@@ -394,27 +366,14 @@ impl std::error::Error for CorpusError {
     }
 }
 
-fn collect_manifests(
-    directory: &Path,
-    root: &Path,
-    visited_directories: &mut BTreeSet<PathBuf>,
-    manifests: &mut Vec<PathBuf>,
-) -> Result<(), CorpusError> {
-    let canonical_directory =
-        std::fs::canonicalize(directory).map_err(|source| CorpusError::Io {
-            path: directory.to_path_buf(),
-            source,
-        })?;
-    if !canonical_directory.starts_with(root) {
-        return Err(CorpusError::InvalidCase {
-            path: directory.to_path_buf(),
-            message: "case directory resolves outside the corpus root".to_owned(),
-        });
-    }
-    if !visited_directories.insert(canonical_directory) {
-        return Ok(());
-    }
+fn canonical(path: &Path) -> Result<PathBuf, CorpusError> {
+    std::fs::canonicalize(path).map_err(|source| CorpusError::Io {
+        path: path.to_path_buf(),
+        source,
+    })
+}
 
+fn sorted_entries(directory: &Path) -> Result<Vec<PathBuf>, CorpusError> {
     let mut entries = std::fs::read_dir(directory)
         .map_err(|source| CorpusError::Io {
             path: directory.to_path_buf(),
@@ -430,117 +389,111 @@ fn collect_manifests(
         })
         .collect::<Result<Vec<_>, _>>()?;
     entries.sort();
+    Ok(entries)
+}
 
-    for path in entries {
-        let metadata = std::fs::metadata(&path).map_err(|source| CorpusError::Io {
-            path: path.clone(),
-            source,
-        })?;
-        if metadata.is_dir() {
-            collect_manifests(&path, root, visited_directories, manifests)?;
-        } else if path.file_name().and_then(|name| name.to_str())
-            == Some(MANIFEST_FILE_NAME)
-        {
-            let canonical =
-                std::fs::canonicalize(&path).map_err(|source| CorpusError::Io {
-                    path: path.clone(),
-                    source,
-                })?;
-            if !canonical.starts_with(root) {
-                return Err(CorpusError::InvalidCase {
-                    path,
-                    message: "manifest resolves outside the corpus root".to_owned(),
-                });
-            }
-            let declared_directory =
-                path.parent().ok_or_else(|| CorpusError::InvalidCase {
-                    path: path.clone(),
-                    message: "manifest has no containing case directory".to_owned(),
-                })?;
-            let canonical_declared_directory =
-                std::fs::canonicalize(declared_directory).map_err(|source| {
-                    CorpusError::Io {
-                        path: declared_directory.to_path_buf(),
-                        source,
-                    }
-                })?;
-            let canonical_manifest_directory =
-                canonical.parent().ok_or_else(|| CorpusError::InvalidCase {
-                    path: canonical.clone(),
-                    message: "manifest has no canonical parent directory".to_owned(),
-                })?;
-            if canonical_manifest_directory != canonical_declared_directory {
-                return Err(CorpusError::InvalidCase {
-                    path,
-                    message: "manifest resolves outside its case directory".to_owned(),
-                });
-            }
-            manifests.push(canonical);
-        }
+/// Whether `path` is a directory, after checking that it resolves inside
+/// `root`.
+fn is_directory_inside(path: &Path, root: &Path) -> Result<bool, CorpusError> {
+    let resolved = canonical(path)?;
+    if !resolved.starts_with(root) {
+        return Err(CorpusError::InvalidCase {
+            path: path.to_path_buf(),
+            message: "the entry resolves outside the corpus root".to_owned(),
+        });
+    }
+    Ok(resolved.is_dir())
+}
+
+fn file_name(path: &Path) -> &str {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default()
+}
+
+/// A case directory is named by the case identity and lies in the directory
+/// of its identity's prefix.
+fn validate_layout(
+    prefix_directory: &Path,
+    directory: &Path,
+    manifest: &CaseManifest,
+) -> Result<(), CorpusError> {
+    let prefix = file_name(prefix_directory);
+    if prefix != manifest.prefix() {
+        return Err(CorpusError::InvalidCase {
+            path: directory.to_path_buf(),
+            message: format!(
+                "case `{}` lies in the prefix directory `{prefix}`, but its identity's \
+                 prefix is `{}`",
+                manifest.id,
+                manifest.prefix()
+            ),
+        });
+    }
+    if file_name(directory) != manifest.id {
+        return Err(CorpusError::InvalidCase {
+            path: directory.to_path_buf(),
+            message: format!(
+                "the directory name must equal the case id `{}`",
+                manifest.id
+            ),
+        });
     }
     Ok(())
 }
 
-fn validate_case_directory(
+/// A case may address only a rule the index lists as active.
+fn validate_rule(
+    rules: &RuleIndex,
     directory: &Path,
     manifest: &CaseManifest,
 ) -> Result<(), CorpusError> {
-    let directory_name = directory.file_name().and_then(|name| name.to_str());
-    if directory_name != Some(manifest.id.as_str()) {
-        return Err(CorpusError::InvalidCase {
-            path: directory.to_path_buf(),
-            message: format!("directory name must equal manifest id `{}`", manifest.id),
-        });
-    }
-    Ok(())
+    let problem = match rules.status(&manifest.rule) {
+        Some(RuleStatus::Active) => return Ok(()),
+        Some(RuleStatus::Retired) => "which the rule index lists as retired",
+        None => "which the rule index does not list",
+    };
+    Err(CorpusError::InvalidCase {
+        path: directory.to_path_buf(),
+        message: format!(
+            "case `{}` addresses rule `{}`, {problem}",
+            manifest.id, manifest.rule
+        ),
+    })
 }
 
 fn validate_declared_files(
     directory: &Path,
     manifest: &CaseManifest,
 ) -> Result<(), CorpusError> {
-    if let Some(source) = &manifest.inputs.source {
-        let _ = resolve_file(directory, source, &manifest.id)?;
-    }
-    if let Some(project) = &manifest.inputs.project {
-        let _ = resolve_file(directory, project, &manifest.id)?;
-    }
-    if let Some(tree) = &manifest.inputs.tree {
-        let _ = resolve_directory(directory, tree, &manifest.id)?;
-    }
-    for data in &manifest.inputs.data {
-        let _ = resolve_file(directory, data, &manifest.id)?;
-    }
-    if let Some(world) = &manifest.inputs.host_world {
-        let _ = resolve_file(directory, world, &manifest.id)?;
-    }
-
-    let expectations = &manifest.expectations;
-    for snapshot in [
-        expectations.formatted.as_ref(),
-        expectations.graph.as_ref(),
-        expectations.resolved.as_ref(),
-        expectations.types.as_ref(),
-        expectations.effects.as_ref(),
-        expectations.index.as_ref(),
-    ]
-    .into_iter()
-    .flatten()
+    let inputs = &manifest.inputs;
+    for file in inputs
+        .source
+        .iter()
+        .chain(&inputs.project)
+        .chain(&inputs.data)
+        .chain(&inputs.host_world)
     {
-        let _ = resolve_file(directory, snapshot, &manifest.id)?;
+        resolve_file(directory, file, &manifest.id)?;
     }
-    for query in &expectations.queries {
-        let _ = resolve_file(directory, &query.snapshot, &manifest.id)?;
+    if let Some(tree) = &inputs.tree {
+        resolve_directory(directory, tree, &manifest.id)?;
     }
-    if let Some(execution) = expectations.interpreter.as_ref() {
-        for snapshot in [execution.result.as_ref(), execution.audit_trace.as_ref()]
-            .into_iter()
-            .flatten()
-        {
-            let _ = resolve_file(directory, snapshot, &manifest.id)?;
-        }
+    for (_, snapshot) in manifest.expectations.snapshots() {
+        resolve_file(directory, snapshot, &manifest.id)?;
     }
     Ok(())
+}
+
+fn is_relative_path(relative: &str, current_directory_allowed: bool) -> bool {
+    let path = Path::new(relative);
+    !relative.is_empty()
+        && !path.is_absolute()
+        && !path.components().any(|component| match component {
+            Component::CurDir => !current_directory_allowed,
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => true,
+            Component::Normal(_) => false,
+        })
 }
 
 fn resolve_file(
@@ -548,16 +501,7 @@ fn resolve_file(
     relative: &str,
     case_id: &str,
 ) -> Result<PathBuf, CorpusError> {
-    let relative_path = Path::new(relative);
-    if relative.is_empty()
-        || relative_path.is_absolute()
-        || relative_path.components().any(|component| {
-            matches!(
-                component,
-                Component::ParentDir | Component::RootDir | Component::Prefix(_)
-            )
-        })
-    {
+    if !is_relative_path(relative, true) {
         return Err(CorpusError::InvalidCase {
             path: directory.to_path_buf(),
             message: format!(
@@ -565,8 +509,7 @@ fn resolve_file(
             ),
         });
     }
-
-    let path = directory.join(relative_path);
+    let path = directory.join(relative);
     let metadata = std::fs::metadata(&path).map_err(|source| CorpusError::Io {
         path: path.clone(),
         source,
@@ -574,26 +517,17 @@ fn resolve_file(
     if !metadata.is_file() {
         return Err(CorpusError::InvalidCase {
             path,
-            message: "declared input or snapshot is not a regular file".to_owned(),
+            message: "a declared input or snapshot is not a regular file".to_owned(),
         });
     }
-    let canonical_directory =
-        std::fs::canonicalize(directory).map_err(|source| CorpusError::Io {
-            path: directory.to_path_buf(),
-            source,
-        })?;
-    let canonical_file =
-        std::fs::canonicalize(&path).map_err(|source| CorpusError::Io {
-            path: path.clone(),
-            source,
-        })?;
-    if !canonical_file.starts_with(&canonical_directory) {
+    let file = canonical(&path)?;
+    if !file.starts_with(canonical(directory)?) {
         return Err(CorpusError::InvalidCase {
             path,
-            message: "declared file resolves outside its case directory".to_owned(),
+            message: "a declared file resolves outside its case directory".to_owned(),
         });
     }
-    Ok(canonical_file)
+    Ok(file)
 }
 
 fn resolve_directory(
@@ -601,19 +535,7 @@ fn resolve_directory(
     relative: &str,
     case_id: &str,
 ) -> Result<PathBuf, CorpusError> {
-    let relative_path = Path::new(relative);
-    if relative.is_empty()
-        || relative_path.is_absolute()
-        || relative_path.components().any(|component| {
-            matches!(
-                component,
-                Component::CurDir
-                    | Component::ParentDir
-                    | Component::RootDir
-                    | Component::Prefix(_)
-            )
-        })
-    {
+    if !is_relative_path(relative, false) {
         return Err(CorpusError::InvalidCase {
             path: directory.to_path_buf(),
             message: format!(
@@ -621,7 +543,7 @@ fn resolve_directory(
             ),
         });
     }
-    let path = directory.join(relative_path);
+    let path = directory.join(relative);
     let metadata =
         std::fs::symlink_metadata(&path).map_err(|source| CorpusError::Io {
             path: path.clone(),
@@ -630,27 +552,18 @@ fn resolve_directory(
     if metadata.file_type().is_symlink() || !metadata.is_dir() {
         return Err(CorpusError::InvalidCase {
             path,
-            message: "declared tree input is not a regular directory or is a link"
+            message: "a declared tree is not a regular directory or is a link"
                 .to_owned(),
         });
     }
-    let canonical_directory =
-        std::fs::canonicalize(directory).map_err(|source| CorpusError::Io {
-            path: directory.to_path_buf(),
-            source,
-        })?;
-    let canonical_tree =
-        std::fs::canonicalize(&path).map_err(|source| CorpusError::Io {
-            path: path.clone(),
-            source,
-        })?;
-    if !canonical_tree.starts_with(&canonical_directory) {
+    let tree = canonical(&path)?;
+    if !tree.starts_with(canonical(directory)?) {
         return Err(CorpusError::InvalidCase {
             path,
-            message: "declared tree resolves outside its case directory".to_owned(),
+            message: "a declared tree resolves outside its case directory".to_owned(),
         });
     }
-    Ok(canonical_tree)
+    Ok(tree)
 }
 
 fn collect_tree_files(
@@ -660,80 +573,28 @@ fn collect_tree_files(
     visited: &mut BTreeSet<PathBuf>,
     files: &mut Vec<(String, PathBuf)>,
 ) -> Result<(), CorpusError> {
-    let canonical_directory =
-        std::fs::canonicalize(directory).map_err(|source| CorpusError::Io {
-            path: directory.to_path_buf(),
-            source,
-        })?;
-    if !canonical_directory.starts_with(case_root)
-        || !canonical_directory.starts_with(tree_root)
-    {
+    let resolved = canonical(directory)?;
+    if !resolved.starts_with(case_root) || !resolved.starts_with(tree_root) {
         return Err(CorpusError::InvalidCase {
             path: directory.to_path_buf(),
-            message: "tree entry resolves outside the confined tree".to_owned(),
+            message: "a tree entry resolves outside the confined tree".to_owned(),
         });
     }
-    if !visited.insert(canonical_directory) {
+    if !visited.insert(resolved) {
         return Ok(());
     }
-    let mut entries = std::fs::read_dir(directory)
-        .map_err(|source| CorpusError::Io {
-            path: directory.to_path_buf(),
-            source,
-        })?
-        .map(|entry| {
-            entry
-                .map_err(|source| CorpusError::Io {
-                    path: directory.to_path_buf(),
-                    source,
-                })
-                .map(|entry| entry.path())
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    entries.sort();
-    for path in entries {
-        let metadata =
-            std::fs::symlink_metadata(&path).map_err(|source| CorpusError::Io {
-                path: path.clone(),
-                source,
-            })?;
-        if metadata.file_type().is_symlink() {
-            let canonical =
-                std::fs::canonicalize(&path).map_err(|source| CorpusError::Io {
-                    path: path.clone(),
-                    source,
-                })?;
-            if !canonical.starts_with(case_root) || !canonical.starts_with(tree_root) {
-                return Err(CorpusError::InvalidCase {
-                    path,
-                    message: "tree link resolves outside its confined tree".to_owned(),
-                });
-            }
-            let target_metadata =
-                std::fs::metadata(&path).map_err(|source| CorpusError::Io {
-                    path: path.clone(),
-                    source,
-                })?;
-            if target_metadata.is_dir() {
-                collect_tree_files(&path, case_root, tree_root, visited, files)?;
-            } else if target_metadata.is_file() {
-                files.push((relative_id(case_root, &path), canonical));
-            }
-        } else if metadata.is_dir() {
+    for path in sorted_entries(directory)? {
+        let target = canonical(&path)?;
+        if !target.starts_with(case_root) || !target.starts_with(tree_root) {
+            return Err(CorpusError::InvalidCase {
+                path,
+                message: "a tree entry resolves outside its confined tree".to_owned(),
+            });
+        }
+        if target.is_dir() {
             collect_tree_files(&path, case_root, tree_root, visited, files)?;
-        } else if metadata.is_file() {
-            let canonical =
-                std::fs::canonicalize(&path).map_err(|source| CorpusError::Io {
-                    path: path.clone(),
-                    source,
-                })?;
-            if !canonical.starts_with(case_root) || !canonical.starts_with(tree_root) {
-                return Err(CorpusError::InvalidCase {
-                    path,
-                    message: "tree file resolves outside its confined tree".to_owned(),
-                });
-            }
-            files.push((relative_id(case_root, &path), canonical));
+        } else if target.is_file() {
+            files.push((relative_id(case_root, &path), target));
         }
     }
     Ok(())

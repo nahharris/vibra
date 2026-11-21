@@ -1,0 +1,16 @@
+id = "V2-SRC-READER-name-invalid"
+rule = "V2-SRC-READER-name-invalid"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#lexical-structure: an identifier with an underscore"
+
+[inputs]
+data = ["input.vibon"]
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@syntax.invalidName"
+level = "@error"
+span = { start = 1, end = 9 }

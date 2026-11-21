@@ -1,0 +1,17 @@
+id = "V2-SRC-FMT-idempotence-1"
+rule = "V2-SRC-FMT-idempotence"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#canonical-format: formatting is idempotent; the longest corpus input, a project document whose dict repeats the key @args: it is returned byte for byte"
+
+[inputs]
+data = ["input.vibon"]
+
+[expect]
+verdict = "refuted"
+formatted = "formatted.vibon"
+
+[[expect.diagnostics]]
+code = "@data.duplicateKey"
+level = "@error"
+span = { start = 897, end = 902 }

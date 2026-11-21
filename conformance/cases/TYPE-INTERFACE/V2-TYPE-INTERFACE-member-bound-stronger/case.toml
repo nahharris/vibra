@@ -1,0 +1,19 @@
+id = "V2-TYPE-INTERFACE-member-bound-stronger"
+rule = "V2-TYPE-INTERFACE-member-bound-stronger"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#implementations: an implementation member whose own type parameter has a bound the contract does not give differs from the contract, at that bound"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.mismatch"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 247, end = 254 }
+related = [{ source = "src/app/main.vib", span = { start = 65, end = 69 } }]

@@ -1,0 +1,6 @@
+fn f
+  returns r: I32
+  ensures Ordered.greater(r 0i32)
+  do
+    return 1i32
+endfn

@@ -1,0 +1,6 @@
+fn main
+  returns r: I32
+  do
+    let w: I32 be From.convert(1i8) endlet
+    return w
+endfn

@@ -1,6 +1,6 @@
 [package]
 name = "vibra-native"
-description = "Toolchain-owned native code of the Vibra runtime, written once and called by both backends."
+description = "Toolchain-owned native code of the Vibra runtime, written once against the shared value-storage interface."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

@@ -1,0 +1,21 @@
+fn main returns r: I32 do return 1i32 endfn
+
+type Tag(T)
+  case only
+  impl From(T)
+    fn convert
+      takes {value: T}
+      returns converted: Self
+      do
+        return Tag.only()
+    endfn
+  endimpl
+  impl From(I8)
+    fn convert
+      takes {value: I8}
+      returns converted: Self
+      do
+        return Tag.only()
+    endfn
+  endimpl
+endtype

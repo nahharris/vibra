@@ -1,0 +1,2 @@
+fn f(T) takes {items: List(T)} returns r: U64 do return g([items]) endfn
+fn g(U) takes {items: List(U)} returns r: U64 do return f(items) endfn

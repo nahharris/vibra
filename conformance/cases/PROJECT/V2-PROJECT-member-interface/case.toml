@@ -1,0 +1,13 @@
+id = "V2-PROJECT-member-interface"
+rule = "V2-PROJECT-member-interface"
+profile = "staticV2"
+operation = "resolve"
+description = "04-programs-and-packages.md#modules-and-imports: a member of a public interface has the interface's access, which the @resolved.v2 snapshot records, and is reachable from another module"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+resolved = "resolved.vibon"

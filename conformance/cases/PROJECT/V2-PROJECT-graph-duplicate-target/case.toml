@@ -1,0 +1,19 @@
+id = "V2-PROJECT-graph-duplicate-target"
+rule = "V2-PROJECT-graph-duplicate-target"
+profile = "staticV2"
+operation = "sourceGraph"
+description = "04-programs-and-packages.md#packages-units-and-targets: two targets named @app are @project.duplicateName at the second name, related to the first"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@project.duplicateName"
+level = "@error"
+source = "project.vibon"
+span = { start = 120, end = 124 }
+related = [{ source = "project.vibon", span = { start = 80, end = 84 } }]

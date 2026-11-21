@@ -1,0 +1,7 @@
+fn count
+  takes {}
+  returns r: Result(U64 Str)
+  visibility @public
+  do
+    return Result.ok(value: 2u64)
+endfn

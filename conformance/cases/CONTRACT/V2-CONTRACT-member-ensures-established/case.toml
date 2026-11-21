@@ -1,0 +1,19 @@
+id = "V2-CONTRACT-member-ensures-established"
+rule = "V2-CONTRACT-member-ensures-established"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#guards-and-callable-types: an implementation must establish its contract member's ensures: @contract.unproved at the return that does not, related to the contract member"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "unknown"
+
+[[expect.diagnostics]]
+code = "@contract.unproved"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 398, end = 406 }
+related = [{ source = "src/app/main.vib", span = { start = 21, end = 25 } }]

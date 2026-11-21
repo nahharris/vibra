@@ -3,8 +3,8 @@
 
 use std::cell::Cell as Counter;
 
-use vibra_host::{AuditEvent, HostWorld, WorldProvider};
-use vibra_ir::boundary::TrapCode;
+use vibra_host_v1::{AuditEvent, HostWorld, WorldProvider};
+use vibra_ir_v1::boundary::TrapCode;
 use vibra_nexus::{Cell, Context, Outcome, Stats, run};
 use vibra_nexus_bridge as bridge;
 use vibra_nexus_bridge::{

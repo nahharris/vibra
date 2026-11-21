@@ -20,8 +20,8 @@
 //! # Documents
 //!
 //! A span may carry the case-relative source identity that owns it. The
-//! identity is optional for the syntax-only APIs, which historically diagnose
-//! one document at a time, but conformance and workspace adapters attach it
+//! identity is optional for the syntax-only APIs, which diagnose one document
+//! at a time, but conformance and workspace adapters attach it
 //! before comparing observations from more than one document. Keeping the
 //! identity beside the byte span prevents equal offsets in different files
 //! from being flattened into one location.
@@ -105,8 +105,8 @@ impl Fix {
 
     /// A fix that changes meaning or needs review before it is applied.
     ///
-    /// V1 has no command that applies one. It exists so a fix can be offered
-    /// and described without `vibra edit fix` treating it as applicable.
+    /// No command applies one. It exists so a fix can be described without an
+    /// edit plan treating it as applicable.
     #[must_use]
     pub fn unsafe_to_apply(
         description: impl Into<String>,
@@ -325,17 +325,17 @@ mod tests {
         // The chapter requires every emitted diagnostic to carry its code's
         // registered level. Deriving it is what makes that unconditional.
         let error = Diagnostic::new(
-            DiagnosticCode::SyntaxRetiredForm,
+            DiagnosticCode::SyntaxInvalidForm,
             ByteSpan::empty_at(0),
-            "`while` was retired",
+            "the grammar does not admit this form",
         );
         assert_eq!(error.level(), Level::Error);
         assert!(error.is_error());
 
         let warning = Diagnostic::new(
-            DiagnosticCode::StyleArgumentOrder,
+            DiagnosticCode::StyleCasing,
             ByteSpan::empty_at(0),
-            "labelled operand precedes a fixed one",
+            "the name departs from the casing convention",
         );
         assert_eq!(warning.level(), Level::Warning);
         assert!(!warning.is_error());
@@ -365,16 +365,10 @@ mod tests {
     #[test]
     fn a_safe_fix_records_its_expected_revision() {
         let revision = DocumentRevision::new("sha256:abc");
-        let diagnostic = Diagnostic::new(
-            DiagnosticCode::StyleArgumentOrder,
-            ByteSpan::new(0, 8),
-            "operands are in a noncanonical order",
-        )
-        .with_fix(Fix::safe("reorder operands canonically", revision.clone()));
+        let fix = Fix::safe("rename to the canonical casing", revision.clone());
 
-        let fix = &diagnostic.fixes()[0];
         assert!(fix.is_safe());
-        assert_eq!(fix.description(), "reorder operands canonically");
+        assert_eq!(fix.description(), "rename to the canonical casing");
         assert_eq!(fix.expected_revision(), &revision);
         assert_eq!(revision.as_str(), "sha256:abc");
     }
@@ -389,22 +383,17 @@ mod tests {
     }
 
     #[test]
-    fn only_a_code_registered_as_fixable_is_given_a_fix() {
+    fn no_code_is_registered_as_fixable() {
         // The invariant the emitting code must respect: a diagnostic offers a
-        // fix only where the registry says the compiler can produce one.
+        // fix only where the registry says the compiler can produce one, and
+        // today every code has fix capability `@none`.
         let fixable: Vec<DiagnosticCode> = DiagnosticCode::ALL
             .iter()
             .copied()
             .filter(|code| code.fix_capability() == FixCapability::Safe)
             .collect();
 
-        assert_eq!(fixable, [DiagnosticCode::StyleArgumentOrder]);
-
-        for code in fixable {
-            let diagnostic = Diagnostic::new(code, ByteSpan::empty_at(0), "message")
-                .with_fix(Fix::safe("fix", DocumentRevision::new("sha256:0")));
-            assert_eq!(diagnostic.fixes().len(), 1);
-        }
+        assert!(fixable.is_empty(), "{fixable:?}");
     }
 
     #[test]

@@ -1,6 +1,6 @@
 [package]
 name = "vibra-workspace"
-description = "Typed project data decoding and workspace orchestration for Vibra."
+description = "Vibra project discovery, the typed project file, the confined source snapshot, the source graph, and the test runner."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,18 +9,14 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+sha2.workspace = true
 vibra-diagnostics.workspace = true
 vibra-fmt.workspace = true
-vibra-host.workspace = true
-vibra-syntax.workspace = true
-vibra-resolve.workspace = true
-vibra-ir.workspace = true
-vibra-types.workspace = true
 vibra-interp.workspace = true
-sha2.workspace = true
-
-[target.'cfg(unix)'.dependencies]
-rustix.workspace = true
+vibra-ir.workspace = true
+vibra-resolve.workspace = true
+vibra-syntax.workspace = true
+vibra-types.workspace = true
 
 [lints]
 workspace = true

@@ -1,0 +1,18 @@
+id = "V2-CONTRACT-ensures-else-wrong-type"
+rule = "V2-CONTRACT-ensures-else-wrong-type"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#guards-with-else: an ensures consequence that is not of the result type is @contract.invalidConsequence at the consequence"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@contract.invalidConsequence"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 81, end = 86 }

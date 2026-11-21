@@ -1,0 +1,18 @@
+id = "V2-TYPE-NOMINAL-dict-key-function"
+rule = "V2-TYPE-NOMINAL-dict-key-function"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#dict-keys-equality-and-order: a callable key is not equatable"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.functionNotEquatable"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 91, end = 94 }

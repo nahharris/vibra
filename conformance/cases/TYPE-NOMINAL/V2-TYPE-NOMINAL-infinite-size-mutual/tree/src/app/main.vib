@@ -1,0 +1,2 @@
+type A of {b: B} endtype
+type B of {a: A} endtype

@@ -1,43 +1,49 @@
 //! The audit event and its codecs.
 //!
-//! `docs/spec/06-runtime.md`, "The audit trace". The trace is the VIBON record
-//! `(record format: @audit-trace.v1 events: (array event...))` and an **event**
-//! is the record
+//! `docs/spec/06-runtime.md`, "Audit trace". The trace is the data document
+//! `{format: @auditTrace.v1 events: [event ...]}` and an **event** is the
+//! record
 //!
 //! ```text
-//! (record kind: @host op: "<registry symbol>"
-//!         args: (array <canonical encodings>) result: <canonical encoding>)
+//! {kind: @host op: "<registry symbol>" args: [<encodings>] result: <encoding>}
 //! ```
 //!
-//! One event is built for each completed host call, by [`AuditEvent::completed`],
-//! from the call and its answer: both backends use this one function, so a trace
-//! is part of the observable behavior they reproduce. A consumer preserves an
-//! event of a kind it does not know as opaque data and never fails on it; an
-//! unknown field in a known kind is a violation of the format.
+//! over the major-1 host rows. One event is built for each completed host
+//! call, by [`AuditEvent::completed`], from the call and its answer, so every
+//! backend that records a trace records it by this one function. A consumer
+//! preserves an event of a kind it does not know as opaque data and never
+//! fails on it; an unknown field in a known kind is a violation of the format.
+//!
+//! Every encoding an event holds is canonical data under the opaque rules of
+//! `docs/spec/04-programs-and-packages.md`, "Decoded values and canonical
+//! bytes": record fields in the byte order of their names, numbers with their
+//! minimal digits and their suffix. A decoded event holds the canonical text
+//! the schema reader of `vibra-syntax` writes, so two spellings of one event
+//! decode to equal events.
 //!
 //! The same event is a JSON object `{ "kind", "op", "args", "result" }` whose
-//! values are the VIBON text of the fields, with `kind` in its atom spelling.
-
-use std::path::Path;
+//! values are the data text of the fields, with `kind` in its atom spelling.
 
 use serde_json::{Map, Value};
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
-use vibra_ir::{canonical_array, canonical_string, vocabulary};
-use vibra_syntax::{DataNode, DataValue, Literal, canonical_data, parse_data};
+use vibra_syntax::{
+    DataNode, DataValue, FieldSchema, Schema, Slot, TypedNode, TypedValue,
+    canonical_string, decode, parse_data,
+};
 
 use crate::operation::{HostCall, HostOk, HostReply};
 
-/// The format atom of an audit trace, without `@`.
-pub const TRACE_FORMAT: &str = "audit-trace.v1";
+/// The format atom of an audit trace, with its `@`.
+pub const TRACE_FORMAT: &str = "@auditTrace.v1";
 
-/// The event of a completed host call: the only kind the format defines in v1.
+/// The event of a completed host call: the only kind the format defines.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HostEvent {
     /// The registry symbol of the operation.
     pub op: String,
-    /// The canonical VIBON encoding of each argument, in parameter order.
+    /// The canonical data of each argument, in parameter order.
     pub args: Vec<String>,
-    /// The canonical VIBON encoding of the `(result t e)` value.
+    /// The canonical data of the `Result` value.
     pub result: String,
 }
 
@@ -46,7 +52,8 @@ pub struct HostEvent {
 pub struct OpaqueEvent {
     /// The kind atom without `@`.
     pub kind: String,
-    /// The other fields in order, each with the VIBON text of its value.
+    /// The other fields in the byte order of their names, each with the
+    /// canonical data of its value.
     pub fields: Vec<(String, String)>,
 }
 
@@ -79,28 +86,31 @@ impl AuditEvent {
         }
     }
 
-    /// The canonical VIBON text of the event on one line.
+    /// The data text of the event on one line, its `kind` first.
     #[must_use]
     pub fn to_vibon(&self) -> String {
         match self {
             Self::Host(event) => format!(
-                "(record kind: @host op: {} args: {} result: {})",
+                "{{kind: @host op: {} args: {} result: {}}}",
                 canonical_string(&event.op),
-                canonical_array(&event.args),
+                list(&event.args),
                 event.result
             ),
             Self::Opaque(event) => {
-                let mut text = format!("(record kind: @{}", event.kind);
+                let mut text = format!("{{kind: @{}", event.kind);
                 for (name, value) in &event.fields {
-                    text.push_str(&format!(" {name}: {value}"));
+                    text.push(' ');
+                    text.push_str(name);
+                    text.push_str(": ");
+                    text.push_str(value);
                 }
-                text.push(')');
+                text.push('}');
                 text
             }
         }
     }
 
-    /// The event as the JSON object of the CLI.
+    /// The event as the JSON object of the command line.
     #[must_use]
     pub fn to_json(&self) -> Value {
         let mut object = Map::new();
@@ -128,8 +138,8 @@ impl AuditEvent {
         Value::Object(object)
     }
 
-    /// Reads the JSON object of the CLI. An object of an unknown kind keeps its
-    /// field names and values as text.
+    /// Reads the JSON object of the command line. An object of an unknown
+    /// kind keeps its field names and values as text.
     pub fn from_json(value: &Value) -> Result<Self, String> {
         let object = value.as_object().ok_or("an event must be an object")?;
         let kind = object
@@ -186,128 +196,129 @@ impl AuditEvent {
         }))
     }
 
-    /// Decodes one event from the text of a VIBON document.
+    /// Decodes one event from the text of a data document.
     pub fn decode(source_id: &str, text: &str) -> Result<Self, Vec<Diagnostic>> {
-        let root = read_document(source_id, text)?;
-        decode_event(source_id, &root).map_err(|diagnostic| vec![*diagnostic])
+        let whole = ByteSpan::new(0, text.len());
+        let canonical = canonical_event(source_id, text)?;
+        event_of(source_id, &canonical, whole).map_err(|diagnostic| vec![*diagnostic])
     }
 }
 
-/// The text of the audit trace record of `events`.
+/// The text of the audit trace document of `events`.
 #[must_use]
 pub fn trace_to_vibon(events: &[AuditEvent]) -> String {
     let events = events.iter().map(AuditEvent::to_vibon).collect::<Vec<_>>();
-    format!(
-        "(record format: @{TRACE_FORMAT} events: {})",
-        canonical_array(&events)
-    )
+    format!("{{format: {TRACE_FORMAT} events: {}}}", list(&events))
 }
 
-/// Decodes the text of an audit trace record into its events.
+/// Decodes the text of an audit trace document into its events.
 pub fn decode_trace(
     source_id: &str,
     text: &str,
 ) -> Result<Vec<AuditEvent>, Vec<Diagnostic>> {
-    let root = read_document(source_id, text)?;
-    let shape = |node: &DataNode, message: &str| {
-        vec![
-            Diagnostic::new(DiagnosticCode::DataInvalidShape, node.span(), message)
-                .with_source_id(source_id),
-        ]
+    let (document, diagnostics) =
+        decode(&trace_schema(), Some(source_id), text.as_bytes()).into_parts();
+    let Some(document) = document else {
+        return Err(diagnostics);
     };
-    let DataValue::Record(fields) = root.value() else {
-        return Err(shape(&root, "an audit trace is a record"));
-    };
-    let mut format = None;
-    let mut events = None;
-    for field in fields {
-        match field.label().value() {
-            "format" => format = Some(field.value()),
-            "events" => events = Some(field.value()),
-            _ => return Err(shape(field.value(), "an audit trace has no such field")),
-        }
-    }
-    match format.map(DataNode::value) {
-        Some(DataValue::Atom(atom)) if atom.value() == TRACE_FORMAT => {}
-        _ => return Err(shape(&root, "the format must be @audit-trace.v1")),
-    }
-    let Some(events) = events else {
-        return Err(shape(&root, "an audit trace needs its `events`"));
-    };
-    let DataValue::Array(items) = events.value() else {
-        return Err(shape(events, "`events` must be an array"));
-    };
-    items
+    let events = document
+        .root()
+        .get("events")
+        .and_then(TypedNode::as_list)
+        .unwrap_or_default();
+    events
         .iter()
-        .map(|item| {
-            decode_event(source_id, item).map_err(|diagnostic| vec![*diagnostic])
+        .map(|event| match event.value() {
+            TypedValue::Opaque(canonical) => {
+                event_of(source_id, canonical, event.span())
+                    .map_err(|diagnostic| vec![*diagnostic])
+            }
+            _ => Err(vec![shape(source_id, event.span(), "an event is data")]),
         })
         .collect()
 }
 
-fn read_document(source_id: &str, text: &str) -> Result<DataNode, Vec<Diagnostic>> {
-    let document = parse_data(Path::new(source_id), text).map_err(|error| {
-        vec![
-            Diagnostic::new(
-                DiagnosticCode::DataInvalidExtension,
-                ByteSpan::new(0, 0),
-                error.to_string(),
-            )
-            .with_source_id(source_id),
-        ]
-    })?;
-    if !document.accepted() || document.recovered() {
-        return Err(document
-            .diagnostics()
-            .iter()
-            .cloned()
-            .map(|diagnostic| diagnostic.with_source_id(source_id))
-            .collect());
-    }
-    document.data().cloned().ok_or_else(|| {
-        vec![
-            Diagnostic::new(
-                DiagnosticCode::DataInvalidShape,
-                ByteSpan::new(0, text.len()),
-                "the document has no data value",
-            )
-            .with_source_id(source_id),
-        ]
-    })
+/// The schema of the trace: its events are data no schema describes, which
+/// the reader writes as canonical text.
+fn trace_schema() -> Schema {
+    Schema::new(
+        TRACE_FORMAT,
+        vec![FieldSchema::required("events", Slot::list(Slot::Opaque))],
+    )
 }
 
-fn decode_event(
+fn shape(source_id: &str, span: ByteSpan, message: &str) -> Diagnostic {
+    Diagnostic::new(DiagnosticCode::DataInvalidShape, span, message)
+        .with_source_id(source_id)
+}
+
+/// The canonical text of the one data value `text` holds: the text is read
+/// on its own first, so its faults are reported at its own bytes, and then as
+/// the one event of a trace, which writes it as canonical opaque data.
+fn canonical_event(source_id: &str, text: &str) -> Result<String, Vec<Diagnostic>> {
+    let whole = ByteSpan::new(0, text.len());
+    let document = parse_data(Some(source_id), text.as_bytes());
+    if !document.diagnostics().is_empty() {
+        return Err(document.diagnostics().to_vec());
+    }
+    if document.value().is_none() {
+        return Err(vec![shape(
+            source_id,
+            whole,
+            "the document has no data value",
+        )]);
+    }
+    // The text is one well-formed value, so the trace around it is too; the
+    // line breaks end any comment it carries.
+    let trace = format!("{{format: {TRACE_FORMAT} events: [\n{text}\n]}}");
+    let (document, _) = decode(&trace_schema(), None, trace.as_bytes()).into_parts();
+    let canonical = document.as_ref().and_then(|document| {
+        match document.root().get("events")?.as_list()? {
+            [event] => match event.value() {
+                TypedValue::Opaque(canonical) => Some(canonical.clone()),
+                _ => None,
+            },
+            _ => None,
+        }
+    });
+    canonical.ok_or_else(|| vec![shape(source_id, whole, "an event is one data value")])
+}
+
+/// The event whose canonical text is `canonical`; a fault is reported at
+/// `span`, where the event was read.
+fn event_of(
     source_id: &str,
-    node: &DataNode,
+    canonical: &str,
+    span: ByteSpan,
 ) -> Result<AuditEvent, Box<Diagnostic>> {
-    let shape = |at: &DataNode, message: &str| {
-        Box::new(
-            Diagnostic::new(DiagnosticCode::DataInvalidShape, at.span(), message)
-                .with_source_id(source_id),
-        )
+    let fault = |message: &str| Box::new(shape(source_id, span, message));
+    let document = parse_data(None, canonical.as_bytes());
+    let Some(node) = document.value() else {
+        return Err(fault("an event is one data value"));
     };
     let DataValue::Record(fields) = node.value() else {
-        return Err(shape(node, "an event is a record"));
+        return Err(fault("an event is a record"));
     };
-    let kind = match fields.first() {
-        Some(field) if field.label().value() == "kind" => match field.value().value() {
-            DataValue::Atom(atom) => atom.value().to_owned(),
-            _ => return Err(shape(field.value(), "an event `kind` is an atom")),
+    // A sub-value of canonical text is canonical text itself.
+    let text = |value: &DataNode| {
+        canonical
+            .get(value.span().start()..value.span().end())
+            .unwrap_or_default()
+            .to_owned()
+    };
+    let kind = match fields.iter().find(|field| field.name() == "kind") {
+        Some(field) => match field.value().value() {
+            DataValue::Atom(atom) => atom.strip_prefix('@').unwrap_or(atom).to_owned(),
+            _ => return Err(fault("an event `kind` is an atom")),
         },
-        _ => return Err(shape(node, "an event's first field is `kind`")),
+        None => return Err(fault("an event has a `kind` field")),
     };
-    let rest = fields.get(1..).unwrap_or_default();
+    let rest = fields.iter().filter(|field| field.name() != "kind");
     if kind != "host" {
         return Ok(AuditEvent::Opaque(OpaqueEvent {
             kind,
             fields: rest
-                .iter()
-                .map(|field| {
-                    (
-                        field.label().value().to_owned(),
-                        canonical_data(field.value()),
-                    )
-                })
+                .map(|field| (field.name().to_owned(), text(field.value())))
                 .collect(),
         }));
     }
@@ -316,25 +327,20 @@ fn decode_event(
     let mut result = None;
     for field in rest {
         let value = field.value();
-        match field.label().value() {
-            "op" if op.is_none() => match value.value() {
-                DataValue::Literal(Literal::String(literal)) => {
-                    op = Some(literal.value().to_owned());
-                }
-                _ => return Err(shape(value, "`op` is a string")),
+        match field.name() {
+            "op" => match value.value() {
+                DataValue::String(symbol) => op = Some(symbol.clone()),
+                _ => return Err(fault("`op` is a string")),
             },
-            "args" if args.is_none() => match value.value() {
-                DataValue::Array(items) => {
-                    args = Some(items.iter().map(canonical_data).collect::<Vec<_>>());
+            "args" => match value.value() {
+                DataValue::List(items) => {
+                    args = Some(items.iter().map(text).collect::<Vec<_>>());
                 }
-                _ => return Err(shape(value, "`args` is an array")),
+                _ => return Err(fault("`args` is a list")),
             },
-            "result" if result.is_none() => result = Some(canonical_data(value)),
+            "result" => result = Some(text(value)),
             name => {
-                return Err(shape(
-                    value,
-                    &format!("a host event has no field `{name}`, or repeats it"),
-                ));
+                return Err(fault(&format!("a host event has no field `{name}`")));
             }
         }
     }
@@ -342,40 +348,60 @@ fn decode_event(
         (Some(op), Some(args), Some(result)) => {
             Ok(AuditEvent::Host(HostEvent { op, args, result }))
         }
-        _ => Err(shape(node, "a host event needs `op`, `args`, and `result`")),
+        _ => Err(fault("a host event needs `op`, `args`, and `result`")),
     }
 }
 
-// --- canonical encodings of the values of the registry -----------------------
+// --- canonical data of the values of the registry ----------------------------
+//
+// Each writer emits record fields in the byte order of their names, so the
+// text is canonical as written.
+
+fn list(items: &[String]) -> String {
+    format!("[{}]", items.join(" "))
+}
+
+/// A name of the major-1 registry, such as `fs-metadata`, as an atom part:
+/// `fsMetadata`.
+fn atom_part(name: &str) -> String {
+    let mut out = String::with_capacity(name.len());
+    let mut upper = false;
+    for character in name.chars() {
+        if character == '-' {
+            upper = true;
+        } else if upper {
+            out.extend(character.to_uppercase());
+            upper = false;
+        } else {
+            out.push(character);
+        }
+    }
+    out
+}
 
 fn bytes(bytes: &[u8]) -> String {
     let values = bytes
         .iter()
         .map(|byte| format!("{byte}u8"))
         .collect::<Vec<_>>();
-    format!("(record kind: @bytes values: {})", canonical_array(&values))
+    format!("{{kind: @bytes values: {}}}", list(&values))
 }
 
 fn path(text: &str) -> String {
     format!(
-        "(record kind: @wrapper type: @std.fs.path value: {})",
+        "{{kind: @wrapper typeInfo: @std.fs.path value: {}}}",
         canonical_string(text)
     )
 }
 
-fn enum_value(
-    module: &str,
-    name: &str,
-    variant: &str,
-    payload: Option<&str>,
-) -> String {
-    let mut text =
-        format!("(record kind: @enum type: @{module}.{name} variant: @{variant}");
-    if let Some(payload) = payload {
-        text.push_str(&format!(" payload: {payload}"));
-    }
-    text.push(')');
-    text
+fn variant(module: &str, name: &str, case: &str, payload: Option<&str>) -> String {
+    let payload =
+        payload.map_or_else(String::new, |payload| format!(" payload: {payload}"));
+    format!(
+        "{{kind: @enum{payload} typeInfo: @{module}.{} variant: @{}}}",
+        atom_part(name),
+        atom_part(case)
+    )
 }
 
 fn strings(items: &[String]) -> String {
@@ -383,10 +409,10 @@ fn strings(items: &[String]) -> String {
         .iter()
         .map(|item| canonical_string(item))
         .collect::<Vec<_>>();
-    format!("(record kind: @array values: {})", canonical_array(&values))
+    format!("{{kind: @list values: {}}}", list(&values))
 }
 
-/// The canonical encoding of each argument of `call`, in parameter order.
+/// The canonical data of each argument of `call`, in parameter order.
 fn call_arguments(call: &HostCall) -> Vec<String> {
     match call {
         HostCall::StdinText
@@ -410,7 +436,7 @@ fn call_arguments(call: &HostCall) -> Vec<String> {
     }
 }
 
-/// The canonical encoding of the `(result t e)` value of a completed call.
+/// The canonical data of the `Result` value of a completed call.
 fn encode_reply(reply: &HostReply) -> String {
     match reply {
         Ok(ok) => {
@@ -420,20 +446,19 @@ fn encode_reply(reply: &HostReply) -> String {
                 HostOk::Bytes(value) => Some(bytes(value)),
                 HostOk::Entries(names) => Some(strings(names)),
                 HostOk::Metadata(metadata) => Some(format!(
-                    "(record kind: @record type: @std.fs.fs-metadata fields: (record kind: {} size: {}u64))",
-                    enum_value("std.fs", "fs-kind", metadata.kind.name(), None),
+                    "{{fields: {{kind: {} size: {}u64}} kind: @record typeInfo: @std.fs.fsMetadata}}",
+                    variant("std.fs", "fs-kind", metadata.kind.name(), None),
                     metadata.size
                 )),
                 HostOk::Integer(value) => Some(format!("{value}i64")),
                 HostOk::Count(value) => Some(format!("{value}u64")),
             };
-            enum_value("std.result", "result", vocabulary::OK, payload.as_deref())
+            variant("std.result", "result", "ok", payload.as_deref())
         }
         Err(error) => {
             let ty = error.error_type();
-            let payload =
-                enum_value(ty.module(), ty.name(), error.variant_name(), None);
-            enum_value("std.result", "result", vocabulary::ERR, Some(&payload))
+            let payload = variant(ty.module(), ty.name(), error.variant_name(), None);
+            variant("std.result", "result", "err", Some(&payload))
         }
     }
 }

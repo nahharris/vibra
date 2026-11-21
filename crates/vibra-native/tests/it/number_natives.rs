@@ -1,15 +1,16 @@
-//! The number-text natives over linear memory (milestone 4 Step 8c), without an
-//! engine.
+//! The number-text natives over arena memory.
 //!
 //! Like `arena_natives`, these tests lay arena objects out by hand and call
-//! each native as the runner does. A `to-str` row builds a `str`, so it measures
-//! with no destination and fills the one it is given; a `parse` row reads a `str`
+//! each native as a runtime does. A `toStr` row builds a `Str`, so it measures
+//! with no destination and fills the one it is given; a `parse` row reads a `Str`
 //! and writes the number into the 8-byte cell it is given, answering a status. No
 //! native allocates, and a destination outside the memory is a fault, never a
 //! write outside it.
 
 use vibra_ir::arena::kind;
-use vibra_ir::external::{CompilerIntrinsic, FloatOp, IntegerOp, NumericType};
+use vibra_ir::external::{
+    CompilerIntrinsic, FloatOp, FloatType, IntegerOp, IntegerType,
+};
 use vibra_native::arena::Fault;
 
 use crate::support::{Heap, OUT};
@@ -36,7 +37,7 @@ impl Heap {
     }
 }
 
-/// `to-str` of the number whose cell holds `bits`: measured, then filled.
+/// `toStr` of the number whose cell holds `bits`: measured, then filled.
 fn to_str(intrinsic: CompilerIntrinsic, bits: u64) -> String {
     let mut heap = Heap::new();
     let bits = bits.cast_signed();
@@ -54,18 +55,18 @@ fn parse(intrinsic: CompilerIntrinsic, text: &str) -> (i64, Option<u64>) {
     (status, (status == 0).then(|| heap.cell()))
 }
 
-fn integer(numeric: NumericType, op: IntegerOp) -> CompilerIntrinsic {
+fn integer(numeric: IntegerType, op: IntegerOp) -> CompilerIntrinsic {
     CompilerIntrinsic::Integer(numeric, op)
 }
 
-fn float(numeric: NumericType, op: FloatOp) -> CompilerIntrinsic {
+fn float(numeric: FloatType, op: FloatOp) -> CompilerIntrinsic {
     CompilerIntrinsic::Float(numeric, op)
 }
 
 #[test]
 fn an_integer_is_read_from_its_cell_by_its_type() {
     use IntegerOp::ToStr;
-    use NumericType::{I8, I32, I64, U8, U32, U64};
+    use IntegerType::{I8, I32, I64, U8, U32, U64};
     // A type of at most 32 bits is its 32-bit pattern zero-extended in the cell.
     assert_eq!(to_str(integer(I8, ToStr), 0xFFFF_FF80), "-128");
     assert_eq!(to_str(integer(U8, ToStr), 0x80), "128");
@@ -85,7 +86,7 @@ fn an_integer_is_read_from_its_cell_by_its_type() {
 #[test]
 fn a_float_is_read_from_its_cell_and_a_nan_of_any_sign_and_payload_is_nan() {
     use FloatOp::ToStr;
-    use NumericType::{F32, F64};
+    use FloatType::{F32, F64};
     assert_eq!(to_str(float(F64, ToStr), 1.5e300_f64.to_bits()), "1.5e300");
     assert_eq!(
         to_str(float(F32, ToStr), u64::from(0.1_f32.to_bits())),
@@ -108,8 +109,9 @@ fn a_float_is_read_from_its_cell_and_a_nan_of_any_sign_and_payload_is_nan() {
 
 #[test]
 fn parse_writes_the_cell_of_the_type_and_answers_a_status() {
+    use FloatType::{F32, F64};
     use IntegerOp::Parse;
-    use NumericType::{F32, F64, I8, I64, U8, U64};
+    use IntegerType::{I8, I64, U8, U64};
     // `0`: the cell holds the number, in the cell format of the type.
     assert_eq!(parse(integer(I8, Parse), "-128"), (0, Some(0xFFFF_FF80)));
     assert_eq!(parse(integer(U8, Parse), "255"), (0, Some(255)));
@@ -121,7 +123,7 @@ fn parse_writes_the_cell_of_the_type_and_answers_a_status() {
         parse(integer(U64, Parse), "18446744073709551615"),
         (0, Some(u64::MAX))
     );
-    // `1`: `invalid-format`; `2`: `out-of-range`; the cell is left alone.
+    // `1`: `invalidFormat`; `2`: `outOfRange`; the cell is left alone.
     assert_eq!(parse(integer(I8, Parse), "128"), (2, None));
     assert_eq!(parse(integer(U8, Parse), "-1"), (1, None));
     assert_eq!(parse(integer(U8, Parse), ""), (1, None));
@@ -155,7 +157,7 @@ fn a_destination_outside_the_memory_or_missing_is_a_fault_and_never_a_write() {
     use IntegerOp::{Parse, ToStr};
     let mut heap = Heap::new();
     heap.text(TEXT, "5");
-    let parse = integer(NumericType::U8, Parse);
+    let parse = integer(IntegerType::U8, Parse);
     assert_eq!(heap.run(parse, &[TEXT as i64, 0]), Err(Fault::Destination));
     assert_eq!(
         heap.run(parse, &[TEXT as i64, 4093]),
@@ -165,13 +167,13 @@ fn a_destination_outside_the_memory_or_missing_is_a_fault_and_never_a_write() {
         heap.run(parse, &[TEXT as i64, 1 << 30]),
         Err(Fault::OutOfBounds)
     );
-    // `to-str` into a destination that is not sized to its text.
+    // `toStr` into a destination that is not sized to its text.
     heap.header(OUT, kind::STR, 4, 3);
     assert_eq!(
-        heap.run(integer(NumericType::U8, ToStr), &[5, OUT as i64]),
+        heap.run(integer(IntegerType::U8, ToStr), &[5, OUT as i64]),
         Err(Fault::Destination)
     );
-    // A parse of something that is not a `str`.
+    // A parse of something that is not a `Str`.
     heap.header(OUT, kind::BYTES, 1, 0);
     assert_eq!(
         heap.run(parse, &[OUT as i64, CELL as i64]),

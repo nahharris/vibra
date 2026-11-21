@@ -1,0 +1,12 @@
+id = "V2-CONTRACT-rule7-certified-result"
+rule = "V2-CONTRACT-rule7-certified-result"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#bare-guards: GUARD-7: the proven bare ensures of a callee without a requires holds of its result"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

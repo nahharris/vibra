@@ -6,8 +6,8 @@ use vibra_exec::{
     BlockId, Callee, ConstId, FuncId, GlobalId, Inst, IntOp, OriginId, Program,
     ScalarOp, Slot, Terminator, VerifyErrorKind, verify,
 };
-use vibra_ir::boundary::TrapCode;
-use vibra_ir::external::NumericType;
+use vibra_ir_v1::boundary::TrapCode;
+use vibra_ir_v1::external::NumericType;
 
 use super::{block, entry, function, program, ret, scalar};
 

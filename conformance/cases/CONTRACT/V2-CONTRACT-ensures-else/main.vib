@@ -1,0 +1,2 @@
+fn main returns r: {I32 I32} do return {clamp(3i32) clamp(12i32)} endfn
+fn clamp takes {x: I32} returns r: I32 ensures Ordered.lessOrEqual(r 10i32) else 10i32 do return x endfn

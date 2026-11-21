@@ -1,0 +1,16 @@
+id = "V2-SRC-DECL-type-invalid-section"
+rule = "V2-SRC-DECL-type-invalid-section"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#grammar: performs is not a type item: an invalid section over the section"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@syntax.invalidSection"
+level = "@error"
+span = { start = 13, end = 25 }

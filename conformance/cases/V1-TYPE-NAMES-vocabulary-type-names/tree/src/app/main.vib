@@ -1,3 +1,0 @@
-(def option i32 1i32)
-(defn result () i32 1i32)
-(defn iter () i32 1i32)

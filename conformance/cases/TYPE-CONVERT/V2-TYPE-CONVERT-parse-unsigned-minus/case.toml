@@ -1,0 +1,12 @@
+id = "V2-TYPE-CONVERT-parse-unsigned-minus"
+rule = "V2-TYPE-CONVERT-parse-unsigned-minus"
+profile = "interpreterV2"
+operation = "interpret"
+description = "06-runtime.md#integer-operations: a minus is invalidFormat for an unsigned type"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

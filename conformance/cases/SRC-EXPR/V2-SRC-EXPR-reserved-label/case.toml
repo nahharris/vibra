@@ -1,0 +1,17 @@
+id = "V2-SRC-EXPR-reserved-label"
+rule = "V2-SRC-EXPR-reserved-label"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#reserved-words: a reserved word as an argument label is recovered as the label"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "refuted"
+tree = "tree.vibon"
+
+[[expect.diagnostics]]
+code = "@name.reservedLabel"
+level = "@error"
+span = { start = 20, end = 24 }

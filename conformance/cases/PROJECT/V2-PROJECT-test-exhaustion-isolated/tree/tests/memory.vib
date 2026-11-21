@@ -1,0 +1,12 @@
+use @std.assert enduse
+
+fn grow
+  takes {items: List(I32)}
+  returns count: U64
+  do
+    return grow(List.concat(items items))
+endfn
+
+test "a exhausts" do assert.equal(0u64 grow([1i32])) endtest
+
+test "b passes" do assert.true(true) endtest

@@ -1,0 +1,4 @@
+fn f returns r: I32 do
+  let x be Result.ok(value: void) endlet
+  return 1i32
+endfn

@@ -1,0 +1,7 @@
+interface Sized
+  fn size
+    takes {value: Self Option.some(value: raw): Option(I32)}
+    returns r: I32
+    requires Ordered.greater(raw 1i32) else 0i32
+  endfn
+endinterface

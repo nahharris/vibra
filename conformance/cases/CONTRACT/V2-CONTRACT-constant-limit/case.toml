@@ -1,0 +1,18 @@
+id = "V2-CONTRACT-constant-limit"
+rule = "V2-CONTRACT-constant-limit"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "07-diagnostics-and-conformance.md#runtime-and-tool-failures: a limit that stops the evaluation of a constant construction is @tool.limitExceeded alone at the predicate, and the outcome unknown (limit profile m1Default)"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "unknown"
+
+[[expect.diagnostics]]
+code = "@tool.limitExceeded"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 22, end = 83 }

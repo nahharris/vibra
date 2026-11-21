@@ -1,0 +1,12 @@
+id = "V2-TYPE-GENERIC-joint-inference"
+rule = "V2-TYPE-GENERIC-joint-inference"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#inference-and-checking: the type arguments of one call are solved over every operand and the expected type"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

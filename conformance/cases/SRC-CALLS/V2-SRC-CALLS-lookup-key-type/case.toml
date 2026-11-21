@@ -1,0 +1,18 @@
+id = "V2-SRC-CALLS-lookup-key-type"
+rule = "V2-SRC-CALLS-lookup-key-type"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#application: a list is looked up by a U64; a Str key is an argument that does not fit its slot"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.argumentMismatch"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 48, end = 51 }

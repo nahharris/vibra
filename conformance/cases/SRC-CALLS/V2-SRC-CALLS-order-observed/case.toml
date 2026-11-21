@@ -1,0 +1,13 @@
+id = "V2-SRC-CALLS-order-observed"
+rule = "V2-SRC-CALLS-order-observed"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "06-runtime.md#evaluation: the operands of a tuple, a record, a declared record, a declared tuple, a case, a list, and a dict run in written order, so of two failing assertions the first written is the one recorded"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+testRun = "test-run.vibon"

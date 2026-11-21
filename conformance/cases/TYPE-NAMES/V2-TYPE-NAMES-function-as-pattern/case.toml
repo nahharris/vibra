@@ -1,0 +1,19 @@
+id = "V2-TYPE-NAMES-function-as-pattern"
+rule = "V2-TYPE-NAMES-function-as-pattern"
+profile = "staticV2"
+operation = "resolve"
+description = "01-source-language.md#patterns: a name resolving to a function in pattern position is @name.redeclaration, related to the function"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@name.redeclaration"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 122, end = 128 }
+related = [{ source = "src/app/main.vib", span = { start = 3, end = 9 } }]

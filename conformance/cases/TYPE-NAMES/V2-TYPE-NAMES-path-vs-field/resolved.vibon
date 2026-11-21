@@ -1,0 +1,56 @@
+{
+  format: @resolved.v2
+  package: {name: "hello" version: "0.1.0"}
+  modules: [
+    {path: @app.main unit: @app sourceId: "src/app/main.vib"}
+  ]
+  declarations: [
+    {
+      identity: "sha256:31cafb86f4d347f5ed8a67c43830e2fd657ee509fa16df7ca3b86c5ec0add13e"
+      anchor: {
+        package: "hello"
+        version: "0.1.0"
+        module: @app.main
+        kind: @fn
+        name: "f"
+      }
+      access: @private
+      span: {sourceId: "src/app/main.vib" start: 41u64 end: 129u64}
+    }
+    {
+      identity: "sha256:51809009905ba617c5dacf5c0dabe6eff7dc5dfd23231d55d548103261da099c"
+      anchor: {
+        package: "hello"
+        version: "0.1.0"
+        module: @app.main
+        kind: @type
+        name: "User"
+      }
+      access: @private
+      span: {sourceId: "src/app/main.vib" start: 0u64 end: 39u64}
+    }
+  ]
+  imports: []
+  references: [
+    {
+      span: {sourceId: "src/app/main.vib" start: 21u64 end: 25u64}
+      to: "sha256:58273595fa7101aedb164ee474e4deed307012dc077a493e68abf74b08094028"
+    }
+    {
+      span: {sourceId: "src/app/main.vib" start: 26u64 end: 29u64}
+      to: "sha256:29dc059689d38a6e1e8b843c7c518b7bfe2d16d9f596ef242d758b9b970b1d8a"
+    }
+    {
+      span: {sourceId: "src/app/main.vib" start: 61u64 end: 65u64}
+      to: "sha256:51809009905ba617c5dacf5c0dabe6eff7dc5dfd23231d55d548103261da099c"
+    }
+    {
+      span: {sourceId: "src/app/main.vib" start: 80u64 end: 83u64}
+      to: "sha256:463de75df8a35c98ff6eb7b47e779a021c884f9933c6f7a49e344a086db2b6df"
+    }
+    {
+      span: {sourceId: "src/app/main.vib" start: 100u64 end: 111u64}
+      to: "sha256:ce875d3da44ee7f20c294c548cbe7137cdde61a7ab325c468d92ae5e5ff85245"
+    }
+  ]
+}

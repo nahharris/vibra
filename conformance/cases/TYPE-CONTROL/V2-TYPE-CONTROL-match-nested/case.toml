@@ -1,0 +1,12 @@
+id = "V2-TYPE-CONTROL-match-nested"
+rule = "V2-TYPE-CONTROL-match-nested"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#coverage: nested case patterns cover a variant inside a variant"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

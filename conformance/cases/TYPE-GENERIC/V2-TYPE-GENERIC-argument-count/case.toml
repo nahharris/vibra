@@ -1,0 +1,18 @@
+id = "V2-TYPE-GENERIC-argument-count"
+rule = "V2-TYPE-GENERIC-argument-count"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#generics: a generic type applied to the wrong number of type arguments is reported at the type application"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.typeArgumentMismatch"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 48, end = 60 }

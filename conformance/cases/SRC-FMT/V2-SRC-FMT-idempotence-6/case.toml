@@ -1,0 +1,12 @@
+id = "V2-SRC-FMT-idempotence-6"
+rule = "V2-SRC-FMT-idempotence"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#canonical-format: formatting is idempotent; a module value whose match does not fit: the initializer on the next line, each case one step in"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "accepted"
+formatted = "formatted.vib"

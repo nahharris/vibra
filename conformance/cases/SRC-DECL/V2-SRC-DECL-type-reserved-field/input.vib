@@ -1,0 +1,1 @@
+type A of {role: U8} endtype

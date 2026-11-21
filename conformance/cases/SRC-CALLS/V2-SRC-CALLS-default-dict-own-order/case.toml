@@ -1,0 +1,18 @@
+id = "V2-SRC-CALLS-default-dict-own-order"
+rule = "V2-SRC-CALLS-default-dict-own-order"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#constant-expressions-and-constant-patterns: a dict keyed by a declared type ordered by its own Ordered implementation is no constant expression, so it is no labelled default"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.notConstant"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 295, end = 324 }

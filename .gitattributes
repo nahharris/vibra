@@ -16,3 +16,4 @@
 # files readable in review despite `-text`.
 *.vib -text !eol diff
 *.vibon -text !eol diff
+conformance/rules.tsv merge=union

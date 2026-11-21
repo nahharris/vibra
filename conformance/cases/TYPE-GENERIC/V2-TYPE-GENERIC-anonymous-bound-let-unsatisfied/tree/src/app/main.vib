@@ -1,0 +1,6 @@
+type Box of I32 endtype
+fn main returns r: I32 do
+  let larger be fn(T) takes {a: T b: T} returns m: T given {T: Ordered} do if Ordered.greater(a b) then return a else return b endif endfn endlet
+  let Box(x) be larger(Box(1i32) Box(2i32)) endlet
+  return x
+endfn

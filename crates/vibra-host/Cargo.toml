@@ -1,6 +1,6 @@
 [package]
 name = "vibra-host"
-description = "The host provider of the Vibra runtime: the provider trait, the system provider, the in-memory host world, and the audit event."
+description = "The host provider of the Vibra runtime over the major-1 host rows: the provider trait, the system provider, the in-memory host world, and the audit event."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

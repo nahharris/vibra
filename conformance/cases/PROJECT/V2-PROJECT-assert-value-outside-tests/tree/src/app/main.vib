@@ -1,0 +1,9 @@
+use @std.assert enduse
+
+fn check
+  takes {}
+  returns done: Void
+  do
+    let f: Fn({Bool} Void) be assert.true endlet
+    return void
+endfn

@@ -1,0 +1,12 @@
+id = "V2-TYPE-NOMINAL-list"
+rule = "V2-TYPE-NOMINAL-list"
+profile = "interpreterV2"
+operation = "interpret"
+description = "01-source-language.md#anonymous-products-and-collections: a list literal holds elements of one type in written order"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

@@ -1,0 +1,7 @@
+fn spin takes {n: I32} returns r: Never do return spin(I32.add(n 1i32)) endfn
+
+fn stop takes {n: I32} returns r: I32 do
+  if Ordered.greater(n 0i32) then return n else return spin(n) endif
+endfn
+
+fn main returns r: I32 do return stop(3i32) endfn

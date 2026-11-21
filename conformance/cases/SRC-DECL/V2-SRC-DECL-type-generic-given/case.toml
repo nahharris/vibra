@@ -1,0 +1,13 @@
+id = "V2-SRC-DECL-type-generic-given"
+rule = "V2-SRC-DECL-type-generic-given"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#type: a generic type whose given section bounds its parameter"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "accepted"
+tree = "tree.vibon"
+formatted = "formatted.vib"

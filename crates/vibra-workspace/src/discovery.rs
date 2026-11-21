@@ -1,317 +1,151 @@
-//! Confined `project.vibon` discovery.
+//! Project discovery.
 //!
-//! Discovery is deliberately separate from source walking. It selects one
-//! exact marker by canonical ancestor order, decodes that marker through the
-//! existing data/project loaders, and returns no ambient filesystem handle.
+//! `docs/spec/04-programs-and-packages.md`, "Discovery and the source
+//! snapshot": discovery starts at a directory, or at a file's parent, and
+//! examines that directory and each ancestor. The first directory with a
+//! regular file named exactly `project.vibon` is the project root. No such
+//! file is `@project.notFound`. A nearest marker that cannot be read or
+//! decoded is that failure, and no older ancestor is tried. A marker that is
+//! a symbolic link or junction is `@project.ioError`.
 
 use std::fs;
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
-use vibra_syntax::parse_data;
 
-use crate::WorkspaceError;
-use crate::project::{Project, ProjectDecoder, ProjectOrigin};
+use crate::project::{PROJECT_FILE_NAME, Project, decode_project};
 
-const PROJECT_FILE_NAME: &str = "project.vibon";
-
-/// A successfully discovered and typed project marker.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// A project root and its decoded marker.
+#[derive(Clone, Debug, PartialEq)]
 pub struct DiscoveredProject {
     root: PathBuf,
-    project_path: PathBuf,
+    bytes: Vec<u8>,
     project: Project,
-    project_bytes: Vec<u8>,
 }
 
 impl DiscoveredProject {
-    /// Canonical project root containing `project.vibon`.
+    /// The canonical project root.
     #[must_use]
     pub fn root(&self) -> &Path {
         &self.root
     }
 
-    /// Canonical path to the exact project marker.
+    /// The exact bytes of `project.vibon`.
     #[must_use]
-    pub fn project_path(&self) -> &Path {
-        &self.project_path
+    pub fn bytes(&self) -> &[u8] {
+        &self.bytes
     }
 
-    /// The typed project data decoded from the marker.
+    /// The decoded project.
     #[must_use]
     pub const fn project(&self) -> &Project {
         &self.project
     }
-
-    /// Exact bytes read from the project marker during discovery.
-    #[must_use]
-    pub fn project_bytes(&self) -> &[u8] {
-        &self.project_bytes
-    }
-
-    /// The stable source identity of the project marker.
-    #[must_use]
-    pub const fn project_source_id(&self) -> &'static str {
-        PROJECT_FILE_NAME
-    }
 }
 
-/// Stateless project discovery entry point.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct WorkspaceDiscovery;
-
-impl WorkspaceDiscovery {
-    /// Finds the nearest exact `project.vibon` for `start`.
-    pub fn discover(
-        start: impl AsRef<Path>,
-    ) -> Result<DiscoveredProject, WorkspaceError> {
-        discover_project(start)
-    }
+fn not_found() -> Vec<Diagnostic> {
+    vec![Diagnostic::new(
+        DiagnosticCode::ProjectNotFound,
+        ByteSpan::empty_at(0),
+        "no `project.vibon` at or above the workspace",
+    )]
 }
 
-/// Finds and decodes the nearest exact `project.vibon` marker.
-///
-/// Existing directories start at themselves; existing files start at their
-/// parent. A missing path is a normal `@project.not-found` result. Once an
-/// exact marker is found, all errors are terminal and no older ancestor is
-/// considered.
-pub fn discover_project(
-    start: impl AsRef<Path>,
-) -> Result<DiscoveredProject, WorkspaceError> {
-    let start = start.as_ref();
-    let canonical_start = fs::canonicalize(start).map_err(|error| {
-        if error.kind() == std::io::ErrorKind::NotFound {
-            not_found(start)
-        } else {
-            project_io_error(
-                PROJECT_FILE_NAME,
-                ByteSpan::empty_at(0),
-                format!(
-                    "cannot canonicalize discovery start {}: {error}",
-                    start.display()
-                ),
-            )
-        }
-    })?;
-    let metadata = fs::metadata(&canonical_start).map_err(|error| {
-        project_io_error(
-            PROJECT_FILE_NAME,
+fn io_error(message: String) -> Vec<Diagnostic> {
+    vec![
+        Diagnostic::new(
+            DiagnosticCode::ProjectIoError,
             ByteSpan::empty_at(0),
-            format!(
-                "cannot inspect discovery start {}: {error}",
-                canonical_start.display()
-            ),
+            message,
         )
-    })?;
-    let mut directory = if metadata.is_dir() {
-        canonical_start
-    } else if metadata.is_file() {
-        canonical_start
-            .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| PathBuf::from("."))
-    } else {
-        return Err(not_found(start));
-    };
-
-    loop {
-        let marker = directory.join(PROJECT_FILE_NAME);
-        match fs::symlink_metadata(&marker) {
-            Ok(marker_metadata) => {
-                if marker_metadata.file_type().is_symlink()
-                    || !marker_metadata.is_file()
-                {
-                    return Err(project_io_error(
-                        PROJECT_FILE_NAME,
-                        ByteSpan::empty_at(0),
-                        format!(
-                            "project marker is not a regular file: {}",
-                            marker.display()
-                        ),
-                    ));
-                }
-                return load_project(&directory, &marker);
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => {
-                return Err(project_io_error(
-                    PROJECT_FILE_NAME,
-                    ByteSpan::empty_at(0),
-                    format!(
-                        "cannot inspect project marker {}: {error}",
-                        marker.display()
-                    ),
-                ));
-            }
-        }
-
-        let Some(parent) = directory.parent() else {
-            return Err(not_found(start));
-        };
-        if parent == directory {
-            return Err(not_found(start));
-        }
-        directory = parent.to_path_buf();
-    }
+        .with_source_id(PROJECT_FILE_NAME),
+    ]
 }
 
-/// Loads the exact marker at `root` without searching any ancestor or sibling.
-pub fn discover_project_at(
-    root: impl AsRef<Path>,
-) -> Result<DiscoveredProject, WorkspaceError> {
-    let root = root.as_ref();
-    let metadata = fs::symlink_metadata(root).map_err(|error| {
-        project_io_error(
-            PROJECT_FILE_NAME,
-            ByteSpan::empty_at(0),
-            format!(
-                "cannot inspect confined project root {}: {error}",
-                root.display()
-            ),
-        )
-    })?;
-    if metadata.file_type().is_symlink() || !metadata.is_dir() {
-        return Err(project_io_error(
-            PROJECT_FILE_NAME,
-            ByteSpan::empty_at(0),
-            format!(
-                "confined project root is not a regular directory: {}",
-                root.display()
-            ),
-        ));
-    }
-    let canonical_root = fs::canonicalize(root).map_err(|error| {
-        project_io_error(
-            PROJECT_FILE_NAME,
-            ByteSpan::empty_at(0),
-            format!(
-                "cannot canonicalize confined project root {}: {error}",
-                root.display()
-            ),
-        )
-    })?;
-    let marker = canonical_root.join(PROJECT_FILE_NAME);
+/// What a directory holds under the marker's name.
+enum Marker {
+    Absent,
+    Present(PathBuf),
+}
+
+fn marker_in(directory: &Path) -> Result<Marker, Vec<Diagnostic>> {
+    let marker = directory.join(PROJECT_FILE_NAME);
     match fs::symlink_metadata(&marker) {
-        Ok(marker_metadata)
-            if !marker_metadata.file_type().is_symlink()
-                && marker_metadata.is_file() =>
-        {
-            load_project(&canonical_root, &marker)
-        }
-        Ok(_) => Err(project_io_error(
-            PROJECT_FILE_NAME,
-            ByteSpan::empty_at(0),
-            format!("project marker is not a regular file: {}", marker.display()),
-        )),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            Err(not_found(&canonical_root))
-        }
-        Err(error) => Err(project_io_error(
-            PROJECT_FILE_NAME,
-            ByteSpan::empty_at(0),
-            format!(
-                "cannot inspect project marker {}: {error}",
-                marker.display()
-            ),
-        )),
+        Ok(metadata) if metadata.file_type().is_symlink() => Err(io_error(format!(
+            "the project marker {} is a link",
+            marker.display()
+        ))),
+        Ok(metadata) if metadata.is_file() => Ok(Marker::Present(marker)),
+        // A directory or another entry named `project.vibon` is not a
+        // regular file, so this directory has no marker.
+        Ok(_) => Ok(Marker::Absent),
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(Marker::Absent),
+        Err(error) => Err(io_error(format!(
+            "cannot inspect {}: {error}",
+            marker.display()
+        ))),
     }
 }
 
-fn load_project(
-    root: &Path,
-    marker: &Path,
-) -> Result<DiscoveredProject, WorkspaceError> {
-    let source = fs::read(marker).map_err(|error| {
-        project_io_error(
-            PROJECT_FILE_NAME,
-            ByteSpan::empty_at(0),
-            format!("cannot read project marker {}: {error}", marker.display()),
-        )
+fn load(root: &Path, marker: &Path) -> Result<DiscoveredProject, Vec<Diagnostic>> {
+    let bytes = fs::read(marker).map_err(|error| {
+        io_error(format!("cannot read {}: {error}", marker.display()))
     })?;
-    let project_bytes = source.clone();
-    let source = String::from_utf8(source).map_err(|error| {
-        project_io_error(
-            PROJECT_FILE_NAME,
-            ByteSpan::empty_at(0),
-            format!("project marker is not UTF-8: {error}"),
-        )
-    })?;
-    let document = parse_data(marker, &source).map_err(|error| {
-        project_io_error(
-            PROJECT_FILE_NAME,
-            ByteSpan::empty_at(0),
-            format!("cannot select project data loader: {error}"),
-        )
-    })?;
-    let source_id = PROJECT_FILE_NAME;
-    let mut diagnostics = document
-        .diagnostics()
-        .iter()
-        .cloned()
-        .map(|diagnostic| diagnostic.with_source_id(source_id))
-        .collect::<Vec<_>>();
-    let Some(data) = document.data() else {
-        if diagnostics.is_empty() {
-            diagnostics.push(
-                Diagnostic::new(
-                    DiagnosticCode::DataInvalidShape,
-                    ByteSpan::empty_at(0),
-                    "project document has no valid VIBON root",
-                )
-                .with_source_id(source_id),
-            );
-        }
-        return Err(WorkspaceError::new(
-            "project document was not accepted",
-            diagnostics,
-        )
-        .with_source_text(source_id, source.clone()));
-    };
-    let decoded = ProjectDecoder::decode(data, ProjectOrigin::new(source_id));
-    diagnostics.extend(decoded.diagnostics().iter().cloned());
-    let Some(project) = decoded.project().cloned() else {
-        return Err(WorkspaceError::new(
-            "project schema was not accepted",
-            diagnostics,
-        )
-        .with_source_text(source_id, source.clone()));
-    };
-    if !diagnostics.is_empty() {
-        return Err(WorkspaceError::new(
-            "project document was not accepted",
-            diagnostics,
-        )
-        .with_source_text(source_id, source));
-    }
+    let project = decode_project(PROJECT_FILE_NAME, &bytes)?;
     Ok(DiscoveredProject {
         root: root.to_path_buf(),
-        project_path: marker.to_path_buf(),
+        bytes,
         project,
-        project_bytes,
     })
 }
 
-fn not_found(start: &Path) -> WorkspaceError {
-    WorkspaceError::new(
-        format!("no project.vibon found from {}", start.display()),
-        vec![Diagnostic::new(
-            DiagnosticCode::ProjectNotFound,
-            ByteSpan::empty_at(0),
-            "no exact project.vibon was found in the discovery boundary",
-        )],
-    )
+/// Finds the nearest `project.vibon` at or above `start` (a directory, or a
+/// file whose parent starts the search) and decodes it.
+pub fn discover_project(
+    start: impl AsRef<Path>,
+) -> Result<DiscoveredProject, Vec<Diagnostic>> {
+    let start = start.as_ref();
+    let canonical = match fs::canonicalize(start) {
+        Ok(canonical) => canonical,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Err(not_found()),
+        Err(error) => {
+            return Err(io_error(format!(
+                "cannot resolve {}: {error}",
+                start.display()
+            )));
+        }
+    };
+    let mut directory = if canonical.is_dir() {
+        canonical
+    } else {
+        match canonical.parent() {
+            Some(parent) => parent.to_path_buf(),
+            None => return Err(not_found()),
+        }
+    };
+    loop {
+        if let Marker::Present(marker) = marker_in(&directory)? {
+            return load(&directory, &marker);
+        }
+        match directory.parent() {
+            Some(parent) if parent != directory => directory = parent.to_path_buf(),
+            _ => return Err(not_found()),
+        }
+    }
 }
 
-pub(crate) fn project_io_error(
-    source_id: &str,
-    span: ByteSpan,
-    message: String,
-) -> WorkspaceError {
-    WorkspaceError::new(
-        message.clone(),
-        vec![
-            Diagnostic::new(DiagnosticCode::ProjectIoError, span, message)
-                .with_source_id(source_id),
-        ],
-    )
+/// Decodes the `project.vibon` of exactly the directory `root`, searching no
+/// ancestor: the form a confined tree uses.
+pub fn discover_project_at(
+    root: impl AsRef<Path>,
+) -> Result<DiscoveredProject, Vec<Diagnostic>> {
+    let root = root.as_ref();
+    let canonical = fs::canonicalize(root).map_err(|error| {
+        io_error(format!("cannot resolve {}: {error}", root.display()))
+    })?;
+    match marker_in(&canonical)? {
+        Marker::Present(marker) => load(&canonical, &marker),
+        Marker::Absent => Err(not_found()),
+    }
 }

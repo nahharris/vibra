@@ -9,7 +9,7 @@
 
 use std::cell::Cell as Counter;
 
-use vibra_host::{HostWorld, WorldProvider};
+use vibra_host_v1::{HostWorld, WorldProvider};
 use vibra_nexus::{Context, Outcome, UNBOUNDED, run};
 use vibra_nexus_bridge::{
     CONSTANT_ATOM, CONSTANT_BYTES, CONSTANT_STR, Generated, STATUS_PROCEED,
@@ -255,7 +255,7 @@ extern "C" fn callee_step(_ctx: Ctx, _resume: u32) -> u32 {
 
 #[test]
 fn a_block_past_the_running_functions_blocks_is_a_toolchain_defect() {
-    use vibra_ir::boundary::TrapCode;
+    use vibra_ir_v1::boundary::TrapCode;
     use vibra_nexus::Trap;
 
     for which in 0..6 {

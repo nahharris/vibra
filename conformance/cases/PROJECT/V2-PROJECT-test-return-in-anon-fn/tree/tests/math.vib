@@ -1,0 +1,3 @@
+use @std.assert enduse
+
+test "closure" do let f be fn takes {x: I32} returns y: I32 do return x endfn endlet assert.equal(1i32 f(1i32)) endtest

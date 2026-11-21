@@ -1,0 +1,13 @@
+id = "V2-SRC-DECL-type-callable-types"
+rule = "V2-SRC-DECL-type-callable-types"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#grammar: the three callable types: Fn inputs with a labelled entry, and Proc and Intent with their row as the last operand"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "accepted"
+tree = "tree.vibon"
+formatted = "formatted.vib"

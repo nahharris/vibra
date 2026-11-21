@@ -1,0 +1,32 @@
+fn main
+  returns r: I32
+  do
+    let unread be Read.read(Box(0u8)) endlet
+    return 1i32
+endfn
+
+interface Read(T)
+  fn read
+    takes {x: Self}
+    returns r: T
+  endfn
+endinterface
+
+type Box of U8
+  impl Read(U8)
+    fn read
+      takes {x: Self}
+      returns r: U8
+      do
+        return 8u8
+    endfn
+  endimpl
+  impl Read(U16)
+    fn read
+      takes {x: Self}
+      returns r: U16
+      do
+        return 16u16
+    endfn
+  endimpl
+endtype

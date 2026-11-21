@@ -1,0 +1,2 @@
+use @std.core enduse
+let core: U8 be 1u8 endlet

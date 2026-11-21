@@ -1,0 +1,1 @@
+{format: @value.v2 typeInfo: {kind: @tuple arguments: [{kind: @list arguments: [@i32]} {kind: @list arguments: [@i32]}]} value: {kind: @tuple values: [{kind: @list values: [1i32 2i32]} {kind: @list values: [3i32]}]}}

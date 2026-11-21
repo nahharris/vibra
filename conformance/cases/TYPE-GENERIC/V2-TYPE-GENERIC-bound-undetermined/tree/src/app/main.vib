@@ -1,0 +1,30 @@
+fn main
+  returns r: I32
+  do
+    let c: Celsius be make([]) endlet
+    return 1i32
+endfn
+
+fn make(T S)
+  takes {sources: List(S)}
+  returns r: T
+  given {T: From(S)}
+  do
+    match Iter.next(sources)
+      case Option.some(value: {first _})
+        return From.convert(first)
+      case Option.none()
+        return make(sources)
+    endmatch
+endfn
+
+type Celsius of I32
+  impl From(I32)
+    fn convert
+      takes {value: I32}
+      returns converted: Self
+      do
+        return Celsius(value)
+    endfn
+  endimpl
+endtype

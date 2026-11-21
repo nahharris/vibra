@@ -1,0 +1,238 @@
+assert.equal	T	{T T}	Void
+assert.false		{Bool}	Void
+assert.true		{Bool}	Void
+bytes.concat		{Bytes Bytes}	Bytes
+bytes.equal		{Bytes Bytes}	Bool
+bytes.fromList		{List(U8)}	Bytes
+bytes.length		{Bytes}	U64
+bytes.slice		{Bytes U64 U64}	Option(Bytes)
+bytes.toList		{Bytes}	List(U8)
+char.fromU32		{U32}	Option(Char)
+char.toU32		{Char}	U32
+dict.entries	K V	{Dict(K V)}	List({K V})
+dict.fromList	K V	{List({K V})}	Dict(K V)
+dict.next	K V	{Dict(K V)}	Option({{K V} Dict(K V)})
+f32.add		{F32 F32}	F32
+f32.compareTotal		{F32 F32}	Ordering
+f32.div		{F32 F32}	F32
+f32.equal		{F32 F32}	Bool
+f32.mul		{F32 F32}	F32
+f32.neg		{F32}	F32
+f32.parse		{Str}	Result(F32 ConversionError)
+f32.sub		{F32 F32}	F32
+f32.toStr		{F32}	Str
+f64.add		{F64 F64}	F64
+f64.compareTotal		{F64 F64}	Ordering
+f64.div		{F64 F64}	F64
+f64.equal		{F64 F64}	Bool
+f64.mul		{F64 F64}	F64
+f64.neg		{F64}	F64
+f64.parse		{Str}	Result(F64 ConversionError)
+f64.sub		{F64 F64}	F64
+f64.toStr		{F64}	Str
+i16.add		{I16 I16}	I16
+i16.addChecked		{I16 I16}	Result(I16 ArithmeticError)
+i16.compare		{I16 I16}	Ordering
+i16.divChecked		{I16 I16}	Result(I16 ArithmeticError)
+i16.equal		{I16 I16}	Bool
+i16.mul		{I16 I16}	I16
+i16.mulChecked		{I16 I16}	Result(I16 ArithmeticError)
+i16.neg		{I16}	I16
+i16.negChecked		{I16}	Result(I16 ArithmeticError)
+i16.parse		{Str}	Result(I16 ConversionError)
+i16.remChecked		{I16 I16}	Result(I16 ArithmeticError)
+i16.shiftLeft		{I16 U32}	I16
+i16.shiftLeftChecked		{I16 U32}	Result(I16 ArithmeticError)
+i16.shiftRight		{I16 U32}	I16
+i16.shiftRightChecked		{I16 U32}	Result(I16 ArithmeticError)
+i16.sub		{I16 I16}	I16
+i16.subChecked		{I16 I16}	Result(I16 ArithmeticError)
+i16.toI32		{I16}	I32
+i16.toI64		{I16}	I64
+i16.toI8		{I16}	Result(I8 ConversionError)
+i16.toStr		{I16}	Str
+i16.toU16		{I16}	Result(U16 ConversionError)
+i16.toU32		{I16}	Result(U32 ConversionError)
+i16.toU64		{I16}	Result(U64 ConversionError)
+i16.toU8		{I16}	Result(U8 ConversionError)
+i32.add		{I32 I32}	I32
+i32.addChecked		{I32 I32}	Result(I32 ArithmeticError)
+i32.compare		{I32 I32}	Ordering
+i32.divChecked		{I32 I32}	Result(I32 ArithmeticError)
+i32.equal		{I32 I32}	Bool
+i32.mul		{I32 I32}	I32
+i32.mulChecked		{I32 I32}	Result(I32 ArithmeticError)
+i32.neg		{I32}	I32
+i32.negChecked		{I32}	Result(I32 ArithmeticError)
+i32.parse		{Str}	Result(I32 ConversionError)
+i32.remChecked		{I32 I32}	Result(I32 ArithmeticError)
+i32.shiftLeft		{I32 U32}	I32
+i32.shiftLeftChecked		{I32 U32}	Result(I32 ArithmeticError)
+i32.shiftRight		{I32 U32}	I32
+i32.shiftRightChecked		{I32 U32}	Result(I32 ArithmeticError)
+i32.sub		{I32 I32}	I32
+i32.subChecked		{I32 I32}	Result(I32 ArithmeticError)
+i32.toI16		{I32}	Result(I16 ConversionError)
+i32.toI64		{I32}	I64
+i32.toI8		{I32}	Result(I8 ConversionError)
+i32.toStr		{I32}	Str
+i32.toU16		{I32}	Result(U16 ConversionError)
+i32.toU32		{I32}	Result(U32 ConversionError)
+i32.toU64		{I32}	Result(U64 ConversionError)
+i32.toU8		{I32}	Result(U8 ConversionError)
+i64.add		{I64 I64}	I64
+i64.addChecked		{I64 I64}	Result(I64 ArithmeticError)
+i64.compare		{I64 I64}	Ordering
+i64.divChecked		{I64 I64}	Result(I64 ArithmeticError)
+i64.equal		{I64 I64}	Bool
+i64.mul		{I64 I64}	I64
+i64.mulChecked		{I64 I64}	Result(I64 ArithmeticError)
+i64.neg		{I64}	I64
+i64.negChecked		{I64}	Result(I64 ArithmeticError)
+i64.parse		{Str}	Result(I64 ConversionError)
+i64.remChecked		{I64 I64}	Result(I64 ArithmeticError)
+i64.shiftLeft		{I64 U32}	I64
+i64.shiftLeftChecked		{I64 U32}	Result(I64 ArithmeticError)
+i64.shiftRight		{I64 U32}	I64
+i64.shiftRightChecked		{I64 U32}	Result(I64 ArithmeticError)
+i64.sub		{I64 I64}	I64
+i64.subChecked		{I64 I64}	Result(I64 ArithmeticError)
+i64.toI16		{I64}	Result(I16 ConversionError)
+i64.toI32		{I64}	Result(I32 ConversionError)
+i64.toI8		{I64}	Result(I8 ConversionError)
+i64.toStr		{I64}	Str
+i64.toU16		{I64}	Result(U16 ConversionError)
+i64.toU32		{I64}	Result(U32 ConversionError)
+i64.toU64		{I64}	Result(U64 ConversionError)
+i64.toU8		{I64}	Result(U8 ConversionError)
+i8.add		{I8 I8}	I8
+i8.addChecked		{I8 I8}	Result(I8 ArithmeticError)
+i8.compare		{I8 I8}	Ordering
+i8.divChecked		{I8 I8}	Result(I8 ArithmeticError)
+i8.equal		{I8 I8}	Bool
+i8.mul		{I8 I8}	I8
+i8.mulChecked		{I8 I8}	Result(I8 ArithmeticError)
+i8.neg		{I8}	I8
+i8.negChecked		{I8}	Result(I8 ArithmeticError)
+i8.parse		{Str}	Result(I8 ConversionError)
+i8.remChecked		{I8 I8}	Result(I8 ArithmeticError)
+i8.shiftLeft		{I8 U32}	I8
+i8.shiftLeftChecked		{I8 U32}	Result(I8 ArithmeticError)
+i8.shiftRight		{I8 U32}	I8
+i8.shiftRightChecked		{I8 U32}	Result(I8 ArithmeticError)
+i8.sub		{I8 I8}	I8
+i8.subChecked		{I8 I8}	Result(I8 ArithmeticError)
+i8.toI16		{I8}	I16
+i8.toI32		{I8}	I32
+i8.toI64		{I8}	I64
+i8.toStr		{I8}	Str
+i8.toU16		{I8}	Result(U16 ConversionError)
+i8.toU32		{I8}	Result(U32 ConversionError)
+i8.toU64		{I8}	Result(U64 ConversionError)
+i8.toU8		{I8}	Result(U8 ConversionError)
+list.append	T	{List(T) T}	List(T)
+list.concat	T	{List(T) List(T)}	List(T)
+list.fold	T A	{List(T) A Fn({A T} A)}	A
+list.length	T	{List(T)}	U64
+list.next	T	{List(T)}	Option({T List(T)})
+list.slice	T	{List(T) U64 U64}	Option(List(T))
+str.concat		{Str Str}	Str
+str.equal		{Str Str}	Bool
+str.fromChars		{List(Char)}	Str
+str.fromUtf8		{Bytes}	Result(Str ConversionError)
+str.length		{Str}	U64
+str.slice		{Str U64 U64}	Option(Str)
+str.toChars		{Str}	List(Char)
+str.toUtf8		{Str}	Bytes
+u16.add		{U16 U16}	U16
+u16.addChecked		{U16 U16}	Result(U16 ArithmeticError)
+u16.compare		{U16 U16}	Ordering
+u16.divChecked		{U16 U16}	Result(U16 ArithmeticError)
+u16.equal		{U16 U16}	Bool
+u16.mul		{U16 U16}	U16
+u16.mulChecked		{U16 U16}	Result(U16 ArithmeticError)
+u16.parse		{Str}	Result(U16 ConversionError)
+u16.remChecked		{U16 U16}	Result(U16 ArithmeticError)
+u16.shiftLeft		{U16 U32}	U16
+u16.shiftLeftChecked		{U16 U32}	Result(U16 ArithmeticError)
+u16.shiftRight		{U16 U32}	U16
+u16.shiftRightChecked		{U16 U32}	Result(U16 ArithmeticError)
+u16.sub		{U16 U16}	U16
+u16.subChecked		{U16 U16}	Result(U16 ArithmeticError)
+u16.toI16		{U16}	Result(I16 ConversionError)
+u16.toI32		{U16}	I32
+u16.toI64		{U16}	I64
+u16.toI8		{U16}	Result(I8 ConversionError)
+u16.toStr		{U16}	Str
+u16.toU32		{U16}	U32
+u16.toU64		{U16}	U64
+u16.toU8		{U16}	Result(U8 ConversionError)
+u32.add		{U32 U32}	U32
+u32.addChecked		{U32 U32}	Result(U32 ArithmeticError)
+u32.compare		{U32 U32}	Ordering
+u32.divChecked		{U32 U32}	Result(U32 ArithmeticError)
+u32.equal		{U32 U32}	Bool
+u32.mul		{U32 U32}	U32
+u32.mulChecked		{U32 U32}	Result(U32 ArithmeticError)
+u32.parse		{Str}	Result(U32 ConversionError)
+u32.remChecked		{U32 U32}	Result(U32 ArithmeticError)
+u32.shiftLeft		{U32 U32}	U32
+u32.shiftLeftChecked		{U32 U32}	Result(U32 ArithmeticError)
+u32.shiftRight		{U32 U32}	U32
+u32.shiftRightChecked		{U32 U32}	Result(U32 ArithmeticError)
+u32.sub		{U32 U32}	U32
+u32.subChecked		{U32 U32}	Result(U32 ArithmeticError)
+u32.toI16		{U32}	Result(I16 ConversionError)
+u32.toI32		{U32}	Result(I32 ConversionError)
+u32.toI64		{U32}	I64
+u32.toI8		{U32}	Result(I8 ConversionError)
+u32.toStr		{U32}	Str
+u32.toU16		{U32}	Result(U16 ConversionError)
+u32.toU64		{U32}	U64
+u32.toU8		{U32}	Result(U8 ConversionError)
+u64.add		{U64 U64}	U64
+u64.addChecked		{U64 U64}	Result(U64 ArithmeticError)
+u64.compare		{U64 U64}	Ordering
+u64.divChecked		{U64 U64}	Result(U64 ArithmeticError)
+u64.equal		{U64 U64}	Bool
+u64.mul		{U64 U64}	U64
+u64.mulChecked		{U64 U64}	Result(U64 ArithmeticError)
+u64.parse		{Str}	Result(U64 ConversionError)
+u64.remChecked		{U64 U64}	Result(U64 ArithmeticError)
+u64.shiftLeft		{U64 U32}	U64
+u64.shiftLeftChecked		{U64 U32}	Result(U64 ArithmeticError)
+u64.shiftRight		{U64 U32}	U64
+u64.shiftRightChecked		{U64 U32}	Result(U64 ArithmeticError)
+u64.sub		{U64 U64}	U64
+u64.subChecked		{U64 U64}	Result(U64 ArithmeticError)
+u64.toI16		{U64}	Result(I16 ConversionError)
+u64.toI32		{U64}	Result(I32 ConversionError)
+u64.toI64		{U64}	Result(I64 ConversionError)
+u64.toI8		{U64}	Result(I8 ConversionError)
+u64.toStr		{U64}	Str
+u64.toU16		{U64}	Result(U16 ConversionError)
+u64.toU32		{U64}	Result(U32 ConversionError)
+u64.toU8		{U64}	Result(U8 ConversionError)
+u8.add		{U8 U8}	U8
+u8.addChecked		{U8 U8}	Result(U8 ArithmeticError)
+u8.compare		{U8 U8}	Ordering
+u8.divChecked		{U8 U8}	Result(U8 ArithmeticError)
+u8.equal		{U8 U8}	Bool
+u8.mul		{U8 U8}	U8
+u8.mulChecked		{U8 U8}	Result(U8 ArithmeticError)
+u8.parse		{Str}	Result(U8 ConversionError)
+u8.remChecked		{U8 U8}	Result(U8 ArithmeticError)
+u8.shiftLeft		{U8 U32}	U8
+u8.shiftLeftChecked		{U8 U32}	Result(U8 ArithmeticError)
+u8.shiftRight		{U8 U32}	U8
+u8.shiftRightChecked		{U8 U32}	Result(U8 ArithmeticError)
+u8.sub		{U8 U8}	U8
+u8.subChecked		{U8 U8}	Result(U8 ArithmeticError)
+u8.toI16		{U8}	I16
+u8.toI32		{U8}	I32
+u8.toI64		{U8}	I64
+u8.toI8		{U8}	Result(I8 ConversionError)
+u8.toStr		{U8}	Str
+u8.toU16		{U8}	U16
+u8.toU32		{U8}	U32
+u8.toU64		{U8}	U64

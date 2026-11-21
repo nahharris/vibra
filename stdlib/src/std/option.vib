@@ -1,6 +1,23 @@
-; The standard optional value. It plays the `@option` role, so lookups and
-; `try` answer with it and it needs no import.
-(deftype option (enum some t none void)
-  where: (t any)
-  role: @option
-  visibility: @public)
+// The optional value, which plays the `@option` role: lookups and `try`
+// answer with it.
+
+type Option(T)
+  case none
+  case some {value: T}
+  role @option
+  visibility @public
+  impl Iter
+    type Item of T endtype
+    fn next
+      takes {value: Self}
+      returns step: Option({Item Self})
+      do
+        match value
+          case Option.some(value: item)
+            return Option.some(value: {item Option.none()})
+          case Option.none()
+            return Option.none()
+        endmatch
+    endfn
+  endimpl
+endtype

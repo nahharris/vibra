@@ -1,0 +1,12 @@
+id = "V2-TYPE-INTERFACE-iter-collect"
+rule = "V2-TYPE-INTERFACE-iter-collect"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#iteration: collect is the items of successive next steps, in order"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

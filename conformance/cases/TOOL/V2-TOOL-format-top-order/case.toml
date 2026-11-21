@@ -1,0 +1,14 @@
+id = "V2-TOOL-format-top-order"
+rule = "V2-TOOL-format-top-order"
+profile = "toolingV2"
+operation = "format"
+description = "01-source-language.md#canonical-format: top-level forms keep their written order, a fn before the type that follows it, with one blank line between them"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+source = "tree/src/app/main.vib"
+
+[expect]
+verdict = "accepted"
+formatted = "formatted.vib"

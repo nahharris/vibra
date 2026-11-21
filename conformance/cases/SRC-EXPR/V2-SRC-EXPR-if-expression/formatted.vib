@@ -1,0 +1,1 @@
+let label: Str be if ready then "go" else "wait" endif endlet

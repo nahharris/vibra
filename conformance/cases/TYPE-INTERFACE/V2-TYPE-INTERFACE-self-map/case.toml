@@ -1,0 +1,12 @@
+id = "V2-TYPE-INTERFACE-self-map"
+rule = "V2-TYPE-INTERFACE-self-map"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#interfaces: every Self of a result in a position of the Self map is accepted"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

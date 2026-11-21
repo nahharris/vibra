@@ -1,0 +1,12 @@
+id = "V2-TYPE-INTERFACE-iter-fold"
+rule = "V2-TYPE-INTERFACE-iter-fold"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#iteration: fold applies step to the accumulator and each item, left to right"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

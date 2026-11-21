@@ -1,0 +1,9 @@
+fn main returns r: I32 do return 1i32 endfn
+
+interface I
+  fn f
+    takes {v: Self}
+    returns r: Str
+    do
+  endfn
+endinterface

@@ -1,0 +1,2 @@
+fn inc takes {x: I32} returns r: I32 do return x endfn
+fn main returns r: I32 do let d be [inc: "x"] endlet return 1i32 endfn

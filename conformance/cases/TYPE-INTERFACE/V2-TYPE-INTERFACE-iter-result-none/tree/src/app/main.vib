@@ -1,0 +1,6 @@
+fn f
+  returns r: List(I32)
+  do
+    let held: Result(I32 Str) be Result.ok(value: 1i32) endlet
+    return Iter.collect(held)
+endfn

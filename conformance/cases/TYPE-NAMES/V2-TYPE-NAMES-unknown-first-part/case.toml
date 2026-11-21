@@ -1,0 +1,18 @@
+id = "V2-TYPE-NAMES-unknown-first-part"
+rule = "V2-TYPE-NAMES-unknown-first-part"
+profile = "staticV2"
+operation = "resolve"
+description = "01-source-language.md#names-and-paths: a dotted name whose first part names nothing is @name.unknownSymbol at that part"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@name.unknownSymbol"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 38, end = 45 }

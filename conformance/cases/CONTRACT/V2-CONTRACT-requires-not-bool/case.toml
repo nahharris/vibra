@@ -1,0 +1,18 @@
+id = "V2-CONTRACT-requires-not-bool"
+rule = "V2-CONTRACT-requires-not-bool"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#predicates: a predicate that is not a Bool is @contract.invalidPredicate at the predicate"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@contract.invalidPredicate"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 44, end = 48 }

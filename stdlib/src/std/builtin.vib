@@ -1,1026 +1,1720 @@
-; Members of the builtin types. They are reached through the type path, such
-; as `(array.of 1i32 2i32)` or `(i32.add-checked 1i32 2i32)`, with no import.
-; `external:` members are primitive operations; `native:` members are Vibra
-; whose native implementation the toolchain may run instead, and the others
-; are Vibra alone. Each type implements the comparison and conversion
-; contracts of `@std.core` here, where it is declared.
-(import core @std.core)
-(import option @std.option)
+// The builtin types: the compiler owns their representation, written
+// `Intrinsic(@tag)` with the type's wire tag, and their static members are
+// bound to `@compiler` intrinsics. The module is in every checked graph and is
+// never imported; its public declarations are reached through the prelude.
+// `Dict`, whose representation is private, is declared here with its role.
 
-(deftype array (intrinsic-type @array)
-  where: (t any)
-  visibility: @public
-  (defn of () (array t)
-    visibility: @public
-    variadic: (items (array t))
-    native: "array.of"
-    items)
-  (defn length (items (array t)) u64
-    visibility: @public
-    external: @compiler
-    symbol: "array.length")
-  (defn append (items (array t) item t) (array t)
-    visibility: @public
-    external: @compiler
-    symbol: "array.append")
-  (defn concat (left (array t) right (array t)) (array t)
-    visibility: @public
-    external: @compiler
-    symbol: "array.concat")
-  (defn slice (items (array t) start u64 end u64) (option.option (array t))
-    visibility: @public
-    external: @compiler
-    symbol: "array.slice")
-  ; The left fold: `step` combines the accumulator with each element in order.
-  (defn fold (items (array t) initial a step (fn (a t) a)) a
-    where: (a any)
-    visibility: @public
-    native: "array.fold"
-    (match (items 0u64)
-      (option.option.none) initial
-      (option.option.some first)
-        (match (array.slice items 1u64 (array.length items))
-          (option.option.some rest) (array.fold rest (step initial first) step)
-          (option.option.none) initial))))
+use @std.core.ArithmeticError enduse
 
-; The standard dict, which plays the `@dict` role: its entries sorted by
-; `ordered.compare` on their keys, one entry per key. The toolchain represents
-; it directly; building one sorts and merges its entries, so a later entry for
-; the same key wins.
-(deftype dict (array (tuple k v))
-  where: (k ordered v any)
-  role: @dict
-  visibility: @public
-  (defn of () (dict k v)
-    visibility: @public
-    variadic: (entries (dict k v))
-    native: "dict.of"
-    entries)
-  ; The entries in key order, which is how a dict is traversed and rendered.
-  (defn entries (value (dict k v)) (array (tuple k v))
-    visibility: @public
-    external: @compiler
-    symbol: "dict.entries"))
+use @std.core.ConversionError enduse
 
-(deftype i8 (intrinsic-type @i8)
-  visibility: @public
-  ; Saturating arithmetic: a result past the type is its nearest bound, and
-  ; a zero divisor traps. The -checked members return the failure instead.
-  (defn add (left i8 right i8) i8
-    visibility: @public
-    external: @compiler
-    symbol: "i8.add")
-  (defn sub (left i8 right i8) i8
-    visibility: @public
-    external: @compiler
-    symbol: "i8.sub")
-  (defn mul (left i8 right i8) i8
-    visibility: @public
-    external: @compiler
-    symbol: "i8.mul")
-  (defn div (left i8 right i8) i8
-    visibility: @public
-    external: @compiler
-    symbol: "i8.div")
-  (defn rem (left i8 right i8) i8
-    visibility: @public
-    external: @compiler
-    symbol: "i8.rem")
-  (defn neg (value i8) i8
-    visibility: @public
-    external: @compiler
-    symbol: "i8.neg")
-  (defn shift-left (value i8 amount u32) i8
-    visibility: @public
-    external: @compiler
-    symbol: "i8.shift-left")
-  (defn shift-right (value i8 amount u32) i8
-    visibility: @public
-    external: @compiler
-    symbol: "i8.shift-right")
-  (defn add-checked (left i8 right i8) (result i8 core.arithmetic-error)
-    visibility: @public
-    external: @compiler
-    symbol: "i8.add-checked")
-  (defn sub-checked (left i8 right i8) (result i8 core.arithmetic-error)
-    visibility: @public
-    external: @compiler
-    symbol: "i8.sub-checked")
-  (defn mul-checked (left i8 right i8) (result i8 core.arithmetic-error)
-    visibility: @public
-    external: @compiler
-    symbol: "i8.mul-checked")
-  (defn div-checked (left i8 right i8) (result i8 core.arithmetic-error)
-    visibility: @public
-    external: @compiler
-    symbol: "i8.div-checked")
-  (defn rem-checked (left i8 right i8) (result i8 core.arithmetic-error)
-    visibility: @public
-    external: @compiler
-    symbol: "i8.rem-checked")
-  (defn neg-checked (value i8) (result i8 core.arithmetic-error)
-    visibility: @public
-    external: @compiler
-    symbol: "i8.neg-checked")
-  (defn shift-left-checked (value i8 amount u32) (result i8 core.arithmetic-error)
-    visibility: @public
-    external: @compiler
-    symbol: "i8.shift-left-checked")
-  (defn shift-right-checked (value i8 amount u32) (result i8 core.arithmetic-error)
-    visibility: @public
-    external: @compiler
-    symbol: "i8.shift-right-checked")
-  (impl equatable
-    (defn equal (left self right self) bool
-      external: @compiler
-      symbol: "i8.equal"))
-  (impl ordered
-    (defn compare (left self right self) core.ordering
-      external: @compiler
-      symbol: "i8.compare"))
-  (impl (core.try-from i16)
-    (defn convert (value i16) (result self core.conversion-error)
-      external: @compiler
-      symbol: "i16.to-i8"))
-  (impl (core.try-from i32)
-    (defn convert (value i32) (result self core.conversion-error)
-      external: @compiler
-      symbol: "i32.to-i8"))
-  (impl (core.try-from i64)
-    (defn convert (value i64) (result self core.conversion-error)
-      external: @compiler
-      symbol: "i64.to-i8"))
-  (impl (core.try-from u8)
-    (defn convert (value u8) (result self core.conversion-error)
-      external: @compiler
-      symbol: "u8.to-i8"))
-  (impl (core.try-from u16)
-    (defn convert (value u16) (result self core.conversion-error)
-      external: @compiler
-      symbol: "u16.to-i8"))
-  (impl (core.try-from u32)
-    (defn convert (value u32) (result self core.conversion-error)
-      external: @compiler
-      symbol: "u32.to-i8"))
-  (impl (core.try-from u64)
-    (defn convert (value u64) (result self core.conversion-error)
-      external: @compiler
-      symbol: "u64.to-i8"))
-  (impl (core.try-from str)
-    (defn convert (value str) (result self core.conversion-error)
-      external: @compiler
-      symbol: "i8.parse")))
+type Void of Intrinsic(@void)
+  visibility @public
+endtype
 
-(deftype i16 (intrinsic-type @i16)
-  visibility: @public
-  ; Saturating arithmetic: a result past the type is its nearest bound, and
-  ; a zero divisor traps. The -checked members return the failure instead.
-  (defn add (left i16 right i16) i16
-    visibility: @public
-    external: @compiler
-    symbol: "i16.add")
-  (defn sub (left i16 right i16) i16
-    visibility: @public
-    external: @compiler
-    symbol: "i16.sub")
-  (defn mul (left i16 right i16) i16
-    visibility: @public
-    external: @compiler
-    symbol: "i16.mul")
-  (defn div (left i16 right i16) i16
-    visibility: @public
-    external: @compiler
-    symbol: "i16.div")
-  (defn rem (left i16 right i16) i16
-    visibility: @public
-    external: @compiler
-    symbol: "i16.rem")
-  (defn neg (value i16) i16
-    visibility: @public
-    external: @compiler
-    symbol: "i16.neg")
-  (defn shift-left (value i16 amount u32) i16
-    visibility: @public
-    external: @compiler
-    symbol: "i16.shift-left")
-  (defn shift-right (value i16 amount u32) i16
-    visibility: @public
-    external: @compiler
-    symbol: "i16.shift-right")
-  (defn add-checked (left i16 right i16) (result i16 core.arithmetic-error)
-    visibility: @public
-    external: @compiler
-    symbol: "i16.add-checked")
-  (defn sub-checked (left i16 right i16) (result i16 core.arithmetic-error)
-    visibility: @public
-    external: @compiler
-    symbol: "i16.sub-checked")
-  (defn mul-checked (left i16 right i16) (result i16 core.arithmetic-error)
-    visibility: @public
-    external: @compiler
-    symbol: "i16.mul-checked")
-  (defn div-checked (left i16 right i16) (result i16 core.arithmetic-error)
-    visibility: @public
-    external: @compiler
-    symbol: "i16.div-checked")
-  (defn rem-checked (left i16 right i16) (result i16 core.arithmetic-error)
-    visibility: @public
-    external: @compiler
-    symbol: "i16.rem-checked")
-  (defn neg-checked (value i16) (result i16 core.arithmetic-error)
-    visibility: @public
-    external: @compiler
-    symbol: "i16.neg-checked")
-  (defn shift-left-checked (value i16 amount u32) (result i16 core.arithmetic-error)
-    visibility: @public
-    external: @compiler
-    symbol: "i16.shift-left-checked")
-  (defn shift-right-checked (value i16 amount u32) (result i16 core.arithmetic-error)
-    visibility: @public
-    external: @compiler
-    symbol: "i16.shift-right-checked")
-  (impl equatable
-    (defn equal (left self right self) bool
-      external: @compiler
-      symbol: "i16.equal"))
-  (impl ordered
-    (defn compare (left self right self) core.ordering
-      external: @compiler
-      symbol: "i16.compare"))
-  (impl (core.from i8)
-    (defn convert (value i8) self
-      external: @compiler
-      symbol: "i8.to-i16"))
-  (impl (core.try-from i32)
-    (defn convert (value i32) (result self core.conversion-error)
-      external: @compiler
-      symbol: "i32.to-i16"))
-  (impl (core.try-from i64)
-    (defn convert (value i64) (result self core.conversion-error)
-      external: @compiler
-      symbol: "i64.to-i16"))
-  (impl (core.from u8)
-    (defn convert (value u8) self
-      external: @compiler
-      symbol: "u8.to-i16"))
-  (impl (core.try-from u16)
-    (defn convert (value u16) (result self core.conversion-error)
-      external: @compiler
-      symbol: "u16.to-i16"))
-  (impl (core.try-from u32)
-    (defn convert (value u32) (result self core.conversion-error)
-      external: @compiler
-      symbol: "u32.to-i16"))
-  (impl (core.try-from u64)
-    (defn convert (value u64) (result self core.conversion-error)
-      external: @compiler
-      symbol: "u64.to-i16"))
-  (impl (core.try-from str)
-    (defn convert (value str) (result self core.conversion-error)
-      external: @compiler
-      symbol: "i16.parse")))
+type Never of Intrinsic(@never)
+  visibility @public
+endtype
 
-(deftype i32 (intrinsic-type @i32)
-  visibility: @public
-  ; Saturating arithmetic: a result past the type is its nearest bound, and
-  ; a zero divisor traps. The -checked members return the failure instead.
-  (defn add (left i32 right i32) i32
-    visibility: @public
-    external: @compiler
-    symbol: "i32.add")
-  (defn sub (left i32 right i32) i32
-    visibility: @public
-    external: @compiler
-    symbol: "i32.sub")
-  (defn mul (left i32 right i32) i32
-    visibility: @public
-    external: @compiler
-    symbol: "i32.mul")
-  (defn div (left i32 right i32) i32
-    visibility: @public
-    external: @compiler
-    symbol: "i32.div")
-  (defn rem (left i32 right i32) i32
-    visibility: @public
-    external: @compiler
-    symbol: "i32.rem")
-  (defn neg (value i32) i32
-    visibility: @public
-    external: @compiler
-    symbol: "i32.neg")
-  (defn shift-left (value i32 amount u32) i32
-    visibility: @public
-    external: @compiler
-    symbol: "i32.shift-left")
-  (defn shift-right (value i32 amount u32) i32
-    visibility: @public
-    external: @compiler
-    symbol: "i32.shift-right")
-  (defn add-checked (left i32 right i32) (result i32 core.arithmetic-error)
-    visibility: @public
-    external: @compiler
-    symbol: "i32.add-checked")
-  (defn sub-checked (left i32 right i32) (result i32 core.arithmetic-error)
-    visibility: @public
-    external: @compiler
-    symbol: "i32.sub-checked")
-  (defn mul-checked (left i32 right i32) (result i32 core.arithmetic-error)
-    visibility: @public
-    external: @compiler
-    symbol: "i32.mul-checked")
-  (defn div-checked (left i32 right i32) (result i32 core.arithmetic-error)
-    visibility: @public
-    external: @compiler
-    symbol: "i32.div-checked")
-  (defn rem-checked (left i32 right i32) (result i32 core.arithmetic-error)
-    visibility: @public
-    external: @compiler
-    symbol: "i32.rem-checked")
-  (defn neg-checked (value i32) (result i32 core.arithmetic-error)
-    visibility: @public
-    external: @compiler
-    symbol: "i32.neg-checked")
-  (defn shift-left-checked (value i32 amount u32) (result i32 core.arithmetic-error)
-    visibility: @public
-    external: @compiler
-    symbol: "i32.shift-left-checked")
-  (defn shift-right-checked (value i32 amount u32) (result i32 core.arithmetic-error)
-    visibility: @public
-    external: @compiler
-    symbol: "i32.shift-right-checked")
-  (impl equatable
-    (defn equal (left self right self) bool
-      external: @compiler
-      symbol: "i32.equal"))
-  (impl ordered
-    (defn compare (left self right self) core.ordering
-      external: @compiler
-      symbol: "i32.compare"))
-  (impl (core.from i8)
-    (defn convert (value i8) self
-      external: @compiler
-      symbol: "i8.to-i32"))
-  (impl (core.from i16)
-    (defn convert (value i16) self
-      external: @compiler
-      symbol: "i16.to-i32"))
-  (impl (core.try-from i64)
-    (defn convert (value i64) (result self core.conversion-error)
-      external: @compiler
-      symbol: "i64.to-i32"))
-  (impl (core.from u8)
-    (defn convert (value u8) self
-      external: @compiler
-      symbol: "u8.to-i32"))
-  (impl (core.from u16)
-    (defn convert (value u16) self
-      external: @compiler
-      symbol: "u16.to-i32"))
-  (impl (core.try-from u32)
-    (defn convert (value u32) (result self core.conversion-error)
-      external: @compiler
-      symbol: "u32.to-i32"))
-  (impl (core.try-from u64)
-    (defn convert (value u64) (result self core.conversion-error)
-      external: @compiler
-      symbol: "u64.to-i32"))
-  (impl (core.try-from str)
-    (defn convert (value str) (result self core.conversion-error)
-      external: @compiler
-      symbol: "i32.parse")))
+type Atom of Intrinsic(@atom)
+  visibility @public
+endtype
 
-(deftype i64 (intrinsic-type @i64)
-  visibility: @public
-  ; Saturating arithmetic: a result past the type is its nearest bound, and
-  ; a zero divisor traps. The -checked members return the failure instead.
-  (defn add (left i64 right i64) i64
-    visibility: @public
-    external: @compiler
-    symbol: "i64.add")
-  (defn sub (left i64 right i64) i64
-    visibility: @public
-    external: @compiler
-    symbol: "i64.sub")
-  (defn mul (left i64 right i64) i64
-    visibility: @public
-    external: @compiler
-    symbol: "i64.mul")
-  (defn div (left i64 right i64) i64
-    visibility: @public
-    external: @compiler
-    symbol: "i64.div")
-  (defn rem (left i64 right i64) i64
-    visibility: @public
-    external: @compiler
-    symbol: "i64.rem")
-  (defn neg (value i64) i64
-    visibility: @public
-    external: @compiler
-    symbol: "i64.neg")
-  (defn shift-left (value i64 amount u32) i64
-    visibility: @public
-    external: @compiler
-    symbol: "i64.shift-left")
-  (defn shift-right (value i64 amount u32) i64
-    visibility: @public
-    external: @compiler
-    symbol: "i64.shift-right")
-  (defn add-checked (left i64 right i64) (result i64 core.arithmetic-error)
-    visibility: @public
-    external: @compiler
-    symbol: "i64.add-checked")
-  (defn sub-checked (left i64 right i64) (result i64 core.arithmetic-error)
-    visibility: @public
-    external: @compiler
-    symbol: "i64.sub-checked")
-  (defn mul-checked (left i64 right i64) (result i64 core.arithmetic-error)
-    visibility: @public
-    external: @compiler
-    symbol: "i64.mul-checked")
-  (defn div-checked (left i64 right i64) (result i64 core.arithmetic-error)
-    visibility: @public
-    external: @compiler
-    symbol: "i64.div-checked")
-  (defn rem-checked (left i64 right i64) (result i64 core.arithmetic-error)
-    visibility: @public
-    external: @compiler
-    symbol: "i64.rem-checked")
-  (defn neg-checked (value i64) (result i64 core.arithmetic-error)
-    visibility: @public
-    external: @compiler
-    symbol: "i64.neg-checked")
-  (defn shift-left-checked (value i64 amount u32) (result i64 core.arithmetic-error)
-    visibility: @public
-    external: @compiler
-    symbol: "i64.shift-left-checked")
-  (defn shift-right-checked (value i64 amount u32) (result i64 core.arithmetic-error)
-    visibility: @public
-    external: @compiler
-    symbol: "i64.shift-right-checked")
-  (impl equatable
-    (defn equal (left self right self) bool
-      external: @compiler
-      symbol: "i64.equal"))
-  (impl ordered
-    (defn compare (left self right self) core.ordering
-      external: @compiler
-      symbol: "i64.compare"))
-  (impl (core.from i8)
-    (defn convert (value i8) self
-      external: @compiler
-      symbol: "i8.to-i64"))
-  (impl (core.from i16)
-    (defn convert (value i16) self
-      external: @compiler
-      symbol: "i16.to-i64"))
-  (impl (core.from i32)
-    (defn convert (value i32) self
-      external: @compiler
-      symbol: "i32.to-i64"))
-  (impl (core.from u8)
-    (defn convert (value u8) self
-      external: @compiler
-      symbol: "u8.to-i64"))
-  (impl (core.from u16)
-    (defn convert (value u16) self
-      external: @compiler
-      symbol: "u16.to-i64"))
-  (impl (core.from u32)
-    (defn convert (value u32) self
-      external: @compiler
-      symbol: "u32.to-i64"))
-  (impl (core.try-from u64)
-    (defn convert (value u64) (result self core.conversion-error)
-      external: @compiler
-      symbol: "u64.to-i64"))
-  (impl (core.try-from str)
-    (defn convert (value str) (result self core.conversion-error)
-      external: @compiler
-      symbol: "i64.parse")))
+type Char of Intrinsic(@char)
+  visibility @public
+  fn toU32
+    takes {value: Self}
+    returns scalar: U32
+    visibility @public
+    external @compiler
+    symbol "char.toU32"
+  endfn
+  fn fromU32
+    takes {scalar: U32}
+    returns value: Option(Self)
+    visibility @public
+    external @compiler
+    symbol "char.fromU32"
+  endfn
+  fn isAsciiDigit
+    takes {value: Self}
+    returns holds: Bool
+    visibility @public
+    do
+      return Ordered.inRange(value '0' '9')
+  endfn
+  fn isAsciiAlphabetic
+    takes {value: Self}
+    returns holds: Bool
+    visibility @public
+    do
+      return Bool.or(Ordered.inRange(value 'A' 'Z') Ordered.inRange(value 'a' 'z'))
+  endfn
+  fn isAsciiWhitespace
+    takes {value: Self}
+    returns holds: Bool
+    visibility @public
+    do
+      return Bool.or(
+        Bool.or(Equatable.equal(value ' ') Equatable.equal(value '\t'))
+        Bool.or(Equatable.equal(value '\n') Equatable.equal(value '\r'))
+      )
+  endfn
+  impl Equatable
+    fn equal
+      takes {left: Self right: Self}
+      returns same: Bool
+      do
+        return Equatable.equal(Char.toU32(left) Char.toU32(right))
+    endfn
+  endimpl
+  impl Ordered
+    fn compare
+      takes {left: Self right: Self}
+      returns order: Ordering
+      do
+        return Ordered.compare(Char.toU32(left) Char.toU32(right))
+    endfn
+  endimpl
+endtype
 
-(deftype u8 (intrinsic-type @u8)
-  visibility: @public
-  ; Saturating arithmetic: a result past the type is its nearest bound, and
-  ; a zero divisor traps. The -checked members return the failure instead.
-  (defn add (left u8 right u8) u8
-    visibility: @public
-    external: @compiler
-    symbol: "u8.add")
-  (defn sub (left u8 right u8) u8
-    visibility: @public
-    external: @compiler
-    symbol: "u8.sub")
-  (defn mul (left u8 right u8) u8
-    visibility: @public
-    external: @compiler
-    symbol: "u8.mul")
-  (defn div (left u8 right u8) u8
-    visibility: @public
-    external: @compiler
-    symbol: "u8.div")
-  (defn rem (left u8 right u8) u8
-    visibility: @public
-    external: @compiler
-    symbol: "u8.rem")
-  (defn shift-left (value u8 amount u32) u8
-    visibility: @public
-    external: @compiler
-    symbol: "u8.shift-left")
-  (defn shift-right (value u8 amount u32) u8
-    visibility: @public
-    external: @compiler
-    symbol: "u8.shift-right")
-  (defn add-checked (left u8 right u8) (result u8 core.arithmetic-error)
-    visibility: @public
-    external: @compiler
-    symbol: "u8.add-checked")
-  (defn sub-checked (left u8 right u8) (result u8 core.arithmetic-error)
-    visibility: @public
-    external: @compiler
-    symbol: "u8.sub-checked")
-  (defn mul-checked (left u8 right u8) (result u8 core.arithmetic-error)
-    visibility: @public
-    external: @compiler
-    symbol: "u8.mul-checked")
-  (defn div-checked (left u8 right u8) (result u8 core.arithmetic-error)
-    visibility: @public
-    external: @compiler
-    symbol: "u8.div-checked")
-  (defn rem-checked (left u8 right u8) (result u8 core.arithmetic-error)
-    visibility: @public
-    external: @compiler
-    symbol: "u8.rem-checked")
-  (defn shift-left-checked (value u8 amount u32) (result u8 core.arithmetic-error)
-    visibility: @public
-    external: @compiler
-    symbol: "u8.shift-left-checked")
-  (defn shift-right-checked (value u8 amount u32) (result u8 core.arithmetic-error)
-    visibility: @public
-    external: @compiler
-    symbol: "u8.shift-right-checked")
-  (impl equatable
-    (defn equal (left self right self) bool
-      external: @compiler
-      symbol: "u8.equal"))
-  (impl ordered
-    (defn compare (left self right self) core.ordering
-      external: @compiler
-      symbol: "u8.compare"))
-  (impl (core.try-from i8)
-    (defn convert (value i8) (result self core.conversion-error)
-      external: @compiler
-      symbol: "i8.to-u8"))
-  (impl (core.try-from i16)
-    (defn convert (value i16) (result self core.conversion-error)
-      external: @compiler
-      symbol: "i16.to-u8"))
-  (impl (core.try-from i32)
-    (defn convert (value i32) (result self core.conversion-error)
-      external: @compiler
-      symbol: "i32.to-u8"))
-  (impl (core.try-from i64)
-    (defn convert (value i64) (result self core.conversion-error)
-      external: @compiler
-      symbol: "i64.to-u8"))
-  (impl (core.try-from u16)
-    (defn convert (value u16) (result self core.conversion-error)
-      external: @compiler
-      symbol: "u16.to-u8"))
-  (impl (core.try-from u32)
-    (defn convert (value u32) (result self core.conversion-error)
-      external: @compiler
-      symbol: "u32.to-u8"))
-  (impl (core.try-from u64)
-    (defn convert (value u64) (result self core.conversion-error)
-      external: @compiler
-      symbol: "u64.to-u8"))
-  (impl (core.try-from str)
-    (defn convert (value str) (result self core.conversion-error)
-      external: @compiler
-      symbol: "u8.parse")))
+type I8 of Intrinsic(@i8)
+  visibility @public
+  fn add
+    takes {left: Self right: Self}
+    returns sum: Self
+    visibility @public
+    external @compiler
+    symbol "i8.add"
+  endfn
+  fn sub
+    takes {left: Self right: Self}
+    returns difference: Self
+    visibility @public
+    external @compiler
+    symbol "i8.sub"
+  endfn
+  fn mul
+    takes {left: Self right: Self}
+    returns product: Self
+    visibility @public
+    external @compiler
+    symbol "i8.mul"
+  endfn
+  fn neg
+    takes {value: Self}
+    returns negated: Self
+    visibility @public
+    external @compiler
+    symbol "i8.neg"
+  endfn
+  fn shiftLeft
+    takes {value: Self amount: U32}
+    returns shifted: Self
+    visibility @public
+    external @compiler
+    symbol "i8.shiftLeft"
+  endfn
+  fn shiftRight
+    takes {value: Self amount: U32}
+    returns shifted: Self
+    visibility @public
+    external @compiler
+    symbol "i8.shiftRight"
+  endfn
+  fn addChecked
+    takes {left: Self right: Self}
+    returns sum: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "i8.addChecked"
+  endfn
+  fn subChecked
+    takes {left: Self right: Self}
+    returns difference: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "i8.subChecked"
+  endfn
+  fn mulChecked
+    takes {left: Self right: Self}
+    returns product: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "i8.mulChecked"
+  endfn
+  fn divChecked
+    takes {left: Self right: Self}
+    returns quotient: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "i8.divChecked"
+  endfn
+  fn remChecked
+    takes {left: Self right: Self}
+    returns remainder: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "i8.remChecked"
+  endfn
+  fn negChecked
+    takes {value: Self}
+    returns negated: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "i8.negChecked"
+  endfn
+  fn shiftLeftChecked
+    takes {value: Self amount: U32}
+    returns shifted: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "i8.shiftLeftChecked"
+  endfn
+  fn shiftRightChecked
+    takes {value: Self amount: U32}
+    returns shifted: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "i8.shiftRightChecked"
+  endfn
+  impl Equatable
+    fn equal
+      takes {left: Self right: Self}
+      returns same: Bool
+      external @compiler
+      symbol "i8.equal"
+    endfn
+  endimpl
+  impl Ordered
+    fn compare
+      takes {left: Self right: Self}
+      returns order: Ordering
+      external @compiler
+      symbol "i8.compare"
+    endfn
+  endimpl
+  impl TryFrom(I16)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: I16}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "i16.toI8"
+    endfn
+  endimpl
+  impl TryFrom(I32)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: I32}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "i32.toI8"
+    endfn
+  endimpl
+  impl TryFrom(I64)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: I64}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "i64.toI8"
+    endfn
+  endimpl
+  impl TryFrom(U8)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: U8}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "u8.toI8"
+    endfn
+  endimpl
+  impl TryFrom(U16)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: U16}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "u16.toI8"
+    endfn
+  endimpl
+  impl TryFrom(U32)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: U32}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "u32.toI8"
+    endfn
+  endimpl
+  impl TryFrom(U64)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: U64}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "u64.toI8"
+    endfn
+  endimpl
+  impl TryFrom(Str)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: Str}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "i8.parse"
+    endfn
+  endimpl
+endtype
 
-(deftype u16 (intrinsic-type @u16)
-  visibility: @public
-  ; Saturating arithmetic: a result past the type is its nearest bound, and
-  ; a zero divisor traps. The -checked members return the failure instead.
-  (defn add (left u16 right u16) u16
-    visibility: @public
-    external: @compiler
-    symbol: "u16.add")
-  (defn sub (left u16 right u16) u16
-    visibility: @public
-    external: @compiler
-    symbol: "u16.sub")
-  (defn mul (left u16 right u16) u16
-    visibility: @public
-    external: @compiler
-    symbol: "u16.mul")
-  (defn div (left u16 right u16) u16
-    visibility: @public
-    external: @compiler
-    symbol: "u16.div")
-  (defn rem (left u16 right u16) u16
-    visibility: @public
-    external: @compiler
-    symbol: "u16.rem")
-  (defn shift-left (value u16 amount u32) u16
-    visibility: @public
-    external: @compiler
-    symbol: "u16.shift-left")
-  (defn shift-right (value u16 amount u32) u16
-    visibility: @public
-    external: @compiler
-    symbol: "u16.shift-right")
-  (defn add-checked (left u16 right u16) (result u16 core.arithmetic-error)
-    visibility: @public
-    external: @compiler
-    symbol: "u16.add-checked")
-  (defn sub-checked (left u16 right u16) (result u16 core.arithmetic-error)
-    visibility: @public
-    external: @compiler
-    symbol: "u16.sub-checked")
-  (defn mul-checked (left u16 right u16) (result u16 core.arithmetic-error)
-    visibility: @public
-    external: @compiler
-    symbol: "u16.mul-checked")
-  (defn div-checked (left u16 right u16) (result u16 core.arithmetic-error)
-    visibility: @public
-    external: @compiler
-    symbol: "u16.div-checked")
-  (defn rem-checked (left u16 right u16) (result u16 core.arithmetic-error)
-    visibility: @public
-    external: @compiler
-    symbol: "u16.rem-checked")
-  (defn shift-left-checked (value u16 amount u32) (result u16 core.arithmetic-error)
-    visibility: @public
-    external: @compiler
-    symbol: "u16.shift-left-checked")
-  (defn shift-right-checked (value u16 amount u32) (result u16 core.arithmetic-error)
-    visibility: @public
-    external: @compiler
-    symbol: "u16.shift-right-checked")
-  (impl equatable
-    (defn equal (left self right self) bool
-      external: @compiler
-      symbol: "u16.equal"))
-  (impl ordered
-    (defn compare (left self right self) core.ordering
-      external: @compiler
-      symbol: "u16.compare"))
-  (impl (core.try-from i8)
-    (defn convert (value i8) (result self core.conversion-error)
-      external: @compiler
-      symbol: "i8.to-u16"))
-  (impl (core.try-from i16)
-    (defn convert (value i16) (result self core.conversion-error)
-      external: @compiler
-      symbol: "i16.to-u16"))
-  (impl (core.try-from i32)
-    (defn convert (value i32) (result self core.conversion-error)
-      external: @compiler
-      symbol: "i32.to-u16"))
-  (impl (core.try-from i64)
-    (defn convert (value i64) (result self core.conversion-error)
-      external: @compiler
-      symbol: "i64.to-u16"))
-  (impl (core.from u8)
-    (defn convert (value u8) self
-      external: @compiler
-      symbol: "u8.to-u16"))
-  (impl (core.try-from u32)
-    (defn convert (value u32) (result self core.conversion-error)
-      external: @compiler
-      symbol: "u32.to-u16"))
-  (impl (core.try-from u64)
-    (defn convert (value u64) (result self core.conversion-error)
-      external: @compiler
-      symbol: "u64.to-u16"))
-  (impl (core.try-from str)
-    (defn convert (value str) (result self core.conversion-error)
-      external: @compiler
-      symbol: "u16.parse")))
+type I16 of Intrinsic(@i16)
+  visibility @public
+  fn add
+    takes {left: Self right: Self}
+    returns sum: Self
+    visibility @public
+    external @compiler
+    symbol "i16.add"
+  endfn
+  fn sub
+    takes {left: Self right: Self}
+    returns difference: Self
+    visibility @public
+    external @compiler
+    symbol "i16.sub"
+  endfn
+  fn mul
+    takes {left: Self right: Self}
+    returns product: Self
+    visibility @public
+    external @compiler
+    symbol "i16.mul"
+  endfn
+  fn neg
+    takes {value: Self}
+    returns negated: Self
+    visibility @public
+    external @compiler
+    symbol "i16.neg"
+  endfn
+  fn shiftLeft
+    takes {value: Self amount: U32}
+    returns shifted: Self
+    visibility @public
+    external @compiler
+    symbol "i16.shiftLeft"
+  endfn
+  fn shiftRight
+    takes {value: Self amount: U32}
+    returns shifted: Self
+    visibility @public
+    external @compiler
+    symbol "i16.shiftRight"
+  endfn
+  fn addChecked
+    takes {left: Self right: Self}
+    returns sum: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "i16.addChecked"
+  endfn
+  fn subChecked
+    takes {left: Self right: Self}
+    returns difference: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "i16.subChecked"
+  endfn
+  fn mulChecked
+    takes {left: Self right: Self}
+    returns product: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "i16.mulChecked"
+  endfn
+  fn divChecked
+    takes {left: Self right: Self}
+    returns quotient: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "i16.divChecked"
+  endfn
+  fn remChecked
+    takes {left: Self right: Self}
+    returns remainder: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "i16.remChecked"
+  endfn
+  fn negChecked
+    takes {value: Self}
+    returns negated: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "i16.negChecked"
+  endfn
+  fn shiftLeftChecked
+    takes {value: Self amount: U32}
+    returns shifted: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "i16.shiftLeftChecked"
+  endfn
+  fn shiftRightChecked
+    takes {value: Self amount: U32}
+    returns shifted: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "i16.shiftRightChecked"
+  endfn
+  impl Equatable
+    fn equal
+      takes {left: Self right: Self}
+      returns same: Bool
+      external @compiler
+      symbol "i16.equal"
+    endfn
+  endimpl
+  impl Ordered
+    fn compare
+      takes {left: Self right: Self}
+      returns order: Ordering
+      external @compiler
+      symbol "i16.compare"
+    endfn
+  endimpl
+  impl From(I8)
+    fn convert
+      takes {value: I8}
+      returns converted: Self
+      external @compiler
+      symbol "i8.toI16"
+    endfn
+  endimpl
+  impl TryFrom(I32)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: I32}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "i32.toI16"
+    endfn
+  endimpl
+  impl TryFrom(I64)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: I64}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "i64.toI16"
+    endfn
+  endimpl
+  impl From(U8)
+    fn convert
+      takes {value: U8}
+      returns converted: Self
+      external @compiler
+      symbol "u8.toI16"
+    endfn
+  endimpl
+  impl TryFrom(U16)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: U16}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "u16.toI16"
+    endfn
+  endimpl
+  impl TryFrom(U32)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: U32}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "u32.toI16"
+    endfn
+  endimpl
+  impl TryFrom(U64)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: U64}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "u64.toI16"
+    endfn
+  endimpl
+  impl TryFrom(Str)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: Str}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "i16.parse"
+    endfn
+  endimpl
+endtype
 
-(deftype u32 (intrinsic-type @u32)
-  visibility: @public
-  ; Saturating arithmetic: a result past the type is its nearest bound, and
-  ; a zero divisor traps. The -checked members return the failure instead.
-  (defn add (left u32 right u32) u32
-    visibility: @public
-    external: @compiler
-    symbol: "u32.add")
-  (defn sub (left u32 right u32) u32
-    visibility: @public
-    external: @compiler
-    symbol: "u32.sub")
-  (defn mul (left u32 right u32) u32
-    visibility: @public
-    external: @compiler
-    symbol: "u32.mul")
-  (defn div (left u32 right u32) u32
-    visibility: @public
-    external: @compiler
-    symbol: "u32.div")
-  (defn rem (left u32 right u32) u32
-    visibility: @public
-    external: @compiler
-    symbol: "u32.rem")
-  (defn shift-left (value u32 amount u32) u32
-    visibility: @public
-    external: @compiler
-    symbol: "u32.shift-left")
-  (defn shift-right (value u32 amount u32) u32
-    visibility: @public
-    external: @compiler
-    symbol: "u32.shift-right")
-  (defn add-checked (left u32 right u32) (result u32 core.arithmetic-error)
-    visibility: @public
-    external: @compiler
-    symbol: "u32.add-checked")
-  (defn sub-checked (left u32 right u32) (result u32 core.arithmetic-error)
-    visibility: @public
-    external: @compiler
-    symbol: "u32.sub-checked")
-  (defn mul-checked (left u32 right u32) (result u32 core.arithmetic-error)
-    visibility: @public
-    external: @compiler
-    symbol: "u32.mul-checked")
-  (defn div-checked (left u32 right u32) (result u32 core.arithmetic-error)
-    visibility: @public
-    external: @compiler
-    symbol: "u32.div-checked")
-  (defn rem-checked (left u32 right u32) (result u32 core.arithmetic-error)
-    visibility: @public
-    external: @compiler
-    symbol: "u32.rem-checked")
-  (defn shift-left-checked (value u32 amount u32) (result u32 core.arithmetic-error)
-    visibility: @public
-    external: @compiler
-    symbol: "u32.shift-left-checked")
-  (defn shift-right-checked (value u32 amount u32) (result u32 core.arithmetic-error)
-    visibility: @public
-    external: @compiler
-    symbol: "u32.shift-right-checked")
-  (impl equatable
-    (defn equal (left self right self) bool
-      external: @compiler
-      symbol: "u32.equal"))
-  (impl ordered
-    (defn compare (left self right self) core.ordering
-      external: @compiler
-      symbol: "u32.compare"))
-  (impl (core.try-from i8)
-    (defn convert (value i8) (result self core.conversion-error)
-      external: @compiler
-      symbol: "i8.to-u32"))
-  (impl (core.try-from i16)
-    (defn convert (value i16) (result self core.conversion-error)
-      external: @compiler
-      symbol: "i16.to-u32"))
-  (impl (core.try-from i32)
-    (defn convert (value i32) (result self core.conversion-error)
-      external: @compiler
-      symbol: "i32.to-u32"))
-  (impl (core.try-from i64)
-    (defn convert (value i64) (result self core.conversion-error)
-      external: @compiler
-      symbol: "i64.to-u32"))
-  (impl (core.from u8)
-    (defn convert (value u8) self
-      external: @compiler
-      symbol: "u8.to-u32"))
-  (impl (core.from u16)
-    (defn convert (value u16) self
-      external: @compiler
-      symbol: "u16.to-u32"))
-  (impl (core.try-from u64)
-    (defn convert (value u64) (result self core.conversion-error)
-      external: @compiler
-      symbol: "u64.to-u32"))
-  (impl (core.try-from str)
-    (defn convert (value str) (result self core.conversion-error)
-      external: @compiler
-      symbol: "u32.parse")))
+type I32 of Intrinsic(@i32)
+  visibility @public
+  fn add
+    takes {left: Self right: Self}
+    returns sum: Self
+    visibility @public
+    external @compiler
+    symbol "i32.add"
+  endfn
+  fn sub
+    takes {left: Self right: Self}
+    returns difference: Self
+    visibility @public
+    external @compiler
+    symbol "i32.sub"
+  endfn
+  fn mul
+    takes {left: Self right: Self}
+    returns product: Self
+    visibility @public
+    external @compiler
+    symbol "i32.mul"
+  endfn
+  fn neg
+    takes {value: Self}
+    returns negated: Self
+    visibility @public
+    external @compiler
+    symbol "i32.neg"
+  endfn
+  fn shiftLeft
+    takes {value: Self amount: U32}
+    returns shifted: Self
+    visibility @public
+    external @compiler
+    symbol "i32.shiftLeft"
+  endfn
+  fn shiftRight
+    takes {value: Self amount: U32}
+    returns shifted: Self
+    visibility @public
+    external @compiler
+    symbol "i32.shiftRight"
+  endfn
+  fn addChecked
+    takes {left: Self right: Self}
+    returns sum: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "i32.addChecked"
+  endfn
+  fn subChecked
+    takes {left: Self right: Self}
+    returns difference: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "i32.subChecked"
+  endfn
+  fn mulChecked
+    takes {left: Self right: Self}
+    returns product: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "i32.mulChecked"
+  endfn
+  fn divChecked
+    takes {left: Self right: Self}
+    returns quotient: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "i32.divChecked"
+  endfn
+  fn remChecked
+    takes {left: Self right: Self}
+    returns remainder: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "i32.remChecked"
+  endfn
+  fn negChecked
+    takes {value: Self}
+    returns negated: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "i32.negChecked"
+  endfn
+  fn shiftLeftChecked
+    takes {value: Self amount: U32}
+    returns shifted: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "i32.shiftLeftChecked"
+  endfn
+  fn shiftRightChecked
+    takes {value: Self amount: U32}
+    returns shifted: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "i32.shiftRightChecked"
+  endfn
+  impl Equatable
+    fn equal
+      takes {left: Self right: Self}
+      returns same: Bool
+      external @compiler
+      symbol "i32.equal"
+    endfn
+  endimpl
+  impl Ordered
+    fn compare
+      takes {left: Self right: Self}
+      returns order: Ordering
+      external @compiler
+      symbol "i32.compare"
+    endfn
+  endimpl
+  impl From(I8)
+    fn convert
+      takes {value: I8}
+      returns converted: Self
+      external @compiler
+      symbol "i8.toI32"
+    endfn
+  endimpl
+  impl From(I16)
+    fn convert
+      takes {value: I16}
+      returns converted: Self
+      external @compiler
+      symbol "i16.toI32"
+    endfn
+  endimpl
+  impl TryFrom(I64)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: I64}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "i64.toI32"
+    endfn
+  endimpl
+  impl From(U8)
+    fn convert
+      takes {value: U8}
+      returns converted: Self
+      external @compiler
+      symbol "u8.toI32"
+    endfn
+  endimpl
+  impl From(U16)
+    fn convert
+      takes {value: U16}
+      returns converted: Self
+      external @compiler
+      symbol "u16.toI32"
+    endfn
+  endimpl
+  impl TryFrom(U32)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: U32}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "u32.toI32"
+    endfn
+  endimpl
+  impl TryFrom(U64)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: U64}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "u64.toI32"
+    endfn
+  endimpl
+  impl TryFrom(Str)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: Str}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "i32.parse"
+    endfn
+  endimpl
+endtype
 
-(deftype u64 (intrinsic-type @u64)
-  visibility: @public
-  ; Saturating arithmetic: a result past the type is its nearest bound, and
-  ; a zero divisor traps. The -checked members return the failure instead.
-  (defn add (left u64 right u64) u64
-    visibility: @public
-    external: @compiler
-    symbol: "u64.add")
-  (defn sub (left u64 right u64) u64
-    visibility: @public
-    external: @compiler
-    symbol: "u64.sub")
-  (defn mul (left u64 right u64) u64
-    visibility: @public
-    external: @compiler
-    symbol: "u64.mul")
-  (defn div (left u64 right u64) u64
-    visibility: @public
-    external: @compiler
-    symbol: "u64.div")
-  (defn rem (left u64 right u64) u64
-    visibility: @public
-    external: @compiler
-    symbol: "u64.rem")
-  (defn shift-left (value u64 amount u32) u64
-    visibility: @public
-    external: @compiler
-    symbol: "u64.shift-left")
-  (defn shift-right (value u64 amount u32) u64
-    visibility: @public
-    external: @compiler
-    symbol: "u64.shift-right")
-  (defn add-checked (left u64 right u64) (result u64 core.arithmetic-error)
-    visibility: @public
-    external: @compiler
-    symbol: "u64.add-checked")
-  (defn sub-checked (left u64 right u64) (result u64 core.arithmetic-error)
-    visibility: @public
-    external: @compiler
-    symbol: "u64.sub-checked")
-  (defn mul-checked (left u64 right u64) (result u64 core.arithmetic-error)
-    visibility: @public
-    external: @compiler
-    symbol: "u64.mul-checked")
-  (defn div-checked (left u64 right u64) (result u64 core.arithmetic-error)
-    visibility: @public
-    external: @compiler
-    symbol: "u64.div-checked")
-  (defn rem-checked (left u64 right u64) (result u64 core.arithmetic-error)
-    visibility: @public
-    external: @compiler
-    symbol: "u64.rem-checked")
-  (defn shift-left-checked (value u64 amount u32) (result u64 core.arithmetic-error)
-    visibility: @public
-    external: @compiler
-    symbol: "u64.shift-left-checked")
-  (defn shift-right-checked (value u64 amount u32) (result u64 core.arithmetic-error)
-    visibility: @public
-    external: @compiler
-    symbol: "u64.shift-right-checked")
-  (impl equatable
-    (defn equal (left self right self) bool
-      external: @compiler
-      symbol: "u64.equal"))
-  (impl ordered
-    (defn compare (left self right self) core.ordering
-      external: @compiler
-      symbol: "u64.compare"))
-  (impl (core.try-from i8)
-    (defn convert (value i8) (result self core.conversion-error)
-      external: @compiler
-      symbol: "i8.to-u64"))
-  (impl (core.try-from i16)
-    (defn convert (value i16) (result self core.conversion-error)
-      external: @compiler
-      symbol: "i16.to-u64"))
-  (impl (core.try-from i32)
-    (defn convert (value i32) (result self core.conversion-error)
-      external: @compiler
-      symbol: "i32.to-u64"))
-  (impl (core.try-from i64)
-    (defn convert (value i64) (result self core.conversion-error)
-      external: @compiler
-      symbol: "i64.to-u64"))
-  (impl (core.from u8)
-    (defn convert (value u8) self
-      external: @compiler
-      symbol: "u8.to-u64"))
-  (impl (core.from u16)
-    (defn convert (value u16) self
-      external: @compiler
-      symbol: "u16.to-u64"))
-  (impl (core.from u32)
-    (defn convert (value u32) self
-      external: @compiler
-      symbol: "u32.to-u64"))
-  (impl (core.try-from str)
-    (defn convert (value str) (result self core.conversion-error)
-      external: @compiler
-      symbol: "u64.parse")))
+type I64 of Intrinsic(@i64)
+  visibility @public
+  fn add
+    takes {left: Self right: Self}
+    returns sum: Self
+    visibility @public
+    external @compiler
+    symbol "i64.add"
+  endfn
+  fn sub
+    takes {left: Self right: Self}
+    returns difference: Self
+    visibility @public
+    external @compiler
+    symbol "i64.sub"
+  endfn
+  fn mul
+    takes {left: Self right: Self}
+    returns product: Self
+    visibility @public
+    external @compiler
+    symbol "i64.mul"
+  endfn
+  fn neg
+    takes {value: Self}
+    returns negated: Self
+    visibility @public
+    external @compiler
+    symbol "i64.neg"
+  endfn
+  fn shiftLeft
+    takes {value: Self amount: U32}
+    returns shifted: Self
+    visibility @public
+    external @compiler
+    symbol "i64.shiftLeft"
+  endfn
+  fn shiftRight
+    takes {value: Self amount: U32}
+    returns shifted: Self
+    visibility @public
+    external @compiler
+    symbol "i64.shiftRight"
+  endfn
+  fn addChecked
+    takes {left: Self right: Self}
+    returns sum: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "i64.addChecked"
+  endfn
+  fn subChecked
+    takes {left: Self right: Self}
+    returns difference: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "i64.subChecked"
+  endfn
+  fn mulChecked
+    takes {left: Self right: Self}
+    returns product: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "i64.mulChecked"
+  endfn
+  fn divChecked
+    takes {left: Self right: Self}
+    returns quotient: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "i64.divChecked"
+  endfn
+  fn remChecked
+    takes {left: Self right: Self}
+    returns remainder: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "i64.remChecked"
+  endfn
+  fn negChecked
+    takes {value: Self}
+    returns negated: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "i64.negChecked"
+  endfn
+  fn shiftLeftChecked
+    takes {value: Self amount: U32}
+    returns shifted: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "i64.shiftLeftChecked"
+  endfn
+  fn shiftRightChecked
+    takes {value: Self amount: U32}
+    returns shifted: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "i64.shiftRightChecked"
+  endfn
+  impl Equatable
+    fn equal
+      takes {left: Self right: Self}
+      returns same: Bool
+      external @compiler
+      symbol "i64.equal"
+    endfn
+  endimpl
+  impl Ordered
+    fn compare
+      takes {left: Self right: Self}
+      returns order: Ordering
+      external @compiler
+      symbol "i64.compare"
+    endfn
+  endimpl
+  impl From(I8)
+    fn convert
+      takes {value: I8}
+      returns converted: Self
+      external @compiler
+      symbol "i8.toI64"
+    endfn
+  endimpl
+  impl From(I16)
+    fn convert
+      takes {value: I16}
+      returns converted: Self
+      external @compiler
+      symbol "i16.toI64"
+    endfn
+  endimpl
+  impl From(I32)
+    fn convert
+      takes {value: I32}
+      returns converted: Self
+      external @compiler
+      symbol "i32.toI64"
+    endfn
+  endimpl
+  impl From(U8)
+    fn convert
+      takes {value: U8}
+      returns converted: Self
+      external @compiler
+      symbol "u8.toI64"
+    endfn
+  endimpl
+  impl From(U16)
+    fn convert
+      takes {value: U16}
+      returns converted: Self
+      external @compiler
+      symbol "u16.toI64"
+    endfn
+  endimpl
+  impl From(U32)
+    fn convert
+      takes {value: U32}
+      returns converted: Self
+      external @compiler
+      symbol "u32.toI64"
+    endfn
+  endimpl
+  impl TryFrom(U64)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: U64}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "u64.toI64"
+    endfn
+  endimpl
+  impl TryFrom(Str)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: Str}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "i64.parse"
+    endfn
+  endimpl
+endtype
 
-; IEEE 754 arithmetic. A float is not `equatable` or `ordered`: `equal` is
-; IEEE equality, under which NaN is unequal to itself, and `compare-total` is
-; the `totalOrder` predicate.
-(deftype f32 (intrinsic-type @f32)
-  visibility: @public
-  (defn add (left f32 right f32) f32
-    visibility: @public
-    external: @compiler
-    symbol: "f32.add")
-  (defn sub (left f32 right f32) f32
-    visibility: @public
-    external: @compiler
-    symbol: "f32.sub")
-  (defn mul (left f32 right f32) f32
-    visibility: @public
-    external: @compiler
-    symbol: "f32.mul")
-  (defn div (left f32 right f32) f32
-    visibility: @public
-    external: @compiler
-    symbol: "f32.div")
-  (defn neg (value f32) f32
-    visibility: @public
-    external: @compiler
-    symbol: "f32.neg")
-  (defn equal (left f32 right f32) bool
-    visibility: @public
-    external: @compiler
-    symbol: "f32.equal")
-  (defn compare-total (left f32 right f32) core.ordering
-    visibility: @public
-    external: @compiler
-    symbol: "f32.compare-total")
-  (impl (core.try-from str)
-    (defn convert (value str) (result self core.conversion-error)
-      external: @compiler
-      symbol: "f32.parse")))
+type U8 of Intrinsic(@u8)
+  visibility @public
+  fn add
+    takes {left: Self right: Self}
+    returns sum: Self
+    visibility @public
+    external @compiler
+    symbol "u8.add"
+  endfn
+  fn sub
+    takes {left: Self right: Self}
+    returns difference: Self
+    visibility @public
+    external @compiler
+    symbol "u8.sub"
+  endfn
+  fn mul
+    takes {left: Self right: Self}
+    returns product: Self
+    visibility @public
+    external @compiler
+    symbol "u8.mul"
+  endfn
+  fn shiftLeft
+    takes {value: Self amount: U32}
+    returns shifted: Self
+    visibility @public
+    external @compiler
+    symbol "u8.shiftLeft"
+  endfn
+  fn shiftRight
+    takes {value: Self amount: U32}
+    returns shifted: Self
+    visibility @public
+    external @compiler
+    symbol "u8.shiftRight"
+  endfn
+  fn addChecked
+    takes {left: Self right: Self}
+    returns sum: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "u8.addChecked"
+  endfn
+  fn subChecked
+    takes {left: Self right: Self}
+    returns difference: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "u8.subChecked"
+  endfn
+  fn mulChecked
+    takes {left: Self right: Self}
+    returns product: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "u8.mulChecked"
+  endfn
+  fn divChecked
+    takes {left: Self right: Self}
+    returns quotient: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "u8.divChecked"
+  endfn
+  fn remChecked
+    takes {left: Self right: Self}
+    returns remainder: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "u8.remChecked"
+  endfn
+  fn shiftLeftChecked
+    takes {value: Self amount: U32}
+    returns shifted: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "u8.shiftLeftChecked"
+  endfn
+  fn shiftRightChecked
+    takes {value: Self amount: U32}
+    returns shifted: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "u8.shiftRightChecked"
+  endfn
+  impl Equatable
+    fn equal
+      takes {left: Self right: Self}
+      returns same: Bool
+      external @compiler
+      symbol "u8.equal"
+    endfn
+  endimpl
+  impl Ordered
+    fn compare
+      takes {left: Self right: Self}
+      returns order: Ordering
+      external @compiler
+      symbol "u8.compare"
+    endfn
+  endimpl
+  impl TryFrom(I8)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: I8}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "i8.toU8"
+    endfn
+  endimpl
+  impl TryFrom(I16)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: I16}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "i16.toU8"
+    endfn
+  endimpl
+  impl TryFrom(I32)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: I32}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "i32.toU8"
+    endfn
+  endimpl
+  impl TryFrom(I64)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: I64}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "i64.toU8"
+    endfn
+  endimpl
+  impl TryFrom(U16)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: U16}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "u16.toU8"
+    endfn
+  endimpl
+  impl TryFrom(U32)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: U32}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "u32.toU8"
+    endfn
+  endimpl
+  impl TryFrom(U64)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: U64}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "u64.toU8"
+    endfn
+  endimpl
+  impl TryFrom(Str)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: Str}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "u8.parse"
+    endfn
+  endimpl
+endtype
 
-; IEEE 754 arithmetic. A float is not `equatable` or `ordered`: `equal` is
-; IEEE equality, under which NaN is unequal to itself, and `compare-total` is
-; the `totalOrder` predicate.
-(deftype f64 (intrinsic-type @f64)
-  visibility: @public
-  (defn add (left f64 right f64) f64
-    visibility: @public
-    external: @compiler
-    symbol: "f64.add")
-  (defn sub (left f64 right f64) f64
-    visibility: @public
-    external: @compiler
-    symbol: "f64.sub")
-  (defn mul (left f64 right f64) f64
-    visibility: @public
-    external: @compiler
-    symbol: "f64.mul")
-  (defn div (left f64 right f64) f64
-    visibility: @public
-    external: @compiler
-    symbol: "f64.div")
-  (defn neg (value f64) f64
-    visibility: @public
-    external: @compiler
-    symbol: "f64.neg")
-  (defn equal (left f64 right f64) bool
-    visibility: @public
-    external: @compiler
-    symbol: "f64.equal")
-  (defn compare-total (left f64 right f64) core.ordering
-    visibility: @public
-    external: @compiler
-    symbol: "f64.compare-total")
-  (impl (core.try-from str)
-    (defn convert (value str) (result self core.conversion-error)
-      external: @compiler
-      symbol: "f64.parse")))
+type U16 of Intrinsic(@u16)
+  visibility @public
+  fn add
+    takes {left: Self right: Self}
+    returns sum: Self
+    visibility @public
+    external @compiler
+    symbol "u16.add"
+  endfn
+  fn sub
+    takes {left: Self right: Self}
+    returns difference: Self
+    visibility @public
+    external @compiler
+    symbol "u16.sub"
+  endfn
+  fn mul
+    takes {left: Self right: Self}
+    returns product: Self
+    visibility @public
+    external @compiler
+    symbol "u16.mul"
+  endfn
+  fn shiftLeft
+    takes {value: Self amount: U32}
+    returns shifted: Self
+    visibility @public
+    external @compiler
+    symbol "u16.shiftLeft"
+  endfn
+  fn shiftRight
+    takes {value: Self amount: U32}
+    returns shifted: Self
+    visibility @public
+    external @compiler
+    symbol "u16.shiftRight"
+  endfn
+  fn addChecked
+    takes {left: Self right: Self}
+    returns sum: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "u16.addChecked"
+  endfn
+  fn subChecked
+    takes {left: Self right: Self}
+    returns difference: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "u16.subChecked"
+  endfn
+  fn mulChecked
+    takes {left: Self right: Self}
+    returns product: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "u16.mulChecked"
+  endfn
+  fn divChecked
+    takes {left: Self right: Self}
+    returns quotient: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "u16.divChecked"
+  endfn
+  fn remChecked
+    takes {left: Self right: Self}
+    returns remainder: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "u16.remChecked"
+  endfn
+  fn shiftLeftChecked
+    takes {value: Self amount: U32}
+    returns shifted: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "u16.shiftLeftChecked"
+  endfn
+  fn shiftRightChecked
+    takes {value: Self amount: U32}
+    returns shifted: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "u16.shiftRightChecked"
+  endfn
+  impl Equatable
+    fn equal
+      takes {left: Self right: Self}
+      returns same: Bool
+      external @compiler
+      symbol "u16.equal"
+    endfn
+  endimpl
+  impl Ordered
+    fn compare
+      takes {left: Self right: Self}
+      returns order: Ordering
+      external @compiler
+      symbol "u16.compare"
+    endfn
+  endimpl
+  impl TryFrom(I8)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: I8}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "i8.toU16"
+    endfn
+  endimpl
+  impl TryFrom(I16)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: I16}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "i16.toU16"
+    endfn
+  endimpl
+  impl TryFrom(I32)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: I32}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "i32.toU16"
+    endfn
+  endimpl
+  impl TryFrom(I64)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: I64}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "i64.toU16"
+    endfn
+  endimpl
+  impl From(U8)
+    fn convert
+      takes {value: U8}
+      returns converted: Self
+      external @compiler
+      symbol "u8.toU16"
+    endfn
+  endimpl
+  impl TryFrom(U32)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: U32}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "u32.toU16"
+    endfn
+  endimpl
+  impl TryFrom(U64)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: U64}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "u64.toU16"
+    endfn
+  endimpl
+  impl TryFrom(Str)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: Str}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "u16.parse"
+    endfn
+  endimpl
+endtype
 
-; A Unicode scalar value. It orders by scalar value, and its ASCII classes are
-; Vibra over `to-u32`.
-(deftype char (intrinsic-type @char)
-  visibility: @public
-  (defn to-u32 (value char) u32
-    visibility: @public
-    external: @compiler
-    symbol: "char.to-u32")
-  (defn from-u32 (scalar u32) (option char)
-    visibility: @public
-    external: @compiler
-    symbol: "char.from-u32")
-  ; Whether `value` lies in `[low, high]`.
-  (defn in-range (value char low char high char) bool
-    visibility: @public
-    (match (ordered.compare value low)
-      (core.ordering.less) false
-      - (match (ordered.compare value high) (core.ordering.greater) false - true)))
-  (defn is-ascii-digit (value char) bool
-    visibility: @public
-    (char.in-range value \0 \9))
-  (defn is-ascii-upper (value char) bool
-    visibility: @public
-    (char.in-range value \A \Z))
-  (defn is-ascii-lower (value char) bool
-    visibility: @public
-    (char.in-range value \a \z))
-  (defn is-ascii-letter (value char) bool
-    visibility: @public
-    (if (char.is-ascii-upper value) true (char.is-ascii-lower value)))
-  ; Space, tab, line feed, form feed, and carriage return.
-  (defn is-ascii-whitespace (value char) bool
-    visibility: @public
-    (match (char.to-u32 value)
-      32u32 true
-      9u32 true
-      10u32 true
-      12u32 true
-      13u32 true
-      - false))
-  (impl equatable
-    (defn equal (left self right self) bool
-      (equatable.equal (char.to-u32 left) (char.to-u32 right))))
-  (impl ordered
-    (defn compare (left self right self) core.ordering
-      (ordered.compare (char.to-u32 left) (char.to-u32 right)))))
+type U32 of Intrinsic(@u32)
+  visibility @public
+  fn add
+    takes {left: Self right: Self}
+    returns sum: Self
+    visibility @public
+    external @compiler
+    symbol "u32.add"
+  endfn
+  fn sub
+    takes {left: Self right: Self}
+    returns difference: Self
+    visibility @public
+    external @compiler
+    symbol "u32.sub"
+  endfn
+  fn mul
+    takes {left: Self right: Self}
+    returns product: Self
+    visibility @public
+    external @compiler
+    symbol "u32.mul"
+  endfn
+  fn shiftLeft
+    takes {value: Self amount: U32}
+    returns shifted: Self
+    visibility @public
+    external @compiler
+    symbol "u32.shiftLeft"
+  endfn
+  fn shiftRight
+    takes {value: Self amount: U32}
+    returns shifted: Self
+    visibility @public
+    external @compiler
+    symbol "u32.shiftRight"
+  endfn
+  fn addChecked
+    takes {left: Self right: Self}
+    returns sum: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "u32.addChecked"
+  endfn
+  fn subChecked
+    takes {left: Self right: Self}
+    returns difference: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "u32.subChecked"
+  endfn
+  fn mulChecked
+    takes {left: Self right: Self}
+    returns product: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "u32.mulChecked"
+  endfn
+  fn divChecked
+    takes {left: Self right: Self}
+    returns quotient: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "u32.divChecked"
+  endfn
+  fn remChecked
+    takes {left: Self right: Self}
+    returns remainder: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "u32.remChecked"
+  endfn
+  fn shiftLeftChecked
+    takes {value: Self amount: U32}
+    returns shifted: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "u32.shiftLeftChecked"
+  endfn
+  fn shiftRightChecked
+    takes {value: Self amount: U32}
+    returns shifted: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "u32.shiftRightChecked"
+  endfn
+  impl Equatable
+    fn equal
+      takes {left: Self right: Self}
+      returns same: Bool
+      external @compiler
+      symbol "u32.equal"
+    endfn
+  endimpl
+  impl Ordered
+    fn compare
+      takes {left: Self right: Self}
+      returns order: Ordering
+      external @compiler
+      symbol "u32.compare"
+    endfn
+  endimpl
+  impl TryFrom(I8)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: I8}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "i8.toU32"
+    endfn
+  endimpl
+  impl TryFrom(I16)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: I16}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "i16.toU32"
+    endfn
+  endimpl
+  impl TryFrom(I32)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: I32}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "i32.toU32"
+    endfn
+  endimpl
+  impl TryFrom(I64)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: I64}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "i64.toU32"
+    endfn
+  endimpl
+  impl From(U8)
+    fn convert
+      takes {value: U8}
+      returns converted: Self
+      external @compiler
+      symbol "u8.toU32"
+    endfn
+  endimpl
+  impl From(U16)
+    fn convert
+      takes {value: U16}
+      returns converted: Self
+      external @compiler
+      symbol "u16.toU32"
+    endfn
+  endimpl
+  impl TryFrom(U64)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: U64}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "u64.toU32"
+    endfn
+  endimpl
+  impl TryFrom(Str)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: Str}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "u32.parse"
+    endfn
+  endimpl
+endtype
+
+type U64 of Intrinsic(@u64)
+  visibility @public
+  fn add
+    takes {left: Self right: Self}
+    returns sum: Self
+    visibility @public
+    external @compiler
+    symbol "u64.add"
+  endfn
+  fn sub
+    takes {left: Self right: Self}
+    returns difference: Self
+    visibility @public
+    external @compiler
+    symbol "u64.sub"
+  endfn
+  fn mul
+    takes {left: Self right: Self}
+    returns product: Self
+    visibility @public
+    external @compiler
+    symbol "u64.mul"
+  endfn
+  fn shiftLeft
+    takes {value: Self amount: U32}
+    returns shifted: Self
+    visibility @public
+    external @compiler
+    symbol "u64.shiftLeft"
+  endfn
+  fn shiftRight
+    takes {value: Self amount: U32}
+    returns shifted: Self
+    visibility @public
+    external @compiler
+    symbol "u64.shiftRight"
+  endfn
+  fn addChecked
+    takes {left: Self right: Self}
+    returns sum: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "u64.addChecked"
+  endfn
+  fn subChecked
+    takes {left: Self right: Self}
+    returns difference: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "u64.subChecked"
+  endfn
+  fn mulChecked
+    takes {left: Self right: Self}
+    returns product: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "u64.mulChecked"
+  endfn
+  fn divChecked
+    takes {left: Self right: Self}
+    returns quotient: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "u64.divChecked"
+  endfn
+  fn remChecked
+    takes {left: Self right: Self}
+    returns remainder: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "u64.remChecked"
+  endfn
+  fn shiftLeftChecked
+    takes {value: Self amount: U32}
+    returns shifted: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "u64.shiftLeftChecked"
+  endfn
+  fn shiftRightChecked
+    takes {value: Self amount: U32}
+    returns shifted: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "u64.shiftRightChecked"
+  endfn
+  impl Equatable
+    fn equal
+      takes {left: Self right: Self}
+      returns same: Bool
+      external @compiler
+      symbol "u64.equal"
+    endfn
+  endimpl
+  impl Ordered
+    fn compare
+      takes {left: Self right: Self}
+      returns order: Ordering
+      external @compiler
+      symbol "u64.compare"
+    endfn
+  endimpl
+  impl TryFrom(I8)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: I8}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "i8.toU64"
+    endfn
+  endimpl
+  impl TryFrom(I16)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: I16}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "i16.toU64"
+    endfn
+  endimpl
+  impl TryFrom(I32)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: I32}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "i32.toU64"
+    endfn
+  endimpl
+  impl TryFrom(I64)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: I64}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "i64.toU64"
+    endfn
+  endimpl
+  impl From(U8)
+    fn convert
+      takes {value: U8}
+      returns converted: Self
+      external @compiler
+      symbol "u8.toU64"
+    endfn
+  endimpl
+  impl From(U16)
+    fn convert
+      takes {value: U16}
+      returns converted: Self
+      external @compiler
+      symbol "u16.toU64"
+    endfn
+  endimpl
+  impl From(U32)
+    fn convert
+      takes {value: U32}
+      returns converted: Self
+      external @compiler
+      symbol "u32.toU64"
+    endfn
+  endimpl
+  impl TryFrom(Str)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: Str}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "u64.parse"
+    endfn
+  endimpl
+endtype
+
+type F32 of Intrinsic(@f32)
+  visibility @public
+  fn add
+    takes {left: Self right: Self}
+    returns sum: Self
+    visibility @public
+    external @compiler
+    symbol "f32.add"
+  endfn
+  fn sub
+    takes {left: Self right: Self}
+    returns difference: Self
+    visibility @public
+    external @compiler
+    symbol "f32.sub"
+  endfn
+  fn mul
+    takes {left: Self right: Self}
+    returns product: Self
+    visibility @public
+    external @compiler
+    symbol "f32.mul"
+  endfn
+  fn div
+    takes {left: Self right: Self}
+    returns quotient: Self
+    visibility @public
+    external @compiler
+    symbol "f32.div"
+  endfn
+  fn neg
+    takes {value: Self}
+    returns negated: Self
+    visibility @public
+    external @compiler
+    symbol "f32.neg"
+  endfn
+  fn equal
+    takes {left: Self right: Self}
+    returns same: Bool
+    visibility @public
+    external @compiler
+    symbol "f32.equal"
+  endfn
+  fn compareTotal
+    takes {left: Self right: Self}
+    returns order: Ordering
+    visibility @public
+    external @compiler
+    symbol "f32.compareTotal"
+  endfn
+  impl TryFrom(Str)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: Str}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "f32.parse"
+    endfn
+  endimpl
+endtype
+
+type F64 of Intrinsic(@f64)
+  visibility @public
+  fn add
+    takes {left: Self right: Self}
+    returns sum: Self
+    visibility @public
+    external @compiler
+    symbol "f64.add"
+  endfn
+  fn sub
+    takes {left: Self right: Self}
+    returns difference: Self
+    visibility @public
+    external @compiler
+    symbol "f64.sub"
+  endfn
+  fn mul
+    takes {left: Self right: Self}
+    returns product: Self
+    visibility @public
+    external @compiler
+    symbol "f64.mul"
+  endfn
+  fn div
+    takes {left: Self right: Self}
+    returns quotient: Self
+    visibility @public
+    external @compiler
+    symbol "f64.div"
+  endfn
+  fn neg
+    takes {value: Self}
+    returns negated: Self
+    visibility @public
+    external @compiler
+    symbol "f64.neg"
+  endfn
+  fn equal
+    takes {left: Self right: Self}
+    returns same: Bool
+    visibility @public
+    external @compiler
+    symbol "f64.equal"
+  endfn
+  fn compareTotal
+    takes {left: Self right: Self}
+    returns order: Ordering
+    visibility @public
+    external @compiler
+    symbol "f64.compareTotal"
+  endfn
+  impl TryFrom(Str)
+    type Error of ConversionError endtype
+    fn convert
+      takes {value: Str}
+      returns converted: Result(Self ConversionError)
+      external @compiler
+      symbol "f64.parse"
+    endfn
+  endimpl
+endtype
+
+type List(T) of Intrinsic(@list)
+  visibility @public
+  fn length
+    takes {items: Self}
+    returns count: U64
+    visibility @public
+    external @compiler
+    symbol "list.length"
+  endfn
+  fn append
+    takes {items: Self item: T}
+    returns appended: Self
+    visibility @public
+    external @compiler
+    symbol "list.append"
+  endfn
+  fn concat
+    takes {left: Self right: Self}
+    returns joined: Self
+    visibility @public
+    external @compiler
+    symbol "list.concat"
+  endfn
+  fn slice
+    takes {items: Self start: U64 end: U64}
+    returns part: Option(Self)
+    visibility @public
+    external @compiler
+    symbol "list.slice"
+  endfn
+  impl Iter
+    type Item of T endtype
+    fn next
+      takes {value: Self}
+      returns step: Option({T Self})
+      external @compiler
+      symbol "list.next"
+    endfn
+  endimpl
+endtype
+
+type Dict(K V) of List({K V})
+  role @dict
+  visibility @public
+  representation @private
+  fn entries
+    takes {dict: Self}
+    returns pairs: List({K V})
+    visibility @public
+    external @compiler
+    symbol "dict.entries"
+  endfn
+  impl Iter
+    type Item of {K V} endtype
+    fn next
+      takes {value: Self}
+      returns step: Option({{K V} Self})
+      external @compiler
+      symbol "dict.next"
+    endfn
+  endimpl
+  impl From(List({K V}))
+    fn convert
+      takes {value: List({K V})}
+      returns converted: Self
+      external @compiler
+      symbol "dict.fromList"
+    endfn
+  endimpl
+endtype

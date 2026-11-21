@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:vibra:schema:v2:diagnostic",
+  "title": "Vibra diagnostic",
+  "description": "One structured diagnostic, DiagnosticDocument version 2, as rendered to JSON by the command line. Spans are half-open UTF-8 byte ranges; line and column are derived display data.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "code",
+    "level",
+    "message",
+    "primarySpan",
+    "related",
+    "notes",
+    "fixes"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "description": "Major version of this contract. A reader rejects a version it cannot interpret.",
+      "const": 2
+    },
+    "code": {
+      "$ref": "#/$defs/diagnosticCode"
+    },
+    "level": {
+      "description": "The level registered for the code. A project cannot change it.",
+      "enum": ["@error", "@warning"]
+    },
+    "message": {
+      "description": "Text for a person. Tests do not assert its wording.",
+      "type": "string"
+    },
+    "primarySpan": {
+      "$ref": "#/$defs/span"
+    },
+    "related": {
+      "description": "Additional spans that explain the diagnostic.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/relatedSpan" }
+    },
+    "notes": {
+      "description": "Additional explanation carrying no span.",
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "fixes": {
+      "description": "Fixes the diagnostic describes. Empty when the code's fix capability is @none. A diagnostic never applies a fix.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/fix" }
+    }
+  },
+  "$defs": {
+    "diagnosticCode": {
+      "description": "A stable atom of the form @domain.condition, both components camelCase.",
+      "type": "string",
+      "pattern": "^@[a-z][a-zA-Z0-9]*\\.[a-z][a-zA-Z0-9]*$"
+    },
+    "position": {
+      "description": "A one-based display position. The column counts Unicode scalar values.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["line", "column"],
+      "properties": {
+        "line": { "type": "integer", "minimum": 1 },
+        "column": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "span": {
+      "description": "SpanDocument: a half-open UTF-8 byte range with start not after end, and its endpoints as derived display positions. A failure with no location has a null sourceId, offsets 0 and 0, and positions 1:1.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sourceId", "start", "end", "startPosition", "endPosition"],
+      "properties": {
+        "sourceId": {
+          "description": "The source identity owning the span, or null.",
+          "type": ["string", "null"],
+          "minLength": 1
+        },
+        "start": { "type": "integer", "minimum": 0 },
+        "end": { "type": "integer", "minimum": 0 },
+        "startPosition": { "$ref": "#/$defs/position" },
+        "endPosition": { "$ref": "#/$defs/position" }
+      }
+    },
+    "relatedSpan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["span", "message"],
+      "properties": {
+        "span": { "$ref": "#/$defs/span" },
+        "message": { "type": "string" }
+      }
+    },
+    "fix": {
+      "description": "A fix descriptor. The edit is a separate plan that checks revisions.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["description", "safe", "expectedRevision"],
+      "properties": {
+        "description": { "type": "string" },
+        "safe": { "type": "boolean" },
+        "expectedRevision": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

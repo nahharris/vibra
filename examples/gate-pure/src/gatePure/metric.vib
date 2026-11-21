@@ -1,0 +1,64 @@
+type Summary of {notes: U64 lines: U64 longest: U64}
+  visibility @public
+endtype
+
+fn summarize
+  takes {counts: List(U64)}
+  returns summary: Summary
+  visibility @public
+  do
+    return Iter.fold(counts Summary(notes: 0u64 lines: 0u64 longest: 0u64) add)
+endfn
+
+fn add
+  takes {summary: Summary count: U64}
+  returns next: Summary
+  do
+    let Summary(notes: notes lines: lines longest: longest) be summary endlet
+    let widest be larger(count longest) endlet
+    return Summary(
+      notes: U64.add(notes 1u64)
+      lines: U64.add(lines count)
+      longest: widest
+    )
+endfn
+
+fn larger
+  takes {left: U64 right: U64}
+  returns largest: U64
+  do
+    if Ordered.greater(left right) then return left endif
+    return right
+endfn
+
+fn perNote
+  takes {lines: U64 notes: U64}
+  returns mean: U64
+  requires Ordered.greater(notes 0u64)
+  visibility @public
+  do
+    let Result.ok(value: mean) be U64.divChecked(lines notes) else return 0u64 endlet
+    return mean
+endfn
+
+fn meanLines
+  takes {summary: Summary}
+  returns mean: Option(U64)
+  visibility @public
+  do
+    let Summary(notes: notes lines: lines longest: _) be summary endlet
+    if Ordered.greater(notes 0u64) then
+      return Option.some(value: perNote(lines notes))
+    endif
+    return Option.none()
+endfn
+
+fn render
+  takes {summary: Summary}
+  returns text: Str
+  visibility @public
+  do
+    let Summary(notes: notes lines: lines longest: _) be summary endlet
+    let counted be Str.concat(From.convert(notes) " notes, ") endlet
+    return Str.concat(counted Str.concat(From.convert(lines) " lines"))
+endfn

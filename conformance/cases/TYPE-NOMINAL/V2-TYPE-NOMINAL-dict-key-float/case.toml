@@ -1,0 +1,18 @@
+id = "V2-TYPE-NOMINAL-dict-key-float"
+rule = "V2-TYPE-NOMINAL-dict-key-float"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#dict-keys-equality-and-order: F64 is not Ordered, so it keys no dict; with no written key type the key is reported at the first key"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.invalidDictKey"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 36, end = 42 }

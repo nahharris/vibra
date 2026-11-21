@@ -1,0 +1,2 @@
+fn f returns r: U64 do let g: Fn({Str width: U64} U64) be pad endlet return g("x") endfn
+fn pad takes {s: Str} labelled {width: U64 be 4u64} returns r: U64 do return width endfn

@@ -1,155 +1,126 @@
-//! Helpers shared by the `vibra-workspace` integration tests: one temporary
-//! directory with one process-wide counter, and the project documents the
-//! tests write into it.
+//! Temporary project trees, links, and the documents the tests write.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-/// A counter, not the clock, makes a name unique within the process: the clock
-/// of some platforms is too coarse to tell two parallel tests apart.
-static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
+use vibra_diagnostics::{Diagnostic, DiagnosticCode};
+use vibra_workspace::{SourceSnapshot, discover_project_at};
 
-fn fresh_directory(label: &str, canonical: bool) -> PathBuf {
-    let serial = NEXT_TEMP.fetch_add(1, Ordering::Relaxed);
-    let parent = if canonical {
-        fs::canonicalize(std::env::temp_dir()).expect("canonical temp directory")
-    } else {
-        std::env::temp_dir()
-    };
-    let root = parent.join(format!(
-        "vibra-workspace-{label}-{}-{serial}",
-        std::process::id()
-    ));
-    fs::create_dir_all(&root).expect("create temporary directory");
-    root
-}
+/// A counter, not the clock, makes a name unique within the process.
+static NEXT: AtomicU64 = AtomicU64::new(0);
 
-/// A fresh directory under the canonical system temporary directory.
-pub(crate) fn temporary_directory(label: &str) -> PathBuf {
-    fresh_directory(label, true)
-}
+/// The step's library project, with the root `src/app`.
+pub(crate) const LIBRARY: &str = "{format: @project.v2 package: {name: \"hello\" version: \"0.1.0\"} targets: [{name: @app kind: @lib root: \"src/app\"}] dependencies: [:]}";
 
-/// A fresh directory under the system temporary directory as the platform
-/// spells it, for tests that hand the path to a tool such as `mklink`.
-pub(crate) fn plain_directory(label: &str) -> PathBuf {
-    fresh_directory(label, false)
-}
-
-/// Writes `contents` at `path`, creating its parents.
-pub(crate) fn write(path: &Path, contents: impl AsRef<[u8]>) {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).expect("parent directory");
-    }
-    fs::write(path, contents).expect("fixture file");
-}
-
-pub(crate) fn cleanup(path: &Path) {
-    let _ = fs::remove_dir_all(path);
-}
-
-/// A temporary directory removed on drop, along with any
-/// [`TempDir::sibling_dir`] made beside it.
+/// A temporary directory, removed on drop.
 pub(crate) struct TempDir {
     path: PathBuf,
-    siblings: Vec<PathBuf>,
 }
 
 impl TempDir {
+    /// A fresh directory under the canonical temporary directory.
     pub(crate) fn new(label: &str) -> Self {
-        Self {
-            path: temporary_directory(label),
-            siblings: Vec::new(),
-        }
+        let serial = NEXT.fetch_add(1, Ordering::Relaxed);
+        let parent =
+            fs::canonicalize(std::env::temp_dir()).expect("temporary directory");
+        let path =
+            parent.join(format!("vibra-ws-{label}-{}-{serial}", std::process::id()));
+        let _ = fs::remove_dir_all(&path);
+        fs::create_dir_all(&path).expect("create the directory");
+        Self { path }
     }
 
-    /// A directory spelled as the platform spells the temporary directory.
-    pub(crate) fn plain(label: &str) -> Self {
-        Self {
-            path: plain_directory(label),
-            siblings: Vec::new(),
-        }
-    }
-
-    /// A project directory: `project.vibon` holds `document`, and each of
-    /// `sources` is a project-relative path and its content.
-    pub(crate) fn project(
-        label: &str,
-        document: &str,
-        sources: &[(&str, &str)],
-    ) -> Self {
+    /// A project: `project.vibon` holds `document`, and each of `files` is a
+    /// relative path and its content. A path ending in `/` is a directory.
+    pub(crate) fn project(label: &str, document: &str, files: &[(&str, &str)]) -> Self {
         let directory = Self::new(label);
-        write(&directory.path.join("project.vibon"), document);
-        for (relative, source) in sources {
-            write(&directory.path.join(relative), source);
+        directory.write("project.vibon", document);
+        for (path, contents) in files {
+            if let Some(path) = path.strip_suffix('/') {
+                fs::create_dir_all(directory.path.join(path)).expect("directory");
+            } else {
+                directory.write(path, contents);
+            }
         }
         directory
-    }
-
-    /// A project directory holding [`demo_project`].
-    pub(crate) fn demo(label: &str, sources: &[(&str, &str)]) -> Self {
-        Self::project(label, &demo_project(), sources)
     }
 
     pub(crate) fn path(&self) -> &Path {
         &self.path
     }
 
-    /// Writes `content` at the directory-relative `relative`.
-    pub(crate) fn write(&self, relative: &str, content: &str) {
-        write(&self.path.join(relative), content);
+    pub(crate) fn join(&self, relative: &str) -> PathBuf {
+        self.path.join(relative)
     }
 
-    /// A directory beside this one, removed when this one is.
-    pub(crate) fn sibling_dir(&mut self, suffix: &str) -> PathBuf {
-        let name = self
-            .path
-            .file_name()
-            .expect("temporary root has a name")
-            .to_string_lossy();
-        let path = self.path.with_file_name(format!("{name}-{suffix}"));
-        fs::create_dir_all(&path).expect("create outside directory");
-        self.siblings.push(path.clone());
-        path
+    pub(crate) fn write(&self, relative: &str, contents: &str) {
+        let path = self.path.join(relative);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("parent directory");
+        }
+        fs::write(path, contents).expect("fixture file");
     }
 }
 
 impl Drop for TempDir {
     fn drop(&mut self) {
-        cleanup(&self.path);
-        for path in &self.siblings {
-            cleanup(path);
-        }
+        let _ = fs::remove_dir_all(&self.path);
     }
 }
 
-/// A `project.vibon` document with the package `package`, the given `targets`
-/// and `dependencies` (each already spelled as vibon), and a trailing newline.
-pub(crate) fn manifest(package: &str, targets: &str, dependencies: &str) -> String {
-    format!(
-        "(record format: @project.v1 package: (record name: \"{package}\" version: \"0.1.0\") targets: (array {targets}) dependencies: {dependencies})\n"
-    )
+/// A directory link at `link` to `target`: a symbolic link on Unix and a
+/// junction, which needs no privilege, on Windows.
+pub(crate) fn link_directory(target: &Path, link: &Path) {
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(target, link).expect("directory link");
+    #[cfg(windows)]
+    {
+        // mklink does not take the verbatim \\?\ prefix.
+        let plain = |path: &Path| {
+            let text = path.display().to_string();
+            text.strip_prefix(r"\\?\")
+                .map_or(text.clone(), str::to_owned)
+        };
+        let status = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(plain(link))
+            .arg(plain(target))
+            .output()
+            .expect("run mklink");
+        assert!(status.status.success(), "mklink /J failed: {status:?}");
+    }
 }
 
-/// The project most tests need: package `demo` with one binary target `app`
-/// rooted at `src/app` whose entry is `@app.main.execute`.
-pub(crate) fn demo_project() -> String {
-    manifest(
-        "demo",
-        "(record name: @app kind: @bin root: \"src/app\" entry: @app.main.execute effects: (array))",
-        "(dict)",
-    )
+/// A file link at `link` to `target`.
+pub(crate) fn link_file(target: &Path, link: &Path) {
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(target, link).expect("file link");
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_file(target, link)
+        .expect("a file symbolic link (Windows needs developer mode or elevation)");
 }
 
-/// A library target named `name` whose sources are under `root`.
-pub(crate) fn lib_target(name: &str, root: &str) -> String {
-    format!("(record name: @{name} kind: @lib root: \"{root}\")")
+/// The snapshot of the project at `root`, or its diagnostics.
+pub(crate) fn capture(root: &Path) -> Result<SourceSnapshot, Vec<Diagnostic>> {
+    SourceSnapshot::capture(discover_project_at(root)?)
 }
 
-/// A `project.vibon` document for package `hello` with the given `targets`
-/// and `dependencies` (each already spelled as vibon), and no trailing newline.
-pub(crate) fn lib_project(targets: &str, dependencies: &str) -> String {
-    format!(
-        "(record format: @project.v1 package: (record name: \"hello\" version: \"0.1.0\") targets: (array {targets}) dependencies: (dict {dependencies}))"
-    )
+/// The codes and source identities of a failure.
+pub(crate) fn faults(
+    diagnostics: &[Diagnostic],
+) -> Vec<(DiagnosticCode, Option<String>)> {
+    diagnostics
+        .iter()
+        .map(|diagnostic| {
+            (diagnostic.code(), diagnostic.source_id().map(str::to_owned))
+        })
+        .collect()
+}
+
+/// The failure of `result`, which must have failed.
+pub(crate) fn failure<T: std::fmt::Debug>(
+    result: Result<T, Vec<Diagnostic>>,
+) -> Vec<Diagnostic> {
+    result.expect_err("the step fails")
 }

@@ -1,14 +1,14 @@
 //! The text form of a program: exact, complete, and deterministic.
 
-use vibra_diagnostics::ByteSpan;
+use vibra_diagnostics_v1::ByteSpan;
 use vibra_exec::{
     Block, BlockId, Callee, ConstId, Constant, FuncId, Function, GlobalId, Inst,
     ObjectKind, OriginId, Program, ScalarClass, ScalarOp, Slot, Terminator,
 };
-use vibra_ir::SourceOrigin;
-use vibra_ir::boundary::TrapCode;
-use vibra_ir::external::CompilerIntrinsic;
-use vibra_ir::external::host::{HOST_ROWS, host_row};
+use vibra_ir_v1::SourceOrigin;
+use vibra_ir_v1::boundary::TrapCode;
+use vibra_ir_v1::external::CompilerIntrinsic;
+use vibra_ir_v1::external::host::{HOST_ROWS, host_row};
 
 /// A program that uses every instruction, every terminator, and every table.
 /// It is not meant to verify; the text form must print it all the same.

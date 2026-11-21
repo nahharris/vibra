@@ -1,2 +1,0 @@
-(def dict i32 0i32)
-(defn run () void (do))

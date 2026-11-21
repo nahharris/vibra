@@ -1,1834 +1,2111 @@
-//! The reference interpreter's activation machine.
+//! The machine: an explicit loop over evaluation steps and a stack of
+//! continuations, with every activation's frame on the heap
+//! (`docs/spec/06-runtime.md`, "Evaluation", "Tail calls", "Activations and
+//! memory").
 //!
-//! The runtime chapter bounds the depth of non-tail recursion only by memory
-//! (`docs/spec/06-runtime.md`, "Activations and memory"), so no Rust call is
-//! made for a language activation. The machine holds activations on the heap:
-//!
-//! - a **frame** is one activation's slots, captures, and type arguments;
-//! - a **continuation** is what remains to be done with a value an expression
-//!   produces, such as the operands still to evaluate or the body that
-//!   follows a `let`; and
-//! - the machine is a loop over the two stacks that either evaluates an
-//!   expression or hands a value to the continuation on top.
-//!
-//! A non-tail call pushes a frame and an end-of-activation continuation, and
-//! the callee's return pops them. A call in tail position replaces the frame
-//! the activation already holds. A single function body's own nesting is
-//! bounded by its source, so the continuations it pushes need no more
-//! structure than that.
-//!
-//! Memory is accounted in bytes of frames and continuations exactly, and in
-//! bytes of values by measurement: a value does not count when it is built,
-//! because it may be released before the next step, but a walk over every
-//! live value runs whenever enough has been allocated since the last one to
-//! matter. Exceeding the runner's budget, or failing to grow either stack,
-//! is [`Halt::Memory`].
+//! Nothing here recurses on the host stack in proportion to the depth of
+//! Vibra calls or of Vibra values: an operand is evaluated by pushing a
+//! continuation and returning to the loop.
 
-use std::cell::RefCell;
-use std::collections::{BTreeMap, HashSet};
-use std::mem::size_of;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
-use std::sync::Arc;
 
-mod compare;
-
-use vibra_host::{AuditEvent, HostCall, HostProvider, build_reply, perform};
-use vibra_ir::external::{CompilerIntrinsic, IntegerOp};
+use vibra_diagnostics::DiagnosticCode;
+use vibra_ir::external::CompilerIntrinsic;
 use vibra_ir::{
-    CallTarget, CheckedProgram, ClosedContract, Expr, FunctionSignature, MatchArm,
-    SourceOrigin, TestAssertion, Type, TypeId, Value, vocabulary,
+    Arguments, CallTarget, CheckedFunction, CheckedModuleSet, ClosureBody, Constant,
+    Construction, Expr, FunctionBody, Guard, Library, MatchArm, NamedTypes, Node,
+    Pattern, SourceOrigin, Type, TypeBody, TypeId, Value,
 };
 
-use crate::value::{Callable, Elements, Inner, LambdaId, RuntimeValue, TypeMap};
-use crate::{
-    TestAssertionFailure, activation_slots, admits_value, bind_pattern, bind_type,
-    closed_next, lookup, mentions_param, observe_as, pattern_matches, present_payload,
-    registry, representation_of, runtime_type, slots_match_signature,
-    values_match_slots,
-};
+use crate::compare::{DictBuild, DictFind, Structural};
+use crate::encode::{ObserveError, encoding, from_neutral};
+use crate::frame::{Frame, TypeEnv};
+use crate::ingress::{Check, Ingress, Then, checks_of, needs_checks, refused};
+use crate::types::{mentions_self, type_of};
+use crate::value::{ClosureVal, FunctionVal, Held, Repr, Val, neutral_storage, same};
+use crate::{FailureKind, Instrumentation, Reads, TestAssertionFailure, intrinsics};
 
-/// Why the machine stopped before the entry returned.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Why the machine stopped before its work was done.
+#[derive(Debug)]
 pub(crate) enum Halt {
-    /// The checked IR violated an invariant, which the checker rules out.
-    Invalid,
-    /// A test assertion was false; the failure is recorded in the machine.
-    Assertion,
-    /// The budget was exhausted or a stack could not grow: the host event.
+    /// The checked program is not one the checker accepts:
+    /// `@runtime.invalidCheckedProgram`.
+    Invalid(String),
+    /// A value the host handed in is not a value of its type:
+    /// `@runtime.invalidHostValue`.
+    HostValue(String),
+    /// The memory budget is exhausted.
     Memory,
-    /// An unchecked `div` or `rem` had a zero divisor: the trap
-    /// `@runtime.division-by-zero`.
-    DivisionByZero,
+    /// The reduction limit of an evaluation is reached.
+    Reductions,
+    /// A form of a later milestone, such as applying a `proc`.
+    Unavailable(String),
+    /// An assertion did not hold, which ends a test body.
+    Failed(Box<TestAssertionFailure>),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[allow(clippy::large_enum_variant)]
-pub(crate) enum GlobalState {
-    Uninitialized,
+pub(crate) fn invalid<T>(message: impl Into<String>) -> Result<T, Halt> {
+    Err(Halt::Invalid(message.into()))
+}
+
+/// What the machine is running.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Mode {
+    /// A program's entry.
+    Run,
+    /// A test body, where the assertion rows are defined.
+    Test,
+    /// One expression.
+    Evaluate,
+}
+
+/// The state of a module value: lazy, and evaluated at most once.
+#[derive(Debug)]
+enum GlobalState<'a> {
+    Unread,
     Evaluating,
-    Ready(RuntimeValue),
+    Ready(Val<'a>),
 }
 
-/// What a call checks about a callee's signature, worked out once rather than
-/// at every call.
-struct SignatureInfo {
-    signature: Arc<FunctionSignature>,
-    /// The type of every argument slot, in slot order.
-    slots: Vec<Type>,
-    result: Type,
-    /// Whether any slot or the result names a generic parameter.
-    generic: bool,
+/// One move of the machine.
+#[derive(Debug)]
+pub(crate) enum Step<'a> {
+    /// Evaluate a node.
+    Eval(&'a Node),
+    /// Evaluate an expression written at an origin: the root of an
+    /// evaluation, which is not a node of the module set.
+    Root(&'a Expr, &'a SourceOrigin),
+    /// Hand a value to the top continuation.
+    Ret(Val<'a>),
 }
 
-impl SignatureInfo {
-    fn new(signature: Arc<FunctionSignature>) -> Self {
-        let slots = signature.slot_types();
-        let result = signature.result();
-        let generic = slots.iter().any(mentions_param) || mentions_param(&result);
-        Self {
-            signature,
-            slots,
-            result,
-            generic,
+/// The operands a node evaluates, in written order, before it acts.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum Work<'a> {
+    Intrinsic {
+        intrinsic: CompilerIntrinsic,
+        type_arguments: &'a [Type],
+        nodes: &'a [Node],
+        origin: &'a SourceOrigin,
+    },
+    Construct {
+        value_type: &'a Type,
+        construction: &'a Construction,
+    },
+    Closure {
+        body: &'a ClosureBody,
+        nodes: &'a [Node],
+    },
+    Lookup {
+        collection: &'a Node,
+        key: &'a Node,
+    },
+    Call {
+        target: &'a CallTarget,
+        arguments: &'a Arguments,
+        tail: bool,
+        origin: &'a SourceOrigin,
+    },
+}
+
+impl<'a> Work<'a> {
+    /// The operand at `index`: for a call, the callee value first, then the
+    /// positional arguments, then the labelled ones as written.
+    fn node(self, index: usize) -> Option<&'a Node> {
+        match self {
+            Self::Intrinsic { nodes, .. } | Self::Closure { nodes, .. } => {
+                nodes.get(index)
+            }
+            Self::Construct { construction, .. } => match construction {
+                Construction::Tuple(nodes) | Construction::List(nodes) => {
+                    nodes.get(index)
+                }
+                Construction::Record(fields) | Construction::Case { fields, .. } => {
+                    fields.get(index).map(|(_, node)| node)
+                }
+                Construction::Wrapper(node) => (index == 0).then_some(node.as_ref()),
+                Construction::Dict(entries) => {
+                    entries.get(index / 2).map(|(key, value)| {
+                        if index.is_multiple_of(2) { key } else { value }
+                    })
+                }
+            },
+            Self::Lookup { collection, key } => match index {
+                0 => Some(collection),
+                1 => Some(key),
+                _ => None,
+            },
+            Self::Call {
+                target, arguments, ..
+            } => {
+                let index = match target {
+                    CallTarget::Value(callee) => match index.checked_sub(1) {
+                        None => return Some(callee),
+                        Some(index) => index,
+                    },
+                    _ => index,
+                };
+                arguments.positional.get(index).or_else(|| {
+                    let labelled = index.checked_sub(arguments.positional.len())?;
+                    arguments.labelled.get(labelled).map(|(_, node)| node)
+                })
+            }
         }
     }
 }
 
-/// One activation. Slots are write-once and names never shadow, so a `let`
-/// writes its slot in place.
-struct Frame {
-    slots: Vec<Option<RuntimeValue>>,
-    captures: Elements,
-    /// The type arguments of this activation.
-    types: Arc<TypeMap>,
-    /// The module value whose initializer this frame runs, if it runs one.
-    initializer: Option<usize>,
-}
-
-/// What to do with the value the machine is about to produce.
-enum Kont<'a> {
-    /// The end of an activation: its frame is released and the value goes to
-    /// whatever called it.
-    End { counted: bool },
+/// The work left to do when a value arrives.
+#[derive(Debug)]
+pub(crate) enum Kont<'a> {
+    /// The machine's work is done.
+    End,
+    /// The end of an activation: a pending `ensures … else` runs, then the
+    /// frame is released.
+    Leave,
     /// A module value's initializer finished.
-    Global { node: &'a Expr, index: usize },
-    /// A leading expression of a sequence finished; the rest follows.
-    Sequence { rest: &'a [Expr] },
-    /// One operand of `node` finished; the rest follow, then `node` itself.
-    Operands {
-        node: &'a Expr,
-        next: usize,
-        values: Vec<RuntimeValue>,
+    Global(usize),
+    Sequence(&'a [Node]),
+    Let {
+        slot: Option<usize>,
+        body: &'a Node,
     },
-    /// The one operand of `node` finished.
-    Unary { node: &'a Expr },
-    /// The value of a `let` finished.
-    Let { slot: Option<usize>, body: &'a Expr },
-    /// The condition of an `if` finished.
+    LetElse {
+        pattern: &'a Pattern,
+        fallback: &'a Node,
+        body: &'a Node,
+    },
+    Match(&'a [MatchArm]),
     If {
-        then_branch: &'a Expr,
-        else_branch: &'a Expr,
+        then_branch: &'a Node,
+        else_branch: Option<&'a Node>,
     },
-    /// The scrutinee of a `match` finished.
-    Match { arms: &'a [MatchArm] },
-    /// One step of `array.fold` returned.
-    Fold(Box<FoldState>),
-    /// A key comparison that called a user's `compare` returned.
-    Compare(Box<compare::CompareKont>),
+    Field(&'a str),
+    Return,
+    Try,
+    Widen(Type),
+    Operands {
+        work: Work<'a>,
+        done: Vec<Val<'a>>,
+    },
+    Requires {
+        function: &'a CheckedFunction,
+        guard: &'a Guard,
+    },
+    ClosureRequires {
+        body: &'a ClosureBody,
+        guard: &'a Guard,
+    },
+    Ensures {
+        candidate: Val<'a>,
+        guard: &'a Guard,
+    },
+    Invariant {
+        value: Val<'a>,
+        consequence: &'a Constant,
+    },
+    Fold {
+        function: Val<'a>,
+        items: Rc<Vec<Val<'a>>>,
+        next: usize,
+    },
+    DictBuild(Box<DictBuild<'a>>),
+    DictFind(Box<DictFind<'a>>),
+    Structural(Box<Structural<'a>>),
+    /// The checks of a value coming in, the answer of the current one
+    /// awaited.
+    Ingress(Box<Ingress<'a>>),
+    /// Widens each `Self` position of a result dispatched through an
+    /// interface value back to that interface value.
+    Rebox {
+        result: Type,
+        held_type: Type,
+    },
 }
 
-/// `array.fold` calls its step once for each element in order, and each call
-/// is an activation like any other, so the fold is a continuation.
-struct FoldState {
-    items: Elements,
-    next: usize,
-    step: Callable,
-    result: Type,
+impl<'a> Kont<'a> {
+    fn for_each_value(&self, visit: &mut impl FnMut(&Val<'a>)) {
+        match self {
+            Self::Operands { done, .. } => done.iter().for_each(visit),
+            Self::Ensures { candidate, .. } => visit(candidate),
+            Self::Invariant { value, .. } => visit(value),
+            Self::Fold {
+                function, items, ..
+            } => {
+                visit(function);
+                items.iter().for_each(visit);
+            }
+            Self::DictBuild(build) => build.for_each_value(visit),
+            Self::DictFind(find) => find.for_each_value(visit),
+            Self::Structural(structural) => structural.for_each_value(visit),
+            Self::Ingress(ingress) => ingress.for_each_value(visit),
+            _ => {}
+        }
+    }
 }
 
-enum Step<'a> {
-    Eval(&'a Expr),
-    Ret(RuntimeValue),
+/// A callable resolved to what runs.
+#[derive(Clone, Debug)]
+pub(crate) enum Target<'a> {
+    Function(usize),
+    Closure(Rc<ClosureVal<'a>>),
+    /// The structural `Ordered.compare` (`order`) or `Equatable.equal` of
+    /// an atom, an atom singleton, or an anonymous tuple or record type.
+    Structural {
+        order: bool,
+        ty: Type,
+    },
 }
 
-const KONT_BYTES: usize = size_of::<Kont<'static>>();
-const FRAME_BYTES: usize = size_of::<Frame>();
-const SLOT_BYTES: usize = size_of::<Option<RuntimeValue>>();
+/// A callable and the closed substitution it runs under.
+#[derive(Clone, Debug)]
+pub(crate) struct Resolved<'a> {
+    pub(crate) target: Target<'a>,
+    pub(crate) env: Rc<TypeEnv>,
+}
 
-/// The least allocation between two measurements of the live values.
-const MIN_WALK_BYTES: usize = 64 * 1024;
+type DispatchKey = (TypeId, String, Type, Vec<Type>, Vec<Type>);
 
+/// The machine and everything one execution owns.
+#[derive(Debug)]
 pub(crate) struct Machine<'a> {
-    program: &'a CheckedProgram,
-    pub(crate) globals: Vec<GlobalState>,
-    frames: Vec<Frame>,
-    konts: Vec<Kont<'a>>,
-    /// Closure bodies, indexed by [`LambdaId`], and the id of each by the
-    /// address of its body in the checked program.
-    lambdas: Vec<&'a Expr>,
-    lambda_ids: BTreeMap<usize, usize>,
-    /// The signature of each module function, shared once it is first used.
-    signatures: RefCell<Vec<Option<Rc<SignatureInfo>>>>,
-    /// The captures and type arguments of an activation that has none, shared
-    /// so that calling a function allocates neither.
-    no_captures: Elements,
-    no_types: Arc<TypeMap>,
-    current_depth: usize,
-    pub(crate) max_depth: usize,
-    pub(crate) tail_transfers: usize,
-    /// Values built that the accounting counts, and expressions reduced: the
-    /// counters the performance baseline reads, with no effect on a run.
-    pub(crate) allocations: usize,
-    pub(crate) reductions: usize,
-    test_mode: bool,
-    limit: usize,
-    /// Bytes of frames and continuations now live, counted exactly.
-    stack_bytes: usize,
-    /// Bytes of values at the last measurement.
-    live_bytes: usize,
-    /// Bytes of values built since the last measurement.
-    allocated: usize,
-    /// Allocation that triggers the next measurement.
-    walk_after: usize,
-    peak: usize,
-    pub(crate) assertion_failure: Option<TestAssertionFailure>,
-    /// The assertion whose operand held a function, which stops the test.
-    pub(crate) unobservable: Option<SourceOrigin>,
-    /// The provider of the run: every host operation is an operation of it.
-    host: &'a mut dyn HostProvider,
-    /// The events of the host calls that completed, in call order.
-    pub(crate) audit: Vec<AuditEvent>,
+    pub(crate) set: &'a CheckedModuleSet,
+    mode: Mode,
+    pub(crate) frames: Vec<Frame<'a>>,
+    pub(crate) konts: Vec<Kont<'a>>,
+    globals: Vec<GlobalState<'a>>,
+    dispatch: HashMap<DispatchKey, Resolved<'a>>,
+    pub(crate) empty_env: Rc<TypeEnv>,
+    origin: Option<&'a SourceOrigin>,
+    reduction_limit: u64,
+    budget: u64,
+    frame_bytes: u64,
+    live_bytes: u64,
+    allocated_bytes: u64,
+    /// The constants already admitted, by address: each is checked once.
+    admitted: HashSet<usize>,
+    pub(crate) stats: Instrumentation,
+    /// What an evaluation read: the functions it entered and the module
+    /// values it read. Kept only in [`Mode::Evaluate`].
+    pub(crate) reads: Reads,
+}
+
+const FRAME_BYTES: u64 = size_of::<Frame<'static>>() as u64;
+const SLOT_BYTES: u64 = size_of::<Option<Val<'static>>>() as u64;
+const KONT_BYTES: u64 = size_of::<Kont<'static>>() as u64;
+const VAL_BYTES: u64 = size_of::<Val<'static>>() as u64;
+
+fn as_u64(n: usize) -> u64 {
+    u64::try_from(n).unwrap_or(u64::MAX)
+}
+
+fn frame_cost(frame: &Frame<'_>) -> u64 {
+    FRAME_BYTES.saturating_add(as_u64(frame.slots.len()).saturating_mul(SLOT_BYTES))
 }
 
 impl<'a> Machine<'a> {
     pub(crate) fn new(
-        program: &'a CheckedProgram,
-        test_mode: bool,
-        budget_bytes: usize,
-        host: &'a mut dyn HostProvider,
+        set: &'a CheckedModuleSet,
+        mode: Mode,
+        budget: u64,
+        reduction_limit: u64,
     ) -> Self {
         Self {
-            host,
-            audit: Vec::new(),
-            program,
-            globals: vec![GlobalState::Uninitialized; program.globals().len()],
+            set,
+            mode,
             frames: Vec::new(),
-            konts: Vec::new(),
-            lambdas: Vec::new(),
-            lambda_ids: BTreeMap::new(),
-            signatures: RefCell::new(vec![None; program.functions().len()]),
-            no_captures: Elements::new(Vec::new()),
-            no_types: Arc::default(),
-            current_depth: 0,
-            max_depth: 0,
-            tail_transfers: 0,
-            allocations: 0,
-            reductions: 0,
-            test_mode,
-            limit: budget_bytes,
-            stack_bytes: 0,
+            konts: vec![Kont::End],
+            globals: set.globals().iter().map(|_| GlobalState::Unread).collect(),
+            dispatch: HashMap::new(),
+            empty_env: Rc::new(TypeEnv::default()),
+            origin: None,
+            reduction_limit,
+            budget,
+            frame_bytes: 0,
             live_bytes: 0,
-            allocated: 0,
-            walk_after: (budget_bytes / 2).max(MIN_WALK_BYTES),
-            peak: 0,
-            assertion_failure: None,
-            unobservable: None,
+            allocated_bytes: 0,
+            admitted: HashSet::new(),
+            stats: Instrumentation::default(),
+            reads: Reads::default(),
         }
     }
 
-    /// The most memory the run held at once, in the machine's own accounting:
-    /// bytes of frames and continuations, plus the values at the last
-    /// measurement.
-    pub(crate) const fn peak_memory_bytes(&self) -> usize {
-        self.peak
+    /// Where the node being evaluated was written.
+    pub(crate) const fn origin(&self) -> Option<&'a SourceOrigin> {
+        self.origin
     }
 
-    // -----------------------------------------------------------------
-    // Entry.
-    // -----------------------------------------------------------------
-
-    /// Runs the function at `index` as the outermost activation.
-    pub(crate) fn run_entry(
-        &mut self,
-        index: usize,
-        slots: Vec<Option<RuntimeValue>>,
-    ) -> Result<RuntimeValue, Halt> {
-        let program = self.program;
-        let function = program.functions().get(index).ok_or(Halt::Invalid)?;
-        if slots.len() != function.slot_count()
-            || !slots_match_signature(&slots, function.signature())
-        {
-            return Err(Halt::Invalid);
-        }
-        self.enter(slots, self.no_captures.clone(), Arc::clone(&self.no_types))?;
-        self.execute(Step::Eval(function.body()), 0)
-    }
-
-    /// Runs the machine until the continuations above `base` are spent and a
-    /// value reaches the continuation at `base`.
-    fn execute(&mut self, start: Step<'a>, base: usize) -> Result<RuntimeValue, Halt> {
-        let mut step = start;
+    /// Runs the machine from `step` until its work is done.
+    pub(crate) fn execute(&mut self, mut step: Step<'a>) -> Result<Val<'a>, Halt> {
         loop {
             step = match step {
-                Step::Eval(expression) => {
-                    self.reductions = self.reductions.saturating_add(1);
-                    self.eval(expression)?
-                }
-                Step::Ret(value) => {
-                    if self.konts.len() <= base {
-                        return Ok(value);
+                Step::Eval(node) => {
+                    self.stats.reduction_count =
+                        self.stats.reduction_count.saturating_add(1);
+                    if self.stats.reduction_count > self.reduction_limit {
+                        return Err(Halt::Reductions);
                     }
-                    let Some(kont) = self.konts.pop() else {
-                        return Err(Halt::Invalid);
-                    };
-                    self.stack_bytes = self.stack_bytes.saturating_sub(KONT_BYTES);
-                    self.resume(kont, value)?
+                    self.origin = Some(&node.origin);
+                    self.eval(&node.expr, &node.origin)?
                 }
+                Step::Root(expr, origin) => {
+                    self.stats.reduction_count =
+                        self.stats.reduction_count.saturating_add(1);
+                    if self.stats.reduction_count > self.reduction_limit {
+                        return Err(Halt::Reductions);
+                    }
+                    self.origin = Some(origin);
+                    self.eval(expr, origin)?
+                }
+                Step::Ret(value) => match self.konts.pop() {
+                    None => return invalid("a value with no continuation"),
+                    Some(Kont::End) => return Ok(value),
+                    Some(kont) => self.resume(kont, value)?,
+                },
             };
         }
     }
-    // -----------------------------------------------------------------
-    // Frames, continuations, and the memory budget.
-    // -----------------------------------------------------------------
 
-    fn frame(&self) -> Result<&Frame, Halt> {
-        self.frames.last().ok_or(Halt::Invalid)
-    }
-
-    fn frame_mut(&mut self) -> Result<&mut Frame, Halt> {
-        self.frames.last_mut().ok_or(Halt::Invalid)
-    }
-
-    /// The running activation's type arguments.
-    fn current_types(&self) -> Arc<TypeMap> {
+    fn frame(&self) -> Result<&Frame<'a>, Halt> {
         self.frames
             .last()
-            .map(|frame| Arc::clone(&frame.types))
-            .unwrap_or_default()
+            .ok_or_else(|| Halt::Invalid("no activation".to_owned()))
     }
 
-    /// The member of the union type `union` at `index`, as the type declares it.
-    fn declared_member(&self, union: &Type, index: usize) -> Option<Type> {
-        let members = match union {
-            Type::Union(members) => members.clone(),
-            Type::Declared(id) => match self
-                .program
-                .types()
-                .iter()
-                .find(|definition| definition.id() == id)?
-                .instantiate(&[])?
-            {
-                vibra_ir::TypeBody::Union(members) => members,
-                _ => return None,
-            },
-            Type::Applied(id, arguments) => match self
-                .program
-                .types()
-                .iter()
-                .find(|definition| definition.id() == id)?
-                .instantiate(arguments)?
-            {
-                vibra_ir::TypeBody::Union(members) => members,
-                _ => return None,
-            },
-            _ => return None,
-        };
-        members.get(index).cloned()
+    fn frame_mut(&mut self) -> Result<&mut Frame<'a>, Halt> {
+        self.frames
+            .last_mut()
+            .ok_or_else(|| Halt::Invalid("no activation".to_owned()))
     }
 
-    /// `value` at the running activation's type arguments.
-    fn concrete(&self, value: &Type) -> Type {
-        match self.frames.last() {
-            Some(frame) if !frame.types.is_empty() => value.substitute(&frame.types),
-            _ => value.clone(),
-        }
+    fn env(&self) -> Result<Rc<TypeEnv>, Halt> {
+        Ok(Rc::clone(&self.frame()?.env))
     }
 
-    fn push(&mut self, kont: Kont<'a>) -> Result<(), Halt> {
-        self.stack_bytes = self.stack_bytes.saturating_add(KONT_BYTES);
-        self.check_budget()?;
-        self.konts.try_reserve(1).map_err(|_| Halt::Memory)?;
-        self.konts.push(kont);
-        Ok(())
+    pub(crate) fn function(&self, index: usize) -> Result<&'a CheckedFunction, Halt> {
+        let set = self.set;
+        set.functions()
+            .get(index)
+            .ok_or_else(|| Halt::Invalid(format!("no function {index}")))
     }
 
-    /// Takes the continuations off the stack down to the end of the running
-    /// activation, which stays, and releases what they hold.
-    fn unwind(&mut self) -> Result<(), Halt> {
-        while !matches!(self.konts.last(), Some(Kont::End { .. })) {
-            if self.konts.pop().is_none() {
-                return Err(Halt::Invalid);
-            }
-            self.stack_bytes = self.stack_bytes.saturating_sub(KONT_BYTES);
-        }
-        Ok(())
+    /// A constant as a runtime value.
+    fn constant(&mut self, constant: &'a Constant) -> Result<Val<'a>, Halt> {
+        self.ingress(constant.value(), constant.value_type(), false)
     }
 
-    /// Leaves the running activation with `value`, whatever expressions were
-    /// still pending in it.
-    fn exit(&mut self, value: RuntimeValue) -> Result<Step<'a>, Halt> {
-        self.unwind()?;
-        Ok(Step::Ret(value))
-    }
-
-    fn frame_bytes(slot_count: usize) -> usize {
-        FRAME_BYTES.saturating_add(slot_count.saturating_mul(SLOT_BYTES))
-    }
-
-    /// Starts an activation: its frame and the continuation that ends it.
-    fn enter(
+    /// A neutral value as a runtime value of `ty`: its storage is reserved
+    /// against the budget before any of it is built. A value that does not
+    /// fit `ty` halts as an invalid host value when `host` holds.
+    pub(crate) fn ingress(
         &mut self,
-        slots: Vec<Option<RuntimeValue>>,
-        captures: Elements,
-        types: Arc<TypeMap>,
+        value: &'a Value,
+        ty: &Type,
+        host: bool,
+    ) -> Result<Val<'a>, Halt> {
+        let cost = as_u64(neutral_storage(value));
+        self.reserve(cost, &[])?;
+        let converted =
+            from_neutral(self.set, value, ty).map_err(|halt| match halt {
+                Halt::Invalid(message) => refused(host, message),
+                other => other,
+            })?;
+        self.allocated_bytes = self.allocated_bytes.saturating_add(cost);
+        Ok(converted)
+    }
+
+    /// The checks `constant` must pass the first time the run meets it.
+    fn constant_checks(
+        &mut self,
+        constant: &'a Constant,
+        checks: &mut Vec<Check<'a>>,
     ) -> Result<(), Halt> {
-        self.push_frame(
-            Frame {
-                slots,
-                captures,
-                types,
-                initializer: None,
-            },
-            true,
-        )
+        if !self.admitted.insert(std::ptr::from_ref(constant).addr())
+            || !needs_checks(self.set, constant.value_type())
+        {
+            return Ok(());
+        }
+        let value = self.constant(constant)?;
+        checks.extend(checks_of(self.set, &value, constant.value_type(), false)?);
+        Ok(())
     }
 
-    fn push_frame(&mut self, frame: Frame, counted: bool) -> Result<(), Halt> {
-        self.stack_bytes = self
-            .stack_bytes
-            .saturating_add(Self::frame_bytes(frame.slots.len()));
-        self.frames.try_reserve(1).map_err(|_| Halt::Memory)?;
-        self.frames.push(frame);
-        if counted {
-            self.current_depth = self.current_depth.saturating_add(1);
-            self.max_depth = self.max_depth.max(self.current_depth);
+    /// A literal: its constant, admitted the first time.
+    fn literal(&mut self, constant: &'a Constant) -> Result<Step<'a>, Halt> {
+        let value = self.constant(constant)?;
+        if !self.admitted.insert(std::ptr::from_ref(constant).addr())
+            || !needs_checks(self.set, constant.value_type())
+        {
+            return Ok(Step::Ret(value));
         }
-        self.push(Kont::End { counted })
+        let checks = checks_of(self.set, &value, constant.value_type(), false)?;
+        self.admit(checks, false, Then::Ret(value))
     }
 
-    fn leave_frame(&mut self, counted: bool) {
-        if let Some(frame) = self.frames.pop() {
-            self.stack_bytes = self
-                .stack_bytes
-                .saturating_sub(Self::frame_bytes(frame.slots.len()));
+    /// Runs `step` once the constants a call can reach without evaluating a
+    /// node are admitted: the defaults of every function and the
+    /// consequence of every invariant.
+    pub(crate) fn prelude(&mut self, step: Step<'a>) -> Result<Step<'a>, Halt> {
+        let set = self.set;
+        let mut checks = Vec::new();
+        for function in set.functions() {
+            for (_, default) in &function.defaults {
+                self.constant_checks(default, &mut checks)?;
+            }
         }
-        if counted {
-            self.current_depth = self.current_depth.saturating_sub(1);
+        for definition in set.types().types().values() {
+            if let Some(consequence) = definition
+                .invariant()
+                .and_then(|invariant| invariant.consequence.as_ref())
+            {
+                self.constant_checks(consequence, &mut checks)?;
+            }
         }
+        self.admit(checks, false, Then::Continue(step))
     }
 
-    /// Exhaustion is decided on the exact stack bytes and the values as last
-    /// measured; a measurement is taken only when that sum could exceed the
-    /// budget, so a program well inside it never pays for one.
-    fn check_budget(&mut self) -> Result<(), Halt> {
-        let committed = self.stack_bytes.saturating_add(self.live_bytes);
-        if committed > self.peak {
-            self.peak = committed;
-        }
-        if committed.saturating_add(self.allocated) > self.limit {
-            self.measure(None)?;
+    // ----- memory -----
+
+    /// Accounts a newly built value, which no root holds yet, against the
+    /// budget.
+    pub(crate) fn allocated(&mut self, value: &Val<'a>) -> Result<(), Halt> {
+        if let Some((_, bytes)) = value.storage() {
+            self.allocated_bytes = self.allocated_bytes.saturating_add(as_u64(bytes));
+            self.reserve(0, std::slice::from_ref(value))?;
         }
         Ok(())
     }
 
-    /// Measures every value the machine holds, then decides whether the
-    /// budget is exhausted. `extra` is a value in flight.
-    fn measure(&mut self, extra: Option<&RuntimeValue>) -> Result<(), Halt> {
-        // Parts of values are shared, so one walk counts each part once
-        // however many bindings and continuations hold it.
-        let mut seen = HashSet::new();
-        let mut live = 0usize;
-        if let Some(value) = extra {
-            value.live_bytes(&mut seen, &mut live);
+    /// Checks that `pending` more bytes fit the budget beside what is
+    /// accounted. When they do not at first, the live bytes are measured
+    /// again from the roots and from `in_flight`, the values built that no
+    /// root holds yet.
+    fn reserve(&mut self, pending: u64, in_flight: &[Val<'a>]) -> Result<(), Halt> {
+        let accounted = self.accounted().saturating_add(pending);
+        if accounted <= self.budget {
+            self.stats.peak_memory_bytes = self.stats.peak_memory_bytes.max(accounted);
+            return Ok(());
         }
-        for frame in &self.frames {
-            for slot in frame.slots.iter().flatten() {
-                slot.live_bytes(&mut seen, &mut live);
+        self.live_bytes = self.measure(in_flight);
+        self.allocated_bytes = 0;
+        let accounted = self.accounted().saturating_add(pending);
+        self.stats.peak_memory_bytes = self.stats.peak_memory_bytes.max(accounted);
+        if accounted > self.budget {
+            return Err(Halt::Memory);
+        }
+        Ok(())
+    }
+
+    /// A frame of `slot_count` slots, its bytes reserved before it is built;
+    /// `in_flight` are the values that will fill it.
+    pub(crate) fn new_frame(
+        &mut self,
+        slot_count: usize,
+        env: Rc<TypeEnv>,
+        in_flight: &[Val<'a>],
+    ) -> Result<Frame<'a>, Halt> {
+        let cost = FRAME_BYTES
+            .saturating_add(as_u64(slot_count).saturating_mul(SLOT_BYTES))
+            .saturating_add(KONT_BYTES);
+        self.reserve(cost, in_flight)?;
+        Frame::try_new(slot_count, env).ok_or(Halt::Memory)
+    }
+
+    /// Sets `slot` of the current activation. An evaluation's root
+    /// activation grows to hold it, its new slots reserved first.
+    pub(crate) fn bind_slot(
+        &mut self,
+        slot: usize,
+        value: Val<'a>,
+    ) -> Result<(), Halt> {
+        let count = self.frame()?.slots.len();
+        if slot >= count {
+            let wanted = slot.checked_add(1).ok_or(Halt::Memory)?;
+            let extra = wanted.saturating_sub(count);
+            let bytes = as_u64(extra).saturating_mul(SLOT_BYTES);
+            self.reserve(bytes, std::slice::from_ref(&value))?;
+            let frame = self.frame_mut()?;
+            frame
+                .slots
+                .try_reserve_exact(extra)
+                .map_err(|_| Halt::Memory)?;
+            frame.slots.resize(wanted, None);
+            self.frame_bytes = self.frame_bytes.saturating_add(bytes);
+        }
+        self.frame_mut()?.set(slot, value)
+    }
+
+    fn accounted(&self) -> u64 {
+        self.frame_bytes
+            .saturating_add(as_u64(self.konts.len()).saturating_mul(KONT_BYTES))
+            .saturating_add(self.live_bytes)
+            .saturating_add(self.allocated_bytes)
+    }
+
+    fn check_memory(&mut self) -> Result<(), Halt> {
+        self.reserve(0, &[])
+    }
+
+    /// The bytes of every value reachable from the machine's roots and from
+    /// `extra`, each shared part counted once.
+    pub(crate) fn measure(&self, extra: &[Val<'a>]) -> u64 {
+        let mut seen = HashSet::new();
+        let mut pending: Vec<Val<'a>> = Vec::new();
+        let mut total: u64 = 0;
+        let mut root = |value: &Val<'a>, inline: bool, total: &mut u64| {
+            if inline {
+                *total = total.saturating_add(VAL_BYTES);
             }
-            for capture in frame.captures.iter() {
-                capture.live_bytes(&mut seen, &mut live);
+            pending.push(value.clone());
+        };
+        for frame in &self.frames {
+            for value in frame.slots.iter().flatten() {
+                root(value, false, &mut total);
+            }
+            if let Some(closure) = &frame.closure {
+                root(&Val(Repr::Closure(Rc::clone(closure))), false, &mut total);
             }
         }
         for kont in &self.konts {
-            match kont {
-                Kont::Operands { values, .. } => {
-                    live = live.saturating_add(
-                        values.len().saturating_mul(size_of::<RuntimeValue>()),
-                    );
-                    for value in values {
-                        value.live_bytes(&mut seen, &mut live);
-                    }
-                }
-                Kont::Fold(state) => {
-                    let items = RuntimeValue::Array {
-                        value_type: Type::Void,
-                        values: state.items.clone(),
-                    };
-                    items.live_bytes(&mut seen, &mut live);
-                    for capture in state.step.captures().iter() {
-                        capture.live_bytes(&mut seen, &mut live);
-                    }
-                }
-                Kont::Compare(state) => state.live_bytes(&mut seen, &mut live),
-                _ => {}
-            }
+            kont.for_each_value(&mut |value| root(value, true, &mut total));
         }
         for global in &self.globals {
             if let GlobalState::Ready(value) = global {
-                value.live_bytes(&mut seen, &mut live);
+                root(value, true, &mut total);
             }
         }
-        self.live_bytes = live;
-        self.allocated = 0;
-        let committed = self.stack_bytes.saturating_add(live);
-        self.peak = self.peak.max(committed);
-        if committed > self.limit {
-            return Err(Halt::Memory);
+        for value in extra {
+            root(value, true, &mut total);
         }
-        self.walk_after = ((self.limit - committed) / 2).max(MIN_WALK_BYTES);
+        while let Some(value) = pending.pop() {
+            let Some((address, bytes)) = value.storage() else {
+                continue;
+            };
+            if !seen.insert(address) {
+                continue;
+            }
+            total = total.saturating_add(as_u64(bytes));
+            value.for_each_child(|child| pending.push(child.clone()));
+        }
+        total
+    }
+
+    fn push_frame(&mut self, frame: Frame<'a>, tail: bool) -> Result<(), Halt> {
+        if tail {
+            if let Some(old) = self.frames.pop() {
+                self.frame_bytes = self.frame_bytes.saturating_sub(frame_cost(&old));
+            }
+            self.stats.tail_transfer_count =
+                self.stats.tail_transfer_count.saturating_add(1);
+        } else {
+            self.konts.push(Kont::Leave);
+        }
+        self.frame_bytes = self.frame_bytes.saturating_add(frame_cost(&frame));
+        self.frames.push(frame);
+        self.stats.max_activation_depth =
+            self.stats.max_activation_depth.max(self.frames.len());
+        self.check_memory()
+    }
+
+    fn pop_frame(&mut self) -> Result<(), Halt> {
+        let frame = self
+            .frames
+            .pop()
+            .ok_or_else(|| Halt::Invalid("no activation to leave".to_owned()))?;
+        self.frame_bytes = self.frame_bytes.saturating_sub(frame_cost(&frame));
         Ok(())
     }
 
-    /// Accounts for a value an operation has just built, and passes it on.
-    fn fresh(&mut self, value: RuntimeValue) -> Result<Step<'a>, Halt> {
-        let bytes = value.built_bytes();
-        if bytes != 0 {
-            self.allocations = self.allocations.saturating_add(1);
-            self.allocated = self.allocated.saturating_add(bytes);
-            if self.allocated >= self.walk_after {
-                self.measure(Some(&value))?;
-            }
-        }
-        Ok(Step::Ret(value))
+    /// Starts an activation for an evaluation's root expression.
+    pub(crate) fn enter_root(&mut self, frame: Frame<'a>) -> Result<(), Halt> {
+        self.frame_bytes = self.frame_bytes.saturating_add(frame_cost(&frame));
+        self.frames.push(frame);
+        self.check_memory()
     }
 
-    // -----------------------------------------------------------------
-    // Evaluation.
-    // -----------------------------------------------------------------
+    // ----- evaluation -----
 
-    /// The value of an expression that needs no continuation: a literal or a
-    /// read of a binding or a function name.
-    fn leaf(&mut self, expression: &'a Expr) -> Result<Option<RuntimeValue>, Halt> {
-        Ok(Some(match expression {
-            Expr::Literal { value, .. } => RuntimeValue::Primitive(value.clone()),
-            Expr::Variable {
-                slot, value_type, ..
-            } => self
-                .frame()?
-                .slots
-                .get(*slot)
-                .and_then(Option::as_ref)
-                .filter(|value| admits_value(value_type, value))
-                .ok_or(Halt::Invalid)?
-                .clone(),
-            Expr::Captured {
-                slot, value_type, ..
-            } => self
-                .frame()?
-                .captures
-                .get(*slot)
-                .filter(|value| admits_value(value_type, value))
-                .ok_or(Halt::Invalid)?
-                .clone(),
+    /// Reads `slot`; an evaluation's input is converted and admitted on its
+    /// first read, at the type the read names.
+    fn read_slot(&mut self, slot: usize, value_type: &Type) -> Result<Step<'a>, Halt> {
+        let frame = self.frame()?;
+        if let Some(Some(value)) = frame.slots.get(slot) {
+            return Ok(Step::Ret(value.clone()));
+        }
+        let inputs = frame.inputs;
+        let input = inputs.get(slot).ok_or_else(|| {
+            Halt::Invalid(format!("slot {slot} is read before it is set"))
+        })?;
+        let ty = frame.env.apply(value_type);
+        let value = self.ingress(input, &ty, true)?;
+        let checks = checks_of(self.set, &value, &ty, true)?;
+        self.admit(checks, true, Then::Bind(slot, value))
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn eval(
+        &mut self,
+        expr: &'a Expr,
+        origin: &'a SourceOrigin,
+    ) -> Result<Step<'a>, Halt> {
+        Ok(match expr {
+            Expr::Literal(constant) => self.literal(constant)?,
+            Expr::Intrinsic {
+                intrinsic,
+                type_arguments,
+                arguments,
+            } => self.operands(
+                Work::Intrinsic {
+                    intrinsic: *intrinsic,
+                    type_arguments,
+                    nodes: arguments,
+                    origin,
+                },
+                Vec::new(),
+            )?,
+            Expr::Sequence(statements) => self.sequence(statements)?,
+            Expr::Variable { slot, value_type } => self.read_slot(*slot, value_type)?,
+            Expr::Global(index) => self.global(*index)?,
             Expr::Function {
                 function,
-                signature,
-                ..
-            } => self.function_value(*function, signature)?,
-            _ => return Ok(None),
-        }))
-    }
-
-    /// A module function named as a value, instantiated by the signature
-    /// written at the site.
-    fn function_value(
-        &self,
-        function: usize,
-        signature: &FunctionSignature,
-    ) -> Result<RuntimeValue, Halt> {
-        let mut callable = self.named_callable(function).ok_or(Halt::Invalid)?;
-        let mut bound = TypeMap::new();
-        bind_type(
-            &Type::Function(Box::new(callable.signature().clone())),
-            &self.concrete(&Type::Function(Box::new(signature.clone()))),
-            &mut bound,
-        );
-        *callable.types_mut() = Arc::new(bound);
-        Ok(RuntimeValue::Function(callable))
-    }
-
-    /// Evaluates `child` and then continues with `kont`, without pushing the
-    /// continuation when the child is a leaf.
-    fn then(&mut self, child: &'a Expr, kont: Kont<'a>) -> Result<Step<'a>, Halt> {
-        if let Some(value) = self.leaf(child)? {
-            return self.resume(kont, value);
-        }
-        self.push(kont)?;
-        Ok(Step::Eval(child))
-    }
-
-    fn eval(&mut self, expression: &'a Expr) -> Result<Step<'a>, Halt> {
-        if let Some(value) = self.leaf(expression)? {
-            return Ok(Step::Ret(value));
-        }
-        match expression {
-            Expr::Global { index, .. } => self.global(expression, *index),
-            Expr::Default { .. } => Err(Halt::Invalid),
-            Expr::Sequence { expressions, .. } => self.sequence(expressions),
-            Expr::Let {
-                slot, value, body, ..
-            } => self.then(value, Kont::Let { slot: *slot, body }),
+                type_arguments,
+            } => {
+                let type_arguments = self.frame()?.env.apply_all(type_arguments);
+                let value = Val(Repr::Function(Rc::new(FunctionVal {
+                    function: *function,
+                    type_arguments,
+                })));
+                self.allocated(&value)?;
+                Step::Ret(value)
+            }
+            Expr::Closure { closure, captures } => self.operands(
+                Work::Closure {
+                    body: closure,
+                    nodes: captures,
+                },
+                Vec::new(),
+            )?,
+            Expr::Captured { slot, .. } => {
+                let value = self
+                    .frame()?
+                    .closure
+                    .as_ref()
+                    .and_then(|closure| closure.captures.get(*slot))
+                    .cloned()
+                    .ok_or_else(|| Halt::Invalid(format!("no capture {slot}")))?;
+                Step::Ret(value)
+            }
+            Expr::Let { slot, value, body } => {
+                self.konts.push(Kont::Let { slot: *slot, body });
+                Step::Eval(value)
+            }
+            Expr::LetElse {
+                pattern,
+                value,
+                fallback,
+                body,
+            } => {
+                self.konts.push(Kont::LetElse {
+                    pattern,
+                    fallback,
+                    body,
+                });
+                Step::Eval(value)
+            }
+            Expr::Match { subject, arms, .. } => {
+                self.konts.push(Kont::Match(arms));
+                Step::Eval(subject)
+            }
             Expr::If {
                 condition,
                 then_branch,
                 else_branch,
-                ..
-            } => self.then(
-                condition,
-                Kont::If {
-                    then_branch,
-                    else_branch,
-                },
-            ),
-            Expr::Match {
-                scrutinee, arms, ..
-            } => self.then(scrutinee, Kont::Match { arms }),
-            Expr::Variant { payload, .. } => match payload {
-                Some(payload) => self.then(payload, Kont::Unary { node: expression }),
-                None => self.variant(expression, None),
-            },
-            Expr::Wrap { value, .. }
-            | Expr::Widen { value, .. }
-            | Expr::Try { value, .. }
-            | Expr::Return { value, .. } => {
-                self.then(value, Kont::Unary { node: expression })
-            }
-            Expr::Project { record, .. } => {
-                self.then(record, Kont::Unary { node: expression })
-            }
-            Expr::TupleProject { tuple, .. } => {
-                self.then(tuple, Kont::Unary { node: expression })
-            }
-            Expr::External { .. }
-            | Expr::Host { .. }
-            | Expr::Tuple { .. }
-            | Expr::Array { .. }
-            | Expr::Record { .. }
-            | Expr::Closure { .. }
-            | Expr::Dict { .. }
-            | Expr::Lookup { .. }
-            | Expr::Call { .. } => {
-                let count = operand_count(expression);
-                self.operands(expression, 0, Vec::with_capacity(count))
-            }
-            Expr::Literal { .. }
-            | Expr::Variable { .. }
-            | Expr::Captured { .. }
-            | Expr::Function { .. } => Err(Halt::Invalid),
-        }
-    }
-
-    /// Hands the value an expression produced to the continuation that was
-    /// waiting for it.
-    fn resume(
-        &mut self,
-        kont: Kont<'a>,
-        value: RuntimeValue,
-    ) -> Result<Step<'a>, Halt> {
-        match kont {
-            Kont::End { counted } => {
-                self.leave_frame(counted);
-                Ok(Step::Ret(value))
-            }
-            Kont::Global { node, index } => {
-                let Expr::Global { value_type, .. } = node else {
-                    return Err(Halt::Invalid);
-                };
-                *self.globals.get_mut(index).ok_or(Halt::Invalid)? =
-                    GlobalState::Ready(value.clone());
-                if !admits_value(value_type, &value) {
-                    return Err(Halt::Invalid);
-                }
-                Ok(Step::Ret(value))
-            }
-            Kont::Sequence { rest } => {
-                drop(value);
-                self.sequence(rest)
-            }
-            Kont::Operands {
-                node,
-                next,
-                mut values,
             } => {
-                values.push(value);
-                self.operands(node, next, values)
+                self.konts.push(Kont::If {
+                    then_branch,
+                    else_branch: else_branch.as_deref(),
+                });
+                Step::Eval(condition)
             }
-            Kont::Unary { node } => self.unary(node, value),
-            Kont::Let { slot, body } => {
-                if let Some(slot) = slot {
-                    *self.frame_mut()?.slots.get_mut(slot).ok_or(Halt::Invalid)? =
-                        Some(value);
-                }
-                Ok(Step::Eval(body))
+            Expr::Construct {
+                value_type,
+                construction,
+            } => self.operands(
+                Work::Construct {
+                    value_type,
+                    construction,
+                },
+                Vec::new(),
+            )?,
+            Expr::Field { record, field } => {
+                self.konts.push(Kont::Field(field));
+                Step::Eval(record)
             }
-            Kont::If {
-                then_branch,
-                else_branch,
-            } => match value {
-                RuntimeValue::Primitive(Value::Bool(true)) => {
-                    Ok(Step::Eval(then_branch))
-                }
-                RuntimeValue::Primitive(Value::Bool(false)) => {
-                    Ok(Step::Eval(else_branch))
-                }
-                _ => Err(Halt::Invalid),
-            },
-            Kont::Match { arms } => {
-                for arm in arms {
-                    if pattern_matches(&arm.pattern, &value) {
-                        let frame = self.frame_mut()?;
-                        bind_pattern(&arm.pattern, &value, &mut frame.slots)
-                            .ok_or(Halt::Invalid)?;
-                        return Ok(Step::Eval(&arm.body));
-                    }
-                }
-                Err(Halt::Invalid)
+            Expr::Lookup { collection, key } => {
+                self.operands(Work::Lookup { collection, key }, Vec::new())?
             }
-            Kont::Fold(state) => self.fold_next(state, value),
-            Kont::Compare(state) => self.resume_compare(state, value),
-        }
+            Expr::Call { target, arguments } | Expr::TailCall { target, arguments } => {
+                self.operands(
+                    Work::Call {
+                        target,
+                        arguments,
+                        tail: matches!(expr, Expr::TailCall { .. }),
+                        origin,
+                    },
+                    Vec::new(),
+                )?
+            }
+            Expr::Return(value) => {
+                self.konts.push(Kont::Return);
+                Step::Eval(value)
+            }
+            Expr::Try(value) => {
+                self.konts.push(Kont::Try);
+                Step::Eval(value)
+            }
+            Expr::WidenToInterface { value, .. } => {
+                let held_type = self.frame()?.env.apply(&type_of(self.set, value)?);
+                self.konts.push(Kont::Widen(held_type));
+                Step::Eval(value)
+            }
+            Expr::WidenAtom(value) => Step::Eval(value),
+            Expr::Default(_) => {
+                return invalid("a default outside a labelled argument");
+            }
+        })
     }
 
-    /// A sequence: the leading expressions for their effects on the frame,
-    /// then the last as the value, in tail position.
-    fn sequence(&mut self, expressions: &'a [Expr]) -> Result<Step<'a>, Halt> {
-        match expressions {
-            [] => Ok(Step::Ret(RuntimeValue::Primitive(Value::Void))),
-            [last] => Ok(Step::Eval(last)),
-            [first, rest @ ..] => {
-                self.push(Kont::Sequence { rest })?;
+    fn sequence(&mut self, statements: &'a [Node]) -> Result<Step<'a>, Halt> {
+        match statements.split_first() {
+            None => invalid("an empty sequence"),
+            Some((last, [])) => Ok(Step::Eval(last)),
+            Some((first, rest)) => {
+                self.konts.push(Kont::Sequence(rest));
                 Ok(Step::Eval(first))
             }
         }
     }
 
-    /// Evaluates the operands of `node` from `next` on, left to right, and
-    /// then `node` itself.
+    fn global(&mut self, index: usize) -> Result<Step<'a>, Halt> {
+        if matches!(self.mode, Mode::Evaluate) {
+            self.reads.module_values.insert(index);
+        }
+        let set = self.set;
+        let global = set
+            .globals()
+            .get(index)
+            .ok_or_else(|| Halt::Invalid(format!("no module value {index}")))?;
+        let state = self
+            .globals
+            .get_mut(index)
+            .ok_or_else(|| Halt::Invalid(format!("no module value {index}")))?;
+        match state {
+            GlobalState::Ready(value) => Ok(Step::Ret(value.clone())),
+            GlobalState::Evaluating => invalid(format!(
+                "the module value `{}` is read while it is being evaluated",
+                global.name
+            )),
+            GlobalState::Unread => {
+                *state = GlobalState::Evaluating;
+                self.stats.module_value_initializations =
+                    self.stats.module_value_initializations.saturating_add(1);
+                self.konts.push(Kont::Global(index));
+                let env = Rc::clone(&self.empty_env);
+                let frame = self.new_frame(global.slot_count, env, &[])?;
+                self.frame_bytes = self.frame_bytes.saturating_add(frame_cost(&frame));
+                self.frames.push(frame);
+                self.check_memory()?;
+                Ok(Step::Eval(&global.initializer))
+            }
+        }
+    }
+
+    /// Evaluates the operands of `work` from the first not yet `done`.
     fn operands(
         &mut self,
-        node: &'a Expr,
-        next: usize,
-        mut values: Vec<RuntimeValue>,
+        work: Work<'a>,
+        mut done: Vec<Val<'a>>,
     ) -> Result<Step<'a>, Halt> {
-        let count = operand_count(node);
-        let mut next = next;
-        while next < count {
-            let operand = operand_at(node, next).ok_or(Halt::Invalid)?;
-            if matches!(operand, Expr::Default { .. }) {
-                let default = self.default_argument(node, next, &values)?;
-                values.push(default);
-            } else if let Some(value) = self.leaf(operand)? {
-                values.push(value);
-            } else {
-                self.push(Kont::Operands {
-                    node,
-                    next: next + 1,
-                    values,
-                })?;
-                return Ok(Step::Eval(operand));
+        while let Some(node) = work.node(done.len()) {
+            if matches!(node.expr, Expr::Default(_)) {
+                // Resolved from the callee when the call is made.
+                done.push(Val::void());
+                continue;
             }
-            next += 1;
+            self.konts.push(Kont::Operands { work, done });
+            return Ok(Step::Eval(node));
         }
-        self.finish(node, values)
+        self.finish(work, done)
     }
 
-    /// The value of an omitted labelled argument: the default its callee's
-    /// signature declares, resolved at run time from the evaluated callee.
-    fn default_argument(
-        &self,
-        node: &'a Expr,
-        operand: usize,
-        values: &[RuntimeValue],
-    ) -> Result<RuntimeValue, Halt> {
-        let Expr::Call {
-            target, arguments, ..
-        } = node
-        else {
-            return Err(Halt::Invalid);
-        };
-        let program = self.program;
-        let (signature, argument_index) = match target {
-            CallTarget::Direct(function) => (
-                program
-                    .functions()
-                    .get(*function)
-                    .ok_or(Halt::Invalid)?
-                    .signature(),
-                operand,
-            ),
-            CallTarget::Indirect { .. } => match values.first() {
-                Some(RuntimeValue::Function(callable)) => (
-                    callable.signature(),
-                    operand.checked_sub(1).ok_or(Halt::Invalid)?,
-                ),
-                _ => return Err(Halt::Invalid),
-            },
-            CallTarget::Contract { .. } => return Err(Halt::Invalid),
-        };
-        let argument = arguments.get(argument_index).ok_or(Halt::Invalid)?;
-        let positional = signature.parameters().len();
-        let parameter = signature
-            .labelled()
-            .get(
-                argument_index
-                    .checked_sub(positional)
-                    .ok_or(Halt::Invalid)?,
-            )
-            .ok_or(Halt::Invalid)?;
-        let default = parameter.default().ok_or(Halt::Invalid)?;
-        let atom_default =
-            matches!(default, vibra_ir::Constant::Primitive(Value::Atom(_)))
-                && argument.result_type() == Type::Atom;
-        if !atom_default && !default.value_type().same_shape(&argument.result_type()) {
-            return Err(Halt::Invalid);
-        }
-        crate::constant_value(self.program, default).ok_or(Halt::Invalid)
-    }
-
-    /// Builds the value of `node` once its operands are evaluated.
-    fn finish(
-        &mut self,
-        node: &'a Expr,
-        values: Vec<RuntimeValue>,
-    ) -> Result<Step<'a>, Halt> {
-        match node {
-            Expr::External {
-                intrinsic, result, ..
-            } => {
-                let result = self.concrete(result);
-                self.external(*intrinsic, values, &result)
-            }
-            Expr::Host { row, result, .. } => {
-                let result = self.concrete(result);
-                self.host_call(row.symbol, &values, &result)
-            }
-            Expr::Tuple { value_type, .. } => {
-                let value = RuntimeValue::Tuple {
-                    value_type: self.concrete(value_type),
-                    values: values.into(),
-                };
-                self.fresh(value)
-            }
-            Expr::Array { value_type, .. } => {
-                let value = RuntimeValue::Array {
-                    value_type: self.concrete(value_type),
-                    values: values.into(),
-                };
-                self.fresh(value)
-            }
-            Expr::Record {
-                value_type, fields, ..
-            } => {
-                let value_type = self.concrete(value_type);
-                self.record(&value_type, fields, values)
-            }
-            Expr::Closure { .. } => self.closure(node, values),
-            Expr::Dict { .. } => self.dict(node, values),
-            Expr::Lookup { .. } => self.lookup_entry(node, values),
-            Expr::Call { .. } => self.call(node, values),
-            _ => Err(Halt::Invalid),
-        }
-    }
-
-    /// Builds the value of a node with one operand, now evaluated.
-    fn unary(&mut self, node: &'a Expr, value: RuntimeValue) -> Result<Step<'a>, Halt> {
-        match node {
-            Expr::Variant { .. } => self.variant(node, Some(value)),
-            Expr::Wrap { value_type, .. } => {
-                // `str` and `bytes` are represented directly over their items.
-                if let Some(represented) = representation_of(value_type, &value) {
-                    return self.fresh(represented);
-                }
-                let wrapper = RuntimeValue::Wrapper {
-                    value_type: self.concrete(value_type),
-                    value: value.into(),
-                };
-                self.fresh(wrapper)
-            }
-            Expr::Widen {
-                value_type,
-                value: operand,
-                member,
+    fn finish(&mut self, work: Work<'a>, done: Vec<Val<'a>>) -> Result<Step<'a>, Halt> {
+        match work {
+            Work::Intrinsic {
+                intrinsic,
+                type_arguments,
+                origin,
                 ..
             } => {
-                let union_type = self.concrete(value_type);
-                // The canonical encoding names the member the discriminant
-                // selects (`06-runtime.md`, "Canonical value encoding"), which
-                // is the union's declared member and not the type of the value
-                // widened into it.
-                let member_type = member
-                    .and_then(|index| self.declared_member(&union_type, index))
-                    .unwrap_or_else(|| self.concrete(&operand.result_type()));
-                match member {
-                    // Atom and interface widening are erased: a value keeps
-                    // its own type, which selects its implementations.
-                    None => Ok(Step::Ret(value)),
-                    Some(member) => {
-                        let union = RuntimeValue::Union {
-                            value_type: self.concrete(value_type),
-                            member: *member,
-                            member_type: Rc::new(member_type),
-                            value: value.into(),
-                        };
-                        self.fresh(union)
-                    }
-                }
+                let type_arguments = self.frame()?.env.apply_all(type_arguments);
+                self.intrinsic(intrinsic, &type_arguments, done, origin)
             }
-            Expr::Try { exit_type, .. } => {
-                // `try`: the payload of `some` or `ok`, or an early exit that
-                // rebuilds `none` or `err` at the enclosing result type and
-                // leaves the innermost function or `lambda`.
-                let exit_type = self.concrete(exit_type);
-                let RuntimeValue::Enum {
-                    variant, payload, ..
-                } = value
+            Work::Closure { body, .. } => {
+                let env = self.env()?;
+                let value = Val(Repr::Closure(Rc::new(ClosureVal {
+                    body,
+                    captures: done,
+                    env,
+                })));
+                self.allocated(&value)?;
+                let mut checks = Vec::new();
+                for (_, default) in &body.defaults {
+                    self.constant_checks(default, &mut checks)?;
+                }
+                self.admit(checks, false, Then::Ret(value))
+            }
+            Work::Lookup { collection, .. } => {
+                let mut done = done.into_iter();
+                let (Some(collection_value), Some(key)) = (done.next(), done.next())
                 else {
-                    return Err(Halt::Invalid);
+                    return invalid("a lookup without its operands");
                 };
-                match variant.as_str() {
-                    // A nullary success carries the `void` value.
-                    vocabulary::SOME | vocabulary::OK => Ok(Step::Ret(payload.map_or(
-                        RuntimeValue::Primitive(Value::Void),
-                        Inner::into_value,
-                    ))),
-                    vocabulary::NONE | vocabulary::ERR => {
-                        let early = RuntimeValue::Enum {
-                            value_type: exit_type,
-                            variant,
-                            payload,
-                        };
-                        self.exit(early)
-                    }
-                    _ => Err(Halt::Invalid),
+                if let Repr::Dict(dict) = &collection_value.0 {
+                    let key_type = dict.key.clone();
+                    let _ = collection;
+                    return self.dict_find(Rc::clone(dict), key, &key_type);
                 }
+                let found =
+                    intrinsics::lookup(&collection_value, &key).ok_or_else(|| {
+                        Halt::Invalid("a lookup on a value that has none".to_owned())
+                    })?;
+                self.allocated(&found)?;
+                Ok(Step::Ret(found))
             }
-            Expr::Return { .. } => self.exit(value),
-            Expr::Project { field, .. } => {
-                let RuntimeValue::Record { fields, .. } = &value else {
-                    return Err(Halt::Invalid);
-                };
+            Work::Construct {
+                value_type,
+                construction,
+            } => self.construct(value_type, construction, done),
+            Work::Call {
+                target,
+                arguments,
+                tail,
+                origin,
+            } => self.call(target, arguments, tail, origin, done),
+        }
+    }
+
+    // ----- construction -----
+
+    fn construct(
+        &mut self,
+        value_type: &'a Type,
+        construction: &'a Construction,
+        done: Vec<Val<'a>>,
+    ) -> Result<Step<'a>, Halt> {
+        let set = self.set;
+        let value_type = self.frame()?.env.apply(value_type);
+        let library = set.library();
+        let role = match &value_type {
+            Type::Declared(id, _) => library.library_of(id),
+            _ => None,
+        };
+        // The operand an invariant's predicate takes: the representation.
+        let mut representation = None;
+        let value = match (construction, role) {
+            (Construction::Dict(_), Some(Library::Dict)) => {
+                let key = dict_key(&value_type)?;
+                let mut entries = Vec::with_capacity(done.len() / 2);
+                let mut done = done.into_iter();
+                while let (Some(key), Some(value)) = (done.next(), done.next()) {
+                    entries.push((key, value));
+                }
+                return self.dict_build(key, entries);
+            }
+            (Construction::Wrapper(_), Some(Library::Str)) => {
+                intrinsics::apply(CompilerIntrinsic::StrFromChars, &[single(done)?])?
+            }
+            (Construction::Wrapper(_), Some(Library::Bytes)) => {
+                intrinsics::apply(CompilerIntrinsic::BytesFromList, &[single(done)?])?
+            }
+            (Construction::Wrapper(_), _) => {
+                let inner = single(done)?;
+                representation = Some(inner.clone());
+                Val(Repr::Wrapper(Rc::new(inner)))
+            }
+            (Construction::Tuple(_), _) => Val::tuple(done),
+            (Construction::List(_), _) => Val::list(done),
+            (Construction::Record(fields), _) => Val(Repr::Record(Rc::new(
                 fields
                     .iter()
-                    .find(|(name, _)| name == field)
-                    .map(|(_, field)| Step::Ret(field.clone()))
-                    .ok_or(Halt::Invalid)
+                    .map(|(name, _)| name.as_str())
+                    .zip(done)
+                    .collect(),
+            ))),
+            (Construction::Case { case, .. }, Some(Library::Bool)) => {
+                Val::boolean(case == "true")
             }
-            Expr::TupleProject { index, .. } => {
-                let RuntimeValue::Tuple { values, .. } = &value else {
-                    return Err(Halt::Invalid);
-                };
-                values
-                    .get(*index)
-                    .map(|component| Step::Ret(component.clone()))
-                    .ok_or(Halt::Invalid)
-            }
-            _ => Err(Halt::Invalid),
-        }
-    }
-
-    /// An enum variant with its payload, when it has one.
-    fn variant(
-        &mut self,
-        node: &'a Expr,
-        payload: Option<RuntimeValue>,
-    ) -> Result<Step<'a>, Halt> {
-        let Expr::Variant {
-            value_type,
-            variant,
-            ..
-        } = node
-        else {
-            return Err(Halt::Invalid);
-        };
-        // A `void` payload is no payload: a generic slot instantiated to
-        // `void` builds the same nullary value a written one does.
-        let value = RuntimeValue::Enum {
-            value_type: self.concrete(value_type),
-            variant: variant.clone(),
-            payload: payload.and_then(present_payload),
-        };
-        self.fresh(value)
-    }
-
-    /// A record, with its fields evaluated in their checked order and stored
-    /// in the order of the record type.
-    fn record(
-        &mut self,
-        value_type: &Type,
-        fields: &'a [(String, Expr)],
-        values: Vec<RuntimeValue>,
-    ) -> Result<Step<'a>, Halt> {
-        let mut named: Vec<(String, RuntimeValue)> = fields
-            .iter()
-            .map(|(name, _)| name.clone())
-            .zip(values)
-            .collect();
-        let order: Vec<&str> = match value_type {
-            Type::Record(members) => {
-                members.iter().map(|(name, _)| name.as_str()).collect()
-            }
-            Type::Declared(id) | Type::Applied(id, _) => self
-                .program
-                .types()
-                .iter()
-                .find(|definition| definition.id() == id)
-                .and_then(|definition| definition.record_fields())
-                .ok_or(Halt::Invalid)?
-                .iter()
-                .map(|(name, _)| name.as_str())
-                .collect(),
-            _ => return Err(Halt::Invalid),
-        };
-        named.sort_by_key(|(name, _)| order.iter().position(|member| member == name));
-        let record = RuntimeValue::Record {
-            value_type: value_type.clone(),
-            fields: named.into(),
-        };
-        self.fresh(record)
-    }
-
-    /// A `lambda` over the values its captures evaluated to.
-    fn closure(
-        &mut self,
-        node: &'a Expr,
-        environment: Vec<RuntimeValue>,
-    ) -> Result<Step<'a>, Halt> {
-        let Expr::Closure {
-            signature,
-            body,
-            slot_count,
-            ..
-        } = node
-        else {
-            return Err(Halt::Invalid);
-        };
-        // The closure runs at the type arguments of the activation that made
-        // it; its own generic parameters are fixed by each call.
-        let types = self.current_types();
-        let signature = if types.is_empty() {
-            signature.clone()
-        } else {
-            signature.substitute(&types)
-        };
-        let body = self.intern(body);
-        let closure = RuntimeValue::Function(Callable::Lambda {
-            signature: Arc::new(signature),
-            slot_count: *slot_count,
-            body,
-            captures: environment.into(),
-            types,
-        });
-        self.fresh(closure)
-    }
-
-    /// The id of a closure body, registered the first time it is seen.
-    fn intern(&mut self, body: &'a Arc<Expr>) -> LambdaId {
-        let address = Arc::as_ptr(body).addr();
-        if let Some(id) = self.lambda_ids.get(&address) {
-            return LambdaId(*id);
-        }
-        let id = self.lambdas.len();
-        self.lambdas.push(&**body);
-        self.lambda_ids.insert(address, id);
-        LambdaId(id)
-    }
-
-    fn lambda_body(&self, id: LambdaId) -> Result<&'a Expr, Halt> {
-        self.lambdas.get(id.0).copied().ok_or(Halt::Invalid)
-    }
-
-    // -----------------------------------------------------------------
-    // Module values.
-    // -----------------------------------------------------------------
-
-    /// A module value: read once initialized, otherwise its initializer runs
-    /// as an activation of its own with no type arguments.
-    fn global(&mut self, node: &'a Expr, index: usize) -> Result<Step<'a>, Halt> {
-        let Expr::Global { value_type, .. } = node else {
-            return Err(Halt::Invalid);
-        };
-        let ready = match self.globals.get(index).ok_or(Halt::Invalid)? {
-            GlobalState::Ready(value) => Some(value.clone()),
-            GlobalState::Evaluating => return Err(Halt::Invalid),
-            GlobalState::Uninitialized => None,
-        };
-        if let Some(value) = ready {
-            if !admits_value(value_type, &value) {
-                return Err(Halt::Invalid);
-            }
-            return Ok(Step::Ret(value));
-        }
-        *self.globals.get_mut(index).ok_or(Halt::Invalid)? = GlobalState::Evaluating;
-        let program = self.program;
-        let global = program.globals().get(index).ok_or(Halt::Invalid)?;
-        self.push(Kont::Global { node, index })?;
-        self.push_frame(
-            Frame {
-                slots: vec![None; global.slot_count()],
-                captures: self.no_captures.clone(),
-                types: Arc::clone(&self.no_types),
-                initializer: Some(index),
-            },
-            false,
-        )?;
-        Ok(Step::Eval(global.initializer()))
-    }
-
-    // -----------------------------------------------------------------
-    // Collections and compiler intrinsics.
-    // -----------------------------------------------------------------
-
-    /// A `dict`: its entries inserted in canonical key order, where a repeated
-    /// key keeps its first position and takes the later value.
-    fn dict(
-        &mut self,
-        node: &'a Expr,
-        values: Vec<RuntimeValue>,
-    ) -> Result<Step<'a>, Halt> {
-        let Expr::Dict {
-            value_type,
-            key_order,
-            ..
-        } = node
-        else {
-            return Err(Halt::Invalid);
-        };
-        let mut pairs = Vec::with_capacity(values.len() / 2);
-        let mut operands = values.into_iter();
-        while let (Some(key), Some(value)) = (operands.next(), operands.next()) {
-            pairs.push((key, value));
-        }
-        let value_type = self.concrete(value_type);
-        self.start_build(pairs, key_order.clone(), value_type)
-    }
-
-    /// A lookup, which never traps and answers with the standard `option`.
-    fn lookup_entry(
-        &mut self,
-        node: &'a Expr,
-        values: Vec<RuntimeValue>,
-    ) -> Result<Step<'a>, Halt> {
-        let Expr::Lookup {
-            value_type,
-            key_order,
-            ..
-        } = node
-        else {
-            return Err(Halt::Invalid);
-        };
-        let mut operands = values.into_iter();
-        let (Some(collection), Some(key), None) =
-            (operands.next(), operands.next(), operands.next())
-        else {
-            return Err(Halt::Invalid);
-        };
-        if let RuntimeValue::Dict { entries, .. } = &collection {
-            let value_type = self.concrete(value_type);
-            return self.start_lookup(
-                entries.clone(),
-                key,
-                key_order.clone(),
-                value_type,
-            );
-        }
-        let found = lookup(&collection, &key);
-        let entry = RuntimeValue::Enum {
-            value_type: self.concrete(value_type),
-            variant: vocabulary::option_variant(found.is_some()).to_owned(),
-            payload: found.and_then(present_payload),
-        };
-        self.fresh(entry)
-    }
-
-    /// The `ordered` interface of `@std.core`, when the program holds an
-    /// implementation of it.
-    fn ordered_interface(&self) -> Option<TypeId> {
-        self.program.functions().iter().find_map(|function| {
-            function
-                .implements()
-                .filter(|implements| {
-                    implements.member == "compare"
-                        && implements.interface.path() == "std.core.ordered"
-                })
-                .map(|implements| implements.interface.clone())
-        })
-    }
-
-    /// The `compare` implementation of the `ordered` interface `interface`
-    /// whose receiver is the declared type of `value`.
-    fn key_compare_function(
-        &self,
-        interface: &TypeId,
-        value: &RuntimeValue,
-    ) -> Option<usize> {
-        let value_type = match value {
-            RuntimeValue::Record { value_type, .. }
-            | RuntimeValue::Enum { value_type, .. }
-            | RuntimeValue::Wrapper { value_type, .. }
-            | RuntimeValue::Tuple { value_type, .. }
-            | RuntimeValue::Union { value_type, .. } => value_type,
-            _ => return None,
-        };
-        if !matches!(value_type, Type::Declared(_) | Type::Applied(_, _)) {
-            return None;
-        }
-        self.program.functions().iter().position(|function| {
-            function.implements().is_some_and(|implements| {
-                implements.interface == *interface
-                    && implements.member == "compare"
-                    && !matches!(implements.receiver, Type::Param(_))
-                    && admits_value(&implements.receiver, value)
-            })
-        })
-    }
-
-    /// The callable of module function `function`, whose signature is shared
-    /// by every callable of it.
-    fn named_callable(&self, function: usize) -> Option<Callable> {
-        Some(Callable::Named {
-            index: function,
-            signature: Arc::clone(&self.info(function)?.signature),
-            captures: self.no_captures.clone(),
-            types: Arc::clone(&self.no_types),
-        })
-    }
-
-    /// What a call checks of module function `function`'s signature, worked
-    /// out the first time it is called.
-    fn info(&self, function: usize) -> Option<Rc<SignatureInfo>> {
-        let mut signatures = self.signatures.borrow_mut();
-        let slot = signatures.get_mut(function)?;
-        if slot.is_none() {
-            let signature =
-                Arc::new(self.program.functions().get(function)?.signature().clone());
-            *slot = Some(Rc::new(SignatureInfo::new(signature)));
-        }
-        slot.clone()
-    }
-
-    /// What a call checks of `callable`'s signature.
-    fn call_info(&self, callable: &Callable) -> Option<Rc<SignatureInfo>> {
-        match callable {
-            Callable::Named { index, .. } => self.info(*index),
-            Callable::Lambda { signature, .. } => {
-                Some(Rc::new(SignatureInfo::new(Arc::clone(signature))))
-            }
-        }
-    }
-
-    /// The implementation member `function` for `receiver`, at the type
-    /// arguments the receiver's own type fixes.
-    fn implementation_callable(
-        &self,
-        function: usize,
-        receiver: &RuntimeValue,
-    ) -> Option<Callable> {
-        let mut callable = self.named_callable(function)?;
-        if let Some(implements) = self.program.functions().get(function)?.implements() {
-            let mut bound = TypeMap::new();
-            bind_type(&implements.receiver, &runtime_type(receiver), &mut bound);
-            *callable.types_mut() = Arc::new(bound);
-        }
-        Some(callable)
-    }
-
-    /// A host operation on evaluated operands: read by `vibra-host`, performed
-    /// by the run's provider, recorded as an audit event once it completed, and
-    /// built into the `(result t e)` value. Memory exhaustion of the provider is
-    /// the host event and records nothing.
-    fn host_call(
-        &mut self,
-        symbol: &str,
-        values: &[RuntimeValue],
-        result: &Type,
-    ) -> Result<Step<'a>, Halt> {
-        let program = self.program;
-        let mut access = crate::host::Values::new(result, program.types());
-        let call =
-            HostCall::read(symbol, values, &mut access).map_err(|_| Halt::Invalid)?;
-        let reply = perform(&call, &mut *self.host).map_err(|_| Halt::Memory)?;
-        self.audit.push(AuditEvent::completed(&call, &reply));
-        let value = build_reply(&reply, &mut access);
-        self.fresh(value)
-    }
-
-    /// A call of a compiler intrinsic on evaluated operands.
-    fn external(
-        &mut self,
-        intrinsic: CompilerIntrinsic,
-        values: Vec<RuntimeValue>,
-        result: &Type,
-    ) -> Result<Step<'a>, Halt> {
-        match intrinsic {
-            // The packed variadic tail is already the built collection.
-            CompilerIntrinsic::ArrayOf | CompilerIntrinsic::DictOf => {
-                let mut values = values;
-                return match (values.pop(), values.is_empty()) {
-                    (Some(tail), true) => Ok(Step::Ret(vibra_native::identity(tail))),
-                    _ => Err(Halt::Invalid),
-                };
-            }
-            CompilerIntrinsic::ArrayFold => return self.fold_start(values, result),
-            _ => {}
-        }
-        // An unchecked quotient or remainder with a zero divisor traps.
-        if let (
-            CompilerIntrinsic::Integer(_, IntegerOp::Div | IntegerOp::Rem),
-            [_, RuntimeValue::Primitive(divisor)],
-        ) = (intrinsic, values.as_slice())
-            && registry::integer_value(divisor) == Some(0)
-        {
-            return Err(Halt::DivisionByZero);
-        }
-        let value = match (intrinsic, values.as_slice()) {
-            (CompilerIntrinsic::ArrayLength, [RuntimeValue::Array { values, .. }]) => {
-                RuntimeValue::Primitive(Value::U64(values.len() as u64))
-            }
-            _ => registry::apply(intrinsic, &values, result).ok_or(Halt::Invalid)?,
-        };
-        self.fresh(value)
-    }
-
-    /// `array.fold`: the first step call, with the rest left to a
-    /// continuation.
-    fn fold_start(
-        &mut self,
-        values: Vec<RuntimeValue>,
-        result: &Type,
-    ) -> Result<Step<'a>, Halt> {
-        let mut operands = values.into_iter();
-        let (Some(array), Some(initial), Some(step), None) = (
-            operands.next(),
-            operands.next(),
-            operands.next(),
-            operands.next(),
-        ) else {
-            return Err(Halt::Invalid);
-        };
-        let RuntimeValue::Array { values: items, .. } = &array else {
-            return Err(Halt::Invalid);
-        };
-        let step = step.into_callable().ok_or(Halt::Invalid)?;
-        let state = Box::new(FoldState {
-            items: items.clone(),
-            next: 0,
-            step,
-            result: result.clone(),
-        });
-        self.fold_next(state, initial)
-    }
-
-    /// Calls the step of a fold with the accumulator so far and the next
-    /// element, or finishes with the accumulator when none remain.
-    fn fold_next(
-        &mut self,
-        mut state: Box<FoldState>,
-        accumulator: RuntimeValue,
-    ) -> Result<Step<'a>, Halt> {
-        let Some(element) = state.items.get(state.next).cloned() else {
-            return Ok(Step::Ret(accumulator));
-        };
-        state.next += 1;
-        let callable = state.step.clone();
-        let result = state.result.clone();
-        self.push(Kont::Fold(state))?;
-        self.invoke(callable, vec![accumulator, element], &result)
-    }
-
-    // -----------------------------------------------------------------
-    // Calls.
-    // -----------------------------------------------------------------
-
-    /// Extends `callable`'s type arguments with the ones this call fixes: its
-    /// signature against the instantiated types of the operands and result.
-    /// A parameter typed as an interface value takes the type its operand
-    /// holds, which is what the callee's own contract calls dispatch on.
-    fn bind_call(
-        &self,
-        callable: &mut Callable,
-        arguments: &[Expr],
-        values: &[RuntimeValue],
-        result: &Type,
-    ) {
-        let Some(info) = self.call_info(callable) else {
-            return;
-        };
-        if !info.generic {
-            return;
-        }
-        let mut bound = TypeMap::clone(callable.types_mut());
-        for (index, pattern) in info.slots.iter().enumerate() {
-            let Some(argument) = arguments.get(index) else {
-                continue;
-            };
-            let written = self.concrete(&argument.result_type());
-            let actual = match (pattern, &written, values.get(index)) {
-                (Type::Param(_), Type::Interface(_, _) | Type::Any, Some(value)) => {
-                    runtime_type(value)
+            (Construction::Case { case, .. }, Some(Library::Option)) => {
+                match case.as_str() {
+                    "none" => Val::none(),
+                    _ => Val::some(single(done)?),
                 }
-                _ => written,
+            }
+            (Construction::Case { case, fields }, _) => Val::case(
+                case,
+                fields
+                    .iter()
+                    .map(|(name, _)| name.as_str())
+                    .zip(done)
+                    .collect(),
+            ),
+            (Construction::Dict(_), _) => {
+                return invalid("a dict literal of a non-dict type");
+            }
+        };
+        self.allocated(&value)?;
+        if let Type::Declared(id, arguments) = &value_type
+            && let Some(invariant) =
+                set.types().definition(id).and_then(|d| d.invariant())
+            && let Some(consequence) = &invariant.consequence
+        {
+            self.konts.push(Kont::Invariant {
+                value: value.clone(),
+                consequence,
+            });
+            let resolved = Resolved {
+                target: Target::Function(invariant.predicate),
+                env: Rc::new(TypeEnv::of(arguments.clone())),
             };
-            bind_type(pattern, &actual, &mut bound);
+            let origin = self.origin;
+            let operand = representation.unwrap_or_else(|| value.clone());
+            return self.invoke(resolved, vec![operand], false, origin);
         }
-        bind_type(&info.result, &self.concrete(result), &mut bound);
-        *callable.types_mut() = Arc::new(bound);
+        Ok(Step::Ret(value))
     }
 
-    /// A call whose operands are evaluated.
+    // ----- calls -----
+
     fn call(
         &mut self,
-        node: &'a Expr,
-        values: Vec<RuntimeValue>,
+        target: &'a CallTarget,
+        arguments: &'a Arguments,
+        tail: bool,
+        origin: &'a SourceOrigin,
+        done: Vec<Val<'a>>,
     ) -> Result<Step<'a>, Halt> {
-        let Expr::Call {
-            target,
-            arguments,
-            result,
-            tail,
-            origin,
-        } = node
-        else {
-            return Err(Halt::Invalid);
+        let mut values = done.into_iter();
+        let callee = match target {
+            CallTarget::Value(_) => Some(values.next().ok_or_else(|| {
+                Halt::Invalid("a call without its callee".to_owned())
+            })?),
+            _ => None,
         };
-        // A contract call selects its implementation from the receiver's
-        // runtime type, after every operand is evaluated.
-        if let CallTarget::Contract { .. } = target {
-            return self.contract_call(target, arguments, result, *tail, values);
-        }
-        let mut values = values;
-        let mut callable = match target {
-            CallTarget::Direct(function) => {
-                self.named_callable(*function).ok_or(Halt::Invalid)?
-            }
-            CallTarget::Indirect { .. } => {
-                if values.is_empty() {
-                    return Err(Halt::Invalid);
+        let positional = arguments.positional.len();
+        let mut args: Vec<Val<'a>> = values.by_ref().take(positional).collect();
+        let written: Vec<Val<'a>> = values.collect();
+        let mut rebox = None;
+        let resolved = match (target, callee) {
+            (
+                CallTarget::Direct {
+                    function,
+                    type_arguments,
+                },
+                _,
+            ) => {
+                let type_arguments = self.frame()?.env.apply_all(type_arguments);
+                Resolved {
+                    target: Target::Function(*function),
+                    env: self.env_of(type_arguments),
                 }
-                let callee = values.remove(0);
-                callee.into_callable().ok_or(Halt::Invalid)?
             }
-            CallTarget::Contract { .. } => return Err(Halt::Invalid),
+            (CallTarget::Value(_), Some(callee)) => self.resolve_value(&callee)?,
+            (CallTarget::Contract(call), _) => {
+                let env = self.env()?;
+                let receiver = env.apply(&call.receiver);
+                let interface_arguments = env.apply_all(&call.arguments);
+                let member_arguments = env.apply_all(&call.member_arguments);
+                if receiver.is_interface_value() {
+                    let (held_type, result) = self.unbox(
+                        &call.interface,
+                        &call.member,
+                        &mut args,
+                        &interface_arguments,
+                        &member_arguments,
+                        &env.apply_all_named(&call.choices)?,
+                    )?;
+                    // Reboxing is work after the return, so only a result
+                    // that holds `Self` keeps the call out of tail position.
+                    if mentions_self(&result) {
+                        rebox = Some((result, held_type.clone()));
+                    }
+                    self.dispatch(
+                        &call.interface,
+                        &call.member,
+                        &held_type,
+                        &interface_arguments,
+                        &member_arguments,
+                    )?
+                } else {
+                    self.dispatch(
+                        &call.interface,
+                        &call.member,
+                        &receiver,
+                        &interface_arguments,
+                        &member_arguments,
+                    )?
+                }
+            }
+            (CallTarget::Value(_), None) => {
+                return invalid("a call without its callee");
+            }
         };
-        self.bind_call(&mut callable, arguments, &values, result);
-        if let Callable::Named { index, .. } = &callable
-            && let Some(assertion) = self
-                .program
-                .functions()
-                .get(*index)
-                .and_then(|function| function.test_assertion())
-        {
-            if !self.test_mode {
-                return Err(Halt::Invalid);
+        if !written.is_empty() {
+            let mut order: Vec<usize> = (0..written.len()).collect();
+            order.sort_by(|left, right| {
+                let name = |index: &usize| {
+                    arguments
+                        .labelled
+                        .get(*index)
+                        .map_or("", |(label, _)| label.as_str())
+                };
+                name(left).cmp(name(right))
+            });
+            let mut labelled: Vec<Option<Val<'a>>> =
+                written.into_iter().map(Some).collect();
+            for index in order {
+                let (label, node) = arguments.labelled.get(index).ok_or_else(|| {
+                    Halt::Invalid("a labelled argument out of range".to_owned())
+                })?;
+                let value = if matches!(node.expr, Expr::Default(_)) {
+                    self.default_of(&resolved.target, label)?
+                } else {
+                    labelled
+                        .get_mut(index)
+                        .and_then(Option::take)
+                        .ok_or_else(|| {
+                            Halt::Invalid("a labelled argument used twice".to_owned())
+                        })?
+                };
+                args.push(value);
             }
-            let operand_types = arguments
-                .iter()
-                .map(|argument| self.concrete(&argument.result_type()))
-                .collect::<Vec<_>>();
-            let value = self
-                .invoke_test_assertion(
-                    assertion,
-                    values,
-                    origin.clone(),
-                    &operand_types,
-                )
-                .ok_or(Halt::Invalid)?;
-            return if self.assertion_failure.is_some() {
-                Err(Halt::Assertion)
-            } else {
-                Ok(Step::Ret(value))
-            };
         }
-        self.dispatch(callable, values, result, *tail)
+        let tail = tail && rebox.is_none() && self.prepare_tail();
+        if let Some((result, held_type)) = rebox {
+            self.konts.push(Kont::Rebox { result, held_type });
+        }
+        self.invoke(resolved, args, tail, Some(origin))
     }
 
-    /// A call of a contract member, dispatched from the runtime type of its
-    /// receiver.
-    fn contract_call(
+    pub(crate) fn env_of(&self, binders: Vec<Type>) -> Rc<TypeEnv> {
+        if binders.is_empty() {
+            Rc::clone(&self.empty_env)
+        } else {
+            Rc::new(TypeEnv::of(binders))
+        }
+    }
+
+    /// The callable a function value or a closure runs.
+    pub(crate) fn resolve_value(&self, callee: &Val<'a>) -> Result<Resolved<'a>, Halt> {
+        match &callee.0 {
+            Repr::Function(function) => Ok(Resolved {
+                target: Target::Function(function.function),
+                env: self.env_of(function.type_arguments.clone()),
+            }),
+            Repr::Closure(closure) => Ok(Resolved {
+                target: Target::Closure(Rc::clone(closure)),
+                env: Rc::clone(&closure.env),
+            }),
+            _ => invalid("a call of a value that is not callable"),
+        }
+    }
+
+    /// The value of the default of `label` that the resolved callee, a
+    /// function or a closure value, carries.
+    fn default_of(
         &mut self,
-        target: &'a CallTarget,
-        arguments: &'a [Expr],
-        result: &Type,
-        tail: bool,
-        values: Vec<RuntimeValue>,
-    ) -> Result<Step<'a>, Halt> {
-        let CallTarget::Contract {
-            interface,
-            member,
-            receiver,
-            arguments: interface_arguments,
-            member_types,
-            destination,
-            closed,
-            ..
-        } = target
-        else {
-            return Err(Halt::Invalid);
-        };
-        // The implementation is the one whose receiver and interface
-        // arguments both match, at one binding of its own parameters: a
-        // receiver may implement a generic interface more than once.
-        // A member selected by its destination dispatches on that type, at
-        // this activation's type arguments.
-        let receiver_type = match destination {
-            Some(destination) => self.concrete(destination),
-            None => runtime_type(values.get(*receiver).ok_or(Halt::Invalid)?),
-        };
-        let interface_arguments = interface_arguments
-            .iter()
-            .map(|argument| self.concrete(argument))
-            .collect::<Vec<_>>();
-        // A written member for the receiver's type wins over the interface's
-        // default, whose receiver is the open `self`.
-        let candidates = self
-            .program
-            .functions()
-            .iter()
-            .enumerate()
-            .filter_map(|(index, function)| {
-                let implements = function.implements()?;
-                if implements.interface != *interface || implements.member != *member {
-                    return None;
-                }
-                let mut bound = TypeMap::new();
-                let matches =
-                    bind_type(&implements.receiver, &receiver_type, &mut bound)
-                        && (interface_arguments.is_empty()
-                            || (implements.arguments.len()
-                                == interface_arguments.len()
-                                && implements
-                                    .arguments
-                                    .iter()
-                                    .zip(&interface_arguments)
-                                    .all(|(pattern, actual)| {
-                                        bind_type(pattern, actual, &mut bound)
-                                    })));
-                matches.then_some((
-                    index,
-                    matches!(implements.receiver, Type::Param(_)),
-                    bound,
-                ))
-            })
-            .collect::<Vec<_>>();
-        let selected = candidates
-            .iter()
-            .find(|(_, default, _)| !default)
-            .or_else(|| candidates.first())
-            .cloned();
-        let Some((index, _, bound)) = selected else {
-            let closed = (*closed).ok_or(Halt::Invalid)?;
-            if closed == ClosedContract::IterNext {
-                let [iterator] = values.as_slice() else {
-                    return Err(Halt::Invalid);
-                };
-                let next = closed_next(iterator, &self.concrete(result))
-                    .ok_or(Halt::Invalid)?;
-                return self.fresh(next);
+        target: &Target<'a>,
+        label: &str,
+    ) -> Result<Val<'a>, Halt> {
+        let defaults = match target {
+            Target::Function(index) => self.function(*index)?.defaults.as_slice(),
+            Target::Closure(closure) => closure.body.defaults.as_slice(),
+            _ => {
+                return invalid(format!(
+                    "a default for `{label}` of a callee without defaults"
+                ));
             }
-            let [left, right] = values.as_slice() else {
-                return Err(Halt::Invalid);
+        };
+        let constant = defaults
+            .iter()
+            .find_map(|(name, constant)| (name == label).then_some(constant))
+            .ok_or_else(|| {
+                Halt::Invalid(format!("the callee has no default for `{label}`"))
+            })?;
+        self.constant(constant)
+    }
+
+    /// Whether the call being made may replace the current activation: no
+    /// continuation remains but the activation's end, and no `ensures …
+    /// else` is pending. A `return` around the call leaves nothing either.
+    fn prepare_tail(&mut self) -> bool {
+        if matches!(self.konts.last(), Some(Kont::Return)) {
+            let boundary = self.konts.iter().rposition(|kont| {
+                matches!(kont, Kont::Leave | Kont::End | Kont::Global(_))
+            });
+            if let Some(at) = boundary
+                && matches!(self.konts.get(at), Some(Kont::Leave))
+            {
+                self.konts.truncate(at.saturating_add(1));
+            }
+        }
+        matches!(self.konts.last(), Some(Kont::Leave))
+            && self.frames.last().is_some_and(|frame| frame.exit.is_none())
+    }
+
+    /// Runs a resolved callable on `args`, in its slot order.
+    pub(crate) fn invoke(
+        &mut self,
+        resolved: Resolved<'a>,
+        args: Vec<Val<'a>>,
+        tail: bool,
+        origin: Option<&'a SourceOrigin>,
+    ) -> Result<Step<'a>, Halt> {
+        let Resolved { target, env } = resolved;
+        match target {
+            Target::Structural { order, ty } => self.structural(order, ty, args),
+            Target::Closure(closure) => {
+                let body: &'a ClosureBody = closure.body;
+                if matches!(body.value_type, Type::Proc(_)) {
+                    return Err(unavailable_plan());
+                }
+                let mut frame = self.new_frame(body.slot_count, env, &args)?;
+                for (slot, value) in args.into_iter().enumerate() {
+                    frame.set(slot, value)?;
+                }
+                frame.closure = Some(closure);
+                self.push_frame(frame, tail)?;
+                if let Some(guard) = &body.entry_guard {
+                    self.konts.push(Kont::ClosureRequires { body, guard });
+                    return Ok(Step::Eval(&guard.predicate));
+                }
+                self.start_closure(body)
+            }
+            Target::Function(index) => {
+                if matches!(self.mode, Mode::Evaluate) {
+                    self.reads.functions.insert(index);
+                }
+                let function = self.function(index)?;
+                if matches!(function.signature.type_info(), Type::Proc(_)) {
+                    return Err(unavailable_plan());
+                }
+                if let FunctionBody::Intrinsic {
+                    intrinsic,
+                    type_arguments,
+                } = &function.body
+                    && function.entry_guard.is_none()
+                    && function.exit_guard.is_none()
+                {
+                    let type_arguments = env.apply_all(type_arguments);
+                    let origin = origin.unwrap_or(&function.origin);
+                    return self.intrinsic(*intrinsic, &type_arguments, args, origin);
+                }
+                let mut frame = self.new_frame(function.slot_count, env, &args)?;
+                for (slot, value) in args.into_iter().enumerate() {
+                    frame.set(slot, value)?;
+                }
+                self.push_frame(frame, tail)?;
+                if let Some(guard) = &function.entry_guard {
+                    self.konts.push(Kont::Requires { function, guard });
+                    return Ok(Step::Eval(&guard.predicate));
+                }
+                self.start_body(function)
+            }
+        }
+    }
+
+    /// Runs a closure's body in its activation, arming its `ensures`.
+    fn start_closure(&mut self, body: &'a ClosureBody) -> Result<Step<'a>, Halt> {
+        self.frame_mut()?.exit = body.exit_guard.as_ref();
+        Ok(Step::Eval(&body.body))
+    }
+
+    /// Runs a function's body in its activation, arming its `ensures`.
+    fn start_body(&mut self, function: &'a CheckedFunction) -> Result<Step<'a>, Halt> {
+        let frame = self.frame_mut()?;
+        frame.exit = function.exit_guard.as_ref();
+        match &function.body {
+            FunctionBody::Expr(body) => Ok(Step::Eval(body)),
+            FunctionBody::Intrinsic {
+                intrinsic,
+                type_arguments,
+            } => {
+                let count = intrinsic.row().parameters.len();
+                let args = frame
+                    .slots
+                    .iter()
+                    .take(count)
+                    .map(|slot| {
+                        slot.clone().ok_or_else(|| {
+                            Halt::Invalid("an unset parameter".to_owned())
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                let type_arguments = frame.env.apply_all(type_arguments);
+                self.intrinsic(*intrinsic, &type_arguments, args, &function.origin)
+            }
+        }
+    }
+
+    // ----- dispatch -----
+
+    /// The implementation of `member` of `interface` that a closed receiver
+    /// selects, or the interface's default member under that
+    /// implementation.
+    pub(crate) fn dispatch(
+        &mut self,
+        interface: &TypeId,
+        member: &str,
+        receiver: &Type,
+        arguments: &[Type],
+        member_arguments: &[Type],
+    ) -> Result<Resolved<'a>, Halt> {
+        let key: DispatchKey = (
+            interface.clone(),
+            member.to_owned(),
+            receiver.clone(),
+            arguments.to_vec(),
+            member_arguments.to_vec(),
+        );
+        if let Some(resolved) = self.dispatch.get(&key) {
+            return Ok(resolved.clone());
+        }
+        let resolved =
+            self.select(interface, member, receiver, arguments, member_arguments)?;
+        self.dispatch.insert(key, resolved.clone());
+        Ok(resolved)
+    }
+
+    fn select(
+        &self,
+        interface: &TypeId,
+        member: &str,
+        receiver: &Type,
+        arguments: &[Type],
+        member_arguments: &[Type],
+    ) -> Result<Resolved<'a>, Halt> {
+        let set = self.set;
+        let definition = set.interfaces().get(interface).ok_or_else(|| {
+            Halt::Invalid(format!("no interface `{}`", interface.path()))
+        })?;
+        let declared = definition.member(member).ok_or_else(|| {
+            Halt::Invalid(format!("`{}` has no member `{member}`", interface.path()))
+        })?;
+        let default = |choices: NamedTypes| -> Result<Resolved<'a>, Halt> {
+            let function = declared.default.ok_or_else(|| {
+                Halt::Invalid(format!("no implementation of `{member}` for {receiver}"))
+            })?;
+            Ok(Resolved {
+                target: Target::Function(function),
+                env: Rc::new(TypeEnv {
+                    binders: arguments
+                        .iter()
+                        .chain(member_arguments)
+                        .cloned()
+                        .collect(),
+                    self_type: Some(receiver.clone()),
+                    associated: Some(choices),
+                }),
+            })
+        };
+        let selected = vibra_ir::select_implementation(
+            set.implementations(),
+            receiver,
+            interface,
+            arguments,
+            |_, _, _| None,
+        )
+        .map_err(|error| Halt::Invalid(error.to_string()))?;
+        if let Some((implementation, binders)) = selected {
+            return match implementation.member(member) {
+                Some(function) => Ok(Resolved {
+                    target: Target::Function(function),
+                    env: self.env_of(
+                        binders
+                            .into_iter()
+                            .chain(member_arguments.iter().cloned())
+                            .collect(),
+                    ),
+                }),
+                None => {
+                    default(
+                        NamedTypes::new(implementation.choices().entries().iter().map(
+                            |(name, ty)| (name.clone(), ty.instantiate(&binders)),
+                        ))
+                        .map_err(|error| Halt::Invalid(error.to_string()))?,
+                    )
+                }
             };
-            // A structure holding a user key orders through its `compare`,
-            // and is equal exactly when that says so: the closed `equal` has
-            // no other answer for a key it cannot see into.
-            let key_order = match closed {
-                ClosedContract::KeyCompare => Some(interface.clone()),
-                _ => self.ordered_interface(),
-            };
-            let result = self.concrete(result);
-            return self.start_closed(
-                left.clone(),
-                right.clone(),
-                key_order,
-                closed,
-                result,
+        }
+        let library = set.library();
+        let structural_member = match library.library_of(interface) {
+            Some(Library::Ordered) => Some(("compare", true)),
+            Some(Library::Equatable) => Some(("equal", false)),
+            _ => None,
+        };
+        if let Some((name, order)) = structural_member
+            && is_structural(receiver)
+        {
+            if member == name {
+                return Ok(Resolved {
+                    target: Target::Structural {
+                        order,
+                        ty: receiver.clone(),
+                    },
+                    env: Rc::clone(&self.empty_env),
+                });
+            }
+            return default(NamedTypes::empty());
+        }
+        invalid(format!(
+            "no implementation of `{}` for {receiver}",
+            interface.path()
+        ))
+    }
+
+    /// Unboxes the receiver of a call through an interface value, giving
+    /// the held type and the member's result type with `Self` left open.
+    fn unbox(
+        &self,
+        interface: &TypeId,
+        member: &str,
+        args: &mut [Val<'a>],
+        arguments: &[Type],
+        member_arguments: &[Type],
+        choices: &NamedTypes,
+    ) -> Result<(Type, Type), Halt> {
+        let declared = self
+            .set
+            .interfaces()
+            .get(interface)
+            .and_then(|definition| definition.member(member))
+            .ok_or_else(|| Halt::Invalid(format!("no member `{member}`")))?;
+        let slot = declared
+            .signature
+            .receiver()
+            .and_then(|slot| usize::try_from(slot).ok())
+            .ok_or_else(|| Halt::Invalid(format!("`{member}` has no receiver slot")))?;
+        let receiver = args
+            .get_mut(slot)
+            .ok_or_else(|| Halt::Invalid("no receiver argument".to_owned()))?;
+        let Repr::Interface(held) = &receiver.0 else {
+            return invalid("a receiver of an interface value type that is not one");
+        };
+        let held = Rc::clone(held);
+        *receiver = held.value.clone();
+        let binders = arguments
+            .iter()
+            .chain(member_arguments)
+            .cloned()
+            .collect::<Vec<_>>();
+        let signature =
+            declared
+                .signature
+                .type_info()
+                .substitute(&vibra_ir::Substitution {
+                    binders: &binders,
+                    self_type: None,
+                    associated: Some(choices),
+                });
+        let result = match &signature {
+            Type::Fn(signature) => signature.result.clone(),
+            _ => return invalid(format!("`{member}` is not a function")),
+        };
+        Ok((held.held_type.clone(), result))
+    }
+
+    /// `value`, with each `Self` position of `ty` widened to an interface
+    /// value holding `held_type`. The value is walked with a work list, so
+    /// no host stack grows with its depth or its type's.
+    fn rebox(
+        &self,
+        value: Val<'a>,
+        ty: &Type,
+        held_type: &Type,
+    ) -> Result<Val<'a>, Halt> {
+        let mut tasks = vec![Rebox::Enter(value, ty.clone())];
+        let mut built: Vec<Val<'a>> = Vec::new();
+        while let Some(task) = tasks.pop() {
+            match task {
+                Rebox::Enter(value, ty) => {
+                    self.rebox_enter(value, &ty, held_type, &mut tasks, &mut built)?;
+                }
+                Rebox::Build(shape, count) => {
+                    let children = built.split_off(built.len().saturating_sub(count));
+                    built.push(shape.build(children)?);
+                }
+            }
+        }
+        built
+            .pop()
+            .ok_or_else(|| Halt::Invalid("a rebox with no result".to_owned()))
+    }
+
+    /// Takes apart one value of `ty`: a value with no `Self` position is
+    /// done; otherwise its rebuilding and each of its components is queued.
+    fn rebox_enter(
+        &self,
+        value: Val<'a>,
+        ty: &Type,
+        held_type: &Type,
+        tasks: &mut Vec<Rebox<'a>>,
+        built: &mut Vec<Val<'a>>,
+    ) -> Result<(), Halt> {
+        if *ty == Type::SelfType {
+            built.push(Val(Repr::Interface(Rc::new(Held {
+                held_type: held_type.clone(),
+                value,
+            }))));
+            return Ok(());
+        }
+        if !mentions_self(ty) {
+            built.push(value);
+            return Ok(());
+        }
+        let mut queue = |shape: RebuildShape<'a>, parts: Vec<(Val<'a>, Type)>| {
+            tasks.push(Rebox::Build(shape, parts.len()));
+            tasks.extend(
+                parts
+                    .into_iter()
+                    .rev()
+                    .map(|(value, ty)| Rebox::Enter(value, ty)),
             );
         };
-        let mut callable = self.named_callable(index).ok_or(Halt::Invalid)?;
-        let mut bound = bound;
-        // The member's own type arguments at this call, which the selected
-        // function names by its own generic parameters, at this activation's
-        // type arguments.
-        if let Some(implements) = self
-            .program
-            .functions()
-            .get(index)
-            .ok_or(Halt::Invalid)?
-            .implements()
-        {
-            for (name, written) in implements.member_generics.iter().zip(member_types) {
-                if let Some(name) = name {
-                    bound.insert(name.clone(), self.concrete(written));
+        let field_of = |fields: &dyn Fn(&str) -> Option<Type>, name: &str| {
+            fields(name).ok_or_else(|| Halt::Invalid(format!("no field `{name}`")))
+        };
+        match (ty, &value.0) {
+            (Type::Tuple(types), Repr::Tuple(values)) => queue(
+                RebuildShape::Tuple,
+                values.iter().cloned().zip(types.iter().cloned()).collect(),
+            ),
+            (Type::Record(fields), Repr::Record(values)) => {
+                let lookup = |name: &str| fields.get(name).cloned();
+                let parts = values
+                    .iter()
+                    .map(|(name, value)| Ok((value.clone(), field_of(&lookup, name)?)))
+                    .collect::<Result<Vec<_>, Halt>>()?;
+                queue(
+                    RebuildShape::Record(
+                        values.iter().map(|(name, _)| *name).collect(),
+                    ),
+                    parts,
+                );
+            }
+            (Type::List(element), Repr::List(values)) => queue(
+                RebuildShape::List,
+                values
+                    .iter()
+                    .map(|value| (value.clone(), element.as_ref().clone()))
+                    .collect(),
+            ),
+            (Type::Declared(id, arguments), _) => {
+                match (
+                    self.set.library().library_of(id),
+                    &value.0,
+                    arguments.as_slice(),
+                ) {
+                    (Some(Library::Option), Repr::Opt(None), _) => built.push(value),
+                    (Some(Library::Option), Repr::Opt(Some(inner)), [item]) => queue(
+                        RebuildShape::Some,
+                        vec![(Val::clone(inner), item.clone())],
+                    ),
+                    (Some(Library::Dict), Repr::Dict(dict), [key, item]) => queue(
+                        RebuildShape::Dict(dict.key.clone()),
+                        dict.entries
+                            .iter()
+                            .flat_map(|(k, v)| {
+                                [(k.clone(), key.clone()), (v.clone(), item.clone())]
+                            })
+                            .collect(),
+                    ),
+                    _ => self.rebox_declared(value, id, arguments, tasks, built)?,
                 }
             }
-        }
-        *callable.types_mut() = Arc::new(bound);
-        // Anything the operands and the result still fix.
-        self.bind_call(&mut callable, arguments, &values, result);
-        self.dispatch(callable, values, result, tail)
-    }
-
-    /// Runs a call whose callable and operands are resolved: a call in tail
-    /// position replaces the activation that makes it, and any other call
-    /// enters a new activation.
-    fn dispatch(
-        &mut self,
-        callable: Callable,
-        values: Vec<RuntimeValue>,
-        result: &Type,
-        tail: bool,
-    ) -> Result<Step<'a>, Halt> {
-        let info = self.call_info(&callable).ok_or(Halt::Invalid)?;
-        if !tail {
-            return self.enter_callee(callable, &info, values, result);
-        }
-        if info.slots.len() != values.len()
-            || !values_match_slots(&values, &info.slots)
-            || !result.admits(&info.result)
-        {
-            return Err(Halt::Invalid);
-        }
-        self.transfer(callable, values, result)
-    }
-
-    /// Replaces the running activation with the callee: every callable that
-    /// creates a language activation reuses the current one. A
-    /// compiler-intrinsic wrapper creates none, so it is invoked as an
-    /// ordinary call.
-    fn transfer(
-        &mut self,
-        callable: Callable,
-        values: Vec<RuntimeValue>,
-        result: &Type,
-    ) -> Result<Step<'a>, Halt> {
-        match callable {
-            // A named callable carries the signature of its own function, and
-            // the caller has checked the operands against it.
-            Callable::Named {
-                index,
-                signature,
-                captures,
-                types,
-            } => {
-                let program = self.program;
-                let function = program.functions().get(index).ok_or(Halt::Invalid)?;
-                if function.is_external_wrapper() {
-                    return self.invoke(
-                        Callable::Named {
-                            index,
-                            signature,
-                            captures,
-                            types,
-                        },
-                        values,
-                        result,
-                    );
-                }
-                let slots = activation_slots(values, function.slot_count());
-                self.reuse(slots, captures, types)?;
-                Ok(Step::Eval(function.body()))
-            }
-            Callable::Lambda {
-                slot_count,
-                body,
-                captures,
-                types,
-                ..
-            } => {
-                let slots = activation_slots(values, slot_count);
-                self.reuse(slots, captures, types)?;
-                Ok(Step::Eval(self.lambda_body(body)?))
+            _ => {
+                return invalid(format!(
+                    "a `Self` position in {ty} that cannot be reboxed"
+                ));
             }
         }
+        Ok(())
     }
 
-    /// Makes the callee's slots, captures, and type arguments those of the
-    /// running activation, after discarding what the caller still had to do.
-    fn reuse(
-        &mut self,
-        slots: Vec<Option<RuntimeValue>>,
-        captures: Elements,
-        types: Arc<TypeMap>,
+    fn rebox_declared(
+        &self,
+        value: Val<'a>,
+        id: &TypeId,
+        arguments: &[Type],
+        tasks: &mut Vec<Rebox<'a>>,
+        built: &mut Vec<Val<'a>>,
     ) -> Result<(), Halt> {
-        self.unwind()?;
-        let frame = self.frames.last_mut().ok_or(Halt::Invalid)?;
-        // A module value's initializer is not a function body, so it has no
-        // activation to hand over.
-        if frame.initializer.is_some() {
-            return Err(Halt::Invalid);
-        }
-        let before = Self::frame_bytes(frame.slots.len());
-        let after = Self::frame_bytes(slots.len());
-        frame.slots = slots;
-        frame.captures = captures;
-        frame.types = types;
-        self.stack_bytes = self
-            .stack_bytes
-            .saturating_sub(before)
-            .saturating_add(after);
-        self.tail_transfers = self.tail_transfers.saturating_add(1);
-        self.check_budget()
-    }
-
-    /// Enters a new activation of `callable`.
-    fn invoke(
-        &mut self,
-        callable: Callable,
-        values: Vec<RuntimeValue>,
-        result: &Type,
-    ) -> Result<Step<'a>, Halt> {
-        let info = self.call_info(&callable).ok_or(Halt::Invalid)?;
-        self.enter_callee(callable, &info, values, result)
-    }
-
-    /// Enters a new activation of `callable`, whose signature is `info`.
-    fn enter_callee(
-        &mut self,
-        callable: Callable,
-        info: &SignatureInfo,
-        values: Vec<RuntimeValue>,
-        result: &Type,
-    ) -> Result<Step<'a>, Halt> {
-        if info.slots.len() != values.len()
-            || !values_match_slots(&values, &info.slots)
-            || !result.admits(&info.result)
-        {
-            return Err(Halt::Invalid);
-        }
-        match callable {
-            Callable::Named {
-                index,
-                captures,
-                types,
-                ..
-            } => {
-                let program = self.program;
-                let function = program.functions().get(index).ok_or(Halt::Invalid)?;
-                let slots = activation_slots(values, function.slot_count());
-                self.enter(slots, captures, types)?;
-                Ok(Step::Eval(function.body()))
+        let definition = self
+            .set
+            .types()
+            .definition(id)
+            .ok_or_else(|| Halt::Invalid(format!("no type `{}`", id.path())))?;
+        let mut queue = |shape: RebuildShape<'a>, parts: Vec<(Val<'a>, Type)>| {
+            tasks.push(Rebox::Build(shape, parts.len()));
+            tasks.extend(
+                parts
+                    .into_iter()
+                    .rev()
+                    .map(|(value, ty)| Rebox::Enter(value, ty)),
+            );
+        };
+        let fields_of = |declared: &[(String, Type)], values: &[(&'a str, Val<'a>)]| {
+            values
+                .iter()
+                .map(|(name, value)| {
+                    let ty = declared
+                        .iter()
+                        .find_map(|(field, ty)| (field == name).then_some(ty))
+                        .ok_or_else(|| Halt::Invalid(format!("no field `{name}`")))?;
+                    Ok((value.clone(), ty.instantiate(arguments)))
+                })
+                .collect::<Result<Vec<_>, Halt>>()
+        };
+        match (definition.body(), &value.0) {
+            (TypeBody::Record(fields), Repr::Record(values)) => queue(
+                RebuildShape::Record(values.iter().map(|(name, _)| *name).collect()),
+                fields_of(fields, values)?,
+            ),
+            (TypeBody::Tuple(types), Repr::Tuple(values)) => queue(
+                RebuildShape::Tuple,
+                values
+                    .iter()
+                    .cloned()
+                    .zip(types.iter().map(|ty| ty.instantiate(arguments)))
+                    .collect(),
+            ),
+            (TypeBody::Wrapper(representation), Repr::Wrapper(inner)) => queue(
+                RebuildShape::Wrapper,
+                vec![(Val::clone(inner), representation.instantiate(arguments))],
+            ),
+            (TypeBody::Variant(_), Repr::Case(case)) => {
+                let declared = definition
+                    .case(case.case)
+                    .ok_or_else(|| Halt::Invalid(format!("no case `{}`", case.case)))?;
+                queue(
+                    RebuildShape::Case(
+                        case.case,
+                        case.fields.iter().map(|(name, _)| *name).collect(),
+                    ),
+                    fields_of(&declared.fields, &case.fields)?,
+                );
             }
-            Callable::Lambda {
-                slot_count,
+            (TypeBody::Variant(_), Repr::Tag(_)) => built.push(value),
+            _ => return invalid("a reboxed value that does not fit its type"),
+        }
+        Ok(())
+    }
+
+    // ----- intrinsics -----
+
+    fn intrinsic(
+        &mut self,
+        intrinsic: CompilerIntrinsic,
+        type_arguments: &[Type],
+        args: Vec<Val<'a>>,
+        origin: &'a SourceOrigin,
+    ) -> Result<Step<'a>, Halt> {
+        match intrinsic {
+            CompilerIntrinsic::ListFold => {
+                let [list, initial, function]: [Val<'a>; 3] =
+                    args.try_into().map_err(|_| {
+                        Halt::Invalid("`list.fold` takes three operands".to_owned())
+                    })?;
+                let items = Rc::clone(list.as_list().ok_or_else(|| {
+                    Halt::Invalid("`list.fold` of a non-list".to_owned())
+                })?);
+                self.fold(function, items, 0, initial)
+            }
+            CompilerIntrinsic::DictFromList => {
+                let [key, _] = type_arguments else {
+                    return invalid("`dict.fromList` takes two type arguments");
+                };
+                let entries = pairs(&single(args)?)?;
+                self.dict_build(key.clone(), entries)
+            }
+            CompilerIntrinsic::AssertTrue | CompilerIntrinsic::AssertFalse => {
+                self.assertion_allowed(intrinsic, origin)?;
+                let holds = single(args)?.as_bool().ok_or_else(|| {
+                    Halt::Invalid("an assertion of a non-Bool".to_owned())
+                })?;
+                if holds == (intrinsic == CompilerIntrinsic::AssertTrue) {
+                    Ok(Step::Ret(Val::void()))
+                } else {
+                    Err(failure(
+                        FailureKind::Assertion,
+                        intrinsic,
+                        None,
+                        None,
+                        origin,
+                    ))
+                }
+            }
+            CompilerIntrinsic::AssertEqual => {
+                self.assertion_allowed(intrinsic, origin)?;
+                let [ty] = type_arguments else {
+                    return invalid("`assert.equal` takes one type argument");
+                };
+                let [expected, actual] = args.as_slice() else {
+                    return invalid("`assert.equal` takes two operands");
+                };
+                let observe = |value: &Val<'a>| match encoding(self.set, value, ty) {
+                    Ok(text) => Ok(Some(text)),
+                    Err(ObserveError::Unsupported) => Ok(None),
+                    Err(ObserveError::Halt(halt)) => Err(halt),
+                };
+                match (observe(expected)?, observe(actual)?) {
+                    (Some(expected), Some(actual)) if expected == actual => {
+                        Ok(Step::Ret(Val::void()))
+                    }
+                    (Some(expected), Some(actual)) => Err(failure(
+                        FailureKind::Assertion,
+                        intrinsic,
+                        Some(expected),
+                        Some(actual),
+                        origin,
+                    )),
+                    (expected, actual) => Err(failure(
+                        FailureKind::Observation {
+                            code: DiagnosticCode::ToolUnsupportedValue,
+                            type_info: ty.clone(),
+                        },
+                        intrinsic,
+                        expected,
+                        actual,
+                        origin,
+                    )),
+                }
+            }
+            _ => {
+                let value = intrinsics::apply(intrinsic, &args)?;
+                self.allocated(&value)?;
+                Ok(Step::Ret(value))
+            }
+        }
+    }
+
+    fn assertion_allowed(
+        &mut self,
+        intrinsic: CompilerIntrinsic,
+        origin: &'a SourceOrigin,
+    ) -> Result<(), Halt> {
+        if self.mode == Mode::Test {
+            Ok(())
+        } else {
+            self.origin = Some(origin);
+            invalid(format!("`{}` outside a test", intrinsic.symbol()))
+        }
+    }
+
+    fn fold(
+        &mut self,
+        function: Val<'a>,
+        items: Rc<Vec<Val<'a>>>,
+        next: usize,
+        accumulator: Val<'a>,
+    ) -> Result<Step<'a>, Halt> {
+        let Some(item) = items.get(next).cloned() else {
+            return Ok(Step::Ret(accumulator));
+        };
+        let resolved = self.resolve_value(&function)?;
+        self.konts.push(Kont::Fold {
+            function,
+            items,
+            next: next.saturating_add(1),
+        });
+        let origin = self.origin;
+        self.invoke(resolved, vec![accumulator, item], false, origin)
+    }
+
+    // ----- continuations -----
+
+    #[allow(clippy::too_many_lines)]
+    fn resume(&mut self, kont: Kont<'a>, value: Val<'a>) -> Result<Step<'a>, Halt> {
+        Ok(match kont {
+            Kont::End => return invalid("the end resumed"),
+            Kont::Leave => {
+                let frame = self.frame_mut()?;
+                if let Some(exit) = frame.exit.take() {
+                    frame.set(exit.candidate, value.clone())?;
+                    self.konts.push(Kont::Leave);
+                    self.konts.push(Kont::Ensures {
+                        candidate: value,
+                        guard: &exit.guard,
+                    });
+                    return Ok(Step::Eval(&exit.guard.predicate));
+                }
+                self.pop_frame()?;
+                Step::Ret(value)
+            }
+            Kont::Global(index) => {
+                self.pop_frame()?;
+                let state = self
+                    .globals
+                    .get_mut(index)
+                    .ok_or_else(|| Halt::Invalid(format!("no module value {index}")))?;
+                *state = GlobalState::Ready(value.clone());
+                Step::Ret(value)
+            }
+            Kont::Sequence(rest) => {
+                drop(value);
+                self.sequence(rest)?
+            }
+            Kont::Let { slot, body } => {
+                if let Some(slot) = slot {
+                    self.bind_slot(slot, value)?;
+                }
+                Step::Eval(body)
+            }
+            Kont::LetElse {
+                pattern,
+                fallback,
                 body,
-                captures,
-                types,
-                ..
             } => {
-                let slots = activation_slots(values, slot_count);
-                self.enter(slots, captures, types)?;
-                Ok(Step::Eval(self.lambda_body(body)?))
+                if self.bind_pattern(pattern, &value)? {
+                    Step::Eval(body)
+                } else {
+                    Step::Eval(fallback)
+                }
             }
-        }
-    }
-
-    fn invoke_test_assertion(
-        &mut self,
-        assertion: TestAssertion,
-        values: Vec<RuntimeValue>,
-        origin: SourceOrigin,
-        operand_types: &[Type],
-    ) -> Option<RuntimeValue> {
-        // Every operand is compared and reported by its canonical encoding.
-        // The checker rejects an operand whose type names a function; one
-        // hidden behind `any` or an interface stops the test here.
-        let Some(encodings) = values
-            .into_iter()
-            .enumerate()
-            .map(|(position, value)| {
-                observe_as(value, operand_types.get(position), self.program.types())
-                    .map(|value| value.canonical_vibon())
-            })
-            .collect::<Option<Vec<_>>>()
-        else {
-            self.unobservable = Some(origin);
-            return None;
-        };
-        let (passed, expected, actual) = match (assertion, encodings.as_slice()) {
-            (TestAssertion::True | TestAssertion::False, [actual]) => {
-                let expected =
-                    Value::Bool(assertion == TestAssertion::True).canonical_vibon();
-                (*actual == expected, expected, actual.clone())
+            Kont::Match(arms) => {
+                for arm in arms {
+                    if self.bind_pattern(&arm.pattern, &value)? {
+                        return Ok(Step::Eval(&arm.body));
+                    }
+                }
+                return invalid("no arm of a match fits its subject");
             }
-            (TestAssertion::Equal, [expected, actual]) => {
-                (expected == actual, expected.clone(), actual.clone())
-            }
-            _ => return None,
-        };
-        if !passed {
-            self.assertion_failure = Some(TestAssertionFailure {
-                assertion: assertion.symbol(),
-                expected,
-                actual,
-                origin,
-            });
-        }
-        Some(RuntimeValue::Primitive(Value::Void))
-    }
-}
-
-/// How many operands `node` evaluates before it is built.
-fn operand_count(node: &Expr) -> usize {
-    match node {
-        Expr::External { arguments, .. } | Expr::Host { arguments, .. } => {
-            arguments.len()
-        }
-        Expr::Tuple { components, .. } => components.len(),
-        Expr::Array { elements, .. } => elements.len(),
-        Expr::Record { fields, .. } => fields.len(),
-        Expr::Closure { captures, .. } => captures.len(),
-        // Each entry is a key and then a value.
-        Expr::Dict { entries, .. } => entries.len().saturating_mul(2),
-        Expr::Lookup { .. } => 2,
-        // An indirect call evaluates its callee first, once.
-        Expr::Call {
-            target, arguments, ..
-        } => arguments
-            .len()
-            .saturating_add(usize::from(matches!(target, CallTarget::Indirect { .. }))),
-        _ => 0,
-    }
-}
-
-/// The operand of `node` at `index`, in evaluation order.
-fn operand_at(node: &Expr, index: usize) -> Option<&Expr> {
-    match node {
-        Expr::External { arguments, .. } | Expr::Host { arguments, .. } => {
-            arguments.get(index)
-        }
-        Expr::Tuple { components, .. } => components.get(index),
-        Expr::Array { elements, .. } => elements.get(index),
-        Expr::Record { fields, .. } => fields.get(index).map(|(_, field)| field),
-        Expr::Closure { captures, .. } => captures.get(index),
-        Expr::Dict { entries, .. } => {
-            let (key, value) = entries.get(index / 2)?;
-            Some(if index.is_multiple_of(2) { key } else { value })
-        }
-        Expr::Lookup {
-            collection, key, ..
-        } => match index {
-            0 => Some(collection),
-            1 => Some(key),
-            _ => None,
-        },
-        Expr::Call {
-            target, arguments, ..
-        } => match target {
-            CallTarget::Indirect { callee, .. } => match index {
-                0 => Some(callee),
-                _ => arguments.get(index - 1),
+            Kont::If {
+                then_branch,
+                else_branch,
+            } => match (truth(&value)?, else_branch) {
+                (true, _) => Step::Eval(then_branch),
+                (false, Some(else_branch)) => Step::Eval(else_branch),
+                (false, None) => Step::Ret(Val::void()),
             },
-            _ => arguments.get(index),
+            Kont::Field(field) => match &value.0 {
+                Repr::Record(fields) => Step::Ret(
+                    fields
+                        .iter()
+                        .find_map(|(name, value)| {
+                            (*name == field).then(|| value.clone())
+                        })
+                        .ok_or_else(|| Halt::Invalid(format!("no field `{field}`")))?,
+                ),
+                _ => return invalid(format!("a read of `{field}` from a non-record")),
+            },
+            Kont::Return => self.leave_with(value)?,
+            Kont::Try => match value.case_name() {
+                Some("some" | "ok") => {
+                    Step::Ret(value.case_field("value").ok_or_else(|| {
+                        Halt::Invalid("a carrier without its value".to_owned())
+                    })?)
+                }
+                Some("none" | "err") => self.leave_with(value)?,
+                _ => return invalid("a try on a value that is not a carrier"),
+            },
+            Kont::Widen(held_type) => {
+                let value = Val(Repr::Interface(Rc::new(Held { held_type, value })));
+                self.allocated(&value)?;
+                Step::Ret(value)
+            }
+            Kont::Operands { work, mut done } => {
+                done.push(value);
+                self.operands(work, done)?
+            }
+            Kont::Requires { function, guard } => {
+                if truth(&value)? {
+                    self.start_body(function)?
+                } else {
+                    Step::Eval(&guard.consequence)
+                }
+            }
+            Kont::ClosureRequires { body, guard } => {
+                if truth(&value)? {
+                    self.start_closure(body)?
+                } else {
+                    Step::Eval(&guard.consequence)
+                }
+            }
+            Kont::Ensures { candidate, guard } => {
+                if truth(&value)? {
+                    Step::Ret(candidate)
+                } else {
+                    Step::Eval(&guard.consequence)
+                }
+            }
+            Kont::Invariant {
+                value: built,
+                consequence,
+            } => {
+                let result = if truth(&value)? {
+                    Val::ok(built)
+                } else {
+                    Val::err(self.constant(consequence)?)
+                };
+                self.allocated(&result)?;
+                Step::Ret(result)
+            }
+            Kont::Fold {
+                function,
+                items,
+                next,
+            } => self.fold(function, items, next, value)?,
+            Kont::DictBuild(build) => self.resume_dict_build(*build, &value)?,
+            Kont::DictFind(find) => self.resume_dict_find(*find, &value)?,
+            Kont::Structural(structural) => {
+                self.resume_structural(*structural, &value)?
+            }
+            Kont::Ingress(ingress) => self.resume_ingress(*ingress, &value)?,
+            Kont::Rebox { result, held_type } => {
+                let value = self.rebox(value, &result, &held_type)?;
+                self.allocated(&value)?;
+                Step::Ret(value)
+            }
+        })
+    }
+
+    /// Leaves the current activation with `value`, skipping the work left
+    /// in it.
+    fn leave_with(&mut self, value: Val<'a>) -> Result<Step<'a>, Halt> {
+        loop {
+            match self.konts.last() {
+                Some(Kont::Leave) => break,
+                Some(Kont::End | Kont::Global(_)) | None => {
+                    return invalid("a return outside a callable");
+                }
+                Some(_) => {
+                    self.konts.pop();
+                }
+            }
+        }
+        Ok(Step::Ret(value))
+    }
+
+    /// Matches `value` against `pattern`, binding its variables.
+    fn bind_pattern(
+        &mut self,
+        pattern: &'a Pattern,
+        value: &Val<'a>,
+    ) -> Result<bool, Halt> {
+        let mut pending: Vec<(&'a Pattern, Val<'a>)> = vec![(pattern, value.clone())];
+        while let Some((pattern, value)) = pending.pop() {
+            let fits = match pattern {
+                Pattern::Discard => true,
+                Pattern::Bind(slot) => {
+                    self.bind_slot(*slot, value)?;
+                    true
+                }
+                Pattern::Literal(constant) => same(&self.constant(constant)?, &value),
+                Pattern::Tuple(patterns) => match &value.0 {
+                    Repr::Tuple(values) if values.len() == patterns.len() => {
+                        pending.extend(patterns.iter().zip(values.iter().cloned()));
+                        true
+                    }
+                    _ => false,
+                },
+                Pattern::List(patterns) => match &value.0 {
+                    Repr::List(values) if values.len() == patterns.len() => {
+                        pending.extend(patterns.iter().zip(values.iter().cloned()));
+                        true
+                    }
+                    Repr::List(_) => false,
+                    _ => return invalid("a list pattern on a non-list"),
+                },
+                Pattern::Record(fields) => match &value.0 {
+                    Repr::Record(values) => {
+                        for (name, pattern) in fields {
+                            let field = values
+                                .iter()
+                                .find_map(|(field, value)| {
+                                    (*field == name).then(|| value.clone())
+                                })
+                                .ok_or_else(|| {
+                                    Halt::Invalid(format!("no field `{name}`"))
+                                })?;
+                            pending.push((pattern, field));
+                        }
+                        true
+                    }
+                    _ => return invalid("a record pattern on a non-record"),
+                },
+                Pattern::Wrapper(inner) => {
+                    let unwrapped = match &value.0 {
+                        Repr::Wrapper(inner) => inner.as_ref().clone(),
+                        Repr::Str(_) => {
+                            intrinsics::apply(CompilerIntrinsic::StrToChars, &[value])?
+                        }
+                        Repr::Bytes(_) => {
+                            intrinsics::apply(CompilerIntrinsic::BytesToList, &[value])?
+                        }
+                        Repr::Dict(_) => {
+                            intrinsics::apply(CompilerIntrinsic::DictEntries, &[value])?
+                        }
+                        _ => return invalid("a wrapper pattern on a non-wrapper"),
+                    };
+                    self.allocated(&unwrapped)?;
+                    pending.push((inner, unwrapped));
+                    true
+                }
+                Pattern::Case { case, fields } => {
+                    if value.case_name() == Some(case.as_str()) {
+                        for (name, pattern) in fields {
+                            let field = value.case_field(name).ok_or_else(|| {
+                                Halt::Invalid(format!("no field `{name}`"))
+                            })?;
+                            pending.push((pattern, field));
+                        }
+                        true
+                    } else {
+                        false
+                    }
+                }
+            };
+            if !fits {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+}
+
+impl TypeEnv {
+    /// Each choice of `choices` at this activation's type arguments.
+    fn apply_all_named(&self, choices: &NamedTypes) -> Result<NamedTypes, Halt> {
+        NamedTypes::new(
+            choices
+                .entries()
+                .iter()
+                .map(|(name, ty)| (name.clone(), self.apply(ty))),
+        )
+        .map_err(|error| Halt::Invalid(error.to_string()))
+    }
+}
+
+fn single<'a>(values: Vec<Val<'a>>) -> Result<Val<'a>, Halt> {
+    let [value]: [Val<'a>; 1] = values
+        .try_into()
+        .map_err(|_| Halt::Invalid("an operation of one operand".to_owned()))?;
+    Ok(value)
+}
+
+/// The entries of `list`, a `List({K V})`, as key and value pairs in order.
+fn pairs<'a>(list: &Val<'a>) -> Result<Vec<(Val<'a>, Val<'a>)>, Halt> {
+    list.as_list()
+        .ok_or_else(|| Halt::Invalid("a dict built from a non-list".to_owned()))?
+        .iter()
+        .map(|entry| match &entry.0 {
+            Repr::Tuple(pair) => match pair.as_slice() {
+                [key, value] => Ok((key.clone(), value.clone())),
+                _ => invalid("a dict entry that is not a pair"),
+            },
+            _ => invalid("a dict entry that is not a pair"),
+        })
+        .collect()
+}
+
+fn truth(value: &Val<'_>) -> Result<bool, Halt> {
+    value
+        .as_bool()
+        .ok_or_else(|| Halt::Invalid("a condition that is not a Bool".to_owned()))
+}
+
+fn dict_key(value_type: &Type) -> Result<Type, Halt> {
+    match value_type {
+        Type::Declared(_, arguments) => match arguments.as_slice() {
+            [key, _] => Ok(key.clone()),
+            _ => invalid("a dict type without its key"),
         },
-        _ => None,
+        _ => invalid("a dict of a non-dict type"),
+    }
+}
+
+/// Whether `ty` conforms to `Equatable` and `Ordered` with no declaration.
+pub(crate) const fn is_structural(ty: &Type) -> bool {
+    matches!(
+        ty,
+        Type::Atom | Type::AtomSingleton(_) | Type::Tuple(_) | Type::Record(_)
+    )
+}
+
+fn unavailable_plan() -> Halt {
+    Halt::Unavailable(
+        "applying a `proc` builds a plan, which this interpreter does not run"
+            .to_owned(),
+    )
+}
+
+fn failure(
+    kind: FailureKind,
+    intrinsic: CompilerIntrinsic,
+    expected: Option<String>,
+    actual: Option<String>,
+    origin: &SourceOrigin,
+) -> Halt {
+    Halt::Failed(Box::new(TestAssertionFailure {
+        kind,
+        assertion: intrinsic.symbol(),
+        expected,
+        actual,
+        origin: origin.clone(),
+    }))
+}
+
+/// One step of a rebox: take a value of a type apart, or put a value back
+/// together from its last reboxed components.
+enum Rebox<'a> {
+    Enter(Val<'a>, Type),
+    Build(RebuildShape<'a>, usize),
+}
+
+/// What a reboxed value is rebuilt as, around its reboxed components.
+enum RebuildShape<'a> {
+    Tuple,
+    Record(Vec<&'a str>),
+    List,
+    Some,
+    Dict(Type),
+    Wrapper,
+    Case(&'a str, Vec<&'a str>),
+}
+
+impl<'a> RebuildShape<'a> {
+    fn build(self, components: Vec<Val<'a>>) -> Result<Val<'a>, Halt> {
+        let missing = || Halt::Invalid("a rebox lost a component".to_owned());
+        Ok(match self {
+            Self::Tuple => Val::tuple(components),
+            Self::Record(names) => Val(Repr::Record(Rc::new(
+                names.into_iter().zip(components).collect(),
+            ))),
+            Self::List => Val::list(components),
+            Self::Some => Val::some(components.into_iter().next().ok_or_else(missing)?),
+            Self::Dict(key) => {
+                let mut components = components.into_iter();
+                let mut entries = Vec::new();
+                while let Some(entry_key) = components.next() {
+                    entries.push((entry_key, components.next().ok_or_else(missing)?));
+                }
+                Val(Repr::Dict(Rc::new(crate::value::DictVal { key, entries })))
+            }
+            Self::Wrapper => Val(Repr::Wrapper(Rc::new(
+                components.into_iter().next().ok_or_else(missing)?,
+            ))),
+            Self::Case(case, names) => {
+                Val::case(case, names.into_iter().zip(components).collect())
+            }
+        })
     }
 }

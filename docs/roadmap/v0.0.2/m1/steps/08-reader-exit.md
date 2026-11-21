@@ -59,7 +59,11 @@ and the test `crates/vibra-conformance/tests/it/spec_examples.rs`.
    non-idempotent format.
 5. Deep nesting: a host test parses, formats, and drops a 100,000-deep
    `[[[…]]]` and `do do … enddo enddo` without consuming the host stack.
-6. Record the counts in this step's PR and in the README's status row.
+6. Follow-ups: clear every entry of `reader-follow-ups.md`, each with the
+   code change and the cases it names, `@project.duplicateName` among them,
+   then delete the file. Invariant: the specification and the code agree on
+   every entry before the file is deleted.
+7. Record the counts in this step's PR and in the README's status row.
 
 ## Test matrix
 
@@ -75,7 +79,8 @@ and the test `crates/vibra-conformance/tests/it/spec_examples.rs`.
 
 ## Diagnostics and schema changes
 
-None new. The golden trees are `@tree.v2` documents.
+None new in the registry. `@project.duplicateName` is first produced by
+the follow-ups of task 6. The golden trees are `@tree.v2` documents.
 
 ## Ignored tests
 
@@ -117,4 +122,6 @@ Structural queries (M3); any semantic rule.
 - [ ] Every production of the source chapter's EBNF has a `reader` case (the
       owner-table script's empty diff, re-run and pasted).
 - [ ] The CI conformance job runs the new fuzz smoke beside the v1 one.
+- [ ] `docs/roadmap/v0.0.2/m1/reader-follow-ups.md` no longer exists, and
+      every case it named passes.
 - [ ] The validation commands exit 0; counts pasted in the PR.

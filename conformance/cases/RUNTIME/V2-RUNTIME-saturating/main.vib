@@ -1,0 +1,5 @@
+fn main
+  returns r: {I8 U8 I32 I8}
+  do
+    return {I8.add(127i8 1i8) U8.sub(0u8 1u8) I32.shiftLeft(1i32 40u32) I8.shiftRight(-1i8 9u32)}
+endfn

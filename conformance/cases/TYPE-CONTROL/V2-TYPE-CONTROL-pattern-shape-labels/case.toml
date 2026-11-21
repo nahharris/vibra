@@ -1,0 +1,18 @@
+id = "V2-TYPE-CONTROL-pattern-shape-labels"
+rule = "V2-TYPE-CONTROL-pattern-shape-labels"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "01-source-language.md#patterns: a wrapper pattern is positional, so a label is a constructor pattern of the wrong shape"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.argumentMismatch"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 83, end = 100 }

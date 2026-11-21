@@ -1,0 +1,3 @@
+use @app.model enduse
+
+fn read takes {t: model.Token} returns r: U64 do let model.Token(raw) be t endlet return raw endfn

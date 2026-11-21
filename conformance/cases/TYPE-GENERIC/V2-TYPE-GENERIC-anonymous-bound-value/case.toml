@@ -1,0 +1,12 @@
+id = "V2-TYPE-GENERIC-anonymous-bound-value"
+rule = "V2-TYPE-GENERIC-anonymous-bound-value"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#generics: a generic anonymous callable with a bound, written where a callable type is expected, is instantiated from that type, which satisfies the bound"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

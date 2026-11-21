@@ -1,0 +1,1 @@
+type S case a case b where fn takes {s: S} returns ok: Bool do return true endfn endtype

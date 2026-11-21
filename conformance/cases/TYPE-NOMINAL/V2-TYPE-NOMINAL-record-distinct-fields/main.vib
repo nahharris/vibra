@@ -1,0 +1,2 @@
+fn f takes {v: {b: I32 a: I32}} returns r: I32 do let {a: x b: y} be v endlet return I32.add(x y) endfn
+fn main returns r: I32 do return f({a: 1i32 b: 2i32}) endfn

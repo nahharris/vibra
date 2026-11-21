@@ -1,0 +1,2 @@
+type Shape case circle {radius: F64} case empty endtype
+fn main returns r: Shape do return Shape.empty(1i32) endfn

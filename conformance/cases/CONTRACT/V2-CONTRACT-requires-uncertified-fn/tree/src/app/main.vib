@@ -1,0 +1,2 @@
+fn f takes {x: List(I32)} returns r: I32 requires check(x) do return 1i32 endfn
+fn check takes {items: List(I32)} returns found: Bool do match items(0u64) case Option.some(value: _) return true case Option.none() return false endmatch endfn

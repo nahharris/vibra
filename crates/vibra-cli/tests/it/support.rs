@@ -1,60 +1,98 @@
-//! Helpers shared by the `vibra-cli` integration tests: one temporary
-//! directory with one process-wide counter, one way to run the built binary,
-//! and the command-result envelope checks.
+//! The in-process harness of the host tests: run one command line through
+//! `vibra_cli::run` and read what it wrote.
 
+use std::ffi::OsString;
 use std::fs;
-use std::io::{ErrorKind, Write as _};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use jsonschema::Validator;
 use serde_json::Value;
 
-/// A counter, not the clock, makes a name unique within the process: the clock
-/// of some platforms is too coarse to tell two parallel tests apart.
-static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
+/// Everything one run produced.
+pub(crate) struct Outcome {
+    pub(crate) code: i32,
+    pub(crate) stdout: String,
+    pub(crate) stderr: String,
+}
 
-/// A fresh directory under the system temporary directory, removed on drop.
-/// Directories made with [`TempDir::sibling_dir`] are removed with it.
+/// Runs `arguments` in the current directory.
+pub(crate) fn run(arguments: &[&str]) -> Outcome {
+    run_in(Path::new("."), arguments)
+}
+
+/// Runs `arguments` with `directory` as the current directory.
+pub(crate) fn run_in(directory: &Path, arguments: &[&str]) -> Outcome {
+    let (mut stdout, mut stderr) = (Vec::new(), Vec::new());
+    let code = vibra_cli::run(
+        arguments.iter().map(OsString::from),
+        directory,
+        &mut stdout,
+        &mut stderr,
+    );
+    Outcome {
+        code,
+        stdout: String::from_utf8(stdout).expect("standard output is UTF-8"),
+        stderr: String::from_utf8(stderr).expect("standard error is UTF-8"),
+    }
+}
+
+/// The one envelope an invocation wrote, checked against the published
+/// schema, and the exit code the document's result maps to.
+pub(crate) fn envelope(arguments: &[&str]) -> (i32, Value) {
+    envelope_in(Path::new("."), arguments)
+}
+
+/// The one envelope of `arguments` run in `directory` in JSON format,
+/// checked against the published schema, and the exit code.
+pub(crate) fn envelope_in(directory: &Path, arguments: &[&str]) -> (i32, Value) {
+    let outcome = run_in(directory, arguments);
+    let value = single_document(&outcome.stdout);
+    vibra_schema::validate_command_result(&value).unwrap_or_else(|violation| {
+        panic!("the envelope of {arguments:?} violates its schema: {violation}")
+    });
+    (outcome.code, value)
+}
+
+/// Parses `text` as exactly one JSON value followed by one newline.
+pub(crate) fn single_document(text: &str) -> Value {
+    let body = text
+        .strip_suffix('\n')
+        .unwrap_or_else(|| panic!("no final newline in {text:?}"));
+    assert!(!body.contains('\n'), "more than one line in {text:?}");
+    serde_json::from_str(body).unwrap_or_else(|error| panic!("{error}: {text:?}"))
+}
+
+/// A counter, not the clock, makes a name unique within the process.
+static NEXT: AtomicU64 = AtomicU64::new(0);
+
+/// The library project of the host tests, with the root `src/app`.
+pub(crate) const LIBRARY: &str = "{format: @project.v2 package: {name: \"hello\" version: \"0.1.0\"} targets: [{name: @app kind: @lib root: \"src/app\"}] dependencies: [:]}";
+
+/// A temporary directory, removed on drop.
 pub(crate) struct TempDir {
     path: PathBuf,
-    siblings: Vec<PathBuf>,
 }
 
 impl TempDir {
+    /// A fresh directory under the canonical temporary directory.
     pub(crate) fn new(label: &str) -> Self {
-        for _ in 0..1024 {
-            let nonce = NEXT_TEMP.fetch_add(1, Ordering::Relaxed);
-            let path = std::env::temp_dir()
-                .join(format!("vibra-cli-{label}-{}-{nonce}", std::process::id()));
-            match fs::create_dir(&path) {
-                Ok(()) => {
-                    return Self {
-                        path,
-                        siblings: Vec::new(),
-                    };
-                }
-                Err(error) if error.kind() == ErrorKind::AlreadyExists => {}
-                Err(error) => panic!("create a unique temporary directory: {error}"),
-            }
-        }
-        panic!("could not create a unique temporary directory");
+        let serial = NEXT.fetch_add(1, Ordering::Relaxed);
+        let parent =
+            fs::canonicalize(std::env::temp_dir()).expect("temporary directory");
+        let path =
+            parent.join(format!("vibra-cli-{label}-{}-{serial}", std::process::id()));
+        let _ = fs::remove_dir_all(&path);
+        fs::create_dir_all(&path).expect("create the directory");
+        Self { path }
     }
 
-    /// A fresh project: `project.vibon` holds `manifest`, and each of `sources`
-    /// is a project-relative path and its content. `src/app` always exists.
-    pub(crate) fn project(
-        label: &str,
-        manifest: &str,
-        sources: &[(&str, &str)],
-    ) -> Self {
+    /// A project whose `project.vibon` holds `document`, with `files`, each
+    /// a relative path and its content.
+    pub(crate) fn project(label: &str, document: &str, files: &[(&str, &str)]) -> Self {
         let directory = Self::new(label);
-        fs::create_dir_all(directory.path.join("src/app"))
-            .expect("create project source root");
-        directory.write("project.vibon", manifest);
-        for (relative, source) in sources {
-            directory.write(relative, source);
+        directory.write("project.vibon", document);
+        for (path, contents) in files {
+            directory.write(path, contents);
         }
         directory
     }
@@ -63,127 +101,21 @@ impl TempDir {
         &self.path
     }
 
-    /// Writes `content` at the project-relative `relative`, creating parents.
-    pub(crate) fn write(&self, relative: &str, content: &str) {
-        let path = self.path.join(relative);
-        fs::create_dir_all(path.parent().expect("fixture file has a parent"))
-            .expect("create fixture directory");
-        fs::write(path, content).expect("write fixture file");
+    pub(crate) fn read(&self, relative: &str) -> String {
+        fs::read_to_string(self.path.join(relative)).expect("a readable fixture")
     }
 
-    /// A directory beside this one, removed when this one is.
-    pub(crate) fn sibling_dir(&mut self, suffix: &str) -> PathBuf {
-        let name = self
-            .path
-            .file_name()
-            .expect("temporary root has a name")
-            .to_string_lossy();
-        let path = self.path.with_file_name(format!("{name}-{suffix}"));
-        fs::create_dir_all(&path).expect("create outside directory");
-        self.siblings.push(path.clone());
-        path
+    pub(crate) fn write(&self, relative: &str, contents: &str) {
+        let path = self.path.join(relative);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("parent directory");
+        }
+        fs::write(path, contents).expect("fixture file");
     }
 }
 
 impl Drop for TempDir {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.path);
-        for path in &self.siblings {
-            let _ = fs::remove_dir_all(path);
-        }
     }
-}
-
-/// A `project.vibon` document with one package and the given `targets` and
-/// `dependencies` (each already spelled as vibon).
-pub(crate) fn manifest(package: &str, targets: &str, dependencies: &str) -> String {
-    format!(
-        "(record format: @project.v1 package: (record name: \"{package}\" version: \"0.1.0\") targets: (array {targets}) dependencies: {dependencies})\n"
-    )
-}
-
-/// A binary target named `app` rooted at `src/app` whose entry is `entry`.
-pub(crate) fn app_target(entry: &str, effects: &str) -> String {
-    format!(
-        "(record name: @app kind: @bin root: \"src/app\" entry: @app.main.{entry} effects: (array{}))",
-        if effects.is_empty() {
-            String::new()
-        } else {
-            format!(" {effects}")
-        }
-    )
-}
-
-/// The built `vibra` binary, with no arguments.
-pub(crate) fn vibra() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_vibra"))
-}
-
-pub(crate) fn run(args: &[&str]) -> Output {
-    vibra()
-        .args(args)
-        .output()
-        .expect("run the built vibra binary")
-}
-
-pub(crate) fn run_in(args: &[&str], current_dir: &Path) -> Output {
-    vibra()
-        .current_dir(current_dir)
-        .args(args)
-        .output()
-        .expect("run the built vibra binary in the requested directory")
-}
-
-/// Runs the binary over `workspace` with every stream piped: `input` is written
-/// to its standard input, or the input is empty (`/dev/null`) when `None`.
-pub(crate) fn run_workspace(
-    workspace: &Path,
-    arguments: &[&str],
-    input: Option<&[u8]>,
-) -> Output {
-    let mut child = vibra()
-        .args(["--workspace", &workspace.to_string_lossy()])
-        .args(arguments)
-        .stdin(if input.is_some() {
-            Stdio::piped()
-        } else {
-            Stdio::null()
-        })
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("vibra binary");
-    if let Some(input) = input {
-        child
-            .stdin
-            .take()
-            .expect("stdin")
-            .write_all(input)
-            .expect("write input");
-    }
-    child.wait_with_output().expect("output")
-}
-
-pub(crate) fn text(bytes: &[u8]) -> String {
-    String::from_utf8(bytes.to_vec()).expect("utf-8 output")
-}
-
-/// A path spelled with `/` separators on every platform.
-pub(crate) fn spelled(path: &Path) -> String {
-    path.to_str().expect("utf-8 path").replace('\\', "/")
-}
-
-pub(crate) fn json(output: &Output) -> Value {
-    serde_json::from_slice(&output.stdout).expect("stdout is one JSON document")
-}
-
-pub(crate) fn assert_envelope_schema(envelope: &Value) {
-    let schema: Value = serde_json::from_str(vibra_schema::COMMAND_RESULT_SCHEMA)
-        .expect("checked-in command result schema is valid JSON");
-    let validator = Validator::new(&schema).expect("command result schema compiles");
-    assert!(
-        validator.is_valid(envelope),
-        "envelope violates command-result schema: {}",
-        serde_json::to_string_pretty(envelope).expect("envelope serializes")
-    );
 }

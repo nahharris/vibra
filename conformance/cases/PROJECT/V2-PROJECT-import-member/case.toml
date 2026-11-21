@@ -1,0 +1,18 @@
+id = "V2-PROJECT-import-member"
+rule = "V2-PROJECT-import-member"
+profile = "staticV2"
+operation = "resolve"
+description = "04-programs-and-packages.md#modules-and-imports: an import whose path reaches a member is @name.wrongEntityKind at the import"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@name.wrongEntityKind"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 4, end = 30 }

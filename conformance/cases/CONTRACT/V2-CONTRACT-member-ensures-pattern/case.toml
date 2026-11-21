@@ -1,0 +1,12 @@
+id = "V2-CONTRACT-member-ensures-pattern"
+rule = "V2-CONTRACT-member-ensures-pattern"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#guards-and-callable-types: a contract member's ensures … else reads a parameter its pattern takes apart, and replaces a candidate that fails it"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

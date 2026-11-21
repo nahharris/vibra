@@ -1,0 +1,18 @@
+id = "V1-PROJECT-graph-static-invalid-segment"
+rule = "V1-PROJECT-graph-static-invalid-segment"
+profile = "staticV2"
+operation = "sourceGraph"
+description = "04-programs-and-packages.md#discovery-and-the-source-snapshot: a module name that is not an identifier"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@module.invalidSegment"
+level = "@error"
+source = "src/app/my-mod.vib"
+span = { start = 0, end = 0 }

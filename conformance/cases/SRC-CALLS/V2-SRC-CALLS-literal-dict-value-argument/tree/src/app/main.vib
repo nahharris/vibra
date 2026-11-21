@@ -1,0 +1,3 @@
+fn k takes {d: Dict(Str I32)} returns r: I32 do return 0i32 endfn
+
+fn f returns r: I32 do return k(["a": "b"]) endfn

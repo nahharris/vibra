@@ -1,0 +1,17 @@
+fn main
+  returns r: Celsius
+  do
+    let v: Celsius be From.convert(21i32) endlet
+    return v
+endfn
+
+type Celsius of I32
+  impl From(I32)
+    fn convert
+      takes {value: I32}
+      returns converted: Self
+      do
+        return Celsius(value)
+    endfn
+  endimpl
+endtype

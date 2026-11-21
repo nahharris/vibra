@@ -1,0 +1,12 @@
+id = "V2-CONTRACT-else-converts-freely"
+rule = "V2-CONTRACT-else-converts-freely"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#guards-and-callable-types: a callable whose requires has an else converts freely, and its value keeps the check"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

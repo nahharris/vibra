@@ -3,7 +3,7 @@
 //!
 //! The registry has one row for each host operation: the registry **symbol**,
 //! the **owner** root, the exact **signature**, and `since`, the registry minor
-//! that added it. The table is data: the emitter reads the symbols and
+//! that added it. The table is data: a code generator reads the symbols and
 //! signatures, the checker binds `external: @host` declarations against the
 //! rows, and the providers and the audit event of `vibra-host` follow the same
 //! rows. A row's audit-event shape is determined by the row.
@@ -16,7 +16,10 @@
 
 use std::collections::BTreeMap;
 
-/// The registry minor that Milestone 4 ships: the greatest `since` of any row.
+use super::RowType;
+use crate::{Library, Type};
+
+/// The registry minor of the major-1 table: the greatest `since` of any row.
 pub const HOST_REGISTRY_MINOR: u32 = 0;
 
 /// A type that appears in a host signature, spelled as the standard library
@@ -42,18 +45,22 @@ pub enum HostType {
 }
 
 impl HostType {
-    /// The language type, for a type the language names without a declaration;
-    /// `None` for `path`, `fs-metadata`, and `(array T)`, which a module
-    /// declares or builds from other types.
+    /// The type in the registry's type language, for a type the language
+    /// names without a declaration of the operation's module; `None` for
+    /// `path` and `fs-metadata`, which that module declares, and for an
+    /// array of them.
     #[must_use]
-    pub fn primitive(self) -> Option<crate::Type> {
+    pub fn primitive(self) -> Option<RowType> {
         match self {
-            Self::Void => Some(crate::Type::Void),
-            Self::Str => Some(crate::Type::Str),
-            Self::Bytes => Some(crate::Type::Bytes),
-            Self::I64 => Some(crate::Type::I64),
-            Self::U64 => Some(crate::Type::U64),
-            Self::Path | Self::FsMetadata | Self::Array(_) => None,
+            Self::Void => Some(RowType::Core(Type::Void)),
+            Self::Str => Some(RowType::Library(Library::Str, Vec::new())),
+            Self::Bytes => Some(RowType::Library(Library::Bytes, Vec::new())),
+            Self::I64 => Some(RowType::Core(Type::I64)),
+            Self::U64 => Some(RowType::Core(Type::U64)),
+            Self::Array(element) => {
+                element.primitive().map(|ty| RowType::List(Box::new(ty)))
+            }
+            Self::Path | Self::FsMetadata => None,
         }
     }
 
@@ -152,7 +159,7 @@ pub struct HostParameter {
 /// One row of the host registry: `(symbol, owner, signature, since)`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct HostRow {
-    /// The registry symbol, the entry's identity and its Wasm import field.
+    /// The registry symbol, the entry's identity.
     pub symbol: &'static str,
     /// The operation's source name, such as `io.stdin.text`.
     pub operation: &'static str,
@@ -497,4 +504,37 @@ pub fn snapshot_violations(recorded: &str, current: &str) -> Vec<String> {
         }
     }
     violations
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_major_1_table_is_its_own_next_minor() {
+        let snapshot = registry_snapshot();
+        assert!(snapshot.starts_with("registry vibra_v1 1.0\n"));
+        assert_eq!(
+            snapshot
+                .lines()
+                .filter(|line| line.starts_with("row "))
+                .count(),
+            17
+        );
+        assert!(snapshot_violations(&snapshot, &snapshot).is_empty());
+        let removed = snapshot.replace("row io.stdin-text", "row io.stdin-gone");
+        assert!(!snapshot_violations(&snapshot, &removed).is_empty());
+    }
+
+    #[test]
+    fn a_primitive_host_type_is_a_registry_type() {
+        assert_eq!(
+            HostType::Array(&HostType::Str).primitive(),
+            Some(RowType::List(Box::new(RowType::Library(
+                Library::Str,
+                Vec::new()
+            ))))
+        );
+        assert_eq!(HostType::Path.primitive(), None);
+    }
 }

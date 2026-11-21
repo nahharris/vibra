@@ -1,0 +1,1 @@
+type Celsius of F64 endtype

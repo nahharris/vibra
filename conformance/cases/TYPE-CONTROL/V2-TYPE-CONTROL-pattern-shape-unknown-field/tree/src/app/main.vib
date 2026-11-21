@@ -1,0 +1,2 @@
+type User of {name: Str id: U64} endtype
+fn f takes {user: User} returns r: Str do match user case User(age: a) return "x" endmatch endfn

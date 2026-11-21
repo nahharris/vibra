@@ -1,6 +1,6 @@
 [package]
 name = "vibra-fmt"
-description = "The canonical, idempotent Vibra source and VIBON formatter."
+description = "The Vibra formatter: the layout rules of the canonical format, preserving what was written."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

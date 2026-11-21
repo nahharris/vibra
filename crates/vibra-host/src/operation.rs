@@ -1,17 +1,13 @@
 //! The value-access trait and the typed host operations.
 //!
-//! `docs/spec/06-runtime.md`, "WebAssembly boundary" and "The audit trace": each
-//! host operation is written once in Rust, behind a value-access trait. The
-//! reference interpreter implements [`HostValues`] over its own values, and the
-//! Wasm runner implements it through the exported accessors and builders of the
-//! module, never through the instance's linear memory. A [`HostCall`] is the
-//! operation read from the arguments of one call, [`perform`] runs it on a
-//! provider, and a [`HostReply`] is built back into the backend's value, so the
-//! two backends cannot differ in what an operation does.
+//! `docs/spec/06-runtime.md`, "Audit trace": each host operation is written
+//! once in Rust, behind a value-access trait that a backend implements over its
+//! own values. A [`HostCall`] is the operation read from the arguments of one
+//! call, [`perform`] runs it on a provider, and a [`HostReply`] is built back
+//! into the backend's value, so no two backends can differ in what an operation
+//! does.
 //!
-//! Builders are bottom-up: a child is built, and so sealed, before the value
-//! that holds it, which is the discipline of the seven builders of the Wasm
-//! boundary.
+//! Builders are bottom-up: a child is built before the value that holds it.
 
 use std::fmt;
 
@@ -21,75 +17,75 @@ use crate::provider::{
     EnvError, Failure, FsError, HostProvider, IoError, Metadata, RandomError, TimeError,
 };
 
-/// An enum type that a host operation builds, in the order of the registry's
+/// A variant type that a host operation builds, in the order of the registry's
 /// declarations.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HostEnum {
-    /// `result` of `@std.result`: `ok` carries the value, `err` the error.
+    /// `Result`: `ok` carries the value, `err` the error.
     Result,
-    /// `io-error`.
+    /// `ioError`.
     IoError,
-    /// `fs-error`.
+    /// `fsError`.
     FsError,
-    /// `fs-kind`.
+    /// `fsKind`.
     FsKind,
-    /// `env-error`.
+    /// `envError`.
     EnvError,
-    /// `time-error`.
+    /// `timeError`.
     TimeError,
-    /// `random-error`.
+    /// `randomError`.
     RandomError,
 }
 
 /// A record type that a host operation builds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HostRecord {
-    /// `fs-metadata`: the fields `kind` and `size`, in that order.
+    /// `fsMetadata`: the fields `kind` and `size`, in that order.
     FsMetadata,
 }
 
-/// The variant index of `ok` and `err` in `result`.
+/// The case index of `ok` and `err` in `Result`.
 const OK: u32 = 0;
 const ERR: u32 = 1;
 
 /// The value-access interface each backend implements.
 ///
 /// A value is an owned handle in the backend's representation. Reads borrow the
-/// handle; builders take sealed children and answer a sealed value.
+/// handle; builders take built children and answer a built value.
 pub trait HostValues {
     /// A backend value.
     type Value;
 
-    /// The scalars of a `str` as text.
+    /// The scalars of a `Str` as text.
     fn read_text(&mut self, value: &Self::Value) -> Result<String, ReadError>;
-    /// The bytes of a `bytes`.
+    /// The bytes of a `Bytes`.
     fn read_bytes(&mut self, value: &Self::Value) -> Result<Vec<u8>, ReadError>;
-    /// The text of a `path`, the wrapper of `str` that `@std.fs` declares.
+    /// The text of a `path`, the wrapper of `Str` that `@std.fs` declares.
     fn read_path(&mut self, value: &Self::Value) -> Result<String, ReadError>;
-    /// A `u64`.
+    /// A `U64`.
     fn read_u64(&mut self, value: &Self::Value) -> Result<u64, ReadError>;
 
-    /// The `void` value.
+    /// The `Void` value.
     fn build_void(&mut self) -> Self::Value;
-    /// A `str`.
+    /// A `Str`.
     fn build_text(&mut self, text: &str) -> Self::Value;
-    /// A `bytes`.
+    /// A `Bytes`.
     fn build_bytes(&mut self, bytes: &[u8]) -> Self::Value;
-    /// An `i64`.
+    /// An `I64`.
     fn build_i64(&mut self, value: i64) -> Self::Value;
-    /// A `u64`.
+    /// A `U64`.
     fn build_u64(&mut self, value: u64) -> Self::Value;
-    /// An `array` of sealed elements.
-    fn build_array(&mut self, elements: Vec<Self::Value>) -> Self::Value;
-    /// A value of enum `ty` at `variant`, with the sealed payload of a non-`void`
-    /// slot.
+    /// A `List` of built elements.
+    fn build_list(&mut self, elements: Vec<Self::Value>) -> Self::Value;
+    /// A value of variant type `ty` at case `variant`, with the built payload
+    /// of a non-`Void` slot.
     fn build_enum(
         &mut self,
         ty: HostEnum,
         variant: u32,
         payload: Option<Self::Value>,
     ) -> Self::Value;
-    /// A record of type `ty` with its sealed fields in declaration order.
+    /// A record of type `ty` with its built fields in declaration order.
     fn build_record(&mut self, ty: HostRecord, fields: Vec<Self::Value>)
     -> Self::Value;
 }
@@ -254,39 +250,39 @@ impl HostCall {
 /// What a completed host call answered when it succeeded.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum HostOk {
-    /// `void`.
+    /// `Void`.
     Void,
-    /// A `str`.
+    /// A `Str`.
     Text(String),
-    /// A `bytes`.
+    /// A `Bytes`.
     Bytes(Vec<u8>),
-    /// An `(array str)`.
+    /// A `List(Str)`.
     Entries(Vec<String>),
-    /// An `fs-metadata`.
+    /// An `fsMetadata`.
     Metadata(Metadata),
-    /// An `i64`.
+    /// An `I64`.
     Integer(i64),
-    /// A `u64`.
+    /// A `U64`.
     Count(u64),
 }
 
-/// The closed error an operation answered, of the enum its row declares.
+/// The closed error an operation answered, of the variant type its row declares.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OperationError {
-    /// An `io-error`.
+    /// An `ioError`.
     Io(IoError),
-    /// An `fs-error`.
+    /// An `fsError`.
     Fs(FsError),
-    /// An `env-error`.
+    /// An `envError`.
     Env(EnvError),
-    /// A `time-error`.
+    /// A `timeError`.
     Time(TimeError),
-    /// A `random-error`.
+    /// A `randomError`.
     Random(RandomError),
 }
 
 impl OperationError {
-    /// The enum the error is a variant of.
+    /// The variant type the error is a case of.
     #[must_use]
     pub const fn enum_type(self) -> HostEnum {
         match self {
@@ -298,7 +294,7 @@ impl OperationError {
         }
     }
 
-    /// The registry's description of the enum.
+    /// The registry's description of the variant type.
     #[must_use]
     pub const fn error_type(self) -> HostErrorType {
         match self {
@@ -322,7 +318,7 @@ impl OperationError {
         }
     }
 
-    /// The variant's position in its enum.
+    /// The case's position in its type.
     #[must_use]
     pub const fn variant_index(self) -> u32 {
         match self {
@@ -335,7 +331,7 @@ impl OperationError {
     }
 }
 
-/// The `(result t e)` a completed call answered.
+/// The `Result` a completed call answered.
 pub type HostReply = Result<HostOk, OperationError>;
 
 /// The host event of memory exhaustion: the call did not complete, and it reaches
@@ -421,7 +417,7 @@ pub fn perform(
     }
 }
 
-/// Builds the `(result t e)` value of a completed call in the backend's own
+/// Builds the `Result` value of a completed call in the backend's own
 /// representation, children before parents.
 pub fn build_reply<V: HostValues>(reply: &HostReply, values: &mut V) -> V::Value {
     match reply {
@@ -435,7 +431,7 @@ pub fn build_reply<V: HostValues>(reply: &HostReply, values: &mut V) -> V::Value
                         .iter()
                         .map(|name| values.build_text(name))
                         .collect::<Vec<_>>();
-                    Some(values.build_array(elements))
+                    Some(values.build_list(elements))
                 }
                 HostOk::Metadata(metadata) => {
                     let kind = values.build_enum(

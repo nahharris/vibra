@@ -1,0 +1,19 @@
+id = "V2-TYPE-NAMES-shadow-nested"
+rule = "V2-TYPE-NAMES-shadow-nested"
+profile = "staticV2"
+operation = "resolve"
+description = "01-source-language.md#patterns: a binder in a nested scope may not shadow a visible local; @name.redeclaration at the inner binder"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@name.redeclaration"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 94, end = 95 }
+related = [{ source = "src/app/main.vib", span = { start = 53, end = 54 } }]

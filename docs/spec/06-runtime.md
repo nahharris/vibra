@@ -32,10 +32,6 @@ The meaning of a program does not depend on what executes it.
 - **Pure means pure.** A pure operation MUST NOT read the filesystem, the
   environment, a clock, a random source, or the network.
 
-WebAssembly is a transition backend only. It runs pure code, and
-[Wasm transition](#wasm-transition) states what it owes while it is part of
-the toolchain. Source has no Wasm provider, no Wasm or WASI import, and no
-interoperability bridge.
 
 ## Evaluation
 
@@ -211,8 +207,8 @@ actual type arguments.
 - A default member runs under the substitution of the implementation
   selected for its own call, so an associated name in its body denotes that
   implementation's choice.
-- A destination-dispatched conversion uses the instantiated, written
-  destination type.
+- A destination-dispatched conversion uses the instantiated destination
+  type.
 - A type parameter bound to a choice by label, as in
   `given {T: Ordered I: Iter(Item: T)}`, is instantiated at the choice of
   the selected implementation, and its own bound's evidence comes from that
@@ -283,8 +279,8 @@ execution metadata.
 - It is not a `Result`, a validation error, or a trap.
 - It has no source location: primary span `0..0` and no source identity.
 - The tool outcome is an operational failure, exit 3.
-- A test run stopped by it MUST NOT report the tests that did not run as
-  passed.
+- A test it stops is `@test.exhausted`. The run MUST NOT report the tests
+  that did not run as passed.
 - Two runs that differ only because their memory limits differ are not a
   parity violation. A comparison MUST state the limits and compare like
   profiles.
@@ -351,8 +347,11 @@ are the rows `grant.restrict`, `grant.sub`, and `grant.limit`, generic over
 the grant type `G` and bound with `external @compiler` in every standard
 operation interface: `Fn({G FsPolicy} Result(G ScopeError))`,
 `Fn({G RelativePath} Result(G ScopeError))`, and `Fn({G GrantLimits} G)`.
-The broker implements them; they perform no host operation and append no
-event.
+They are rows of 2.0, with `since` 0. Bound in an interface, each is the
+implementation of a sealed grant only, which the broker provides; it
+performs no host operation and appends no event. An `impl` supplies its own
+narrowing members, as the
+[effects chapter](03-effects.md#operation-interfaces) states.
 
 Three core types are used below:
 
@@ -399,7 +398,11 @@ through an extra static member:
 | `TryFrom(Str)` on `T` | an optional minus (signed `T` only), then one or more ASCII decimal digits, and nothing else. Anything else is `invalidFormat`. A well-formed value outside `T` is `outOfRange` |
 | `From(S)` or `TryFrom(S)` on `T`, for another integer type `S` | the same integer. `From` exists exactly when every value of `S` fits `T`; otherwise `TryFrom` returns `outOfRange` for a value that does not fit |
 
-The destination of a conversion is its written expected type. The default
+The registry rows `<t>.equal`, `<t>.compare`, `<t>.toStr`, `<t>.parse`, and
+`<s>.to<T>`, such as `i16.equal` and `i16.toI32`, are the bodies these
+implementations bind. None of them is a member a source path can name.
+
+The destination of a conversion is its expected type. The default
 members of `Ordered` call `compare` once. `min` and `max` return the left
 operand on a tie. `inRange` compares the lower bound first, and the upper
 bound only if needed. The order laws of a user's implementation are that
@@ -466,7 +469,7 @@ Negative zero is normalized only where an operation says so.
 | `List.concat` | `Fn({List(T) List(T)} List(T))` | the first list's elements, then the second's |
 | `List.slice` | `Fn({List(T) U64 U64} Option(List(T)))` | a half-open range of elements, with the same bounds rule |
 | dict literal | pairs to `Dict(K V)` | every pair evaluated; key order; a later duplicate wins; the empty literal is `[:]` |
-| `From(List({K V}))` on `Dict(K V)` | | the same ordering and duplicate rule |
+| `From(List({K V}))` on `Dict(K V)` | `Fn({List({K V})} Dict(K V))` | the same ordering and duplicate rule; its body is the registry row `dict.fromList` |
 | `Dict.entries` | `Fn({Dict(K V)} List({K V}))` | the entries in key order |
 | `dict.next` | `Fn({Dict(K V)} Option({{K V} Dict(K V)}))` | the first entry in key order and the remainder; the pure primitive behind `Dict`'s nested `Iter` implementation |
 
@@ -604,9 +607,11 @@ observe the change or a back edge.
 **Authority.** The broker and kernel own the live resource and accounting
 objects that sealed tokens refer to, without a strong ownership cycle. A
 copy or child keeps its ancestors' accounting and keeps the backing
-authority alive. Releasing a parent MUST NOT invalidate a legitimate live
-child, and a stale token MUST NOT come to name a new resource when a slot
-is reused.
+authority alive. Dropping a parent value MUST NOT invalidate a legitimate
+live child. Release at shutdown is not such a drop: it invalidates the
+whole lineage of the resource before releasing it, as
+[Entry outcome](#entry-outcome) states. A stale token MUST NOT come to
+name a new resource when a slot is reused.
 
 **Not promised:** a general cycle collector, a close protocol, linear
 destruction, revocation, and constant-time reclamation.
@@ -828,7 +833,7 @@ record. Every other compound value is one of these closed records:
 | bytes | `kind: @bytes`; `values`: list of `U8` literals |
 | tuple | `kind: @tuple`; `typeInfo: T`, present only for a declared tuple; `values`: list of encoded components |
 | list | `kind: @list`; `values`: list of encoded elements in order |
-| dict | `kind: @dict`; `entries`: list of encoded key and value tuples in `Ordered` key order |
+| dict | `kind: @dict`; `entries`: list of entries in `Ordered` key order, each the encoding of the anonymous tuple of its key and value, `{kind: @tuple values: [k v]}` |
 | record | `kind: @record`; `typeInfo: T`, present only for a declared record; `fields`: record of encoded fields |
 | variant | `kind: @enum`; `typeInfo: T`; `variant`: the case name as an atom; `payload`: a record of the case's encoded fields in declaration order, only for a case that has fields |
 | wrapper | `kind: @wrapper`; `typeInfo: T`; `value`: the encoded representation |
@@ -845,6 +850,10 @@ record. Every other compound value is one of these closed records:
   use canonical name order. A variant's `payload` has no `kind` and no
   `typeInfo` of its own: `payload: {radius: 1.5f64}`.
 - A case name is the resolved source name.
+- `Bool` has no form of its own. A `Bool` value is the variant record of
+  its declaration, `{kind: @enum typeInfo: T variant: @true}` or
+  `variant: @false`; the `true` and `false` literals of the data grammar
+  never encode one.
 - An interface value is encoded as the complete observation of the value it
   holds, format included, because an observation is for tools, which may
   see it. Source still cannot: no pattern or conversion reads `held` back,
@@ -906,8 +915,8 @@ declarations of the embedded standard library may bind them.
   interface and its audit contract.
 - An unknown symbol or provider, a wrong owner, or a wrong signature MUST
   be rejected before execution.
-- A user package MUST NOT add a foreign function interface, WASI, a Wasm or
-  native import, or a foreign driver through these declarations.
+- A user package MUST NOT add a foreign function interface, a native
+  import, or a foreign driver through these declarations.
 - A host operation takes values and returns a value, through its explicit
   sealed receiver. File contents, stream data, the environment, clocks, and
   randomness are ordinary typed results.
@@ -930,8 +939,8 @@ with one row per member: `testWorld.directory`, `testWorld.streams`,
 `testWorld.environment`, `testWorld.clocks`, `testWorld.random`, and
 `testWorld.output`, bound with `external @host` in `@std.test` and owned by
 `TestWorld`. The test runner's world implements them; they reach no external
-resource and append no `@host` event. Admission refuses every one of them
-for a target, since no recipe can name `TestWorld`.
+resource and append no `@host` event. No target can perform one of them: no
+provider issues a `TestWorld`, so no recipe can bind one.
 
 A row is a symbol, an owner, an exact signature, a `since` minor version,
 and a delivery class. Every row below has `since` 0 and delivery `@once`.
@@ -946,8 +955,8 @@ canonical mapping from source names to these rows.
 
 | Wire symbol | Operation | Owner module | Further parameters | Result of an invocation |
 | --- | --- | --- | --- | --- |
-| `io.stdinText` | `StdinText.read` | `@std.io` | none | `Result(Str IoError)` |
-| `io.stdinBytes` | `StdinBytes.read` | `@std.io` | none | `Result(Bytes IoError)` |
+| `io.stdinText` | `StdinText.read` | `@std.io` | `max: U64` | `Result(Str IoError)` |
+| `io.stdinBytes` | `StdinBytes.read` | `@std.io` | `max: U64` | `Result(Bytes IoError)` |
 | `io.stdoutText` | `StdoutText.write` | `@std.io` | `value: Str` | `Result(Void IoError)` |
 | `io.stdoutBytes` | `StdoutBytes.write` | `@std.io` | `value: Bytes` | `Result(Void IoError)` |
 | `io.stderrText` | `StderrText.write` | `@std.io` | `value: Str` | `Result(Void IoError)` |
@@ -1003,21 +1012,46 @@ access by itself.
   invalid text. Byte operations never inspect contents.
 - A limit MUST be reserved before an operation could exceed its count or
   byte bound. A driver MUST NOT read, allocate, or send an unbounded
-  payload first and check afterwards. A read first learns the size of the
-  opened object, reserves it, and reads at most that many bytes; a size
+  payload first and check afterwards. A file read first learns the size of
+  the opened object, reserves it, and reads at most that many bytes; a size
   over the remaining limit is `limitExceeded` before any content is read.
-  A write reserves the encoded size of its argument before it sends.
+  A stream read is reserved as **Standard input** states. A write reserves
+  the encoded size of its argument before it sends.
 - A driver MUST NOT turn an ordinary failure into a process crash.
 
 **Standard input.**
 
-- A read consumes from the current position to the end.
-- After a completed success or domain failure the position is at the end,
-  and a second completed read returns the empty value.
-- A rejection before dispatch (`denied`, `limitExceeded`, `unsupported`)
-  consumes nothing.
+- A read consumes at most `max` bytes from the current position. A
+  completed read, a success or a domain failure, moves the position past
+  the bytes the adapter took. At the end of input a completed read returns
+  the empty value.
+- The bytes are reserved at the gate, before the stream yields one, and
+  the settlement refunds what was not read. When the size of the remaining
+  input is known (the standard input of a world, which its document holds,
+  or a process's standard input that is a regular file), the reservation is
+  the smaller of `max` and that size, and a reservation over what remains
+  of a bound is `limitExceeded`; an empty input reserves zero, so it
+  succeeds at a zero budget.
+- When the size is not known (a pipe, a console), the reservation is the
+  smaller of `max` and what remains of the `inputBytes` bound of the grant
+  and of every ancestor. The call is `limitExceeded` before the stream is
+  read only when `max` is positive and nothing remains, or for a text
+  read as the next item states. The read returns at most
+  the reserved count, so a loop that reads to the end through a bound
+  smaller than the input reads up to the bound and then receives
+  `limitExceeded`.
+- A text read returns the longest prefix of whole scalars that fits in its
+  reservation, and consumes exactly those bytes. A text `max` below 4, the
+  length of the longest scalar, is `unsupported` before the stream is
+  read. A text read of unknown size whose `max` is at least 4 and whose
+  reservation is below 4 is `limitExceeded` before the stream is read, so
+  a completed text read is empty only at the end of input. A byte read
+  accepts every count; a `max` of zero returns the empty value and
+  consumes nothing, as a zero `count` of random bytes does.
+- A rejection before the stream is read (`denied`, `limitExceeded`,
+  `unsupported`) consumes nothing.
 - Input that cannot be read is `other`. Text that cannot be decoded is
-  `invalidText`.
+  `invalidText`, and the bytes the adapter took for it are consumed.
 
 **Standard output and error.**
 
@@ -1047,7 +1081,10 @@ access by itself.
 - [Scope policies](03-effects.md#scope-policies) specifies `RelativePath`
   parsing, file-name tests, rooted traversal, and the limits on hard links.
 - A grant narrowed by `sub` keeps the same acquired anchor and adds a path
-  restriction. The driver MUST NOT cache a resolved child anchor between
+  restriction, below which its requests are rebased, as
+  [Narrowing](03-effects.md#narrowing) states; the driver is asked for the
+  prefix followed by the request. The driver MUST NOT cache a resolved
+  child anchor between
   invocations. Each operation walks again from the anchor, releases its
   intermediate handles when the invocation ends, and works on the target it
   opened.
@@ -1095,9 +1132,12 @@ link, and so gains no wider traversal authority.
 
 **Environment.**
 
-- `EnvReadVar.read` reads one permitted name. A missing name is
-  `notPresent`. So is a name no environment can hold: an empty one, or one
-  containing `=` or NUL. A value that is not Unicode is `notUnicode`.
+- `EnvReadVar.read` reads one permitted name. A name outside the grant's
+  `names` is `denied`, decided in step 3 of [host calls](#host-calls), so
+  no event is appended and the process environment is not consulted. A
+  permitted name that is missing is `notPresent`. So is a name no
+  environment can hold: an empty one, or one containing `=` or NUL. A
+  value that is not Unicode is `notUnicode`.
 - `EnvReadArgs.read` returns the program's arguments in their original
   order, without the executable's path, under the
   [program arguments](05-tooling.md#program-arguments-execution-and-evaluation)
@@ -1129,19 +1169,29 @@ the runtime MUST do the following, in order:
 
 1. **Validate the grant:** its target kind, its world and provider, its
    lifetime and generation, and the identity of the registered operation.
+   A grant that fails this validation is the defect trap
+   `@runtime.invalidHostValue`, never a typed refusal: checked source
+   cannot hold a grant of another world or one already released, so the
+   failure is a defect, which `denied` would hide.
 2. **Check rights**, and derive the requested resource and action from the
    typed operands. An approval flag supplied by the author is never used.
 3. **Enforce the whole policy** over everything the operands decide,
    including every constraint inherited from a parent: the path prefix, the
    requested name against the name test, and that the policy permits at
    least one of the actions the operation may turn out to perform. Reserve
-   all shared count and byte limits atomically.
+   atomically the shared count limits and the byte limits the operands
+   decide, such as the size of a write or a `count` of random bytes.
 4. **Call only the typed adapter bound to the target.** The adapter
    enforces what only the opened object decides: the right for the action
    it found (create or replace) and the name test against the name the
    filesystem reports. A failure there is `denied`, returned by the adapter
-   as a completed call. Keep three outcomes distinct: known not submitted,
-   completed, and may have run.
+   as a completed call. The bytes of a read are reserved here, when the
+   adapter reports the size it found, and reservation ends there: a call
+   passes reservation, and holds its invocation, only when that size is
+   reserved. A size over the remaining limit is `limitExceeded`, and an
+   action whose rule needs a fact the platform does not report is
+   `unsupported`; neither is a completed call. Keep three outcomes
+   distinct: known not submitted, completed, and may have run.
 5. **Advance the continuation** consistently with the completion, and then
    append the completed event, if one is due. A refusal in steps 1 to 3
    appends nothing.
@@ -1159,12 +1209,17 @@ and a wait transfer; an ordinary call does not define it.
 - Narrowing MUST NOT add a root, an operation, a resource extent, a driver
   or world, or a fresh budget.
 - A child or sibling grant is bound by every ancestor's reservation limit,
-  and its own tighter limits apply in addition.
+  and its own tighter limits apply in addition, on counters of its own, as
+  [Limits](03-effects.md#limits) counts them.
 - A reservation is released or refunded only when the capacity is known to
   be unused. A consumption that might have happened MUST NOT be refunded.
 - A counter that would overflow MUST reject and MUST NOT wrap.
 - A grant outlives the variable that introduced it for as long as a
-  legitimate child or closure holds it.
+  legitimate child or closure holds it. Dropping a parent value releases
+  nothing, so a child of it stays usable.
+- Release at shutdown is different: it makes the whole **lineage** of a
+  root unusable, the root and every grant narrowed from it, before the
+  resource is released, as [Entry outcome](#entry-outcome) states.
 
 **Two kinds of target.** A `HostResource` is checked at host dispatch. An
 `ActorEndpoint` is checked at kernel dispatch, against its typed protocol
@@ -1311,7 +1366,7 @@ steps that came before them. Its persistent format is `@auditTrace.v2`:
 | `format` | `@auditTrace.v2` | required |
 | `revision` | `Str` | the workspace revision of the source that ran |
 | `target` | optional atom | the binary target; absent for a test or an evaluation |
-| `drivers` | list of `{provider: Atom version: Str}` sorted by `provider` | every driver bound in the run; `provider` is `@hostWorld.v2` for a fake world's driver |
+| `drivers` | list of `{provider: Atom version: Str}` sorted by `provider` | every driver bound in the run; `provider` is `@hostWorld.v2` for a fake world's driver; `version` is the release of the toolchain that ships the driver, the fake world's included |
 | `policies` | dict from `Str` policy hash to the normalized `@scopePolicy.v1` document | every policy a grant projection refers to |
 | `redaction` | atom | `@none`, or the redaction profile applied |
 | `events` | list of event records | in completion order |
@@ -1343,15 +1398,20 @@ order. A leaf that startup never reached has no event.
 | `driver` | `{provider: Atom version: Str}`, the bound driver |
 | `origin` | the source-origin ordinal, `U64`; zero means no source origin |
 | `grant` | the grant projection |
-| `args` | list of the canonical argument values after the grant, in parameter order |
+| `args` | list of the canonical argument values after the grant, in parameter order; a path as the program wrote it, before a `sub` rebases it |
 | `result` | the canonical data of the operation's complete `Result` value |
 
 **Invocations.** Every `await` is an invocation, numbered from 1 in the
-order it starts. The startup reads of the recipes come first, each an
-invocation with no parent; the launcher's run of the entry's plan is the
-next invocation; and each `await` inside the entry's body is a further one
-whose parent is the invocation whose body performed it. Because evaluation
-order is fixed, every executor numbers a run alike.
+order it starts. Every started `await` takes the next ordinal whether or not
+an event follows it, as for an `await` of a `TestWorld` member, of a source
+`proc`, or of a call refused before the adapter, so the ordinals of a trace
+may have gaps. The startup reads of the recipes come first, in processing
+order, each an invocation with no parent; the launcher's run of the entry's
+plan is the next invocation; and each `await` inside the entry's body is a
+further one whose parent is the invocation whose body performed it. In a
+test, the runner's run of the test body is invocation 1, and it is the
+parent of each `await` in that body. Because evaluation order is fixed,
+every executor numbers a run alike.
 
 **Origins.** The source origins of a checked program form one canonical
 **origin table**: every source origin of the reachable program, sorted by
@@ -1360,13 +1420,21 @@ lowering, and the trace of a [trap](#traps) all write ordinals of this table,
 so the executors agree on them.
 
 A **grant projection** is a closed record of `issuedBy` (the origin record
-below); `policy` (`Str`, the hash of its normalized policy and a key of
-`policies`, or the empty string for a provider without a policy); `rights`
-(a one-entry list of entity reference records, the operation interface it
-permits); `limits` (optional, absent when no bound is set, otherwise a
-record of the bounds that are set among `invocations`, `inputBytes`, and
-`outputBytes`, each `U64`); and `root` (`U64`, a run-local ordinal of the
-root grant whose accounting it shares).
+below); `policy` (`Str`, the hash of its normalized
+[effective policy](03-effects.md#narrowing) and a key of `policies`, or the
+empty string for a provider without a policy); `rights` (a one-entry list
+of entity reference records, the operation interface it permits); `limits`
+(optional, absent when no bound is set along the grant's ancestry,
+otherwise a record of the bounds that are set among `invocations`,
+`inputBytes`, and `outputBytes`, each `U64` and each the smallest bound of
+its kind along the ancestry, never a remaining amount); and `root` (`U64`,
+a run-local ordinal of the root grant whose accounting it shares).
+
+A **root** is each grant an issuer hands out: each acquired startup leaf,
+and each grant in the result record of a `TestWorld` member. Roots are
+numbered from 1 in issue order, the grants of one result record in the
+canonical order of its field names. The `TestWorld` grant a test receives
+has no ordinal, since no event projects it.
 
 The **origin record** says where the grant's authority began, and has
 exactly two forms. A grant that descends from a startup leaf has
@@ -1394,7 +1462,12 @@ The example is shape only; its identities are placeholders:
       grant: {
         issuedBy: {kind: @binding leaf: @out}
         policy: ""
-        rights: [{path: @std.io.StdoutText seed: "sha256:213e3a01ef10d7c10032616f8ab0da9a97fb729b9f98d723f4beb3158a25e2ad"}]
+        rights: [
+          {
+            path: @std.io.StdoutText
+            seed: "sha256:213e3a01ef10d7c10032616f8ab0da9a97fb729b9f98d723f4beb3158a25e2ad"
+          }
+        ]
         root: 1u64
       }
     }
@@ -1409,7 +1482,12 @@ The example is shape only; its identities are placeholders:
       grant: {
         issuedBy: {kind: @binding leaf: @out}
         policy: ""
-        rights: [{path: @std.io.StdoutText seed: "sha256:213e3a01ef10d7c10032616f8ab0da9a97fb729b9f98d723f4beb3158a25e2ad"}]
+        rights: [
+          {
+            path: @std.io.StdoutText
+            seed: "sha256:213e3a01ef10d7c10032616f8ab0da9a97fb729b9f98d723f4beb3158a25e2ad"
+          }
+        ]
         root: 1u64
       }
       args: ["hello\n"]
@@ -1460,6 +1538,9 @@ The example is shape only; its identities are placeholders:
   appends nothing: the trace holds no record of it, and conformance compares
   the typed result the program received. A refusal kind would need its own
   fields and is not part of this format.
+- A `limitExceeded` or `unsupported` decided in step 4, after the adapter
+  opened an entry, appends nothing either: wherever they are decided, these
+  two refusals are not completed calls.
 - A trap, a host event, or an interrupted completion appends no completed
   success to fill the trace.
 - The absence of a completed event MUST NOT be reported as proof that
@@ -1512,6 +1593,15 @@ signature and its binding recipes.
   [tooling chapter](05-tooling.md#command-payloads) as the binding status
   `released`. Release MUST NOT be presented as rollback of an external
   effect already dispatched.
+- Releasing a grant first makes it and every grant narrowed from it
+  unusable, and only then releases its resource.
+- A release that the operating system reports as failed does not fail the
+  run: the binding is still `released`, and the failure goes to the tool's
+  log.
+- A defect trap during startup ends the run as a trap: the result is
+  `@command.trap`, exit 5, with the trap record. Startup has failed, but no
+  leaf stopped it, so the startup record's `failure` is `null`. Every leaf
+  acquired so far is released.
 - The entry MUST NOT have a bare `requires`: no call site exists where it
   could be discharged, so it is `@project.invalidEntrySignature`. A
   `requires … else` and either form of `ensures` behave as on any `proc`.
@@ -1646,77 +1736,6 @@ typed outcomes, and the order of completed events MUST agree.
   replay at observable kernel actions. It does not require the interpreter
   and native code to take equal numbers of reduction steps.
 
-## Wasm transition
-
-The WebAssembly backend is a narrow transition substrate. It is not another
-source language and not a grant ABI, and it is part of the toolchain only
-while the native profile is unqualified.
-
-- It runs checked IR of this language, and only its pure part: a test
-  without `takes`, and the evaluation of a pure function. Every binary
-  target has the grant-receiving entry and every host operation needs a
-  grant, so neither is admitted: a program that needs the entry, a grant
-  receiver, a host operation, or the host registry MUST be reported as
-  unsupported.
-- It imports no host symbol. Its only imports are the pure native routines
-  of `vibra_native_v1`.
-- It has no grant ABI and gains none.
-- An unsupported case stays an explicit gap. A compatibility parser, an
-  unsafe import shim, and a false parity pass are all forbidden.
-
-**The module.** A transition module validates with core WebAssembly 2.0 MVP
-instructions, function tables, multiple results, bulk memory, sign
-extension, and non-trapping float-to-integer conversion. It MUST NOT
-require tail calls, GC, exceptions, SIMD, threads, reference types,
-memory64, or multiple memories. It has one 32-bit linear memory, exported
-as `vibra_v1_memory`, and no exported global. Only toolchain-owned native
-code reads its layout.
-
-**Imports** are closed: the pure native routines of `vibra_native_v1`, and
-nothing else. Source chooses no import.
-
-- Scalar parameters use `i32`, `i64`, `f32`, and `f64`. A `Char` is a
-  validated `i32` scalar. Smaller integers are sign- or zero-extended into
-  `i32`.
-- Every other value is an instance-local `U64` value ID. No guest pointer
-  or offset crosses the boundary.
-- An ID is non-zero, issued by its instance, never reused within it, and
-  held live in the instance's handle table until it is released.
-- Native in-process execution needs no such table; its offsets stay local
-  to the context.
-
-**Exports** are closed and carry the prefix `vibra_v1_`:
-
-| Export | Signature and meaning |
-| --- | --- |
-| `eval` | no parameters, no result: call the module's first function with no parameters, as the `interpret` operation does |
-| `test` | `i32` index, no result: run one test without `takes` in a fresh instance |
-| `status` | to `i32`: 0 none, 1 recorded trap, 2 memory host event, 3 assertion failure |
-| `trap_code` | to `i32`: 1 invalidCheckedProgram, 3 invalidHostValue; 2 and 4 are unassigned and never returned |
-| `origin` | to `i32`: zero for no origin, otherwise a table ordinal |
-| `failure` | to `i32`: 1 `assert.true`, 2 `assert.false`, 3 `assert.equal` |
-| `failure_expected`, `failure_actual`, `result` | to `i64`: typed scalar bits or a held value ID, according to the checked type |
-| `live_size` | to `i64`: live arena and handle-table bytes |
-| `release` | `i64` held ID, no result: drop the host's hold |
-| `variant` | `i64` ID to `i32`: the variant or member index |
-| `length` | `i64` ID to `i64`: the count of scalars, bytes, elements, entries, or components for the value's kind |
-| `read_i32`, `read_i64`, `read_f32`, `read_f64` | `i64` ID and `i64` index, to the named scalar class |
-| `read_id` | `i64` ID and `i64` index, to a new held child ID, which the host must release |
-
-An evaluation module has `eval` and a test module has `test`, never both.
-Returning is completion. An engine stop without the matching recorded
-status is a compiler defect. The module has no builder exports, because no
-host value ever enters it. The host never receives a raw pointer, and every
-accessor checks instance, kind, and liveness. The kind codes the boundary
-uses are constants of this boundary alone; the native value arena has its
-own private kinds.
-
-**Artifacts.** A transition artifact records its ABI and registry
-requirements and its source-origin mapping. Build metadata MUST NOT reuse
-an incompatible custom section or version. The substrate, its differential
-profile, its emitter and runner dependencies, and its packaging references
-are one unit: a toolchain ships all of them or none.
-
 ## Determinism and observability
 
 **Execution.** For identical checked code and equivalent deterministic
@@ -1764,7 +1783,7 @@ This chapter provides none of the following:
 - exactly-once external delivery, or universal journaling and recovery;
 - shared mutable references, or cycle collection;
 - a hard time bound;
-- a foreign function interface, native or Wasm;
+- a foreign function interface;
 - an operating-system sandbox for foreign binaries.
 
 Capability confinement in source is a contract of trusted compilation
@@ -1772,10 +1791,9 @@ together with reviewed issuers, runtime, and adapters. It is not safe
 execution of arbitrary machine code, and not a proof that a provider is
 correct.
 
-Nothing in the wire encodings or the WebAssembly backend provides an
-untagged union, union injection, a narrowing pattern, a tuple
-index, an ascription expression, a variadic call, or unchecked integer
-division and remainder. There is no implicit `await`, no permission prompt,
+Nothing in the wire encodings provides an untagged union, union injection,
+a narrowing pattern, a tuple index, an ascription expression, a variadic
+call, or unchecked integer division and remainder. There is no implicit `await`, no permission prompt,
 no ambient grant, no widening of a resource, no default error substituted
 for a bare `where`, no trap for a failed contract, and no erasing of a
 proof obligation by sampling.

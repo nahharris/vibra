@@ -1,0 +1,18 @@
+id = "V2-CONTRACT-where-generic-open-comparison"
+rule = "V2-CONTRACT-where-generic-open-comparison"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#predicates: a predicate that compares values of a type parameter calls a comparison at an open receiver, which is outside the fragment"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@contract.unsupportedPredicate"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 63, end = 70 }

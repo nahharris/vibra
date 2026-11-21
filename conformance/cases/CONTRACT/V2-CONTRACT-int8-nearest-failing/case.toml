@@ -1,0 +1,19 @@
+id = "V2-CONTRACT-int8-nearest-failing"
+rule = "V2-CONTRACT-int8-nearest-failing"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "07-diagnostics-and-conformance.md#integer-facts: the nearest program to int8 that the facts do not establish"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "unknown"
+
+[[expect.diagnostics]]
+code = "@contract.unproved"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 185, end = 198 }
+related = [{ source = "src/app/main.vib", span = { start = 3, end = 8 } }]

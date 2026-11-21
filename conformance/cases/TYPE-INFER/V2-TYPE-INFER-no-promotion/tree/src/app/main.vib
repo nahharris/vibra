@@ -1,0 +1,1 @@
+fn add takes {a: I32 b: I64} returns r: I64 do return I64.add(a b) endfn

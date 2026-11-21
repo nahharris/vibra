@@ -19,7 +19,7 @@ pub(crate) enum Tree {
     Bytes(Vec<u8>),
     I64(i64),
     U64(u64),
-    Array(Vec<Tree>),
+    List(Vec<Tree>),
     Enum(HostEnum, u32, Option<Box<Tree>>),
     Record(HostRecord, Vec<Tree>),
 }
@@ -69,8 +69,8 @@ impl HostValues for Plain {
     fn build_u64(&mut self, value: u64) -> Tree {
         Tree::U64(value)
     }
-    fn build_array(&mut self, elements: Vec<Tree>) -> Tree {
-        Tree::Array(elements)
+    fn build_list(&mut self, elements: Vec<Tree>) -> Tree {
+        Tree::List(elements)
     }
     fn build_enum(
         &mut self,

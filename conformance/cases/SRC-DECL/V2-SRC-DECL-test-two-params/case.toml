@@ -1,0 +1,16 @@
+id = "V2-SRC-DECL-test-two-params"
+rule = "V2-SRC-DECL-test-two-params"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#test: a test takes exactly one parameter; two is an invalid form over the test"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@syntax.invalidForm"
+level = "@error"
+span = { start = 0, end = 55 }

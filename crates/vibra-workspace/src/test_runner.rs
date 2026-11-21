@@ -1,18 +1,57 @@
-//! Pure test selection and execution over a captured project graph.
+//! The test runner: discovery, selection, the check of the selection, one
+//! fresh execution per test, and the `@testRun.v2` observation.
+//!
+//! `docs/spec/04-programs-and-packages.md`, "Tests" and "Assertions",
+//! `docs/spec/05-tooling.md`, "Tests and selection", and
+//! `docs/spec/07-diagnostics-and-conformance.md`, `@testRun.v2`, are the
+//! authority.
+//!
+//! Tests are discovered in ascending module path by UTF-8 bytes, then in
+//! declaration order. Without a selector every test module is parsed; with
+//! one, its module and the test modules it imports are, and no other test
+//! module is given to resolution. Parse errors of the parsed test modules
+//! are reported first, with no items. Every selected test is then checked with its
+//! module's import closure before any runs: an ordinary error makes every
+//! item `@test.invalid`, and a test whose declaration closure reaches a form
+//! this toolchain does not implement is `@test.unavailable` while the
+//! others run. Each test runs in a new interpreter, so module values start
+//! fresh and the audit trace is empty.
 
-use std::collections::{BTreeMap, BTreeSet};
-use std::path::Path;
+use std::collections::BTreeSet;
+use std::fmt;
+use std::sync::Arc;
 
-use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode, Domain, Level};
-use vibra_host::{AuditEvent, HostWorld, WorldProvider};
-use vibra_interp::MemoryBudget;
-use vibra_ir::{CheckedProgram, SourceOrigin};
-use vibra_resolve::{DeclarationId, EntityKind, ResolvedSnapshot};
-use vibra_syntax::{Declaration, Literal, canonical_string_spelling};
+use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode, Level};
+use vibra_interp::{
+    FailureKind, Instrumentation, MemoryBudget, RuntimeError, TestAssertionFailure,
+    run_test,
+};
+use vibra_ir::{CheckedModuleSet, CheckedProgram, SourceOrigin, Trap, encode_type};
+use vibra_syntax::source::Declaration;
+use vibra_syntax::{canonical_string, decode_string, parse_source};
+use vibra_types::{CheckResult, check_workspace};
 
-use crate::WorkspaceSnapshot;
+use crate::resolve::resolve_input_of;
+use crate::revision::workspace_revision;
+use crate::snapshot::{SourceFile, SourceSnapshot, UnitKind};
 
-/// An exact canonical module/name test selector.
+/// The format atom of the observation.
+pub const TEST_RUN_FORMAT: &str = "@testRun.v2";
+
+/// The format atom of each test's audit trace.
+const AUDIT_TRACE_FORMAT: &str = "@auditTrace.v2";
+
+/// The provider of the default fake world each test runs in.
+const WORLD_PROVIDER: &str = "@hostWorld.v2";
+
+/// The version of that world's driver.
+const WORLD_DRIVER_VERSION: &str = "0.0.2";
+
+/// The unit every test module belongs to, and the prefix of a selector's
+/// module.
+const TESTS_UNIT: &str = "@tests";
+
+/// One selected test: `@tests.math::"adds one"`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TestSelector {
     module: String,
@@ -20,1187 +59,649 @@ pub struct TestSelector {
 }
 
 impl TestSelector {
-    /// Parses the canonical `@tests.module::"name"` spelling.
-    pub fn parse(value: &str) -> Option<Self> {
-        let (module, literal) = value.split_once("::")?;
-        if !canonical_test_module(module) {
-            return None;
+    /// Reads a selector: a module atom that begins `@tests.`, `::`, and the
+    /// test's name as one canonical string literal, with no other
+    /// whitespace.
+    ///
+    /// # Errors
+    ///
+    /// The text is not a selector: invalid input.
+    pub fn parse(text: &str) -> Result<Self, InvalidSelection> {
+        let malformed = || InvalidSelection::Malformed(text.to_owned());
+        let (module, literal) = text.split_once("::").ok_or_else(malformed)?;
+        let segments = module
+            .strip_prefix(TESTS_UNIT)
+            .and_then(|rest| rest.strip_prefix('.'))
+            .ok_or_else(malformed)?;
+        if !segments.split('.').all(is_identifier) {
+            return Err(malformed());
         }
-        let source = format!("(test {literal} void)");
-        let document =
-            vibra_syntax::parse_source(Path::new("selector.vib"), &source).ok()?;
-        if !document.accepted()
-            || document.recovered()
-            || !document.diagnostics().is_empty()
-        {
-            return None;
+        let name = decode_string(literal).ok_or_else(malformed)?;
+        if canonical_string(&name) != literal {
+            return Err(malformed());
         }
-        let ast = document.ast()?;
-        let [Declaration::Test(test)] = ast.declarations() else {
-            return None;
-        };
-        let Literal::String(name) = test.name() else {
-            return None;
-        };
-        if canonical_string_spelling(name.value()) != literal {
-            return None;
-        }
-        Some(Self {
+        Ok(Self {
             module: module.to_owned(),
-            name: name.value().to_owned(),
+            name,
         })
     }
 
-    /// Canonical module identity including its `@tests` unit.
+    /// The module path atom.
     #[must_use]
     pub fn module(&self) -> &str {
         &self.module
     }
 
-    /// Exact decoded test name.
+    /// The decoded test name.
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
     }
+}
 
-    /// Full canonical selector spelling.
-    #[must_use]
-    pub fn canonical(&self) -> String {
-        format!("{}::{}", self.module, canonical_string_spelling(&self.name))
+impl fmt::Display for TestSelector {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "{}::{}",
+            self.module,
+            canonical_string(&self.name)
+        )
     }
 }
 
-fn canonical_test_module(module: &str) -> bool {
-    let Some(path) = module.strip_prefix("@tests.") else {
-        return false;
-    };
-    let source = format!("(import module {module})");
-    let Ok(document) = vibra_syntax::parse_source(Path::new("selector.vib"), &source)
-    else {
-        return false;
-    };
-    if !document.accepted()
-        || document.recovered()
-        || !document.diagnostics().is_empty()
-    {
-        return false;
-    }
-    let Some(ast) = document.ast() else {
-        return false;
-    };
-    let [Declaration::Import(import)] = ast.declarations() else {
-        return false;
-    };
-    import.target().raw() == module
-        && import
-            .target()
-            .segments()
-            .first()
-            .is_some_and(|unit| unit == "tests")
-        && !path.is_empty()
+fn is_identifier(text: &str) -> bool {
+    let mut chars = text.chars();
+    chars
+        .next()
+        .is_some_and(|first| first.is_ascii_alphabetic())
+        && chars.all(|next| next.is_ascii_alphanumeric())
 }
 
-/// Outcome of one selected test item.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TestItemStatus {
-    /// The body completed and every assertion passed.
-    Passed,
-    /// A supported assertion evaluated to false.
-    AssertionFailed,
-    /// Suite-wide static errors prevented all selected tests from running.
-    Invalid,
-    /// A valid but M2-unavailable form lies in this test's dependency closure.
-    Unavailable,
-    /// The interpreter encountered a runtime invariant trap.
-    Trap,
+/// A selection that is invalid input: it has no diagnostics.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum InvalidSelection {
+    /// The selector is not well formed.
+    Malformed(String),
+    /// The selector names no test module, or no test of its module.
+    Unknown(String),
 }
 
-impl TestItemStatus {
-    /// Stable language outcome atom.
-    #[must_use]
-    pub const fn as_atom(self) -> &'static str {
+impl fmt::Display for InvalidSelection {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Passed => "@test.passed",
-            Self::AssertionFailed => "@test.assertion-failed",
-            Self::Invalid => "@test.invalid",
-            Self::Unavailable => "@test.unavailable",
-            Self::Trap => "@test.trap",
+            Self::Malformed(text) => {
+                write!(formatter, "`{text}` is not a test selector")
+            }
+            Self::Unknown(text) => write!(formatter, "`{text}` names no test"),
         }
     }
 }
 
-/// One structured pure-assertion failure.
+impl std::error::Error for InvalidSelection {}
+
+/// How one test ended.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct TestFailure {
-    assertion: String,
-    expected: String,
-    actual: String,
-    source_id: String,
-    primary_span: ByteSpan,
+pub enum TestOutcome {
+    /// `@test.passed`: the body completed with no failed assertion.
+    Passed,
+    /// `@test.assertionFailed`: an assertion was false, or an operand could
+    /// not be observed; the body stopped there.
+    AssertionFailed(TestAssertionFailure),
+    /// `@test.trap`: a toolchain defect trap ended the test.
+    Trap {
+        /// The trap.
+        trap: Trap,
+        /// Where the trapping node was written, when one was.
+        origin: Option<SourceOrigin>,
+    },
+    /// `@test.invalid`: the selection had static errors.
+    Invalid,
+    /// `@test.unavailable`: the test's declaration closure reaches a form
+    /// this toolchain does not implement, the `@tool.unavailable` at it.
+    Unavailable(Diagnostic),
+    /// `@test.exhausted`: the test exceeded its memory budget, the host
+    /// event `@runtime.memoryExhausted`. It is never counted as passed.
+    Exhausted,
 }
 
-impl TestFailure {
-    /// Canonical assertion member atom.
+impl TestOutcome {
+    /// The `@test.*` result atom.
     #[must_use]
-    pub fn assertion(&self) -> &str {
-        &self.assertion
-    }
-
-    /// Canonical expected literal.
-    #[must_use]
-    pub fn expected(&self) -> &str {
-        &self.expected
-    }
-
-    /// Canonical actual literal.
-    #[must_use]
-    pub fn actual(&self) -> &str {
-        &self.actual
-    }
-
-    /// Source identity owning the failed assertion call.
-    #[must_use]
-    pub fn source_id(&self) -> &str {
-        &self.source_id
-    }
-
-    /// Primary span of the failed assertion call.
-    #[must_use]
-    pub const fn primary_span(&self) -> ByteSpan {
-        self.primary_span
-    }
-}
-
-/// One runtime invariant trap belonging to a test.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct TestTrap {
-    trap_code: String,
-    origin: Option<SourceOrigin>,
-}
-
-impl TestTrap {
-    /// Stable trap code.
-    #[must_use]
-    pub fn trap_code(&self) -> &str {
-        &self.trap_code
-    }
-
-    /// Source origin, when the runtime invariant has one.
-    #[must_use]
-    pub const fn origin(&self) -> Option<&SourceOrigin> {
-        self.origin.as_ref()
+    pub const fn result(&self) -> &'static str {
+        match self {
+            Self::Passed => "@test.passed",
+            Self::AssertionFailed(_) => "@test.assertionFailed",
+            Self::Trap { .. } => "@test.trap",
+            Self::Invalid => "@test.invalid",
+            Self::Unavailable(_) => "@test.unavailable",
+            Self::Exhausted => "@test.exhausted",
+        }
     }
 }
 
-/// One selected test and its isolated result.
+/// One selected test and how it ended.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TestItem {
-    name: String,
-    status: TestItemStatus,
-    failure: Option<TestFailure>,
-    trap: Option<TestTrap>,
-    audit_trace: Vec<AuditEvent>,
-    diagnostics: Vec<Diagnostic>,
-    program: Option<CheckedProgram>,
+    selector: TestSelector,
+    outcome: TestOutcome,
+    instrumentation: Option<Instrumentation>,
 }
 
 impl TestItem {
-    /// Canonical selector spelling.
+    /// The test's selector.
     #[must_use]
-    pub fn name(&self) -> &str {
-        &self.name
+    pub const fn selector(&self) -> &TestSelector {
+        &self.selector
     }
 
-    /// Outcome of this test.
+    /// How the test ended.
     #[must_use]
-    pub const fn status(&self) -> TestItemStatus {
-        self.status
+    pub const fn outcome(&self) -> &TestOutcome {
+        &self.outcome
     }
 
-    /// Structured false-assertion detail.
+    /// What the test's execution measured, when it ran to an end of its
+    /// own: passed or failed an assertion.
     #[must_use]
-    pub const fn failure(&self) -> Option<&TestFailure> {
-        self.failure.as_ref()
-    }
-
-    /// Structured trap detail.
-    #[must_use]
-    pub const fn trap(&self) -> Option<&TestTrap> {
-        self.trap.as_ref()
-    }
-
-    /// Isolated ordered host trace, empty for M2.
-    #[must_use]
-    pub fn audit_trace(&self) -> &[AuditEvent] {
-        &self.audit_trace
-    }
-
-    /// The checked program this test ran as, for a backend that runs it again.
-    /// Every test of a workspace shares one module set, and the program selects
-    /// the test as its entry. `None` for a test that never ran.
-    #[must_use]
-    pub const fn program(&self) -> Option<&CheckedProgram> {
-        self.program.as_ref()
-    }
-
-    /// Diagnostics attributed to this test.
-    #[must_use]
-    pub fn diagnostics(&self) -> &[Diagnostic] {
-        &self.diagnostics
+    pub const fn instrumentation(&self) -> Option<&Instrumentation> {
+        self.instrumentation.as_ref()
     }
 }
 
-/// Overall workspace test-suite result.
+/// The suite's `@command.*` result.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TestSuiteStatus {
-    /// The empty or fully passing suite.
+pub enum SuiteResult {
+    /// `@command.ok`.
     Ok,
-    /// Required parsing or static diagnostics were found.
+    /// `@command.diagnostics`: parse or check errors.
     Diagnostics,
-    /// One or more assertion-failed tests remain after precedence.
+    /// `@command.testFailed`: a test failed an assertion.
     TestFailed,
-    /// The selector is malformed at the CLI boundary or names no test.
-    InvalidInput,
-    /// At least one test depends on an unavailable M2 form.
-    Unavailable,
-    /// At least one selected test trapped, which takes precedence.
-    Trap,
-    /// The host stopped execution (for example, the interpreter's activation
-    /// budget was exhausted). No test result is reported.
+    /// `@command.operationalFailure`: a test exhausted its budget.
     OperationalFailure,
+    /// `@command.unavailable`: a test needs an unsupported construct.
+    Unavailable,
+    /// `@command.trap`: a test trapped.
+    Trap,
 }
 
-impl TestSuiteStatus {
-    /// Stable command result atom.
+impl SuiteResult {
+    /// The atom.
     #[must_use]
     pub const fn as_atom(self) -> &'static str {
         match self {
             Self::Ok => "@command.ok",
             Self::Diagnostics => "@command.diagnostics",
-            Self::TestFailed => "@command.test-failed",
-            Self::InvalidInput => "@command.invalid-input",
+            Self::TestFailed => "@command.testFailed",
+            Self::OperationalFailure => "@command.operationalFailure",
             Self::Unavailable => "@command.unavailable",
             Self::Trap => "@command.trap",
-            Self::OperationalFailure => "@command.operational-failure",
+        }
+    }
+
+    /// The suite result of tests that were checked and ran, by the
+    /// precedence trap, operational exhaustion, unavailable, test failed,
+    /// ok.
+    #[must_use]
+    pub fn by_precedence<'a>(
+        outcomes: impl IntoIterator<Item = &'a TestOutcome>,
+    ) -> Self {
+        let rank = |outcome: &TestOutcome| match outcome {
+            TestOutcome::Trap { .. } => 4,
+            TestOutcome::Exhausted => 3,
+            TestOutcome::Unavailable(_) => 2,
+            TestOutcome::AssertionFailed(_) => 1,
+            TestOutcome::Passed | TestOutcome::Invalid => 0,
+        };
+        match outcomes.into_iter().map(rank).max() {
+            Some(4) => Self::Trap,
+            Some(3) => Self::OperationalFailure,
+            Some(2) => Self::Unavailable,
+            Some(1) => Self::TestFailed,
+            _ => Self::Ok,
         }
     }
 }
 
-/// Result of selecting, checking, and running tests in one immutable snapshot.
+/// One run of the suite.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct WorkspaceTestResult {
-    status: TestSuiteStatus,
-    diagnostics: Vec<Diagnostic>,
+pub struct TestRun {
+    result: SuiteResult,
     items: Vec<TestItem>,
-    stopped_programs: Vec<vibra_ir::CheckedProgram>,
+    diagnostics: Vec<Diagnostic>,
+    revision: String,
 }
 
-impl WorkspaceTestResult {
-    /// Overall result.
+impl TestRun {
+    /// The suite result, by the precedence trap, operational exhaustion,
+    /// unavailable, test failed, ok.
     #[must_use]
-    pub const fn status(&self) -> TestSuiteStatus {
-        self.status
+    pub const fn result(&self) -> SuiteResult {
+        self.result
     }
 
-    /// Suite diagnostics in canonical order.
-    #[must_use]
-    pub fn diagnostics(&self) -> &[Diagnostic] {
-        &self.diagnostics
-    }
-
-    /// Selected test records in canonical discovery order.
+    /// Every selected test, in discovery order; empty when parse errors
+    /// were reported.
     #[must_use]
     pub fn items(&self) -> &[TestItem] {
         &self.items
     }
 
-    /// The checked programs of the tests that ran up to and including the one a
-    /// host event stopped, in canonical discovery order. A run that ended in a
-    /// host event reports no item (zero selected, passed, and failed), so this
-    /// is how a second backend runs the same tests. It is empty for any other
-    /// result.
+    /// Every diagnostic, once.
     #[must_use]
-    pub fn stopped_programs(&self) -> &[vibra_ir::CheckedProgram] {
-        &self.stopped_programs
+    pub fn diagnostics(&self) -> &[Diagnostic] {
+        &self.diagnostics
     }
 
-    /// Number of selected records.
+    /// The number of selected tests.
     #[must_use]
-    pub const fn selected(&self) -> usize {
+    pub fn selected(&self) -> usize {
         self.items.len()
     }
 
-    /// Number of passing tests.
+    /// The number of `@test.passed` items.
     #[must_use]
     pub fn passed(&self) -> usize {
         self.items
             .iter()
-            .filter(|item| item.status == TestItemStatus::Passed)
+            .filter(|item| item.outcome == TestOutcome::Passed)
             .count()
     }
 
-    /// Selected count minus the passing count.
+    /// The selected tests that did not pass.
     #[must_use]
     pub fn failed(&self) -> usize {
-        self.selected().saturating_sub(self.passed())
+        self.selected() - self.passed()
     }
-}
 
-struct TestRef<'a> {
-    module: &'a vibra_resolve::ModuleRecord,
-    declaration: &'a vibra_syntax::TestDeclaration,
-    id: DeclarationId,
-}
-
-/// Selects and runs the tests admitted by one workspace snapshot.
-pub fn run_tests(
-    workspace: &WorkspaceSnapshot,
-    selector: Option<&TestSelector>,
-    verification: Option<&vibra_types::Stdlib>,
-) -> WorkspaceTestResult {
-    run_tests_with_budget(workspace, selector, verification, MemoryBudget::DEFAULT)
-}
-
-/// Like [`run_tests`], with the memory budget the runner supplies for each
-/// test's instance: exhausting it ends the run with the host event
-/// `@runtime.memory-exhausted` and no test counts.
-pub fn run_tests_with_budget(
-    workspace: &WorkspaceSnapshot,
-    selector: Option<&TestSelector>,
-    verification: Option<&vibra_types::Stdlib>,
-    budget: MemoryBudget,
-) -> WorkspaceTestResult {
-    run_tests_in_world(
-        workspace,
-        selector,
-        verification,
-        budget,
-        &HostWorld::default(),
-    )
-}
-
-/// Like [`run_tests_with_budget`], with the host world each test starts in. A
-/// test runs over a fresh copy of `world`, so nothing a test writes or reads
-/// reaches another test or the process: standard output and error go to the
-/// test's audit trace and nowhere else.
-pub fn run_tests_in_world(
-    workspace: &WorkspaceSnapshot,
-    selector: Option<&TestSelector>,
-    verification: Option<&vibra_types::Stdlib>,
-    budget: MemoryBudget,
-    world: &HostWorld,
-) -> WorkspaceTestResult {
-    let graph = match workspace.source_graph() {
-        Ok(graph) => graph,
-        Err(error) => return diagnostics_result(error.diagnostics().to_vec()),
-    };
-    if !graph.diagnostics().is_empty() {
-        return diagnostics_result(graph.diagnostics().to_vec());
+    /// The workspace revision the run was taken from.
+    #[must_use]
+    pub fn revision(&self) -> &str {
+        &self.revision
     }
-    let resolved = match workspace.resolve_graph(&graph, verification) {
-        Ok(resolved) => resolved,
-        Err(error) => return diagnostics_result(error.diagnostics().to_vec()),
-    };
-    select_tests(&resolved, selector, verification, budget, world)
-}
 
-fn select_tests(
-    resolved: &ResolvedSnapshot,
-    selector: Option<&TestSelector>,
-    verification: Option<&vibra_types::Stdlib>,
-    budget: MemoryBudget,
-    world: &HostWorld,
-) -> WorkspaceTestResult {
-    let local = resolved.package();
-    let modules = resolved
-        .modules()
-        .iter()
-        .filter(|module| module.package() == local && module.unit() == "tests")
-        .collect::<Vec<_>>();
-    let selected_modules = if let Some(selector) = selector {
-        let Some(module) = modules
+    /// The canonical text of the `@testRun.v2` observation, with every item,
+    /// an exhausted one included.
+    #[must_use]
+    pub fn document(&self) -> String {
+        let tests = self
+            .items
             .iter()
-            .find(|module| module_atom(module) == selector.module)
-        else {
-            return empty_result(TestSuiteStatus::InvalidInput);
-        };
-        vec![*module]
-    } else {
-        modules
-    };
-    let parse_sources = selected_modules
-        .iter()
-        .map(|module| module.source_id().to_owned())
-        .collect::<BTreeSet<_>>();
-    let parse_diagnostics = resolved
-        .diagnostics()
-        .iter()
-        .filter(|diagnostic| {
-            diagnostic
-                .source_id()
-                .is_some_and(|source| parse_sources.contains(source))
-                && (diagnostic.code().domain() == Domain::Syntax
-                    || diagnostic.code() == DiagnosticCode::ModuleIoError)
-        })
-        .cloned()
-        .collect::<Vec<_>>();
-    if !parse_diagnostics.is_empty() {
-        return diagnostics_result(parse_diagnostics);
-    }
-    let mut tests = Vec::new();
-    for module in &selected_modules {
-        let Some(ast) = module.ast() else {
-            continue;
-        };
-        for declaration in ast.declarations() {
-            let Declaration::Test(test) = declaration else {
-                continue;
-            };
-            let Literal::String(name) = test.name() else {
-                continue;
-            };
-            let id = resolved
-                .declarations()
-                .iter()
-                .find(|resolved| {
-                    resolved.source_id() == module.source_id()
-                        && resolved.span() == test.span()
-                        && resolved.id().kind() == EntityKind::Test
-                })
-                .map(|resolved| resolved.id().clone())
-                .unwrap_or_else(|| {
-                    DeclarationId::new(
-                        local.name(),
-                        local.version(),
-                        "tests",
-                        module.segments().iter().cloned(),
-                        ["$test".to_owned(), name.value().to_owned()],
-                        EntityKind::Test,
-                    )
-                });
-            if selector.is_none_or(|selector| {
-                module_atom(module) == selector.module && name.value() == selector.name
-            }) {
-                tests.push(TestRef {
-                    module,
-                    declaration: test,
-                    id,
-                });
-            }
-        }
-    }
-    tests.sort_by(|left, right| {
-        module_atom(left.module)
-            .as_bytes()
-            .cmp(module_atom(right.module).as_bytes())
-            .then_with(|| {
-                left.declaration
-                    .span()
-                    .start()
-                    .cmp(&right.declaration.span().start())
-            })
-    });
-    if tests.is_empty() {
-        return if selector.is_some() {
-            empty_result(TestSuiteStatus::InvalidInput)
-        } else {
-            empty_result(TestSuiteStatus::Ok)
-        };
-    }
-    let index = SnapshotIndex::new(resolved);
-    let mut module_closures = BTreeMap::new();
-    for test in &tests {
-        module_closures
-            .entry(test.module.source_id().to_owned())
-            .or_insert_with(|| index.module_import_closure(test.module.source_id()));
-    }
-    let checking_sources = module_closures
-        .values()
-        .flat_map(|sources| sources.iter().cloned())
-        .collect::<BTreeSet<_>>();
-
-    let mut diagnostics = duplicate_test_names(&selected_modules);
-    diagnostics.extend(
-        resolved
-            .diagnostics()
-            .iter()
-            .filter(|diagnostic| {
-                diagnostic
-                    .source_id()
-                    .is_some_and(|source_id| checking_sources.contains(source_id))
-            })
-            .filter(|diagnostic| !index.is_missing_assertion_diagnostic(diagnostic))
-            .cloned(),
-    );
-
-    for module in selected_modules.iter().filter(|module| {
-        tests
-            .iter()
-            .any(|test| test.module.source_id() == module.source_id())
-    }) {
-        let has_exact_import = module.ast().is_some_and(module_imports_assert);
-        if !has_exact_import {
-            if let Some(first_test) = module.ast().and_then(|ast| {
-                ast.declarations().iter().find_map(|declaration| {
-                    if let Declaration::Test(test) = declaration {
-                        Some(test)
-                    } else {
-                        None
-                    }
-                })
-            }) {
-                diagnostics.push(
-                    Diagnostic::new(
-                        DiagnosticCode::ModuleMissingRequiredImport,
-                        first_test.name_span(),
-                        "test modules must import @std.assert",
-                    )
-                    .with_source_id(module.source_id()),
-                );
-            }
-        } else if !module_has_verified_assertion_import(resolved, module, verification)
-        {
-            for test in tests
-                .iter()
-                .filter(|test| test.module.source_id() == module.source_id())
-            {
-                diagnostics.push(
-                    Diagnostic::new(
-                        DiagnosticCode::ToolUnavailable,
-                        test.declaration.span(),
-                        "the @std.assert module requires verified bootstrap provenance",
-                    )
-                    .with_source_id(module.source_id()),
-                );
-            }
-        }
-    }
-
-    let checked = vibra_types::check_resolved(
-        resolved,
-        &checking_sources.iter().cloned().collect::<Vec<_>>(),
-        verification,
-    );
-    diagnostics.extend(
-        checked
-            .diagnostics()
-            .iter()
-            .filter(|diagnostic| {
-                diagnostic
-                    .source_id()
-                    .is_some_and(|source_id| checking_sources.contains(source_id))
-            })
-            .cloned(),
-    );
-    sort_and_deduplicate(&mut diagnostics);
-
-    let module_diagnostics = diagnostics
-        .iter()
-        .filter(|diagnostic| diagnostic.code() != DiagnosticCode::ToolUnavailable)
-        .cloned()
-        .collect::<Vec<_>>();
-    // Owners are found once per unavailable diagnostic, not once per test.
-    let unavailable = diagnostics
-        .iter()
-        .filter(|diagnostic| diagnostic.code() == DiagnosticCode::ToolUnavailable)
-        .filter_map(|diagnostic| {
-            diagnostic_owner(resolved, diagnostic).map(|owner| (owner, diagnostic))
-        })
-        .collect::<Vec<_>>();
-    let static_errors = module_diagnostics
-        .iter()
-        .filter(|diagnostic| diagnostic.level() == Level::Error)
-        .cloned()
-        .collect::<Vec<_>>();
-    if !static_errors.is_empty() {
-        let mut envelope_diagnostics = module_diagnostics.clone();
-        let items = tests
-            .iter()
-            .map(|test| {
-                let closure = module_closures
-                    .get(test.module.source_id())
-                    .cloned()
-                    .unwrap_or_default();
-                let mut item_diagnostics = module_diagnostics
-                    .iter()
-                    .filter(|diagnostic| {
-                        diagnostic_in_source_closure(diagnostic, &closure)
-                    })
-                    .cloned()
-                    .collect::<Vec<_>>();
-                item_diagnostics.extend(index.unavailable_for(&test.id, &unavailable));
-                envelope_diagnostics.extend(item_diagnostics.iter().cloned());
-                sort_and_deduplicate(&mut item_diagnostics);
-                invalid_item(test, &item_diagnostics)
-            })
-            .collect();
-        sort_and_deduplicate(&mut envelope_diagnostics);
-        return WorkspaceTestResult {
-            status: TestSuiteStatus::Diagnostics,
-            diagnostics: envelope_diagnostics,
-            items,
-            stopped_programs: Vec::new(),
-        };
-    }
-
-    let mut items = Vec::with_capacity(tests.len());
-    for test in &tests {
-        let closure = module_closures
-            .get(test.module.source_id())
-            .cloned()
-            .unwrap_or_default();
-        let mut item_diagnostics = module_diagnostics
-            .iter()
-            .filter(|diagnostic| diagnostic_in_source_closure(diagnostic, &closure))
-            .cloned()
+            .map(|item| self.record(item))
             .collect::<Vec<_>>();
-        let unavailable_diagnostics = index.unavailable_for(&test.id, &unavailable);
-        if !unavailable_diagnostics.is_empty() {
-            item_diagnostics.extend(unavailable_diagnostics);
-            sort_and_deduplicate(&mut item_diagnostics);
-            items.push(TestItem {
-                name: test_name(test),
-                status: TestItemStatus::Unavailable,
-                failure: None,
-                trap: None,
-                audit_trace: Vec::new(),
-                diagnostics: item_diagnostics,
+        format!(
+            "{{format: {TEST_RUN_FORMAT} result: {} tests: [{}]}}",
+            self.result.as_atom(),
+            tests.join(" ")
+        )
+    }
 
-                program: None,
-            });
-            continue;
-        }
-
-        let Some(program) = checked.program_for_function(&test.id) else {
-            let mut item =
-                trap_item(test_name(test), vibra_interp::RuntimeError::NoEntry);
-            item.diagnostics.extend(item_diagnostics);
-            sort_and_deduplicate(&mut item.diagnostics);
-            items.push(item);
-            continue;
-        };
-        let mut host = WorldProvider::new(world);
-        match vibra_interp::Interpreter::run_test_with_host(program, budget, &mut host)
-        {
-            Ok(execution) => {
-                if let Some(failure) = execution.assertion_failure() {
-                    items.push(TestItem {
-                        name: test_name(test),
-                        status: TestItemStatus::AssertionFailed,
-                        failure: Some(TestFailure {
-                            assertion: failure.assertion().to_owned(),
-                            expected: failure.expected().to_owned(),
-                            actual: failure.actual().to_owned(),
-                            source_id: failure.origin().source_id().to_owned(),
-                            primary_span: failure.origin().span(),
-                        }),
-                        trap: None,
-                        audit_trace: execution.audit_trace().to_vec(),
-                        diagnostics: item_diagnostics.clone(),
-
-                        program: Some(program.clone()),
-                    });
-                } else {
-                    items.push(TestItem {
-                        name: test_name(test),
-                        status: TestItemStatus::Passed,
-                        failure: None,
-                        trap: None,
-                        audit_trace: execution.audit_trace().to_vec(),
-                        diagnostics: item_diagnostics.clone(),
-
-                        program: Some(program.clone()),
-                    });
-                }
+    fn record(&self, item: &TestItem) -> String {
+        let mut fields = vec![
+            format!("name: {}", canonical_string(&item.selector.to_string())),
+            format!("result: {}", item.outcome.result()),
+        ];
+        match &item.outcome {
+            TestOutcome::AssertionFailed(failure) => {
+                fields.push(format!("failure: {}", failure_record(failure)));
             }
-            Err(error) if error.is_host_event() => {
-                let diagnostic = error.host_diagnostic().unwrap_or_else(|| {
-                    Diagnostic::new(
-                        DiagnosticCode::ProjectIoError,
-                        ByteSpan::empty_at(0),
-                        error.to_string(),
-                    )
-                });
-                let mut stopped_programs = items
-                    .iter()
-                    .filter_map(|item: &TestItem| item.program.clone())
-                    .collect::<Vec<_>>();
-                stopped_programs.push(program.clone());
-                return WorkspaceTestResult {
-                    status: TestSuiteStatus::OperationalFailure,
-                    diagnostics: vec![diagnostic],
-                    items: Vec::new(),
-                    stopped_programs,
-                };
+            TestOutcome::Trap { trap, .. } => {
+                fields.push(format!("trap: {{trapCode: {}}}", trap.code().as_atom()));
             }
-            Err(error) => {
-                let mut item = trap_item(test_name(test), error);
-                item.program = Some(program.clone());
-                item.diagnostics.extend(item_diagnostics);
-                sort_and_deduplicate(&mut item.diagnostics);
-                items.push(item);
-            }
+            _ => {}
         }
-    }
-
-    let mut envelope_diagnostics = module_diagnostics;
-    envelope_diagnostics.extend(
-        items
-            .iter()
-            .flat_map(|item| item.diagnostics.iter().cloned()),
-    );
-    sort_and_deduplicate(&mut envelope_diagnostics);
-    let status = if items.iter().any(|item| item.status == TestItemStatus::Trap) {
-        TestSuiteStatus::Trap
-    } else if items
-        .iter()
-        .any(|item| item.status == TestItemStatus::Unavailable)
-    {
-        TestSuiteStatus::Unavailable
-    } else if items
-        .iter()
-        .any(|item| item.status == TestItemStatus::AssertionFailed)
-    {
-        TestSuiteStatus::TestFailed
-    } else {
-        TestSuiteStatus::Ok
-    };
-    WorkspaceTestResult {
-        status,
-        diagnostics: envelope_diagnostics,
-        items,
-        stopped_programs: Vec::new(),
-    }
-}
-
-fn module_imports_assert(ast: &vibra_syntax::SourceAst) -> bool {
-    ast.declarations().iter().any(|declaration| {
-        matches!(declaration, Declaration::Import(import)
-            if import.target().segments().len() == 2
-                && import.target().segments().first().is_some_and(|segment| segment == "std")
-                && import.target().segments().get(1).is_some_and(|segment| segment == "assert"))
-    })
-}
-
-fn module_has_verified_assertion_import(
-    resolved: &ResolvedSnapshot,
-    module: &vibra_resolve::ModuleRecord,
-    verification: Option<&vibra_types::Stdlib>,
-) -> bool {
-    let Some(verification) = verification else {
-        return false;
-    };
-    let (package, overlay) = verification.resolver_overlay();
-    if &package != verification.package() {
-        return false;
-    }
-    let Some(assertion_source) = overlay
-        .iter()
-        .find(|source| source.unit() == "std" && source.segments() == ["assert"])
-    else {
-        return false;
-    };
-    resolved.imports().iter().any(|import| {
-        if import.source_id() != module.source_id()
-            || import.written().trim_start_matches('@') != "std.assert"
-        {
-            return false;
-        }
-        let Some(target) = import.module() else {
-            return false;
-        };
-        target.package() == &package
-            && target.unit() == assertion_source.unit()
-            && target.segments() == assertion_source.segments()
-            && resolved.modules().iter().any(|resolved_module| {
-                resolved_module.package() == &package
-                    && resolved_module.unit() == assertion_source.unit()
-                    && resolved_module.segments() == assertion_source.segments()
-                    && resolved_module.source_id() == assertion_source.source_id()
-                    && resolved_module.bytes() == assertion_source.bytes()
-            })
-    })
-}
-
-/// Lookups over one resolved snapshot, built once per test run so that
-/// closures are worklist searches over indexed edges instead of repeated
-/// scans of every import and reference.
-struct SnapshotIndex<'a> {
-    /// Resolved reference targets of each declaration.
-    references: BTreeMap<&'a DeclarationId, Vec<&'a DeclarationId>>,
-    /// Source IDs of the modules each source imports.
-    imports: BTreeMap<&'a str, Vec<&'a str>>,
-    /// `(source, code, start, end)` of resolver diagnostics caused only by
-    /// an unresolved `@std.assert` import, which test checking reports as a
-    /// provenance diagnostic instead.
-    missing_assertion: BTreeSet<(&'a str, DiagnosticCode, usize, usize)>,
-}
-
-impl<'a> SnapshotIndex<'a> {
-    fn new(resolved: &'a ResolvedSnapshot) -> Self {
-        let mut references = BTreeMap::<_, Vec<_>>::new();
-        for reference in resolved.references() {
-            if let Some(target) = reference.target() {
-                references.entry(reference.from()).or_default().push(target);
-            }
-        }
-        let modules = resolved
-            .modules()
-            .iter()
-            .map(|module| {
-                (
-                    (module.package(), module.unit(), module.segments()),
-                    module.source_id(),
-                )
-            })
-            .collect::<BTreeMap<_, _>>();
-        let mut imports = BTreeMap::<_, Vec<_>>::new();
-        let mut missing_assertion = BTreeSet::new();
-        for import in resolved.imports() {
-            if let Some(target) = import.module() {
-                if let Some(source) =
-                    modules.get(&(target.package(), target.unit(), target.segments()))
-                {
-                    imports.entry(import.source_id()).or_default().push(*source);
-                }
-            } else if import.written().trim_start_matches('@') == "std.assert" {
-                let span = import.span();
-                missing_assertion.insert((
-                    import.source_id(),
-                    DiagnosticCode::ModuleUnknownPath,
-                    span.start(),
-                    span.end(),
-                ));
-                for reference in resolved.references().iter().filter(|reference| {
-                    reference.source_id() == import.source_id()
-                        && reference.target().is_none()
-                        && reference
-                            .written()
-                            .strip_prefix(import.alias())
-                            .is_some_and(|suffix| suffix.starts_with('.'))
-                }) {
-                    let span = reference.span();
-                    missing_assertion.insert((
-                        import.source_id(),
-                        DiagnosticCode::NameUnknownSymbol,
-                        span.start(),
-                        span.end(),
-                    ));
-                }
-            }
-        }
-        Self {
-            references,
-            imports,
-            missing_assertion,
-        }
-    }
-
-    /// Source IDs reachable from `start` through resolved imports.
-    fn module_import_closure(&self, start: &str) -> BTreeSet<String> {
-        let mut sources = BTreeSet::from([start.to_owned()]);
-        let mut pending = vec![start];
-        while let Some(source) = pending.pop() {
-            for target in self.imports.get(source).into_iter().flatten() {
-                if sources.insert((*target).to_owned()) {
-                    pending.push(target);
-                }
-            }
-        }
-        sources
-    }
-
-    /// Declarations reachable from `start` through resolved references.
-    fn declaration_closure(
-        &self,
-        start: &'a DeclarationId,
-    ) -> BTreeSet<&'a DeclarationId> {
-        let mut closure = BTreeSet::from([start]);
-        let mut pending = vec![start];
-        while let Some(declaration) = pending.pop() {
-            for target in self.references.get(declaration).into_iter().flatten() {
-                if closure.insert(*target) {
-                    pending.push(target);
-                }
-            }
-        }
-        closure
-    }
-
-    fn is_missing_assertion_diagnostic(&self, diagnostic: &Diagnostic) -> bool {
-        let span = diagnostic.primary_span();
-        diagnostic.source_id().is_some_and(|source| {
-            self.missing_assertion.contains(&(
-                source,
-                diagnostic.code(),
-                span.start(),
-                span.end(),
-            ))
-        })
-    }
-
-    /// Unavailable diagnostics owned by a declaration in `test`'s closure.
-    fn unavailable_for(
-        &self,
-        test: &'a DeclarationId,
-        unavailable: &[(&DeclarationId, &Diagnostic)],
-    ) -> Vec<Diagnostic> {
-        if unavailable.is_empty() {
-            return Vec::new();
-        }
-        let closure = self.declaration_closure(test);
-        unavailable
-            .iter()
-            .filter(|(owner, _)| closure.contains(owner))
-            .map(|(_, diagnostic)| (*diagnostic).clone())
-            .collect()
-    }
-}
-
-fn diagnostic_owner<'a>(
-    resolved: &'a ResolvedSnapshot,
-    diagnostic: &Diagnostic,
-) -> Option<&'a DeclarationId> {
-    let source = diagnostic.source_id()?;
-    let span = diagnostic.primary_span();
-    resolved
-        .declarations()
-        .iter()
-        .filter(|declaration| declaration.source_id() == source)
-        .filter(|declaration| {
-            declaration.span().start() <= span.start()
-                && span.end() <= declaration.span().end()
-        })
-        .min_by_key(|declaration| declaration.span().len())
-        .map(|declaration| declaration.id())
-}
-
-fn diagnostic_in_source_closure(
-    diagnostic: &Diagnostic,
-    source_ids: &BTreeSet<String>,
-) -> bool {
-    diagnostic
-        .source_id()
-        .is_some_and(|source_id| source_ids.contains(source_id))
-}
-
-#[cfg(test)]
-mod provenance_tests {
-
-    use vibra_resolve::{ResolveInput, Resolver, SourceModule, SourceUnit};
-
-    use super::{TestSuiteStatus, select_tests};
-
-    #[test]
-    fn local_assertion_import_cannot_satisfy_verified_assertion_contract() {
-        let test_source = "(import assert @std.assert)\n(test \"spoofed\" (assert.equal false true))\n";
-        let fake_assertions =
-            "(defn equal (expected bool actual bool) void visibility: @public void)\n";
-        let resolved = Resolver::resolve(ResolveInput::new(
-            "demo",
-            "0.1.0",
-            vec![
-                SourceUnit::lib(
-                    "std",
-                    vec![SourceModule::new(
-                        "std",
-                        ["assert"],
-                        "src/std/assert.vib",
-                        fake_assertions,
-                    )],
-                ),
-                SourceUnit::lib(
-                    "tests",
-                    vec![SourceModule::new(
-                        "tests",
-                        ["math"],
-                        "tests/math.vib",
-                        test_source,
-                    )],
-                ),
-            ],
+        fields.push(format!(
+            "auditTrace: {{format: {AUDIT_TRACE_FORMAT} revision: {} drivers: \
+             [{{provider: {WORLD_PROVIDER} version: {}}}] policies: [:] redaction: @none \
+             events: []}}",
+            canonical_string(&self.revision),
+            canonical_string(WORLD_DRIVER_VERSION)
         ));
-        let verification =
-            vibra_types::load_stdlib().expect("embedded standard library");
-
-        let result = select_tests(
-            &resolved,
-            None,
-            Some(&verification),
-            vibra_interp::MemoryBudget::DEFAULT,
-            &vibra_host::HostWorld::default(),
-        );
-
-        assert_eq!(
-            result.status(),
-            TestSuiteStatus::Unavailable,
-            "{:?}",
-            result.diagnostics()
-        );
-        assert!(result.items()[0].diagnostics().iter().any(|diagnostic| {
-            diagnostic.code() == vibra_diagnostics::DiagnosticCode::ToolUnavailable
-        }));
+        format!("{{{}}}", fields.join(" "))
     }
 }
 
-fn sort_and_deduplicate(diagnostics: &mut Vec<Diagnostic>) {
-    diagnostics.sort_by_key(diagnostic_key);
-    diagnostics.dedup_by(|left, right| {
-        left.code() == right.code()
-            && left.source_id() == right.source_id()
-            && left.primary_span() == right.primary_span()
-    });
-}
-
-fn module_atom(module: &vibra_resolve::ModuleRecord) -> String {
-    if module.segments().is_empty() {
-        "@tests".to_owned()
-    } else {
-        format!("@tests.{}", module.segments().join("."))
-    }
-}
-
-fn test_name(test: &TestRef<'_>) -> String {
-    let Literal::String(name) = test.declaration.name() else {
-        return String::new();
+fn failure_record(failure: &TestAssertionFailure) -> String {
+    let kind = match failure.kind {
+        FailureKind::Assertion => "@assertion",
+        FailureKind::Observation { .. } => "@observation",
     };
+    let mut fields = vec![
+        format!("kind: {kind}"),
+        format!("assertion: {}", canonical_string(&failure.assertion)),
+    ];
+    if let Some(expected) = &failure.expected {
+        fields.push(format!("expected: {}", canonical_string(expected)));
+    }
+    if let Some(actual) = &failure.actual {
+        fields.push(format!("actual: {}", canonical_string(actual)));
+    }
+    fields.push(format!("primarySpan: {}", span_record(&failure.origin)));
+    if let FailureKind::Observation { code, .. } = &failure.kind {
+        let type_info = observation_type(failure)
+            .map(|encoded| format!(" typeInfo: {encoded}"))
+            .unwrap_or_default();
+        fields.push(format!(
+            "observationError: {{code: {}{type_info}}}",
+            code.as_atom()
+        ));
+    }
+    format!("{{{}}}", fields.join(" "))
+}
+
+/// The canonical `@type.v2` text of the operand an observation failure
+/// could not observe; `None` for a false assertion, or when the type has no
+/// encoding.
+#[must_use]
+pub fn observation_type(failure: &TestAssertionFailure) -> Option<String> {
+    match &failure.kind {
+        FailureKind::Observation { type_info, .. } => encode_type(type_info).ok(),
+        FailureKind::Assertion => None,
+    }
+}
+
+fn span_record(origin: &SourceOrigin) -> String {
+    let span = origin.span();
     format!(
-        "{}::{}",
-        module_atom(test.module),
-        canonical_string_spelling(name.value())
+        "{{sourceId: {} start: {}u64 end: {}u64}}",
+        canonical_string(origin.source_id()),
+        span.start(),
+        span.end()
     )
 }
 
-fn duplicate_test_names(modules: &[&vibra_resolve::ModuleRecord]) -> Vec<Diagnostic> {
-    let mut diagnostics = Vec::new();
-    for module in modules {
-        let Some(ast) = module.ast() else {
+/// One discovered test.
+struct Discovered {
+    selector: TestSelector,
+}
+
+/// Runs the tests of `snapshot` that `selector` selects, every test with no
+/// selector, each under `budget`.
+///
+/// # Errors
+///
+/// The selector names no test module or no test of its module: invalid
+/// input, with no diagnostics.
+pub fn run_tests(
+    snapshot: &SourceSnapshot,
+    selector: Option<&TestSelector>,
+    budget: MemoryBudget,
+) -> Result<TestRun, InvalidSelection> {
+    let revision = workspace_revision(&snapshot.revision_records()).unwrap_or_default();
+    let modules = test_modules(snapshot, selector)?;
+    let mut parse_errors = Vec::new();
+    let mut discovered = Vec::new();
+    for module in &modules {
+        let document = parse_source(Some(module.source_id()), module.bytes());
+        parse_errors.extend(
+            document
+                .diagnostics()
+                .iter()
+                .filter(|diagnostic| diagnostic.level() == Level::Error)
+                .cloned(),
+        );
+        let Some(view) = vibra_syntax::module(&document) else {
             continue;
         };
-        let mut names = BTreeMap::<String, ByteSpan>::new();
-        for declaration in ast.declarations() {
-            let Declaration::Test(test) = declaration else {
-                continue;
-            };
-            let Literal::String(name) = test.name() else {
-                continue;
-            };
-            if let Some(earlier) = names.get(name.value()).copied() {
-                diagnostics.push(
-                    Diagnostic::new(
-                        DiagnosticCode::NameRedeclaration,
-                        test.name_span(),
-                        "a test name is repeated within one module",
-                    )
-                    .with_source_id(module.source_id())
-                    .with_related_source(
-                        module.source_id(),
-                        earlier,
-                        "the earlier test name is here",
-                    ),
-                );
-            } else {
-                names.insert(name.value().to_owned(), test.name_span());
+        for declaration in view.declarations() {
+            if let Declaration::Test(test) = declaration
+                && let Some(name) = test.name_value()
+            {
+                discovered.push(Discovered {
+                    selector: TestSelector {
+                        module: module.path().to_owned(),
+                        name,
+                    },
+                });
             }
         }
     }
-    diagnostics.sort_by_key(diagnostic_key);
-    diagnostics
-}
-
-fn invalid_item(test: &TestRef<'_>, diagnostics: &[Diagnostic]) -> TestItem {
-    TestItem {
-        name: test_name(test),
-        status: TestItemStatus::Invalid,
-        failure: None,
-        trap: None,
-        audit_trace: Vec::new(),
-        diagnostics: diagnostics.to_vec(),
-
-        program: None,
+    if !parse_errors.is_empty() {
+        return Ok(TestRun {
+            result: SuiteResult::Diagnostics,
+            items: Vec::new(),
+            diagnostics: parse_errors,
+            revision,
+        });
     }
-}
-
-fn trap_item(name: String, error: vibra_interp::RuntimeError) -> TestItem {
-    let (code, origin) = error.program_trap().map_or(
-        (DiagnosticCode::RuntimeInvalidCheckedProgram, None),
-        |(code, origin)| (code, origin.cloned()),
-    );
-    let message = error.trap_message();
-    let diagnostic = match &origin {
-        Some(origin) => Diagnostic::new(code, origin.span(), message)
-            .with_source_id(origin.source_id()),
-        None => Diagnostic::new(code, ByteSpan::empty_at(0), message),
+    if let Some(selector) = selector {
+        discovered.retain(|test| test.selector == *selector);
+        if discovered.is_empty() {
+            return Err(InvalidSelection::Unknown(selector.to_string()));
+        }
+    }
+    let (check, diagnostics) = match check_selection(snapshot, selector, &modules) {
+        Ok(check) => {
+            let diagnostics = check.diagnostics().to_vec();
+            (Some(check), diagnostics)
+        }
+        Err(defect) => (None, vec![*defect]),
     };
-    TestItem {
-        name,
-        status: TestItemStatus::Trap,
-        failure: None,
-        trap: Some(TestTrap {
-            trap_code: code.as_atom().to_owned(),
-            origin,
-        }),
-        audit_trace: Vec::new(),
-        diagnostics: vec![diagnostic],
-
-        program: None,
-    }
-}
-
-fn diagnostics_result(mut diagnostics: Vec<Diagnostic>) -> WorkspaceTestResult {
-    diagnostics.sort_by_key(diagnostic_key);
-    WorkspaceTestResult {
-        status: TestSuiteStatus::Diagnostics,
+    let check = check.filter(|check| !check.has_errors() || check.only_unavailable());
+    let invalid = check.is_none();
+    let items = discovered
+        .into_iter()
+        .enumerate()
+        .map(|(index, test)| {
+            let Some(check) = &check else {
+                return TestItem {
+                    selector: test.selector,
+                    outcome: TestOutcome::Invalid,
+                    instrumentation: None,
+                };
+            };
+            let (outcome, instrumentation) =
+                run_one(check, &test.selector, index, budget);
+            TestItem {
+                selector: test.selector,
+                outcome,
+                instrumentation,
+            }
+        })
+        .collect::<Vec<_>>();
+    let result = if invalid {
+        SuiteResult::Diagnostics
+    } else {
+        SuiteResult::by_precedence(items.iter().map(TestItem::outcome))
+    };
+    Ok(TestRun {
+        result,
+        items,
         diagnostics,
-        items: Vec::new(),
-        stopped_programs: Vec::new(),
+        revision,
+    })
+}
+
+/// The test modules a run needs, sorted by module path bytes: every module
+/// of `@tests`, or the selector's module and the test modules it reaches
+/// through `use`.
+fn test_modules<'s>(
+    snapshot: &'s SourceSnapshot,
+    selector: Option<&TestSelector>,
+) -> Result<Vec<&'s SourceFile>, InvalidSelection> {
+    let mut modules = snapshot
+        .units()
+        .iter()
+        .filter(|unit| unit.kind() == UnitKind::Tests)
+        .flat_map(|unit| unit.modules())
+        .collect::<Vec<_>>();
+    modules.sort_by(|left, right| left.path().as_bytes().cmp(right.path().as_bytes()));
+    let Some(selector) = selector else {
+        return Ok(modules);
+    };
+    let Some(selected) = modules
+        .iter()
+        .copied()
+        .find(|module| module.path() == selector.module)
+    else {
+        return Err(InvalidSelection::Unknown(selector.to_string()));
+    };
+    let mut reached = BTreeSet::from([selected.path()]);
+    let mut pending = vec![selected];
+    while let Some(module) = pending.pop() {
+        let document = parse_source(Some(module.source_id()), module.bytes());
+        let Some(view) = vibra_syntax::module(&document) else {
+            continue;
+        };
+        for declaration in view.declarations() {
+            let Declaration::Use(import) = declaration else {
+                continue;
+            };
+            let Some(locator) = import.locator() else {
+                continue;
+            };
+            for &candidate in &modules {
+                if names_module(locator.text(), candidate.path())
+                    && reached.insert(candidate.path())
+                {
+                    pending.push(candidate);
+                }
+            }
+        }
+    }
+    modules.retain(|module| reached.contains(module.path()));
+    Ok(modules)
+}
+
+/// Whether the `use` locator `locator` names the module `path` or a
+/// declaration of it.
+fn names_module(locator: &str, path: &str) -> bool {
+    locator
+        .strip_prefix(path)
+        .is_some_and(|rest| rest.is_empty() || rest.starts_with('.'))
+}
+
+/// Checks the selected test modules with their import closure: every
+/// module of `@tests`, or the selector's module. Only the test modules of
+/// `modules` are given to resolution, so a test module the selection does
+/// not reach is neither parsed nor checked.
+///
+/// # Errors
+///
+/// The embedded standard library is defective.
+fn check_selection(
+    snapshot: &SourceSnapshot,
+    selector: Option<&TestSelector>,
+    modules: &[&SourceFile],
+) -> Result<CheckResult, Box<Diagnostic>> {
+    let units = vec![
+        selector
+            .map_or_else(|| TESTS_UNIT.to_owned(), |selected| selected.module.clone()),
+    ];
+    let tests = snapshot
+        .units()
+        .iter()
+        .filter(|unit| unit.kind() == UnitKind::Tests)
+        .flat_map(|unit| unit.modules())
+        .map(SourceFile::path)
+        .collect::<BTreeSet<_>>();
+    let needed = modules
+        .iter()
+        .map(|module| module.path())
+        .collect::<BTreeSet<_>>();
+    let input = resolve_input_of(snapshot, &|module| {
+        !tests.contains(module.path()) || needed.contains(module.path())
+    })
+    .map_err(|error| Box::new(error.diagnostic().clone()))?;
+    Ok(check_workspace(&input, &units))
+}
+
+/// Runs the checked test `selector`, the `index`-th selected.
+fn run_one(
+    check: &CheckResult,
+    selector: &TestSelector,
+    index: usize,
+    budget: MemoryBudget,
+) -> (TestOutcome, Option<Instrumentation>) {
+    let checked = check
+        .tests()
+        .iter()
+        .find(|test| test.module() == selector.module && test.name() == selector.name);
+    let Some(checked) = checked else {
+        return (
+            TestOutcome::Unavailable(Diagnostic::new(
+                DiagnosticCode::ToolUnavailable,
+                ByteSpan::empty_at(0),
+                format!("the test `{selector}` was not checked"),
+            )),
+            None,
+        );
+    };
+    if let Some(diagnostic) = checked.unavailable() {
+        return (TestOutcome::Unavailable(diagnostic.clone()), None);
+    }
+    let (Some(function), Some(set)) = (checked.function(), check.test_set()) else {
+        return (
+            TestOutcome::Unavailable(Diagnostic::new(
+                DiagnosticCode::ToolUnavailable,
+                ByteSpan::empty_at(0),
+                format!("the test `{selector}` was not lowered"),
+            )),
+            None,
+        );
+    };
+    match execute(set, function, index, budget) {
+        Ok(execution) => {
+            let outcome = match execution.failure {
+                None => TestOutcome::Passed,
+                Some(failure) => TestOutcome::AssertionFailed(failure),
+            };
+            (outcome, Some(execution.instrumentation))
+        }
+        Err(RuntimeError::MemoryExhausted { .. }) => (TestOutcome::Exhausted, None),
+        Err(RuntimeError::Trap { trap, origin, .. }) => {
+            (TestOutcome::Trap { trap, origin }, None)
+        }
+        Err(
+            error @ (RuntimeError::UnsupportedValue { .. }
+            | RuntimeError::Unavailable { .. }),
+        ) => (TestOutcome::Unavailable(error.diagnostic()), None),
     }
 }
 
-fn empty_result(status: TestSuiteStatus) -> WorkspaceTestResult {
-    WorkspaceTestResult {
-        status,
-        diagnostics: Vec::new(),
-        items: Vec::new(),
-        stopped_programs: Vec::new(),
+/// One execution of the test function `function` in a new interpreter.
+fn execute(
+    set: &Arc<CheckedModuleSet>,
+    function: usize,
+    index: usize,
+    budget: MemoryBudget,
+) -> Result<vibra_interp::TestExecution, RuntimeError> {
+    if let Some(error) = injected(index) {
+        return Err(error);
     }
+    let program =
+        CheckedProgram::for_entry(Arc::clone(set), function).map_err(|error| {
+            RuntimeError::Trap {
+                trap: Trap::InvalidCheckedProgram,
+                origin: None,
+                message: format!("a test is not a valid entry: {error}"),
+            }
+        })?;
+    run_test(&program, budget)
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{TestItemStatus, trap_item};
-    use vibra_diagnostics::{ByteSpan, DiagnosticCode};
-
-    #[test]
-    fn runtime_checked_program_trap_is_unlocated_and_has_the_closed_code() {
-        let item = trap_item(
-            "@tests.math::\"traps\"".to_owned(),
-            vibra_interp::RuntimeError::InvalidBody {
-                function: "test".to_owned(),
-            },
-        );
-
-        assert_eq!(item.status(), TestItemStatus::Trap);
-        let trap = item.trap().expect("structured trap");
-        assert_eq!(trap.trap_code(), "@runtime.invalid-checked-program");
-        assert!(trap.origin().is_none());
-        let [diagnostic] = item.diagnostics() else {
-            panic!("one trap diagnostic");
-        };
-        assert_eq!(
-            diagnostic.code(),
-            DiagnosticCode::RuntimeInvalidCheckedProgram
-        );
-        assert_eq!(diagnostic.primary_span(), ByteSpan::empty_at(0));
-        assert!(diagnostic.source_id().is_none());
-    }
+thread_local! {
+    /// The fault-injection hook of the trap-isolation test: the first
+    /// selected test raises `@runtime.invalidCheckedProgram` before it runs.
+    static TRAP_FIRST: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
-fn diagnostic_key(diagnostic: &Diagnostic) -> (String, usize, usize, DiagnosticCode) {
-    (
-        diagnostic.source_id().unwrap_or_default().to_owned(),
-        diagnostic.primary_span().start(),
-        diagnostic.primary_span().end(),
-        diagnostic.code(),
-    )
+/// The fault the test hook injects into the `index`-th selected test.
+#[cfg(test)]
+fn injected(index: usize) -> Option<RuntimeError> {
+    (index == 0 && TRAP_FIRST.get()).then(|| RuntimeError::Trap {
+        trap: Trap::InvalidCheckedProgram,
+        origin: None,
+        message: "an injected fault".to_owned(),
+    })
 }
+
+#[cfg(not(test))]
+const fn injected(_index: usize) -> Option<RuntimeError> {
+    None
+}
+
+#[cfg(test)]
+mod tests;

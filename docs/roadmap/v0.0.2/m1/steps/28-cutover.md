@@ -13,7 +13,7 @@ step one reader, one checker, one corpus, and one `vibra` binary exist.
   its first PR, which moves the native track to the new `vibra-ir`,
   `vibra-native`, and `vibra-host`. If it has not when every other
   prerequisite has, task 2 applies.
-- Read: [architecture](../architecture.md) decisions 4 to 7 and the
+- Read: [architecture](../architecture.md) decisions 4 to 6 and the
   corpus section; [release README](../../README.md) "Scope and priorities";
   [diagnostics chapter](../../../../spec/07-diagnostics-and-conformance.md)
   "Required implementation suites", "Exclusions and retired surfaces";
@@ -48,8 +48,8 @@ No new module.
 3. Delete the thirteen crates and the four directories with `git rm -r`.
    Remove their workspace entries. `Cargo.lock` loses exactly the removed
    package blocks; `cargo metadata --locked --offline` must still succeed.
-4. CI: remove the v1 lines; the conformance job runs the new corpus, the
-   Wasm executor row, and the new fuzz smoke.
+4. CI: remove the v1 lines; the conformance job runs the new corpus and
+   the new fuzz smoke.
 5. Architecture test: remove the `-v1` rows; the table lists every
    remaining crate once.
 6. Repository documents: `README.md` describes the keyword-led language
@@ -100,20 +100,19 @@ $env:RUSTFLAGS='-D warnings'
 cargo clippy --locked --offline --workspace --all-targets --all-features -- -D warnings
 cargo test --locked --offline --workspace --all-targets --all-features
 cargo run --locked --offline -p vibra-conformance --bin vibra-conformance -- --root conformance/cases
-cargo run --locked --offline -p vibra-conformance --bin vibra-conformance -- --root conformance/cases --executor wasm
 cargo run --locked --offline -p vibra-conformance --bin fuzz -- --profile ci-smoke
 cargo run --locked --offline -p vibra-cli --bin vibra -- --workspace examples/hello check
 git grep -n -E "conformance/v1|stdlib-v1|examples-v1|fuzz-v1|vibra-v1" -- . ":!docs/roadmap/v0.0.2/m1"
 ```
 
 Read: the second line prints nothing; the suites and the corpus pass; the
-Wasm row has no failed case; the last command prints nothing (this
-directory is excluded because the step guides name the transition).
+last command prints nothing (this directory is excluded because the step
+guides name the transition).
 
 ## Excluded
 
-Any language change; deleting or rewriting a native crate; removing the
-Wasm backend (v0.0.3); rewriting `archive/`; the M1 exit evidence (29).
+Any language change; deleting or rewriting a native crate; rewriting
+`archive/`; the M1 exit evidence (29).
 
 ## Completion evidence
 

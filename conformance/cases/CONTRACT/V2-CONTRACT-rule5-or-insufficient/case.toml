@@ -1,0 +1,19 @@
+id = "V2-CONTRACT-rule5-or-insufficient"
+rule = "V2-CONTRACT-rule5-or-insufficient"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#bare-guards: GUARD-5: a fact Bool.or establishes neither operand"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "unknown"
+
+[[expect.diagnostics]]
+code = "@contract.unproved"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 205, end = 211 }
+related = [{ source = "src/app/main.vib", span = { start = 3, end = 6 } }]

@@ -1,4 +1,4 @@
-//! The system provider over the real host (Milestone 4, Step 16a).
+//! The system provider over the real host.
 //!
 //! These are host-language tests of the one module that reads ambient state.
 //! The directory they use is a fresh one under the system temporary directory.
@@ -184,7 +184,7 @@ fn an_allocation_the_host_cannot_make_is_memory_exhaustion_not_an_error() {
     ));
 }
 
-// -- the output sink (Step 16b-1) ------------------------------------------------
+// -- the output sink ------------------------------------------------
 
 #[test]
 fn a_capturing_provider_keeps_standard_output_and_error_apart_in_call_order() {

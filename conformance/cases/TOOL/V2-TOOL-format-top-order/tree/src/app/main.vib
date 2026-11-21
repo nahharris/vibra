@@ -1,0 +1,2 @@
+fn  answer returns r:I32 do return 42i32 endfn
+type  Celsius   of F64 endtype

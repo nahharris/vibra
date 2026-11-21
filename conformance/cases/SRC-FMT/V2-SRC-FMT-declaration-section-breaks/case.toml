@@ -1,0 +1,12 @@
+id = "V2-SRC-FMT-declaration-section-breaks"
+rule = "V2-SRC-FMT-declaration-section-breaks"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#canonical-format: a short type with a section other than `of` is on several lines, with `of` on the opener's line"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "accepted"
+formatted = "formatted.vib"

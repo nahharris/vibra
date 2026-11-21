@@ -1,16 +1,17 @@
-//! The in-memory host world: the `@host-world.v1` document and its provider.
+//! The in-memory host world: the `@hostWorld.v1` document and its provider.
 //!
-//! `docs/spec/06-runtime.md`, "The host world". A world is a value. The decoder
-//! turns the VIBON document into a [`HostWorld`], applying the defaults of the
-//! chapter and reporting every violation as a `@data.*` diagnostic at the
-//! document, and [`WorldProvider::new`] makes a fresh copy of it for one test or
-//! one backend, so no two runs share anything.
+//! `docs/spec/06-runtime.md`, "Host world". A world is a value. The decoder
+//! reads the VIBON document in the data grammar into a [`HostWorld`], applying
+//! the defaults of the chapter and reporting every violation as a `@data.*`
+//! diagnostic at the document, in the order of the schema rules: the grammar,
+//! then the format, then the shape and the values. [`WorldProvider::new`] makes
+//! a fresh copy of it for one test or one backend, so no two runs share
+//! anything.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::Path;
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
-use vibra_syntax::{DataNode, DataValue, IntegerSuffix, Literal, parse_data};
+use vibra_syntax::{DataNode, DataValue, IntegerSuffix, parse_data};
 
 use crate::provider::{
     Done, EnvError, Failure, FsError, FsKind, HostProvider, IoError, Metadata,
@@ -35,7 +36,10 @@ const RANDOM_FIELDS: &[&str] = &["seed"];
 /// A path as its resolved components from the root.
 type Components = Vec<String>;
 
-/// A decoded `@host-world.v1` document.
+/// The format atom of a host world, with its `@`.
+pub const WORLD_FORMAT: &str = "@hostWorld.v1";
+
+/// A decoded `@hostWorld.v1` document.
 ///
 /// The default world has the root directory and nothing else.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -69,44 +73,16 @@ impl Default for HostWorld {
 }
 
 impl HostWorld {
-    /// Decodes the text of a `@host-world.v1` document.
+    /// Decodes the text of a `@hostWorld.v1` document.
     ///
     /// `source_id` is the document's identity in diagnostics; it names a
     /// `.vibon` file. Every diagnostic is reported once, at the document.
     pub fn decode(source_id: &str, text: &str) -> Result<Self, Vec<Diagnostic>> {
-        let document = match parse_data(Path::new(source_id), text) {
-            Ok(document) => document,
-            Err(error) => {
-                return Err(vec![
-                    Diagnostic::new(
-                        DiagnosticCode::DataInvalidExtension,
-                        ByteSpan::new(0, 0),
-                        error.to_string(),
-                    )
-                    .with_source_id(source_id),
-                ]);
-            }
-        };
-        if !document.accepted() || document.recovered() {
-            let mut diagnostics = document
-                .diagnostics()
-                .iter()
-                .cloned()
-                .map(|diagnostic| diagnostic.with_source_id(source_id))
-                .collect::<Vec<_>>();
-            if diagnostics.is_empty() {
-                diagnostics.push(
-                    Diagnostic::new(
-                        DiagnosticCode::DataInvalidShape,
-                        ByteSpan::new(0, text.len()),
-                        "the host world is not one valid VIBON value",
-                    )
-                    .with_source_id(source_id),
-                );
-            }
-            return Err(diagnostics);
+        let document = parse_data(Some(source_id), text.as_bytes());
+        if !document.diagnostics().is_empty() {
+            return Err(document.diagnostics().to_vec());
         }
-        let Some(root) = document.data() else {
+        let Some(root) = document.value() else {
             return Err(vec![
                 Diagnostic::new(
                     DiagnosticCode::DataInvalidShape,
@@ -120,6 +96,9 @@ impl HostWorld {
             source_id,
             diagnostics: Vec::new(),
         };
+        if !decoder.format(root) {
+            return Err(decoder.diagnostics);
+        }
         let world = decoder.world(root);
         match world {
             Some(world) if decoder.diagnostics.is_empty() => Ok(world),
@@ -137,9 +116,12 @@ type Fields<'n> = BTreeMap<&'n str, &'n DataNode>;
 
 impl Decoder<'_> {
     fn error(&mut self, code: DiagnosticCode, node: &DataNode, message: &str) {
-        self.diagnostics.push(
-            Diagnostic::new(code, node.span(), message).with_source_id(self.source_id),
-        );
+        self.error_at(code, node.span(), message);
+    }
+
+    fn error_at(&mut self, code: DiagnosticCode, span: ByteSpan, message: &str) {
+        self.diagnostics
+            .push(Diagnostic::new(code, span, message).with_source_id(self.source_id));
     }
 
     fn shape(&mut self, node: &DataNode, message: &str) {
@@ -150,7 +132,31 @@ impl Decoder<'_> {
         self.error(DiagnosticCode::DataInvalidValue, node, message);
     }
 
-    /// The fields of a closed record: unknown and repeated fields are reported.
+    /// Format selection: the root is a record whose `format` field holds
+    /// [`WORLD_FORMAT`]. Another atom is `@data.invalidValue` at the value.
+    fn format(&mut self, root: &DataNode) -> bool {
+        let DataValue::Record(fields) = root.value() else {
+            self.shape(root, "the host world must be a record");
+            return false;
+        };
+        let Some(format) = fields.iter().find(|field| field.name() == "format") else {
+            self.shape(root, "the host world needs its `format` field");
+            return false;
+        };
+        match format.value().value() {
+            DataValue::Atom(atom) if atom == WORLD_FORMAT => true,
+            _ => {
+                self.value(
+                    format.value(),
+                    &format!("this reader implements the format `{WORLD_FORMAT}` and no other"),
+                );
+                false
+            }
+        }
+    }
+
+    /// The fields of a closed record: unknown fields are reported; the reader
+    /// has reported repeated ones.
     fn record<'n>(
         &mut self,
         node: &'n DataNode,
@@ -163,11 +169,11 @@ impl Decoder<'_> {
         };
         let mut found = Fields::new();
         for field in fields {
-            let label = field.label().value();
-            if !allowed.contains(&label) {
+            let label = field.name();
+            if allowed.contains(&label) {
+                found.insert(label, field.value());
+            } else {
                 self.shape(field.value(), &format!("unknown {what} field `{label}`"));
-            } else if found.insert(label, field.value()).is_some() {
-                self.shape(field.value(), &format!("repeated {what} field `{label}`"));
             }
         }
         Some(found)
@@ -177,24 +183,6 @@ impl Decoder<'_> {
         let fields = self.record(root, WORLD_FIELDS, "host world")?;
         let mut world = HostWorld::default();
         let mut valid = true;
-
-        match fields.get("format") {
-            None => {
-                self.shape(root, "the host world needs its `format` field");
-                valid = false;
-            }
-            Some(node) => match node.value() {
-                DataValue::Atom(atom) if atom.value() == "host-world.v1" => {}
-                DataValue::Atom(_) => {
-                    self.value(node, "the host world format must be @host-world.v1");
-                    valid = false;
-                }
-                _ => {
-                    self.shape(node, "the host world format must be an atom");
-                    valid = false;
-                }
-            },
-        }
         if let Some(node) = fields.get("stdin") {
             match self.contents(node, "standard input") {
                 Some(bytes) => world.stdin = bytes,
@@ -235,8 +223,8 @@ impl Decoder<'_> {
     }
 
     fn string(&mut self, node: &DataNode, what: &str) -> Option<String> {
-        if let DataValue::Literal(Literal::String(literal)) = node.value() {
-            Some(literal.value().to_owned())
+        if let DataValue::String(text) = node.value() {
+            Some(text.clone())
         } else {
             self.shape(node, &format!("{what} must be a string"));
             None
@@ -244,8 +232,8 @@ impl Decoder<'_> {
     }
 
     fn strings(&mut self, node: &DataNode, what: &str) -> Option<Vec<String>> {
-        let DataValue::Array(items) = node.value() else {
-            self.shape(node, &format!("{what} must be an array"));
+        let DataValue::List(items) = node.value() else {
+            self.shape(node, &format!("{what} must be a list"));
             return None;
         };
         let mut strings = Vec::with_capacity(items.len());
@@ -267,7 +255,7 @@ impl Decoder<'_> {
         range: (i128, i128),
         what: &str,
     ) -> Option<i128> {
-        let DataValue::Literal(Literal::Integer(literal)) = node.value() else {
+        let DataValue::Integer(literal) = node.value() else {
             self.shape(
                 node,
                 &format!("{what} must be a `{}` literal", suffix.as_str()),
@@ -281,15 +269,9 @@ impl Decoder<'_> {
             );
             return None;
         }
-        let magnitude = literal.digits().parse::<i128>().ok();
-        let value = magnitude.map(|magnitude| {
-            if literal.is_negative() {
-                -magnitude
-            } else {
-                magnitude
-            }
-        });
-        match value {
+        // The body is an optional `-` and decimal digits; a value too large
+        // even for `i128` is out of every range.
+        match literal.body().parse::<i128>().ok() {
             Some(value) if (range.0..=range.1).contains(&value) => Some(value),
             _ => {
                 self.value(
@@ -301,12 +283,10 @@ impl Decoder<'_> {
         }
     }
 
-    /// A `str` literal, or the `bytes` record, as the bytes it holds.
+    /// A `Str` literal, or the bytes record, as the bytes it holds.
     fn contents(&mut self, node: &DataNode, what: &str) -> Option<Vec<u8>> {
         match node.value() {
-            DataValue::Literal(Literal::String(literal)) => {
-                Some(literal.value().as_bytes().to_vec())
-            }
+            DataValue::String(text) => Some(text.as_bytes().to_vec()),
             DataValue::Record(_) => {
                 let fields = self.record(node, &["kind", "values"], what)?;
                 let (Some(kind), Some(values)) =
@@ -319,7 +299,7 @@ impl Decoder<'_> {
                     return None;
                 };
                 match kind.value() {
-                    DataValue::Atom(atom) if atom.value() == "bytes" => {}
+                    DataValue::Atom(atom) if atom == "@bytes" => {}
                     _ => {
                         self.value(
                             kind,
@@ -328,11 +308,8 @@ impl Decoder<'_> {
                         return None;
                     }
                 }
-                let DataValue::Array(items) = values.value() else {
-                    self.shape(
-                        values,
-                        &format!("the bytes of {what} must be an array"),
-                    );
+                let DataValue::List(items) = values.value() else {
+                    self.shape(values, &format!("the bytes of {what} must be a list"));
                     return None;
                 };
                 let mut bytes = Vec::with_capacity(items.len());
@@ -346,10 +323,7 @@ impl Decoder<'_> {
                 valid.then_some(bytes)
             }
             _ => {
-                self.shape(
-                    node,
-                    &format!("{what} must be a string or a `bytes` record"),
-                );
+                self.shape(node, &format!("{what} must be a string or a bytes record"));
                 None
             }
         }
@@ -365,16 +339,16 @@ impl Decoder<'_> {
         components
     }
 
-    fn directories(&mut self, node: &DataNode) -> Option<Vec<(Components, DataNode)>> {
-        let DataValue::Array(items) = node.value() else {
-            self.shape(node, "the directories must be an array");
+    fn directories(&mut self, node: &DataNode) -> Option<Vec<(Components, ByteSpan)>> {
+        let DataValue::List(items) = node.value() else {
+            self.shape(node, "the directories must be a list");
             return None;
         };
         let mut found = Vec::new();
         let mut valid = true;
         for item in items {
             match self.path(item) {
-                Some(components) => found.push((components, item.clone())),
+                Some(components) => found.push((components, item.span())),
                 None => valid = false,
             }
         }
@@ -385,19 +359,20 @@ impl Decoder<'_> {
     fn files(
         &mut self,
         node: &DataNode,
-    ) -> Option<Vec<(Components, Vec<u8>, DataNode)>> {
+    ) -> Option<Vec<(Components, Vec<u8>, ByteSpan)>> {
         let DataValue::Dict(entries) = node.value() else {
             self.shape(node, "the files must be a dict");
             return None;
         };
         let mut found = Vec::new();
         let mut valid = true;
-        for (key, value) in entries {
+        for entry in entries {
+            let (key, value) = (entry.key(), entry.value());
             let path = self.path(key);
             let contents = self.contents(value, "the contents of a file");
             match (path, contents) {
                 (Some(path), Some(contents)) => {
-                    found.push((path, contents, key.clone()))
+                    found.push((path, contents, key.span()))
                 }
                 _ => valid = false,
             }
@@ -410,8 +385,8 @@ impl Decoder<'_> {
     fn tree(
         &mut self,
         world: &mut HostWorld,
-        directories: Vec<(Components, DataNode)>,
-        files: Vec<(Components, Vec<u8>, DataNode)>,
+        directories: Vec<(Components, ByteSpan)>,
+        files: Vec<(Components, Vec<u8>, ByteSpan)>,
     ) -> bool {
         let mut valid = true;
         for (components, _) in &directories {
@@ -430,10 +405,18 @@ impl Decoder<'_> {
         }
         for (components, contents, key) in files {
             if world.directories.contains(&components) {
-                self.value(&key, "a path cannot be both a file and a directory");
+                self.error_at(
+                    DiagnosticCode::DataInvalidValue,
+                    key,
+                    "a path cannot be both a file and a directory",
+                );
                 valid = false;
             } else if world.files.insert(components, contents).is_some() {
-                self.value(&key, "a file is listed twice under one resolved path");
+                self.error_at(
+                    DiagnosticCode::DataInvalidValue,
+                    key,
+                    "a file is listed twice under one resolved path",
+                );
                 valid = false;
             }
         }
@@ -447,9 +430,9 @@ impl Decoder<'_> {
         };
         let mut env = BTreeMap::new();
         let mut valid = true;
-        for (key, value) in entries {
-            let name = self.string(key, "a variable name");
-            let text = self.string(value, "a variable value");
+        for entry in entries {
+            let name = self.string(entry.key(), "a variable name");
+            let text = self.string(entry.value(), "a variable value");
             match (name, text) {
                 (Some(name), Some(text)) => {
                     env.insert(name, text);
@@ -589,7 +572,7 @@ impl WorldProvider {
     }
 
     /// What `path` names, checking every ancestor: a file where a directory is
-    /// needed is `not-a-directory`, and a missing ancestor is `not-found`.
+    /// needed is `notADirectory`, and a missing ancestor is `notFound`.
     fn lookup(&self, path: &[String]) -> Result<Entry, FsError> {
         for length in 0..path.len() {
             let ancestor = path.get(..length).unwrap_or_default();

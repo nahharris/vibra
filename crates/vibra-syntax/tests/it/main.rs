@@ -1,19 +1,21 @@
-//! The `vibra-syntax` integration tests, one target with a module for each
-//! subject.
-//!
-//! Run them with `cargo test --locked -p vibra-syntax --test it`.
+//! The `vibra-syntax` integration tests, one test target.
 
 #![allow(
     clippy::expect_used,
     clippy::indexing_slicing,
     clippy::panic,
-    clippy::unwrap_used
+    clippy::unwrap_used,
+    missing_docs
 )]
 
+mod support;
+
+mod callable;
 mod data;
-mod declarations;
-mod expressions;
-mod literals;
-mod names;
-mod queries;
-mod reader;
+mod examples;
+mod expr;
+mod lexer;
+mod schema;
+mod source;
+mod tree;
+mod types;

@@ -30,17 +30,17 @@
 //! that ends, by a return or a tail transfer, releases whatever it still owns.
 //!
 //! This crate knows no value layout, no runtime, and no target. It depends on
-//! `vibra-ir` for source origins and the closed registries only.
+//! `vibra-ir-v1` for source origins and the closed registries only.
 
 mod text;
 mod verify;
 
 use std::collections::BTreeSet;
 
-use vibra_ir::SourceOrigin;
-use vibra_ir::boundary::TrapCode;
-use vibra_ir::external::host::{HostRow, derived_registry_minor};
-use vibra_ir::external::{CompilerIntrinsic, NumericType};
+use vibra_ir_v1::SourceOrigin;
+use vibra_ir_v1::boundary::TrapCode;
+use vibra_ir_v1::external::host::{HostRow, derived_registry_minor};
+use vibra_ir_v1::external::{CompilerIntrinsic, NumericType};
 
 pub use verify::{Verified, VerifyError, VerifyErrorKind, verified, verify};
 

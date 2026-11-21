@@ -1,0 +1,16 @@
+type Flagged(T) of {flag: Bool item: T}
+  where isSet
+endtype
+
+fn isSet(T)
+  takes {f: {flag: Bool item: T}}
+  returns ok: Bool
+  do
+    return f.flag
+endfn
+fn make(T)
+  takes {flag: Bool item: T}
+  returns made: Flagged(T)
+  do
+    return Flagged(flag: flag item: item)
+endfn

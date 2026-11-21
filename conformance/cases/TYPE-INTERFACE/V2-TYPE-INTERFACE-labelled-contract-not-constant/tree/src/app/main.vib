@@ -1,0 +1,11 @@
+fn main returns r: I32 do return 1i32 endfn
+
+fn two returns r: U8 do return 2u8 endfn
+
+interface Pad
+  fn pad
+    takes {value: Self}
+    labelled {width: U8 be two()}
+    returns r: U8
+  endfn
+endinterface

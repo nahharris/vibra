@@ -1,0 +1,12 @@
+id = "V2-TYPE-NAMES-flat-scope-forward"
+rule = "V2-TYPE-NAMES-flat-scope-forward"
+profile = "staticV2"
+operation = "resolve"
+description = "02-type-system.md#namespaces-and-resolution: a module scope is flat, so a type names a later declaration"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

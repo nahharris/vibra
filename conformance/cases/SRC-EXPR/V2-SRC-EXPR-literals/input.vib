@@ -1,0 +1,1 @@
+let l: List(Any) be ["s" 'c' 1i32 1.5f64 @ok void] endlet

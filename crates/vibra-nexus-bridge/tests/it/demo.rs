@@ -2,8 +2,8 @@
 //! stepper and the bridge on the same program and requires the same
 //! observation, unbounded and with small quotas.
 
-use vibra_host::AuditEvent;
-use vibra_ir::boundary::TrapCode;
+use vibra_host_v1::AuditEvent;
+use vibra_ir_v1::boundary::TrapCode;
 use vibra_nexus::{Cell, Outcome, Trap, UNBOUNDED};
 
 use crate::fixture::{self, LIMIT, MIB, run_bridge};

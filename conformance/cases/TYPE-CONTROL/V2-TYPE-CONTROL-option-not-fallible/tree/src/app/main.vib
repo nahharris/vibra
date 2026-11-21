@@ -1,0 +1,2 @@
+fn lookup returns r: Option(I32) do return Option.none() endfn
+fn f returns r: Void do lookup() return void endfn

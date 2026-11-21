@@ -1,0 +1,2 @@
+fn main returns r: I32 do return f(0i32) endfn
+fn f takes {parts: I32} returns r: I32 requires Ordered.greater(parts 0i32) else 1i32 ensures Equatable.equal(r 5i32) else 2i32 do return 5i32 endfn

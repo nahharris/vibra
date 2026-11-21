@@ -1,0 +1,28 @@
+use @std.assert enduse
+
+use @gatePure.lines enduse
+
+test "empty text has no lines"
+  do
+    assert.equal(0u64 lines.countLines(""))
+endtest
+
+test "a last line without a line feed counts"
+  do
+    assert.equal(2u64 lines.countLines("a\nb"))
+endtest
+
+test "a final line feed ends the last line"
+  do
+    assert.equal(2u64 lines.countLines("a\nb\n"))
+endtest
+
+test "a carriage return before the line feed is part of the line"
+  do
+    assert.equal(2u64 lines.countLines("a\r\nb\r\n"))
+endtest
+
+test "empty lines count"
+  do
+    assert.equal(3u64 lines.countLines("\n\n\n"))
+endtest

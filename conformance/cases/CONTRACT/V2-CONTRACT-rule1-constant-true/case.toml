@@ -1,0 +1,12 @@
+id = "V2-CONTRACT-rule1-constant-true"
+rule = "V2-CONTRACT-rule1-constant-true"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#bare-guards: GUARD-1: a bare requires whose arguments are constants is decided by evaluating the predicate; true discharges it"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

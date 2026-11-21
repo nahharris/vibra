@@ -1,0 +1,19 @@
+id = "V2-CONTRACT-anonymous-requires-refuted"
+rule = "V2-CONTRACT-anonymous-requires-refuted"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#guards-and-callable-types: a bare requires of an anonymous callable that is false at a call is @contract.refuted at the predicate, related to the argument"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@contract.refuted"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 79, end = 102 }
+related = [{ source = "src/app/main.vib", span = { start = 139, end = 143 } }]

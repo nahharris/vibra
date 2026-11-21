@@ -1,0 +1,18 @@
+id = "V2-TYPE-NOMINAL-list-mixed"
+rule = "V2-TYPE-NOMINAL-list-mixed"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "01-source-language.md#anonymous-products-and-collections: a list element of another type is a mismatch at the element"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.mismatch"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 45, end = 48 }

@@ -17,16 +17,17 @@ behavior.
 | [design.md](design.md) | The architecture: pipeline, crates, execution IR, the step protocol, values, guards, plans, grants, host calls, linking, and the concurrency layer |
 | [decisions.md](decisions.md) | The decision ledger: what was decided, by whom, why, and what was rejected or later replaced |
 | [plan-v0.0.2.md](plan-v0.0.2.md) | Work packages X2-01 to X2-04: the native slice of v0.0.2 M4 |
+| [x2-01-remainder.md](x2-01-remainder.md) | The native-track tests X2-01 rewrites on the new checked IR |
 | [plan-v0.0.3.md](plan-v0.0.3.md) | Work packages X3-08 to X3-29: the whole language, three platforms, build and cutover |
 | [plan-v0.0.4.md](plan-v0.0.4.md) | Work packages X4-S1 to X4-09, each with its validation criteria |
 | [validation.md](validation.md) | The commands, the standing invariants, and the map from gate clause to evidence |
 
 ## The plan in three sentences
 
-The interpreter stays permanently, a native compiler and runtime are built,
-and the Wasm backend is removed at the native cutover (N39). The native
-track follows the release order: one slice in v0.0.2 M4, the whole language
-and three platforms in v0.0.3 (N40). Concurrency in v0.0.4 is built on an
+The interpreter is permanent and a native compiler and runtime are built
+beside it; they are the two executors (N39, N55). The native track follows
+the release order: one slice in v0.0.2 M4, the whole language and three
+platforms in v0.0.3 (N40). Concurrency in v0.0.4 is built on an
 actor kernel, with scoped children and a bounded parallel map as the first
 things a program author meets (N50).
 

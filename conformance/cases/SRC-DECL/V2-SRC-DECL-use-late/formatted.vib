@@ -1,0 +1,3 @@
+type A of U8 endtype
+
+use @std.io enduse

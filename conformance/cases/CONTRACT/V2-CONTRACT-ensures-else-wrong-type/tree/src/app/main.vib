@@ -1,0 +1,1 @@
+fn clamp takes {x: I32} returns r: I32 ensures Ordered.lessOrEqual(r 10i32) else "ten" do return x endfn

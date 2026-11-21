@@ -1,0 +1,6 @@
+fn f
+  returns r: I32
+  do
+    let a be 1i32 endlet
+    return a
+endfn

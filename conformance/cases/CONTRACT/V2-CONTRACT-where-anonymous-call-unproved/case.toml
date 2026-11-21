@@ -1,0 +1,19 @@
+id = "V2-CONTRACT-where-anonymous-call-unproved"
+rule = "V2-CONTRACT-where-anonymous-call-unproved"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#type-invariants: a call with a bare requires in an anonymous where operand states its obligation for the type, @contract.unproved at the call when the discharge rules do not establish it"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "unknown"
+
+[[expect.diagnostics]]
+code = "@contract.unproved"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 170, end = 176 }
+related = [{ source = "src/app/main.vib", span = { start = 3, end = 6 } }]

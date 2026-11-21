@@ -1,0 +1,12 @@
+id = "V2-CONTRACT-rule4-substitution"
+rule = "V2-CONTRACT-rule4-substitution"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#bare-guards: GUARD-4: the caller's own bare requires, substituted at its parameters, establishes the obligation"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

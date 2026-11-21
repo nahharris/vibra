@@ -28,7 +28,9 @@ insignificant: line breaks and indentation never change meaning.
 ## Lexical structure
 
 A `.vib` file is UTF-8. A byte-order mark, an invalid UTF-8 sequence, or a NUL
-is `@syntax.invalidEncoding`. Whitespace is space, tab, CR, and LF.
+is `@syntax.invalidEncoding`. A byte-order mark is U+FEFF at offset 0;
+anywhere else U+FEFF is an ordinary scalar, which outside a literal or a
+comment starts no token. Whitespace is space, tab, CR, and LF.
 `//` starts a comment that runs to the end of the line. There is no block
 comment.
 
@@ -62,7 +64,8 @@ escape      = "\\" | '\"' | "\n" | "\r" | "\t"
 An identifier starts with an ASCII letter and continues with ASCII letters and
 digits. Hyphens, underscores, `?`, and `!` are not identifier characters. An
 identifier that fails this production is `@syntax.invalidName` over the whole
-token.
+token, and that is its only diagnostic: the token is not also reported as
+`@syntax.invalidForm` where the grammar admits no identifier.
 
 Two adjacent tokens of the classes identifier, reserved word, number, atom,
 string, character, and doc string MUST be separated by whitespace, a bracket,
@@ -73,9 +76,12 @@ part of the numeric token and never needs separation.
 
 Casing is a convention, never a parse rule. Types, interfaces, and type
 parameters are written in PascalCase; every other name, including a variant
-case, is written in camelCase. `vibra check` reports a name that departs from
-the convention as the style diagnostic `@style.casing`; the program's
-meaning does not change. No rule in any chapter depends on the case of a name.
+case, is written in camelCase. An associated type is written like a type, and an
+`as` name like its target. The convention reads the first letter only: upper
+case for PascalCase, lower case for camelCase. `vibra check` reports a name that
+departs from the convention as the style diagnostic `@style.casing`; the
+program's meaning does not change. No rule in any chapter depends on the case of
+a name.
 
 ### Reserved words
 
@@ -97,7 +103,10 @@ import name) the report is `@name.reservedDeclaration` at the word. In a
 label position (a labelled parameter, a record or case field, a labelled
 argument, a record literal or pattern field, a type-application label) it is
 `@name.reservedLabel` at the word. The recovered name still binds or labels
-for the rest of its scope so that the error does not cascade.
+for the rest of its scope so that the error does not cascade. The closer of
+the construct being read is never taken as the identifier: in
+`use @a as enduse` the name is missing, while `use @a as endfn enduse`
+recovers the name `endfn`.
 
 The names of the prelude (the [type chapter](02-type-system.md#the-prelude)
 lists them, for example `Bool`, `Option`, `true`, `false`) are ordinary
@@ -106,13 +115,19 @@ type parameter, or pattern binder spelled as one is
 `@name.reservedDeclaration` at the name; a module value, `fn`, `proc`, or
 import spelled as one is `@name.reservedValueSpelling` at the name. Either
 still binds for the rest of its scope so that the error does not cascade.
+The reservations apply to the modules of user packages: the embedded
+standard library introduces the prelude names, so its declarations and
+imports are not reserved.
 
 ### Atoms
 
 An atom is `@` followed by one or more dot-separated parts. A part starts with
 an ASCII letter and continues with ASCII letters and digits. Atoms are
 written in camelCase like every other value name, the registered tags of the
-toolchain included: `@runtime.invalidHostValue`, `@auditTrace.v1`.
+toolchain included: `@runtime.invalidHostValue`, `@auditTrace.v1`. An `@`
+directly followed by a letter, a digit, or `_` starts an atom token; one that
+fails the production, such as `@a.` or `@1`, is `@syntax.invalidName` over
+the whole token. Any other `@` starts no token.
 
 An atom is an ordinary value. What an atom means depends on the grammar
 position it is written in:
@@ -157,12 +172,15 @@ the opening delimiter starts with a line break, that break is removed; the
 line break and indentation before the closing delimiter are removed; and the
 longest whitespace prefix common to all non-blank lines is removed from each
 line. A doc string is valid only as the operand of a `doc` section; elsewhere
-it is `@syntax.invalidForm`.
+it is `@syntax.invalidForm`. A doc string that reaches the end of the file
+unterminated is `@syntax.unmatchedDelimiter` and nothing else.
 
 A character literal is single quoted and denotes exactly one Unicode scalar:
 one scalar written directly, or one string escape, or `\'`. An empty literal,
 one holding more than one scalar, or a surrogate is
-`@syntax.invalidCharacterLiteral`.
+`@syntax.invalidCharacterLiteral`. A character literal never spans lines:
+one with no closing quote before the line break or the end of the file is
+`@syntax.invalidCharacterLiteral` over its text up to that point.
 
 `void` is the single value of the type `Void`. `_` is the discard: in a binder
 or pattern position it matches anything and binds nothing, it may repeat, and
@@ -305,8 +323,11 @@ Notes on the grammar:
 - In `Proc({Str} Void {DirWrite})` the row is the last operand and is
   optional. `Proc({Str} {DirWrite})` therefore declares a `proc` that
   returns the one-component tuple type `{DirWrite}` with an empty row; the
-  checker reports `@type.suspiciousRow` when a result type is a tuple
-  whose every component resolves to an operation interface.
+  checker reports `@type.suspiciousRow` when the result operand of a
+  written `Proc` or `Intent` type whose row is omitted is a tuple of at
+  least one component, every one of which resolves to an operation
+  interface. A `returns` type is never reported: there a tuple of grants is
+  an ordinary value.
 - The grammar admits an empty brace or bracket form wherever a repetition
   can be empty: `{}` is the empty tuple (type, value, and pattern) and `[]`
   the empty list. An empty `takes {}`, `labelled {}`, `given {}`, or
@@ -324,15 +345,23 @@ and its body come last; the `case` alternatives of a variant type keep
 their written order among themselves, which is the order of the variants;
 and, in a file, every `use` precedes every other top-level form. So
 `fn f returns r: I32 takes {x: I32} do return x endfn` is accepted, and
-the formatter moves `takes` before `returns`. Nested members and `impl`
-blocks may be written between sections. A `use` written after another
-top-level form is `@syntax.invalidForm` at the `use`; the formatter moves no
-top-level form, so it does not repair one.
+the formatter moves `takes` before `returns`. `takes`, `labelled`, and
+`returns` need not be adjacent: each run of them written next to each other
+is one `@signature` node, so another section between them gives two. Nested
+members and `impl` blocks may be written between sections. A section
+written before the name, or after `do`, is `@syntax.invalidForm` at that
+section. A declaration with no name is one `@syntax.invalidForm` over the
+construct; when sections stand where the name belongs, a name written after
+them would be read into their operand, so those before `do` are reported as
+sections before the name. A `use` written after another top-level form is
+`@syntax.invalidForm` at the `use`; the formatter moves no top-level form,
+so it does not repair one.
 
 Every section occurs at most once, `requires` and `ensures` included; a
-repeat is `@syntax.duplicateSection`. A required section that is missing,
-such as `returns`, is `@syntax.invalidForm`. Several conditions are joined
-with `Bool.and`. A section a declaration kind does not admit, such as
+repeat is `@syntax.duplicateSection` at the keyword of the later section,
+with no related span. A required section that is missing, such as
+`returns`, is `@syntax.invalidForm`. Several conditions are joined with
+`Bool.and`. A section a declaration kind does not admit, such as
 `performs` on a `fn`, is `@syntax.invalidSection`. The formatter writes
 sections in the canonical order given under
 [Canonical format](#canonical-format).
@@ -346,10 +375,14 @@ named `proc`, or `test` inside a body is `@syntax.invalidForm`.
 
 All declarations of a module share one flat scope. A declaration may be
 referenced before it is written. No declaration or binder may shadow a visible
-name.
+name, a type parameter included.
 
 Every declaration is private to its module unless it contains
 `visibility @public`. `@public` and `@private` are the only visibility values.
+The members of an [`interface`](#interface) and an [`impl`](#impl) take their
+access from the interface. The
+[programs chapter](04-programs-and-packages.md#modules-and-imports) defines
+where access is applied.
 
 ```vibra
 use @std.io enduse
@@ -411,7 +444,9 @@ entry has the bound `Any`. `where` states a type invariant and
 `representation` controls who may construct and take apart the type; the
 [type chapter](02-type-system.md#declared-types) defines all three. A `type`
 may nest `fn` and `proc` declarations, which are its static members, and
-`impl` blocks.
+`impl` blocks. A static member is private to the module that declares the
+type unless it has `visibility @public`. A `case` and a record field have the
+type's access; `representation` governs constructing and taking apart.
 
 `of Intrinsic(@name)` and the `role` section are admissible only in the
 embedded standard library.
@@ -423,9 +458,11 @@ member with `do` is a default, and its body is checked like any other
 callable body, so an empty one is `@type.missingReturn`. A nested
 `type Name endtype`, with no body, declares an associated type, which each
 implementation chooses; it is a member of the interface, and the
-[type chapter](02-type-system.md#associated-types) defines it. An interface
-whose members include a `proc` is an operation interface, which the
-[effects chapter](03-effects.md) defines. When an interface is checked, the
+[type chapter](02-type-system.md#associated-types) defines it. A member is
+part of the interface and has its access; a `visibility` section on a member
+is `@syntax.invalidSection`. An interface whose members include a `proc` is
+an operation interface, which the [effects chapter](03-effects.md) defines.
+When an interface is checked, the
 written result type of each member may place `Self` only where the
 [type chapter](02-type-system.md#interfaces) allows; any other position is
 `@type.unsupportedSelfPosition`.
@@ -466,8 +503,10 @@ type User of {name: Str id: UserId}
 endtype
 ```
 
-A callable member of an `impl` MUST have a body, or be an external
-declaration, and MUST match its contract under the
+A member of an `impl` has the access of the interface member it implements;
+a `visibility` section on one is `@syntax.invalidSection`. A callable member
+of an `impl` MUST have a body, or be an external declaration, and MUST match
+its contract under the
 [substitution](02-type-system.md#substitution) the type chapter defines. A
 `type Name of T endtype` inside an `impl` chooses the associated type `Name`
 and has no body. The operand of `impl` is positional: a label in it, as in
@@ -493,12 +532,15 @@ pattern binds are local to the callable and are not argument labels.
 `labelled` lists optional parameters as `name: Type be default`. Each has a
 real local name, which is part of the call contract, and a default that MUST
 be a constant expression; a default that is not is `@type.notConstant`. The
-type chapter defines constant expressions.
+type chapter defines constant expressions. A default sees no parameter: a
+parameter's name in it is `@name.unknownSymbol`.
 
 `returns name: Type` declares the result type and a result name. The result
 name is visible only in the `ensures` section of the same declaration, in both
 the predicate and its `else` consequence. It is not visible in `requires` or
-in the body.
+in the body. It is a binder whether or not `ensures` is written, in a scope
+of its own that sees the parameters, so `takes {r: I32} returns r: I32` is
+`@name.redeclaration`.
 
 `requires`, `ensures`, and `where` are **guards**. The
 [type chapter](02-type-system.md#guards) defines them: a guard without `else`
@@ -541,7 +583,11 @@ initializer runs. There is no separate constant form.
 
 `test "name" takes {world: TestWorld} performs {…} do … endtest` declares a
 test. `takes` is optional and admits exactly one parameter, of the standard
-type `TestWorld`; any other parameter list is `@syntax.invalidForm`. Its
+type `TestWorld`; any other parameter list is `@syntax.invalidForm` at the
+`takes` section. The reader reports it for anything but one bare-name
+parameter, and the checker reports the same code at the same span when
+that one type does not resolve to `@std.test.TestWorld`. The parameter's
+name is free. Its
 body has type `Void`, MUST NOT contain a `return` or `try` outside an
 anonymous callable, and may `await`. The
 [programs chapter](04-programs-and-packages.md#tests) defines discovery and
@@ -576,6 +622,18 @@ write `performs`. `native` names a toolchain native implementation of a `fn`
 that keeps its Vibra body. Symbol strings are registry keys and keep their
 registered spelling.
 
+A declaration binds a row owned by the declaration's owner: for a member of
+a type, the type's wire tag (`Intrinsic(@i32)` owns `i32`) or the role it
+plays (`role @str` owns `str`); for a top-level declaration, the last part
+of its module path (`@std.assert` owns `assert`). Its name is the member
+part of the symbol: `fn addChecked` binds `i32.addChecked`. A conversion row
+is bound by the `convert` member of an `impl From(S)` or `impl TryFrom(S)`
+nested in its destination type, which is then its owner: `<s>.to<T>` and
+`<t>.parse` in `T`, `<t>.toStr` in `Str`, and `dict.fromList` in `Dict`. A
+row of another owner is `@external.ownerMismatch` at the symbol, related to
+the owner. Another name, another signature, `@compiler` on a `proc`, and
+`@host` on a `fn` are `@external.signatureMismatch` at the declaration.
+
 External declarations, `native`, `role`, and `Intrinsic` are accepted only in
 the embedded standard-library modules; elsewhere each is
 `@syntax.invalidSection`. The operand of `visibility`, `representation`,
@@ -598,7 +656,12 @@ binding or a module value, each later `.name` reads a field of a record or
 declared record. Otherwise the longest prefix that names an entity is a path,
 and any remaining `.name` parts read fields of its value. Because nothing
 shadows, a name is never both. A field read of a value without that field is
-`@type.unknownRecordField`.
+`@type.unknownRecordField`. A field is not an entity, so `User.name` reaches
+no field of the type `User`: it is `@name.unknownSymbol` at `name`, related
+to the type. After a type parameter, an associated type, or the `Self` of an
+interface, the remaining parts name members that
+[dispatch](02-type-system.md#dispatch) selects, and resolution leaves them
+to it; inside a `type`, `Self` is that type and reaches its members.
 
 A module-level `fn` name or a nested member path in expression position
 denotes a function value. Constructors, field reads, and lookups are not
@@ -662,9 +725,12 @@ Each of an `if` branch, a `match` arm, a `do` block, and a `let` fallback is
 its own scope: a binding made in it ends with it. A callable body is one
 scope together with its parameters.
 
-An expression statement whose value is fallible, as the type chapter defines
-(a `Result` that can hold an error), is `@type.unhandledFallible`.
-`let _ be risky() endlet` discards one explicitly.
+An expression statement has type `Void` or `Never`. One whose value is
+fallible, as the type chapter defines (a `Result` that can hold an error),
+is `@type.unhandledFallible`. Any other value is `@type.mismatch` at the
+statement, such as a plan whose `await` was forgotten: applying a `proc`
+only builds the plan. `let _ be risky() endlet` discards a value
+explicitly.
 
 ### `let`
 
@@ -788,25 +854,32 @@ run-time type. The type chapter defines irrefutability and coverage.
 
 ## Canonical format
 
-`vibra fmt` defines the only canonical representation:
+`vibra fmt` defines the only canonical representation, unique up to the
+spaces and tabs before a comment that ends a line:
 
 - UTF-8, LF line endings, one trailing newline, no trailing whitespace;
 - two-space indentation and a limit of 88 columns;
 - one blank line between top-level forms, which keep their written order;
   the imports are already first, as the [grammar](#grammar) requires;
 - one space between tokens on a line; none inside `(`, `)`, `{`, `}`, `[`,
-  `]`, before `(`, or before `:`; one after `:`;
+  `]`, before `(`, before `:`, or around `.`; one after `:`;
 - numeric suffixes, string contents, and name spellings exactly as written;
 - a construct on one line when it holds no comment, no nested `let`, and
   fits within the limit; otherwise its opener line, its contents indented one
   step, and its closer on its own line at the opener's indentation;
-- in a multi-line declaration, each section on its own line, one step in, in
-  this order: `of` or the `case` list, `takes`, `labelled`, `returns`,
+- a `type`, `interface`, `impl`, `fn`, `proc`, or `test` construct
+  always on several lines when it has a member, a `case`, or any section
+  other than `of`, whatever its length: `type Celsius of F64 endtype` is one
+  line, and a type with a `visibility` section or a `case` list is not;
+- in a multi-line declaration, `of` on the opener's line when that line
+  fits, and each other section on its own line, one step in; the sections
+  are in this order: `of` or the `case` list, `takes`, `labelled`, `returns`,
   `given`, `where`, `requires`, `ensures`, `performs`, `role`,
   `visibility`, `representation`, `external`, `symbol`, `native`, `doc`,
-  then the associated type declarations of an interface or the choices of
-  an `impl`, then nested `fn` and `proc` members, then `impl` blocks, then
-  `do`; within each of these three groups the written order is kept;
+  `as`, `be`, then the associated type declarations of an interface or the
+  choices of an `impl`, then nested `fn` and `proc` members, then `impl`
+  blocks, then `do`; within each of these three groups the written order is
+  kept;
 - the statements of a callable body two steps in from the declaration, one
   step in from `do`; a guard's `else` on the next line one step in from its
   guard when both do not fit on one line;
@@ -820,10 +893,16 @@ run-time type. The type chapter defines irrefutability and coverage.
   ends with `endlet` on the same line;
 - a brace or bracket form on one line when it fits, otherwise one entry per
   line, one step in, with the closing token on its own line;
-- arguments in written order, always; and
+- arguments in written order, always;
 - comments preserved: a comment on a construct's line stays at the end of
-  that line, and any other comment stays on its own line before the form
-  that follows it.
+  that line after the spaces and tabs written before it, or one space when
+  none was written, so comments may be aligned in a column; any other
+  comment stays on its own line before the form that follows it. Between
+  top-level forms, an own-line comment that follows a form is separated
+  from it by one blank line, and a blank line written
+  after an own-line comment is kept as one blank line; and
+- a document with no form and no comment as the empty text, with no
+  newline.
 
 Formatting MUST be idempotent and MUST preserve meaning. It never reorders
 anything that is evaluated. If the parser recovered from a syntax error

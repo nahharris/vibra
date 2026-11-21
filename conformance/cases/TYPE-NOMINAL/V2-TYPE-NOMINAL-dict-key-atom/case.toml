@@ -1,0 +1,12 @@
+id = "V2-TYPE-NOMINAL-dict-key-atom"
+rule = "V2-TYPE-NOMINAL-dict-key-atom"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#dict-keys-equality-and-order: atoms are Ordered structurally"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

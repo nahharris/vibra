@@ -1,0 +1,16 @@
+id = "V2-SRC-DECL-type-paren-type"
+rule = "V2-SRC-DECL-type-paren-type"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#grammar: ( never starts a type: the parenthesized form is invalid"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@syntax.invalidForm"
+level = "@error"
+span = { start = 10, end = 14 }

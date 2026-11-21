@@ -1,0 +1,19 @@
+id = "V2-TYPE-INTERFACE-member-bound-missing"
+rule = "V2-TYPE-INTERFACE-member-bound-missing"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#implementations: an implementation member that leaves out the bound the contract gives its own type parameter differs from the contract, at that parameter, related to the contract bound"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.mismatch"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 202, end = 203 }
+related = [{ source = "src/app/main.vib", span = { start = 132, end = 139 } }]

@@ -1,0 +1,19 @@
+id = "V2-TYPE-CONTROL-match-constant-case-missing"
+rule = "V2-TYPE-CONTROL-match-constant-case-missing"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#constant-expressions-and-constant-patterns: a constant of a case with fields expands to the constructor pattern of its fields' patterns, which covers only that value"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@pattern.nonExhaustive"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 152, end = 215 }
+notes = ["Shape.circle(r: _)"]

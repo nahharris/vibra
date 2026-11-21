@@ -1,0 +1,12 @@
+id = "V2-TYPE-CONTROL-match-constant-pattern"
+rule = "V2-TYPE-CONTROL-match-constant-pattern"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#constant-expressions-and-constant-patterns: a constant pattern matches the value of its module value and binds nothing"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

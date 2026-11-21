@@ -1,0 +1,16 @@
+id = "V2-SRC-READER-separator"
+rule = "V2-SRC-READER-separator"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#lexical-structure: two tokens that need a separator and have none"
+
+[inputs]
+data = ["input.vibon"]
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@syntax.missingSeparator"
+level = "@error"
+span = { start = 4, end = 4 }

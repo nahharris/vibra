@@ -1,0 +1,7 @@
+interface Printable
+  visibility @public
+  fn render
+    takes {value: Self}
+    returns text: Str
+  endfn
+endinterface

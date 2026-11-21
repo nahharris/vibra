@@ -1,0 +1,19 @@
+id = "V2-CONTRACT-where-generic-refuted"
+rule = "V2-CONTRACT-where-generic-refuted"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#bare-guards: GUARD-1: a constant construction of a generic type whose predicate is false at its type arguments is @contract.refuted at the predicate, related to the construction"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@contract.refuted"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 48, end = 53 }
+related = [{ source = "src/app/main.vib", span = { start = 217, end = 255 } }]

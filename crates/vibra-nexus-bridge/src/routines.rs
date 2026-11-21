@@ -25,8 +25,8 @@
 //!   [`STATUS_EXHAUSTED`] at the host event. Exceptions are documented on the
 //!   routine.
 
-use vibra_ir::arena::kind;
-use vibra_ir::boundary::TrapCode;
+use vibra_ir_v1::arena::kind;
+use vibra_ir_v1::boundary::TrapCode;
 use vibra_nexus::{Context, Halt};
 
 use crate::abi::{
@@ -174,7 +174,7 @@ fn selector(
 }
 
 fn scalar_class(class: u32) -> Option<u8> {
-    use vibra_ir::arena::class;
+    use vibra_ir_v1::arena::class;
     match class {
         CLASS_I32 => Some(class::I32),
         CLASS_I64 => Some(class::I64),

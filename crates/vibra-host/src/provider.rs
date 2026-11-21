@@ -1,6 +1,7 @@
 //! The host provider trait and the typed answers of the 17 registry rows.
 //!
-//! `docs/spec/06-runtime.md`, "The host registry" and "The host world": a run is
+//! `docs/spec/06-runtime.md`, "Host world", over the major-1 host rows of
+//! `vibra_ir::external::host`: a run is
 //! given one host provider, and a host operation is an operation of that
 //! provider. One trait serves the system provider (`run`) and the world provider
 //! (`test`), so the language has no mode switch. Every operation answers a typed
@@ -60,44 +61,44 @@ macro_rules! error_enum {
 }
 
 error_enum! {
-    /// `io-error` of `@std.io`.
-    IoError { InvalidText = "invalid-text", Closed = "closed", Other = "other" }
+    /// `ioError` of `@std.io`.
+    IoError { InvalidText = "invalidText", Closed = "closed", Other = "other" }
 }
 
 error_enum! {
-    /// `fs-error` of `@std.fs`.
+    /// `fsError` of `@std.fs`.
     FsError {
-        NotFound = "not-found",
-        PermissionDenied = "permission-denied",
-        NotAFile = "not-a-file",
-        NotADirectory = "not-a-directory",
-        InvalidPath = "invalid-path",
-        InvalidText = "invalid-text",
+        NotFound = "notFound",
+        PermissionDenied = "permissionDenied",
+        NotAFile = "notAFile",
+        NotADirectory = "notADirectory",
+        InvalidPath = "invalidPath",
+        InvalidText = "invalidText",
         Other = "other",
     }
 }
 
 error_enum! {
-    /// `env-error` of `@std.env`.
-    EnvError { NotPresent = "not-present", NotUnicode = "not-unicode" }
+    /// `envError` of `@std.env`.
+    EnvError { NotPresent = "notPresent", NotUnicode = "notUnicode" }
 }
 
 error_enum! {
-    /// `time-error` of `@std.time`.
+    /// `timeError` of `@std.time`.
     TimeError { Unavailable = "unavailable" }
 }
 
 error_enum! {
-    /// `random-error` of `@std.random`.
+    /// `randomError` of `@std.random`.
     RandomError { Unavailable = "unavailable" }
 }
 
 error_enum! {
-    /// `fs-kind` of `@std.fs`.
+    /// `fsKind` of `@std.fs`.
     FsKind { File = "file", Directory = "directory", Other = "other" }
 }
 
-/// `fs-metadata` of `@std.fs`: `(record kind fs-kind size u64)`.
+/// `fsMetadata` of `@std.fs`: the record of `kind: FsKind` and `size: U64`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Metadata {
     /// What the path names.
@@ -108,7 +109,7 @@ pub struct Metadata {
 
 /// The host provider: one method for each row of the registry.
 ///
-/// A method does exactly what its row's meaning in "The host registry" says and
+/// A method does exactly what its row's meaning in the major-1 table says and
 /// adds no behavior. A provider MUST NOT read ambient state in any other place:
 /// every ambient read of a running program passes through a provider and a
 /// registry entry.

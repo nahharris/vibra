@@ -1,101 +1,54 @@
-//! Static-v1 declaration-resolution conformance adapter.
+//! The `resolve` operation under `staticV2`.
+//!
+//! `docs/spec/07-diagnostics-and-conformance.md`, "Case operations and
+//! inputs": a `resolve` case has one confined tree with its `project.vibon`
+//! and observes the `@resolved.v2` snapshot and the diagnostics of
+//! resolution. A case with an error is refuted; warnings leave it accepted.
 
-use vibra_resolve::{
-    ReferencePath, ResolveInput, Resolver, SourceModule, SourceUnit,
-    TargetKind as ResolveTargetKind,
-};
-use vibra_workspace::WorkspaceSnapshot;
-use vibra_workspace::project::TargetKind;
+use vibra_resolve::resolve;
+use vibra_workspace::{SourceSnapshot, discover_project_at, resolve_input};
 
 use crate::corpus::Case;
-use crate::manifest::ConformanceOperation;
-use crate::runner::{CaseObservation, HandlerError, ProfileHandler};
+use crate::manifest::Verdict;
+use crate::profile::{
+    CaseObservation, ConformanceOperation, HandlerError, ProfileHandler,
+};
 
-/// Adapts the confined Step 3 workspace snapshot to the filesystem-free
-/// resolver input and returns its canonical resolved artifact.
+/// The `resolve` handler: captures the declared tree as a project root,
+/// searching no ancestor, and resolves every module.
 #[derive(Clone, Copy, Debug, Default)]
-pub struct StaticV1ResolveHandler;
+pub struct ResolveHandler;
 
-impl ProfileHandler for StaticV1ResolveHandler {
+impl ProfileHandler for ResolveHandler {
     fn can_run(&self, case: &Case) -> bool {
         case.manifest().operation == ConformanceOperation::Resolve
     }
 
     fn run(&self, case: &Case) -> Result<CaseObservation, HandlerError> {
-        case.input_documents()
-            .map_err(|error| HandlerError::new(error.to_string()))?;
-        case.tree_files()
-            .map_err(|error| HandlerError::new(error.to_string()))?;
-
         let tree = case
-            .tree_path()
-            .map_err(|error| HandlerError::new(error.to_string()))?;
-        let workspace = match WorkspaceSnapshot::load_confined(tree) {
-            Ok(workspace) => workspace,
-            Err(error) => {
-                let diagnostics = error.diagnostics().to_vec();
-                if diagnostics.is_empty() {
-                    return Err(HandlerError::new(error.to_string()));
+            .tree_directory()
+            .map_err(|error| HandlerError::new(error.to_string()))?
+            .ok_or_else(|| HandlerError::new("a resolve case declares one tree"))?;
+        let snapshot =
+            match discover_project_at(&tree).and_then(SourceSnapshot::capture) {
+                Ok(snapshot) => snapshot,
+                Err(diagnostics) => {
+                    let mut observation = CaseObservation::new(Verdict::Refuted);
+                    observation.diagnostics = diagnostics;
+                    return Ok(observation);
                 }
-                return Ok(CaseObservation {
-                    accepted: false,
-                    diagnostics,
-                    ..CaseObservation::default()
-                });
-            }
-        };
-        let graph = workspace
-            .source_graph()
+            };
+        let input = resolve_input(&snapshot)
             .map_err(|error| HandlerError::new(error.to_string()))?;
-        let project = workspace.project().project();
-        let units = graph
-            .units()
-            .iter()
-            .map(|unit| {
-                let target = project
-                    .targets()
-                    .iter()
-                    .find(|target| target.name().atom().value() == unit.name());
-                let entry = target.and_then(|target| {
-                    target.entry().map(|entry| {
-                        ReferencePath::new(
-                            entry.atom().segments().iter().cloned(),
-                            entry.origin().source_id().to_owned(),
-                            entry.span(),
-                        )
-                    })
-                });
-                let kind = match unit.kind() {
-                    TargetKind::Bin => ResolveTargetKind::Bin,
-                    TargetKind::Lib => ResolveTargetKind::Lib,
-                };
-                let modules = unit
-                    .modules()
-                    .iter()
-                    .map(|module| {
-                        SourceModule::new(
-                            module.id().unit(),
-                            module.id().segments().iter().cloned(),
-                            module.source_id(),
-                            module.bytes(),
-                        )
-                    })
-                    .collect();
-                SourceUnit::new(unit.name(), kind, entry, modules)
-            })
-            .collect::<Vec<_>>();
-        let package = project.package();
-        let input =
-            ResolveInput::new(package.name().value(), package.version().value(), units);
-        let resolved = Resolver::resolve(input);
-        let mut diagnostics = graph.diagnostics().to_vec();
-        diagnostics.extend(resolved.diagnostics().iter().cloned());
-        let accepted = diagnostics.is_empty() && resolved.accepted();
-        Ok(CaseObservation {
-            accepted,
-            diagnostics,
-            resolved: Some(resolved.canonical_vibon()),
-            ..CaseObservation::default()
-        })
+        let resolution = resolve(&input);
+        let verdict = if resolution.has_errors() {
+            Verdict::Refuted
+        } else {
+            Verdict::Accepted
+        };
+        let mut observation = CaseObservation::new(verdict);
+        observation.resolved = Some(resolution.canonical_text());
+        observation.diagnostics = resolution.diagnostics().to_vec();
+        Ok(observation)
     }
 }

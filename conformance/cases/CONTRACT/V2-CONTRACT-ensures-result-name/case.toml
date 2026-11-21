@@ -1,0 +1,12 @@
+id = "V2-CONTRACT-ensures-result-name"
+rule = "V2-CONTRACT-ensures-result-name"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#guards-with-else: the result name resolves in an ensures predicate"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

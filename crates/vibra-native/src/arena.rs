@@ -1,14 +1,13 @@
-//! The natives over a module's linear memory.
+//! The natives over the bytes of a value arena.
 //!
-//! This is what the runner calls for an import of `vibra_native_v1`. It
-//! implements [`Source`] and [`Sink`] over the arena objects of
-//! `vibra_ir::arena` and runs the one set of algorithms of this crate, so the
-//! module and the reference interpreter call the same code.
+//! This is what a runtime calls for a native row. It implements [`Source`]
+//! and [`Sink`] over the arena objects of `vibra_ir::arena` and runs the one
+//! set of algorithms of this crate.
 //!
-//! Every offset the module hands over is checked before it is read: an object
+//! Every offset the caller hands over is checked before it is read: an object
 //! must lie inside the memory, have the kind and stride the row expects, and
 //! hold the payload its header claims. A violation is a [`Fault`], which the
-//! runner reports as a defect of the toolchain, and never a read or a write
+//! caller reports as a defect of the toolchain, and never a read or a write
 //! outside the arena.
 
 use std::cell::Cell;
@@ -16,13 +15,13 @@ use std::fmt;
 
 use vibra_ir::arena::{self, class, header, kind};
 use vibra_ir::external::{
-    Answer, CompilerIntrinsic, FloatOp, IntegerOp, NativeRow, NumericType, Operand,
+    Answer, CompilerIntrinsic, FloatOp, IntegerOp, IntegerType, NativeRow, Operand,
 };
 
 use crate::number::Parsed;
 use crate::{Count, Element, Sink, Source};
 
-/// A module's linear memory, as bytes that a source and a sink can share.
+/// The bytes of a value arena, which a source and a sink can share.
 pub type Memory<'m> = &'m [Cell<u8>];
 
 /// Views a mutable byte slice as [`Memory`].
@@ -31,7 +30,7 @@ pub fn memory(bytes: &mut [u8]) -> Memory<'_> {
     Cell::from_mut(bytes).as_slice_of_cells()
 }
 
-/// Why a native import refused its operands.
+/// Why a native row refused its operands.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Fault {
     /// An offset or a payload lies outside the memory.
@@ -91,11 +90,11 @@ fn offset(value: u32) -> Result<usize, Fault> {
 /// The layout of the payload a row expects of an operand.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Layout {
-    /// The Unicode scalars of a `str` or an atom.
+    /// The Unicode scalars of a `Str` or an atom.
     Chars,
-    /// The bytes of `bytes`.
+    /// The bytes of a `Bytes`.
     Bytes,
-    /// The cells of an `array` or a `dict`.
+    /// The cells of a `List` or a `Dict`.
     Cells,
 }
 
@@ -125,7 +124,7 @@ impl<'m> Object<'m> {
                 u64::from(header::SIZE) + u64::from(len),
             ),
             Layout::Cells => (
-                &[kind::ARRAY, kind::DICT],
+                &[kind::LIST, kind::DICT],
                 arena::STRIDE_CELLS,
                 u64::from(arena::cells_offset(len)) + 8 * u64::from(len),
             ),
@@ -232,7 +231,7 @@ fn read_cell(object: &Object<'_>, index: u64) -> Option<Element> {
     })
 }
 
-/// The scalars of a `str`.
+/// The scalars of a `Str`.
 #[derive(Clone, Copy, Debug)]
 pub struct Chars<'m>(Object<'m>);
 
@@ -252,7 +251,7 @@ impl<'m> Source for Chars<'m> {
     }
 }
 
-/// The bytes of `bytes`.
+/// The bytes of a `Bytes`.
 #[derive(Clone, Copy, Debug)]
 pub struct ByteSeq<'m>(Object<'m>);
 
@@ -272,7 +271,7 @@ impl<'m> Source for ByteSeq<'m> {
     }
 }
 
-/// The cells of an `array` or a `dict`.
+/// The cells of a `List` or a `Dict`.
 #[derive(Clone, Copy, Debug)]
 pub struct Cells<'m>(Object<'m>);
 
@@ -292,8 +291,8 @@ impl<'m> Source for Cells<'m> {
     }
 }
 
-/// Reads the cells of an array as the scalars they hold in their low bits: the
-/// `char`s of an `(array char)` or the bytes of an `(array u8)`.
+/// Reads the cells of a list as the scalars they hold in their low bits: the
+/// characters of a `List(Char)` or the bytes of a `List(U8)`.
 #[derive(Clone, Copy, Debug)]
 pub struct Narrow<S, U>(S, std::marker::PhantomData<U>);
 
@@ -375,7 +374,7 @@ impl<'m> Fill<'m> {
     }
 }
 
-/// The scalars of a new `str`.
+/// The scalars of a new `Str`.
 #[derive(Debug)]
 pub struct CharSink<'m>(Fill<'m>);
 
@@ -397,7 +396,7 @@ impl Built for CharSink<'_> {
     }
 }
 
-/// The bytes of a new `bytes`.
+/// The bytes of a new `Bytes`.
 #[derive(Debug)]
 pub struct ByteSink<'m>(Fill<'m>);
 
@@ -419,8 +418,8 @@ impl Built for ByteSink<'_> {
     }
 }
 
-/// The cells of a new `array`. A cell that holds a reference takes one `dup` of
-/// the object it names, which is the count the new array owns.
+/// The cells of a new `List`. A cell that holds a reference takes one `dup` of
+/// the object it names, which is the count the new list owns.
 #[derive(Debug)]
 pub struct CellSink<'m>(Fill<'m>);
 
@@ -469,7 +468,7 @@ impl Built for CellSink<'_> {
     }
 }
 
-/// A sink of scalars into the cells of a new array: the scalar is a cell of the
+/// A sink of scalars into the cells of a new list: the scalar is a cell of the
 /// 32-bit integer class, holding it zero-extended.
 #[derive(Debug)]
 pub struct AsCells<K, U>(K, std::marker::PhantomData<U>);
@@ -523,12 +522,12 @@ fn arguments(row: &NativeRow, scalars: &[i64]) -> Result<Vec<Argument>, Fault> {
     Ok(out)
 }
 
-/// Runs a native import of `row` against `memory`.
+/// Runs the native routine of `row` against `memory`.
 ///
-/// `scalars` are the import's parameters in order, each widened to an `i64`, and
-/// the result is the import's result: an `ordering` as `-1`, `0`, or `1`, or the
-/// component count of what a building row built or would build, or `-1` for
-/// the absence of one. See `vibra_ir::external::NativeRow` for the protocol of
+/// `scalars` are the row's parameters in order, each widened to an `i64`, and
+/// the result is the row's result: a length, `0` or `1` for whether two
+/// operands are the same, a parse status, or the component count of what a
+/// building row built or would build, or `-1` for the absence of one. See `vibra_ir::external::NativeRow` for the protocol of
 /// the destination.
 ///
 /// # Errors
@@ -546,7 +545,7 @@ pub fn call(
             let last = scalars.last().copied().ok_or(Fault::Signature)?;
             Some(u32::try_from(last).map_err(|_| Fault::OutOfBounds)?)
         }
-        Answer::Order | Answer::Length | Answer::Same | Answer::Operand => None,
+        Answer::Length | Answer::Same => None,
     };
     let object = |position: usize, layout: Layout| -> Result<Object<'_>, Fault> {
         match operands.get(position) {
@@ -568,8 +567,8 @@ pub fn call(
     };
     use CompilerIntrinsic as C;
     let built = match row.intrinsic {
-        C::Integer(numeric, IntegerOp::ToStr) => {
-            let value = decode_integer(numeric, number(0)?);
+        C::Integer(integer, IntegerOp::ToStr) => {
+            let value = decode_integer(integer, number(0)?);
             build(
                 destination,
                 |at| Fill::open(memory, at, Layout::Chars).map(CharSink),
@@ -579,29 +578,29 @@ pub fn call(
                 },
             )?
         }
-        C::Float(numeric, FloatOp::ToStr) => {
+        C::Float(float, FloatOp::ToStr) => {
             let bits = number(0)?;
             build(
                 destination,
                 |at| Fill::open(memory, at, Layout::Chars).map(CharSink),
                 |out: &mut dyn Sink<Unit = u32>| {
-                    crate::number::float_to_str(numeric, bits, out);
+                    crate::number::float_to_str(float, bits, out);
                     true
                 },
             )?
         }
-        C::Integer(numeric, IntegerOp::Parse) => {
+        C::Integer(integer, IntegerOp::Parse) => {
             let text = Chars(object(0, Layout::Chars)?);
-            let parsed = match crate::number::parse_integer(numeric, &text) {
-                Parsed::Value(value) => Parsed::Value(encode_integer(numeric, value)),
+            let parsed = match crate::number::parse_integer(integer, &text) {
+                Parsed::Value(value) => Parsed::Value(encode_integer(integer, value)),
                 Parsed::InvalidFormat => Parsed::InvalidFormat,
                 Parsed::OutOfRange => Parsed::OutOfRange,
             };
             return answer_parsed(memory, destination, parsed);
         }
-        C::Float(numeric, FloatOp::Parse) => {
+        C::Float(float, FloatOp::Parse) => {
             let text = Chars(object(0, Layout::Chars)?);
-            let parsed = crate::number::parse_float(numeric, &text);
+            let parsed = crate::number::parse_float(float, &text);
             return answer_parsed(memory, destination, parsed);
         }
         C::StrLength => {
@@ -626,27 +625,7 @@ pub fn call(
             );
             return Ok(i64::from(crate::same(&a, &b)));
         }
-        // The packed tail is the collection: the answer is the operand, once
-        // it is known to be an object of the layout.
-        C::ArrayOf | C::DictOf => {
-            let packed = object(0, Layout::Cells)?;
-            return i64::try_from(crate::identity(packed.at))
-                .map_err(|_| Fault::OutOfBounds);
-        }
-        C::StrCompare => {
-            let (a, b) = (
-                Chars(object(0, Layout::Chars)?),
-                Chars(object(1, Layout::Chars)?),
-            );
-            return Ok(i64::from(crate::order_code(crate::compare(&a, &b))));
-        }
-        C::BytesCompare => {
-            let (a, b) = (
-                ByteSeq(object(0, Layout::Bytes)?),
-                ByteSeq(object(1, Layout::Bytes)?),
-            );
-            return Ok(i64::from(crate::order_code(crate::compare(&a, &b))));
-        }
+
         C::StrConcat => {
             let (a, b) = (
                 Chars(object(0, Layout::Chars)?),
@@ -740,7 +719,7 @@ pub fn call(
                 |out: &mut dyn Sink<Unit = u8>| crate::slice(&a, start, end, out),
             )?
         }
-        C::BytesToArray => {
+        C::BytesToList => {
             let a = ByteSeq(object(0, Layout::Bytes)?);
             build(
                 destination,
@@ -754,7 +733,7 @@ pub fn call(
                 },
             )?
         }
-        C::BytesFromArray => {
+        C::BytesFromList => {
             let a = Narrow::<_, u8>(
                 Cells(object(0, Layout::Cells)?),
                 std::marker::PhantomData,
@@ -779,7 +758,7 @@ pub fn call(
                 },
             )?
         }
-        C::ArrayAppend => {
+        C::ListAppend => {
             let a = Cells(object(0, Layout::Cells)?);
             let item = element(1)?;
             build(
@@ -791,7 +770,7 @@ pub fn call(
                 },
             )?
         }
-        C::ArrayConcat => {
+        C::ListConcat => {
             let (a, b) = (
                 Cells(object(0, Layout::Cells)?),
                 Cells(object(1, Layout::Cells)?),
@@ -805,7 +784,7 @@ pub fn call(
                 },
             )?
         }
-        C::ArraySlice => {
+        C::ListSlice => {
             let a = Cells(object(0, Layout::Cells)?);
             let (start, end) = (index(1)?, index(2)?);
             build(
@@ -819,24 +798,24 @@ pub fn call(
     Ok(built)
 }
 
-/// The integer a cell of `numeric` holds: a type of at most 32 bits is its
+/// The integer a cell of `integer` holds: a type of at most 32 bits is its
 /// 32-bit pattern, zero-extended, and a 64-bit type is its 64 bits.
-fn decode_integer(numeric: NumericType, bits: u64) -> i128 {
+fn decode_integer(integer: IntegerType, bits: u64) -> i128 {
     let low = u32::try_from(bits & 0xFFFF_FFFF).unwrap_or(0);
-    match numeric {
-        NumericType::I8 | NumericType::I16 | NumericType::I32 => {
+    match integer {
+        IntegerType::I8 | IntegerType::I16 | IntegerType::I32 => {
             i128::from(low.cast_signed())
         }
-        NumericType::U8 | NumericType::U16 | NumericType::U32 => i128::from(low),
-        NumericType::I64 => i128::from(bits.cast_signed()),
-        NumericType::U64 | NumericType::F32 | NumericType::F64 => i128::from(bits),
+        IntegerType::U8 | IntegerType::U16 | IntegerType::U32 => i128::from(low),
+        IntegerType::I64 => i128::from(bits.cast_signed()),
+        IntegerType::U64 => i128::from(bits),
     }
 }
 
-/// The cell of `numeric` that holds `value`, which the type contains.
-fn encode_integer(numeric: NumericType, value: i128) -> u64 {
+/// The cell of `integer` that holds `value`, which the type contains.
+fn encode_integer(integer: IntegerType, value: i128) -> u64 {
     let pattern = u64::try_from(value & i128::from(u64::MAX)).unwrap_or(0);
-    if numeric.bits() == 64 {
+    if integer.bits() == 64 {
         pattern
     } else {
         pattern & 0xFFFF_FFFF

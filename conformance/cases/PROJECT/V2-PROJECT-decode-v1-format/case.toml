@@ -1,0 +1,17 @@
+id = "V2-PROJECT-decode-v1-format"
+rule = "V2-PROJECT-decode-v1-format"
+profile = "staticV2"
+operation = "projectDecode"
+description = "04-programs-and-packages.md#schemas: another format is a value fault at the format and nothing else is checked"
+
+[inputs]
+project = "project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@data.invalidValue"
+level = "@error"
+source = "project.vibon"
+span = { start = 9, end = 20 }

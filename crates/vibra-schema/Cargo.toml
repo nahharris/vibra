@@ -1,6 +1,6 @@
 [package]
 name = "vibra-schema"
-description = "Versioned JSON contracts for the Vibra CLI and MCP surfaces."
+description = "Version 2 JSON contracts of the Vibra command line: the command result envelope and the diagnostic document."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,15 +9,10 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
-vibra-diagnostics.workspace = true
-vibra-syntax.workspace = true
-vibra-workspace.workspace = true
-
-serde.workspace = true
-
-[dev-dependencies]
 jsonschema.workspace = true
+serde.workspace = true
 serde_json.workspace = true
+vibra-diagnostics.workspace = true
 
 [lints]
 workspace = true

@@ -1,0 +1,13 @@
+id = "V2-PROJECT-import-std-declaration"
+rule = "V2-PROJECT-import-std-declaration"
+profile = "staticV2"
+operation = "resolve"
+description = "04-programs-and-packages.md#the-standard-library: an import of a declaration of the @std unit resolves to its identity in the embedded package"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+resolved = "resolved.vibon"

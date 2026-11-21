@@ -1,0 +1,19 @@
+id = "V2-CONTRACT-anonymous-ensures-refuted"
+rule = "V2-CONTRACT-anonymous-ensures-refuted"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#guards-and-callable-types: a bare ensures of an anonymous callable that is false at a return is @contract.refuted at the predicate, related to the return"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@contract.refuted"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 78, end = 101 }
+related = [{ source = "src/app/main.vib", span = { start = 105, end = 116 } }]

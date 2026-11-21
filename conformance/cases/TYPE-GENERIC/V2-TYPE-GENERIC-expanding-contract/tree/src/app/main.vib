@@ -1,0 +1,19 @@
+fn main returns r: I32 do return 1i32 endfn
+
+interface Grow
+  fn grow
+    takes {value: Self}
+    returns n: I32
+  endfn
+endinterface
+
+type Box(T) of T
+  impl Grow
+    fn grow
+      takes {value: Self}
+      returns n: I32
+      do
+        return Grow.grow(Box(value))
+    endfn
+  endimpl
+endtype

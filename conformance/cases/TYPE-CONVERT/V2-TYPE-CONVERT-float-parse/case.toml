@@ -1,0 +1,12 @@
+id = "V2-TYPE-CONVERT-float-parse"
+rule = "V2-TYPE-CONVERT-float-parse"
+profile = "interpreterV2"
+operation = "interpret"
+description = "06-runtime.md#floating-point-operations: TryFrom(Str) on a float type accepts the float-literal grammar; infinity is outOfRange"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

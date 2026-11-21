@@ -1,0 +1,18 @@
+id = "V2-CONTRACT-read-arm-possible"
+rule = "V2-CONTRACT-read-arm-possible"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#bare-guards: GUARD-3: reading ok(x) through its match stops at an earlier arm that may match, so the pick case alone does not select the true arm"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "unknown"
+[[expect.diagnostics]]
+code = "@contract.unproved"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 431, end = 438 }
+related = [{ source = "src/app/main.vib", span = { start = 260, end = 264 } }]

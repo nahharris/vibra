@@ -1,0 +1,1 @@
+fn f takes {c: Bool} returns r: I32 requires c else "no" do return 1i32 endfn

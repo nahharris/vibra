@@ -1,0 +1,4 @@
+fn main returns r: I32 do
+  let c be fn takes {x: I32} returns s: I32 ensures Ordered.greater(s 0i32) do return 0i32 endfn endlet
+  return c(0i32)
+endfn

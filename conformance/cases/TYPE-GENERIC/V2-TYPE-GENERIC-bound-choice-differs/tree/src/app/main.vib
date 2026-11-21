@@ -1,0 +1,21 @@
+fn main returns r: Void do return needsU8(Wide(0u16)) endfn
+
+fn needsU8(I)
+  takes {x: I}
+  returns r: Void
+  given {I: Iter(Item: U8)}
+  do
+    return void
+endfn
+
+type Wide of U16
+  impl Iter
+    type Item of U16 endtype
+    fn next
+      takes {value: Self}
+      returns step: Option({Item Self})
+      do
+        return Option.none()
+    endfn
+  endimpl
+endtype

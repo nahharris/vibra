@@ -1,6 +1,6 @@
 [package]
 name = "vibra-diagnostics"
-description = "Spans, diagnostic codes, levels, and the one Vibra diagnostic model."
+description = "Spans, the closed diagnostic registry, and the one Vibra diagnostic model."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

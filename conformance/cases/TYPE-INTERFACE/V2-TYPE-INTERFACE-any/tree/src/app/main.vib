@@ -1,0 +1,8 @@
+fn main returns r: I32 do let a be pass(1i32) endlet return 1i32 endfn
+
+fn pass
+  takes {a: Any}
+  returns r: Any
+  do
+    return a
+endfn

@@ -1,0 +1,18 @@
+id = "V2-PROJECT-graph-reserved-tests"
+rule = "V2-PROJECT-graph-reserved-tests"
+profile = "staticV2"
+operation = "sourceGraph"
+description = "04-programs-and-packages.md#discovery-and-the-source-snapshot: a target named tests is a reserved unit name"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@project.reservedUnitName"
+level = "@error"
+source = "project.vibon"
+span = { start = 80, end = 86 }

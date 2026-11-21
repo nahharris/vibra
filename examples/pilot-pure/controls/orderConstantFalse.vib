@@ -1,0 +1,21 @@
+fn inOrder
+  takes {low: I32 high: I32}
+  returns ok: Bool
+  do
+    return Ordered.lessOrEqual(low high)
+endfn
+
+fn chooseUpper
+  takes {low: I32 high: I32}
+  returns upper: I32
+  requires inOrder(low high)
+  ensures inOrder(low upper)
+  do
+    return high
+endfn
+
+fn constantFalse
+  returns upper: I32
+  do
+    return chooseUpper(5i32 2i32)
+endfn

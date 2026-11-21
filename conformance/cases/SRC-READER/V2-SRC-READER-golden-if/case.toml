@@ -1,0 +1,12 @@
+id = "V2-SRC-READER-golden-if"
+rule = "V2-SRC-READER-golden-if"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#if-match-do: an if expression is an @if node with one @body per branch"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "accepted"
+tree = "tree.vibon"

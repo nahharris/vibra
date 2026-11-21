@@ -1,43 +1,83 @@
-; The standard boolean type, which plays the `@bool` role: `true`, `false`, and
-; `if` conditions have this type. The toolchain represents it directly.
-(import core @std.core)
+// The boolean type, which plays the `@bool` role, and its two values. The
+// connectives are ordinary members, so both operands are evaluated before a
+// call; `if` is the short-circuiting form.
 
-; The two values of `bool`. They belong to the closed import-free vocabulary:
-; every program names `true` and `false` without an import, and nothing can
-; shadow them.
-(def true bool (bool.true)
-  visibility: @public)
+type Bool
+  case false
+  case true
+  role @bool
+  visibility @public
+  fn not
+    takes {value: Self}
+    returns negated: Self
+    visibility @public
+    do
+      match value case Bool.true() return false case Bool.false() return true endmatch
+  endfn
+  fn and
+    takes {left: Self right: Self}
+    returns both: Self
+    visibility @public
+    do
+      match left case Bool.true() return right case Bool.false() return false endmatch
+  endfn
+  fn or
+    takes {left: Self right: Self}
+    returns either: Self
+    visibility @public
+    do
+      match left case Bool.true() return true case Bool.false() return right endmatch
+  endfn
+  fn xor
+    takes {left: Self right: Self}
+    returns exactlyOne: Self
+    visibility @public
+    do
+      match left
+        case Bool.true()
+          return Bool.not(right)
+        case Bool.false()
+          return right
+      endmatch
+  endfn
+  impl Equatable
+    fn equal
+      takes {left: Self right: Self}
+      returns same: Bool
+      do
+        match left
+          case Bool.true()
+            return right
+          case Bool.false()
+            return Bool.not(right)
+        endmatch
+    endfn
+  endimpl
+  impl Ordered
+    fn compare
+      takes {left: Self right: Self}
+      returns order: Ordering
+      do
+        match left
+          case Bool.false()
+            match right
+              case Bool.false()
+                return Ordering.equal()
+              case Bool.true()
+                return Ordering.less()
+            endmatch
+          case Bool.true()
+            match right
+              case Bool.false()
+                return Ordering.greater()
+              case Bool.true()
+                return Ordering.equal()
+            endmatch
+        endmatch
+    endfn
+  endimpl
+endtype
 
-(def false bool (bool.false)
-  visibility: @public)
+let true: Bool visibility @public be Bool.true() endlet
 
-; `false` orders before `true`.
-(deftype bool (enum false void true void)
-  role: @bool
-  visibility: @public
-  (impl equatable
-    (defn equal (left self right self) bool
-      (if left right (not right))))
-  (impl ordered
-    (defn compare (left self right self) core.ordering
-      (if left
-        (if right (core.ordering.equal) (core.ordering.greater))
-        (if right (core.ordering.less) (core.ordering.equal))))))
-
-; Boolean connectives. Each is an ordinary function, so both operands are
-; evaluated before the call; `if` is the short-circuiting form.
-(defn not (value bool) bool
-  visibility: @public
-  (if value false true))
-
-(defn and (left bool right bool) bool
-  visibility: @public
-  (if left right false))
-
-(defn or (left bool right bool) bool
-  visibility: @public
-  (if left true right))
-
-(defn xor (left bool right bool) bool
-  visibility: @public
-  (if left (not right) right))
+let false: Bool visibility @public be Bool.false() endlet

@@ -16,8 +16,8 @@ use vibra_exec::{
     OriginId, Program, ScalarClass, ScalarOp, Slot, Terminator, VerifyErrorKind,
     verify,
 };
-use vibra_ir::boundary::TrapCode;
-use vibra_ir::external::host::host_row;
+use vibra_ir_v1::boundary::TrapCode;
+use vibra_ir_v1::external::host::host_row;
 
 mod fuzz;
 mod kinds;

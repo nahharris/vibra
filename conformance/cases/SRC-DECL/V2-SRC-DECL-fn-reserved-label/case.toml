@@ -1,0 +1,16 @@
+id = "V2-SRC-DECL-fn-reserved-label"
+rule = "V2-SRC-DECL-fn-reserved-label"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#reserved-words: a reserved word as a labelled parameter name is a reserved label"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@name.reservedLabel"
+level = "@error"
+span = { start = 15, end = 19 }

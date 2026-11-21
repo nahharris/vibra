@@ -1,0 +1,12 @@
+id = "V2-CONTRACT-where-bare-branch"
+rule = "V2-CONTRACT-where-bare-branch"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#bare-guards: GUARD-3: a branch on the invariant's predicate establishes the construction"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

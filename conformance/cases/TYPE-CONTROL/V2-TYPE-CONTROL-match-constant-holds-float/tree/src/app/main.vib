@@ -1,0 +1,8 @@
+let pair: {I32 F64} be {1i32 0.5f64} endlet
+
+fn f takes {p: {I32 F64}} returns r: I32 do
+  return match p
+    case pair 1i32
+    case _ 0i32
+  endmatch
+endfn

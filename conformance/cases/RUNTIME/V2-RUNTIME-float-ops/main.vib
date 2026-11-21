@@ -1,0 +1,5 @@
+fn main
+  returns r: {F64 Bool}
+  do
+    return {F64.div(1.0f64 0.0f64) F64.equal(F64.div(0.0f64 0.0f64) F64.div(0.0f64 0.0f64))}
+endfn

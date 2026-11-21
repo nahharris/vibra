@@ -1,0 +1,11 @@
+fn f
+  takes {b: Bool}
+  returns r: I32
+  do
+    match b
+      case true
+        return 1i32
+      case false
+        return 0i32
+    endmatch
+endfn

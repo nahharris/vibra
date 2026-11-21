@@ -1,0 +1,3 @@
+use @app.model enduse
+
+fn main returns r: U64 do let t be model.Token(1u64) endlet return 1u64 endfn

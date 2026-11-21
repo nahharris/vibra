@@ -1,0 +1,1 @@
+fn first(I) takes {it: I} returns r: Option(I.Item) given {I: Iter} do return Option.none() endfn

@@ -1,0 +1,12 @@
+id = "V2-CONTRACT-int1"
+rule = "V2-CONTRACT-int1"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "07-diagnostics-and-conformance.md#integer-facts: INT-1: x < y gives not x = y"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

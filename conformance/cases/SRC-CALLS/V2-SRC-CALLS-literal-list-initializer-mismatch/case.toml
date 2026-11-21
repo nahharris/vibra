@@ -1,0 +1,18 @@
+id = "V2-SRC-CALLS-literal-list-initializer-mismatch"
+rule = "V2-SRC-CALLS-literal-list-initializer-mismatch"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#application: an element of a list literal outside argument position that does not fit is @type.mismatch"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.mismatch"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 46, end = 49 }

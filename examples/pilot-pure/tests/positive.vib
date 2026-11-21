@@ -1,0 +1,21 @@
+use @std.assert enduse
+
+use @pilot.positive enduse
+
+test "a positive raw value is made"
+  do
+    assert.equal(Result.ok(value: positive.Positive(3i32)) positive.makePositive(3i32))
+endtest
+
+test "zero is not positive"
+  do
+    assert.equal(
+      Result.err(error: positive.PositiveError.nonPositive())
+      positive.makePositive(0i32)
+    )
+endtest
+
+test "a positive value reads back"
+  do
+    assert.equal(3i32 positive.readPositive(positive.Positive(3i32)))
+endtest

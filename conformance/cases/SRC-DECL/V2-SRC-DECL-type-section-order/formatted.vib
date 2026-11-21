@@ -1,0 +1,4 @@
+type A of {x: T}
+  given {T: Any}
+  visibility @public
+endtype

@@ -1,0 +1,12 @@
+id = "V2-SRC-DECL-member-and-impl"
+rule = "V2-SRC-DECL-member-and-impl"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#impl: a fn member and an impl block; members come before impl blocks and the example is its own canonical layout"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "accepted"
+formatted = "formatted.vib"
