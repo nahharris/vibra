@@ -1,7 +1,10 @@
 # v0.0.2 M0: specification and transition
 
-**Planned.** Make the written contracts complete and consistent before any
-implementation relies on them.
+**Exited.** The written contracts were made complete and consistent before
+any implementation relied on them. Its records are the
+[owner table](owners.md), the [native contract comparison](native-contract.md),
+and the [file-scope feasibility record](file-scope-feasibility.md), whose
+verdict is that the Windows adapter meets the contract.
 
 ## Scope
 
@@ -45,11 +48,11 @@ implementation relies on them.
 
 ## Exit evidence
 
-- A cross-chapter review record with no open contradiction.
-- The owner table: form, conformance case, diagnostics, schema.
-- The native contract comparison.
-- The feasibility record. If the adapter cannot meet the contract, the file
-  operations it would back are marked unsupported on Windows, M2's gate
+- The [owner table](owners.md): form, conformance case, diagnostics,
+  schema.
+- The [native contract comparison](native-contract.md).
+- The [feasibility record](file-scope-feasibility.md). If the adapter
+  cannot meet the contract, the file operations it would back are marked unsupported on Windows, M2's gate
   program cannot pass there, and the plan returns to the specification
   before M2 starts.
 

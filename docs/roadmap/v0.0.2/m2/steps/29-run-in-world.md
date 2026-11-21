@@ -27,7 +27,7 @@ Crates: `vibra-workspace`, `vibra-conformance`.
 | `crates/vibra-ir/src/program.rs:91` | `pub fn for_entry` | the reachable program of the entry |
 | `crates/vibra-conformance/src/profile.rs:170` | `WorkspaceRun` | the operation, declared and unhandled |
 | `crates/vibra-conformance/src/standard.rs:192` | `pub fn standard_dispatcher` | registers the handler |
-| `crates/vibra-conformance/src/manifest.rs:170` | `pub struct CaseExpectations` | gains the run observation key |
+| `crates/vibra-conformance/src/manifest.rs:170` | `pub struct CaseExpectations` | gains `targetRun` |
 | `crates/vibra-conformance/src/workspace_test.rs:28` | `pub struct WorkspaceTestHandler` | the model for the handler |
 
 From step 20: `run_entry`. From step 26: `binding::plan_of`. From step
@@ -76,19 +76,18 @@ architecture gives them; `vibra-conformance::workspace_run`.
    `target` set and `revision` the workspace revision.
 4. `workspace_run`: inputs a tree, an optional `hostWorld`, an optional
    target; it calls `run_target` with `Launch::World` and compares the
-   observation of Q17 field by field. The manifest key is added under
-   the name the chapter gives it; until then the handler is exercised by
-   host tests only and no case uses it.
+   `@targetRun.v2` document field by field (Q17). The manifest key is
+   `expect.targetRun`, and `CaseObservation` gains the document.
 5. The handler constructs no `Launch::System`.
 
 ## Test matrix
 
 Host tests of `vibra-workspace` (`tests/it/run.rs`), each a tree written
-by the test and a world. Each row is also the content of the
-`workspaceRun` case named by its id, added to the corpus when Q17 is
-answered. `H` is the hello program: an entry taking `out: StdoutText`,
-writing `hello\n`, returning `ExitCode(0u8)`, with the recipe `@out` from
-`@host.io.stdout`.
+by the test and a world. Each row with a `V2-` id is also the content of
+the `workspaceRun` case named by its id, whose `expect.targetRun` is the
+`@targetRun.v2` document of the row. `H` is the hello program: an entry
+taking `out: StdoutText`, writing `hello\n`, returning `ExitCode(0u8)`,
+with the recipe `@out` from `@host.io.stdout`.
 
 | Case id | Kind | Input | Expected | Specification |
 | --- | --- | --- | --- | --- |
@@ -111,7 +110,7 @@ writing `hello\n`, returning `ExitCode(0u8)`, with the recipe `@out` from
 | `V2-RUNTIME-run-entry-requires-else` | positive | an entry with `requires false else ExitCode(9u8)` | `applicationCode: 9`; the body's write is absent | 06: "behave as on any `proc`" |
 | `V2-RUNTIME-run-target-selection` | negative | two binary targets, none named | `@command.invalidInput` | 05: "invalid command, selector, or typed input" |
 | handler: no system launch | negative, architecture test | `crates/vibra-conformance/src` searched for `Launch::System` | none | 06: "The shipped launcher has no user-selectable world" |
-| handler: observation compared | positive, host test | the hello run against a hand-written observation with one changed byte of stdout | a mismatch naming `stdout` | 07 Persistent observations |
+| handler: observation compared | positive, host test | the hello run against a hand-written observation with one changed byte of stdout | a mismatch naming `stdout` | 07 Persistent observations: "A case expects one with the key `expect.targetRun`" |
 
 ## Diagnostics and schema changes
 
@@ -119,8 +118,9 @@ Codes in outcomes: `@grant.requiredUnavailable`,
 `@grant.acquisitionFailed`, `@runtime.memoryExhausted`,
 `@tool.unavailable`. Results: `@command.ok`, `@command.diagnostics`,
 `@command.programFailed`, `@command.operationalFailure`, `@command.trap`,
-`@command.unavailable`, `@command.invalidInput`. The run observation
-document is Q17's and is not added to any schema until it is named.
+`@command.unavailable`, `@command.invalidInput`. Schema: the
+`@targetRun.v2` observation of the diagnostics chapter and its manifest
+key `expect.targetRun`.
 
 ## Validation
 
@@ -134,8 +134,8 @@ $env:RUSTDOCFLAGS='-D warnings'
 cargo doc --locked --offline --workspace --no-deps --all-features
 ```
 
-Read: all exit 0. The corpus count does not change in this step while Q17
-is open; the report lists the `V2-` ids that wait for it.
+Read: all exit 0. The corpus count grows by the `V2-` rows of this step,
+all passing.
 
 ## Stays unavailable
 
@@ -150,7 +150,6 @@ The command and its payload (32); real drivers.
 
 - [ ] Each row is a test, named in the report.
 - [ ] `run_target` has one `return`; the report quotes it.
-- [ ] If Q17 was answered before this step ran, every `V2-` row is a
-      corpus case and `conformance/rules/m2-29.tsv` lists it `active`;
-      otherwise the file holds the header only and the report says so.
+- [ ] Every `V2-` row is a corpus case and `conformance/rules/m2-29.tsv`
+      lists it `active`.
 - [ ] The validation commands exit 0.

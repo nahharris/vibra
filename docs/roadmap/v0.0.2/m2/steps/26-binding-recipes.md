@@ -121,7 +121,7 @@ from `@host.io.stdout`.
 | `V2-CONTRACT-unused-effect-startup-only` | positive | `effects` holds `EnvReadArgs`; only the startup read performs it | accepted, no warning | 07: "that neither the entry nor a startup step performs" |
 | `V2-GRANT-binding-unused-grant` | positive | an entry `main` taking `{out: StdoutText}` with the empty row and a body that performs nothing; `effects: []`; the recipe `@out` from `@host.io.stdout` | accepted, no diagnostic: a leaf's interface is not a row | 04: "The entry's written `performs` row, and the row of every startup step, MUST be contained in it" |
 | `V2-GRANT-entry-test-world-leaf` | negative | an entry taking `world: TestWorld` with any recipe | `@grant.invalidBinding` at `provider` (Q20) | 04: "No binding recipe can name `TestWorld`" |
-| `V2-CONTRACT-unused-effect-test-world` | positive with warning | `effects: [@std.test.TestWorld]` on an entry with no such parameter | `@contract.unusedEffect` at that entry (Q20) | 06: "Admission refuses every one of them for a target" |
+| `V2-CONTRACT-unused-effect-test-world` | positive with warning | `effects: [@std.test.TestWorld]` on an entry with no such parameter | `@contract.unusedEffect` at that entry (Q20) | 06: "No target can perform one of them" |
 | `V2-GRANT-binding-permuted-dict` | positive | `M` with its `grants` entries written in another order | the same `BindingPlan` order (a host test compares `order()`) | 04: "the project file's written order plays no part" |
 
 ## Diagnostics and schema changes

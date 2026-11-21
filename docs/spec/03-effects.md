@@ -4,8 +4,9 @@ Status: normative target
 Implementation status: none of this chapter is implemented. Delivery is
 scheduled in
 [v0.0.2](../roadmap/v0.0.2/README.md). The Windows file-scope adapter that
-[Filesystem policies](#filesystem-policies) requires has not been shown
-feasible; that check is the first item of the release.
+[Filesystem policies](#filesystem-policies) requires meets the contract on a
+local NTFS volume, as its
+[feasibility record](../roadmap/v0.0.2/m0/file-scope-feasibility.md) shows.
 
 ## Two mechanisms
 
@@ -35,6 +36,14 @@ drivers it ships. They are not a sandbox for arbitrary machine code or a
 defense against another process with the same privileges. Vibra does not
 track information flow and does not prove that a program holds the least
 authority it needs.
+
+The guarantees about narrowing are guarantees about sealed grants.
+Narrowing any other value runs that value's own member: the type system
+requires every implementation of an operation interface to supply the
+[narrowing](#narrowing) members, and it cannot require that a model which
+wraps a grant forwards the narrowing to it. A model that does not forward
+keeps what it holds, and that is the model's code, which the package that
+passes it chose.
 
 ## Operation interfaces
 
@@ -74,11 +83,15 @@ signature and owner MUST match its registry row. A wrong owner is
 `@external.ownerMismatch`, an unknown symbol `@external.unknownSymbol`,
 and a wrong signature `@external.signatureMismatch`.
 
-A sealed grant is a value of its operation interface's type, and the
-interface's own `external @host` members are its implementation: dispatch
-on a sealed receiver selects the host-bound member, and dispatch on any
-other held value, such as a package's in-memory model of the interface,
-selects that type's `impl`. No hidden carrier type exists.
+A sealed grant is a value of its operation interface's type. The members
+the interface binds with `external @host`, and the
+[narrowing](#narrowing) members it binds with `external @compiler`, are the
+implementation of sealed grants only: dispatch on a sealed receiver selects
+them. For an `impl` they are abstract, as a member without a body is: an
+implementation supplies its interface's operation members and narrowing
+members, and one that lacks any of them is `@type.missingAbstractMember`.
+Dispatch on any other held value, such as a package's in-memory model of
+the interface, selects that type's member. No hidden carrier type exists.
 
 ## Effect ceilings
 
@@ -109,7 +122,13 @@ endproc
   one `@effect.outsideCeiling` at the earliest `await` that contributes it,
   with the chain of calls as related spans.
 - An interface in a ceiling that the body cannot perform is the warning
-  `@contract.unusedEffect`.
+  `@contract.unusedEffect`. The warning needs a body and a row written on
+  the same declaration: a `proc`, an anonymous `proc`, a `test`, and the
+  additive `performs` of a default member. It is not reported for an
+  `impl` member, whose row its contract fixes, for the owner root of a
+  default `proc` member, or for a `Proc` or `Intent` type. Building a plan
+  performs nothing, so a `proc` that only builds plans of an interface and
+  returns them does not perform it.
 - Callable types compare rows exactly. A `Proc({Str} Void {DirWriteText})`
   parameter accepts only a procedure with exactly that row. There are no row
   variables, no row subtyping, and no relation between roots.
@@ -172,7 +191,10 @@ twice, because each `await` is a fresh invocation of the plan.
   interface value or a stored callable.
 - `await` is valid only in a `proc` body and in a `test` body, which runs in
   a procedure context the test runner owns. Elsewhere it is
-  `@effect.invalidAwait`.
+  `@effect.invalidAwait`, and the operand is not checked. In a valid
+  position an operand that is not an `Intent` is `@effect.invalidAwait`
+  as well, never `@type.mismatch`, so an `await` that is wrong twice is
+  reported once.
 - `await plan` contributes the plan's complete row to the enclosing body.
   Building a plan contributes only what evaluating its arguments performs.
 - A bare `requires` on a `proc` is discharged where the plan is built. A
@@ -194,6 +216,8 @@ No source expression makes a grant. A path, a policy value, a wrapper type,
 an `impl`, and decoded data are not grants and cannot become one. A grant has
 no encoding: it cannot be written to a file, compared, or used as a dict key.
 A grant from another world, or one released at shutdown, is unusable.
+Checked source cannot reach either, so the runtime treats a use of one as a
+defect, as [host calls](06-runtime.md#host-calls) state.
 
 The type of a grant is the operation interface it permits. Authority is
 requested in signatures, in three shapes:
@@ -253,21 +277,50 @@ endlet
   never adds a right, changes the resource, or resets a limit. A policy
   broader than the parent's changes nothing.
 - `sub` adds a path prefix below the same held directory. It does not check
-  that the directory exists.
+  that the directory exists. It rebases: a request through the child is the
+  child's prefix followed by the request, so after `sub` with `reports` a
+  read of `a.txt` opens `reports/a.txt`.
+- A policy given to `restrict` is rooted at the grant it restricts: its
+  prefixes are relative to that grant, after every `sub` above it.
 - `limit` keeps the smaller of each bound. Copies and children of a grant
-  draw on the limits of their ancestors.
+  draw on the limits of their ancestors, as [Limits](#limits) counts them.
 - The parent stays valid. There is no revocation and no single-use grant.
 - No function combines two grants into one stronger grant.
 
+The broker keeps one **effective policy** per grant, in the coordinates of
+its root's directory: the conjunction, an `@allOf`, of the root's policy and
+of what each narrowing in the grant's ancestry contributes. A `sub` with
+the prefix `p` contributes an `@anyOf` of two rules: a file rule with
+`prefix` `p`, `depth` `@tree`, all four file actions, and `names`
+`@anyName`, and a directory rule with `prefix` `p`, `depth` `@tree`, and the
+actions `@list` and `@stat`. A `restrict` contributes its policy with the
+`prefix` of every rule re-rooted below the prefixes of the `sub`s above it.
+A `limit` contributes no policy. A grant's projection in the
+[audit trace](06-runtime.md#audit-trace) hashes its normalized effective
+policy.
+
 `ScopeError` (`@std.policy`) has the cases `invalidPolicy`,
-`unsupportedVersion`, `policyTooComplex`, and `foreignRoot`. `restrict`
-returns `foreignRoot` for a policy whose rules name a grant leaf other than
-the one the grant descends from; the same policy in a recipe is the build
-error `@grant.invalidPolicy`. `GrantLimits` is a record of `invocations`,
-`inputBytes`, and `outputBytes`, each an `Option(U64)`, where
-`Option.none()` leaves that bound as it was. The three members are rows of
-the [compiler intrinsic registry](06-runtime.md#compiler-intrinsic-registry),
-which the broker implements.
+`unsupportedVersion`, `policyTooComplex`, and `foreignRoot`. For `restrict`,
+`invalidPolicy` is exactly a policy with an empty `suffix`, and
+`policyTooComplex` a policy over the limits of
+[The wire form](#the-wire-form). An empty `actions` list and an empty
+`exact` list are valid and permit nothing; a repeated action or name is
+removed by normalization; a name that no file can have matches nothing.
+`sub` returns only `policyTooComplex`. `foreignRoot` and
+`unsupportedVersion` are reserved for a decoded policy, and no operation of
+this specification returns them: a source policy has no `root` and no
+`format`, and a recipe policy whose rules name another leaf is the build
+error `@grant.invalidPolicy`. `GrantLimits` (`@std.policy`) is a record of
+`invocations`, `inputBytes`, and `outputBytes`, each an `Option(U64)`,
+where `Option.none()` leaves that bound as it was.
+
+The three members are bound with `external @compiler` to rows of the
+[compiler intrinsic registry](06-runtime.md#compiler-intrinsic-registry).
+That binding is the broker's narrowing, the implementation of a sealed
+grant; an `impl` supplies the three members as it supplies any abstract
+member, as [Operation interfaces](#operation-interfaces) states. A model
+that wraps a grant forwards the narrowing to it; a model that holds only
+memory returns itself or keeps bounds of its own.
 
 ### Brands
 
@@ -310,10 +363,10 @@ At startup the runtime acquires grants in the
 chapter defines. A required grant that cannot be acquired prevents the entry
 from running. An optional grant refused in the way its provider specifies
 becomes `Option.none()`; a malformed recipe or an incompatible driver is an
-error, never an absence. On every ending of the process, a failed startup
-included, the acquired grants are released in reverse acquisition order.
-Release is not rollback: an external effect that already happened is
-reported, not undone.
+error, never an absence. On every ending of the process the acquired
+grants are released, as the [runtime chapter](06-runtime.md#entry-outcome)
+states. Release is not rollback: an external effect that already happened
+is reported, not undone.
 
 No operation returns `Never`, and none terminates the process. The
 [runtime chapter](06-runtime.md#entry-outcome) defines how a run ends.
@@ -324,8 +377,9 @@ A **policy** is plain data that describes which requests a grant permits. It
 is not code: there is no user-written permission predicate and no pattern
 language. A policy describes; only a grant authorizes.
 
-In source, a filesystem policy is a value of the standard types below
-(`@std.policy`). In a project file it is a `@scopePolicy.v1` document.
+In source, a filesystem policy is a value of the standard types below,
+which `@std.fs` declares with `FileDepth`, `DirDepth`, `FileAction`, and
+`DirAction`. In a project file it is a `@scopePolicy.v1` document.
 
 ```vibra
 type FsPolicy
@@ -393,7 +447,11 @@ Unknown fields, kinds, and versions are rejected.
 | `@fileRule` | `root`, `prefix` (list of names), `depth` (`@children`, `@tree`), `actions` (set of `@read`, `@replace`, `@create`, `@stat`), `names` |
 | `@directoryRule` | `root`, `prefix`, `depth` (`@self`, `@children`, `@tree`), `actions` (set of `@list`, `@stat`) |
 
-`root` names the grant leaf whose recipe holds the directory. `names` is a
+`root` names the grant leaf whose recipe holds the directory. In an
+[effective policy](#narrowing) every rule has a `root`: a rule a `restrict`
+or a `sub` contributes names the leaf its grant descends from, and every
+rule of a grant that descends from a `TestWorld` directory grant names
+`@testWorld`. `names` is a
 record whose `kind` is `@anyName`; `@exact` with `names`; `@suffix` with
 `value`; or `@allOf` or `@anyOf` with `items`.
 
@@ -406,8 +464,13 @@ differently.
 
 A policy has at most 4,096 nodes and entries in total and a depth of at most
 64, counting ancestors acquired by restriction. A larger one is
-`ScopeError.policyTooComplex`. These numbers are an engineering default of
-the first tool profile, not a measured capacity.
+`ScopeError.policyTooComplex`. The count is taken after normalization, over
+a grant's [effective policy](#narrowing). A node is one expression record or
+one name-test record; an entry is one element of a `prefix`, `actions`, or
+`names` list. The depth is the nesting of expression and name-test records,
+plus one for each `restrict` and each `sub` in the grant's ancestry; a
+`limit` adds nothing. These numbers are an engineering default of the first
+tool profile, not a measured capacity.
 
 ### Filesystem policies
 
@@ -430,6 +493,9 @@ selects directories: `self` is `prefix` itself, `children` one name further,
   Absolute, drive-relative, UNC, and device paths cannot be represented.
   Nothing is expanded, decoded, or stripped. Prefixes are compared name by
   name, never as strings, so `reports` does not cover `reportsOld`.
+  `RelativePath` implements `Equatable` and `Ordered` in `@std.fs`, so it
+  can be a dict key: two paths compare their names in order, with the
+  shared lexicographic helper, each name as a `Str`, by Unicode scalar.
 - **Reserved device names.** Names are portable: the same closed set is
   rejected on every platform. A name's **stem** is the part before its
   first dot, with trailing spaces removed. A name is rejected when its
@@ -499,15 +565,27 @@ describes the request sent, not what the server does with it.
 
 A grant's limits count invocations and payload bytes in and out, in encoded
 bytes. An **invocation** is every call that passed reservation. **Input
-bytes** are the bytes the program receives: file contents, standard input,
+bytes** are the bytes read for the program: file contents, standard input,
 a variable's value, argument text, and random bytes. **Output bytes** are
 the bytes it sends: written file contents and stream writes. Metadata
 results, such as a directory listing or a `stat`, count as an invocation
 only. The limits do not bound time, processor use, or metadata traffic. A
 child grant can only tighten a limit, and every copy and descendant of a
 grant draws on the same ancestor counters, which the runtime's broker owns.
+
+Every `limit` makes counters of its own, which start at zero with the
+written bounds. An invocation reserves on the grant's own counters and on
+every ancestor's, all or none, and is refused if any would pass its bound.
+So a child bounded at five invocations, made when its parent, bounded at
+eight, has used six, runs twice, and two such siblings share the parent's
+remaining two.
+
 The broker reserves before an action, charges actual progress, and does not
-refund an action whose outcome is unknown; the
+refund an action whose outcome is unknown. Progress is what the adapter
+moved across the boundary for the call, whatever its reply: a text read
+that takes five bytes and returns `invalidText` charges five, though the
+program receives none of them. A count the adapter does not know charges
+the reservation in full. The
 [runtime chapter](06-runtime.md#closed-operation-semantics) says how a
 read of unknown size is reserved. A counter that would overflow denies. An
 omitted bound, in a recipe or in `GrantLimits`, is unbounded. Exhaustion is
@@ -570,6 +648,13 @@ exact behavior.
 | `@std.time` | `MonotonicClock.read` | `time.nowMonotonic` | the monotonic clock |
 | `@std.random` | `RandomBytes.generate` | `random.generateBytes` | the random source |
 
+A stream read asks for a count: `StdinText.read` and `StdinBytes.read` take
+`max: U64` after the grant and return at most that many bytes, and the
+empty value is the end of input. Reading to the end is a library loop, not
+an operation: `@std.io` declares `readAllText` and `readAllBytes` in source,
+as the [programs chapter](04-programs-and-packages.md#the-standard-library)
+lists them.
+
 Examples in this specification that use `NetSend` illustrate types only; no
 such interface is in the inventory.
 
@@ -584,9 +669,11 @@ the test's row MUST also name whatever it then performs with the grants. No
 test reaches a real provider.
 
 A package may implement an operation interface in Vibra, for example an
-in-memory directory for its own tests. Such an implementation holds no real
-grant. A comparison of a real driver against its model is sampled evidence
-with a stated domain; it does not prove them equivalent.
+in-memory directory for its own tests, or a type that wraps a grant it
+holds, as the [runtime chapter](06-runtime.md#external-providers) allows.
+Either way the implementation makes no grant. A comparison of a real driver
+against its model is sampled evidence with a stated domain; it does not
+prove them equivalent.
 
 ## Exclusions
 

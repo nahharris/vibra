@@ -53,13 +53,13 @@ Probes; each is run from a scratch test or case and recorded.
 | a grant through `Any` | negative | a generic `fn id(T)` returning its argument, used to move a grant; then every way to observe it | only use as the same interface | 02 Interface values: "A value of type `Any` can only be passed along" |
 | a grant in a failure report | negative | `assert.true(false)` in a test holding grants; an `assert.equal` on a record beside a grant | no grant text in `@testRun.v2` | 05: "A function, a plan, or a grant is never encoded by inventing a string for it" |
 | policy equivalence shortcuts | negative | search `policy.rs` and `broker.rs` for any subset or implication test | none | 03: "no implementation needs to decide whether one policy is a subset of another" |
-| counter atomicity | negative | a reservation that succeeds on the child and fails on the root | no counter changed | 06 step 3: "Reserve all shared count and byte limits atomically" |
+| counter atomicity | negative | a reservation that succeeds on the child and fails on the root | no counter changed | 06 step 3: "Reserve atomically the shared count limits and the byte limits the operands decide" |
 | limits after a gate refusal | boundary | a completed `denied` on a bounded grant | the invocation is charged; the bytes are not | 03 Limits: "An invocation is every call that passed reservation" |
 | `outcomeUnknown` | negative | every place a driver error is mapped | none maps an unknown completion to a pre-dispatch refusal | 06: "It MUST NOT be reported as rejected before submission" |
 | world decoding as authority | negative | a world document with fields named like grants | rejected as unknown fields | 06: "decoding one MUST NOT restore a live grant" |
 | trace completeness | negative | a test that traps between the adapter's return and the event | no event; the item is `@test.trap` | 06: "A trap … appends no completed success" |
 | deep structures | boundary | policy depth 64 through `restrict` plus a recipe-sized policy; ancestry of 100,000 `limit`s | typed errors, no overflow | architecture, risk 5 |
-| test-world rows on a target | negative | every path by which `Context::issue` could be reached with a test root outside the runner | none | 06: "Admission refuses every one of them for a target" |
+| test-world rows on a target | negative | every path by which `Context::issue` could be reached with a test root outside the runner | none | 06: "No target can perform one of them" |
 | library and registry | positive | the 23 bound symbols of the library against the two snapshots | equal | 06 Registry versioning |
 
 ## Diagnostics and schema changes

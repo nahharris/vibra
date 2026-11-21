@@ -366,8 +366,10 @@ is then not defined. There is no hashed collection and no hashing interface.
 
 Dict keys MUST implement `Ordered`. The standard library writes the
 implementations of `Bool`, `Char`, `Str`, `Bytes`, and the integer types
-where each type is declared. `Atom`, every atom singleton type, and an
-anonymous tuple or record whose every component implements `Ordered` conform
+where each type is declared, and that of `RelativePath`, whose order the
+[effects chapter](03-effects.md#filesystem-policies) gives. `Atom`, every
+atom singleton type, and an anonymous tuple or record whose every component
+implements `Ordered` conform
 to `Equatable` and `Ordered` **structurally**, with no declaration. This
 structural conformance is ordinary evidence: it satisfies a bound, it admits
 the type as a dict key, and it is the implementation `Ordered.compare` and
@@ -701,7 +703,11 @@ different interfaces never overlap, so `Iter` and `Ordered` on one receiver
 are two keys.
 
 For each implementation the checker MUST find every abstract contract member
-exactly once and verify that, under the implementation's
+exactly once. A contract member the interface binds with `external` has no
+body to inherit, so it is abstract for every `impl`, as the
+[effects chapter](03-effects.md#operation-interfaces) states for the
+members of an operation interface. The checker verifies that, under the
+implementation's
 [substitution](#substitution), the parameter and result types, labelled
 names and default values, the member's own type parameters and their
 bounds, guards, and effect row are those of the contract, the member's

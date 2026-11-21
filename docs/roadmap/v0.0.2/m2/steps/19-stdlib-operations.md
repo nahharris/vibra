@@ -89,7 +89,8 @@ Proposed: `stdlib/src/std/{io,fs,env,time,random}.vib`.
 
 ## Test matrix
 
-`workspaceCheck`, profile `staticV2`, unless stated. Loader rows are tests
+`workspaceCheck`, profile `staticV2`, unless stated; a row that names another
+operation has that operation's profile (Q34). Loader rows are tests
 of `vibra-types` over an altered copy of a library module. `Memory` is a
 type with `impl DirReadText` that supplies `read` (returning
 `Result.err(error: FsError.notFound())`), `limit` (returning `self`), and

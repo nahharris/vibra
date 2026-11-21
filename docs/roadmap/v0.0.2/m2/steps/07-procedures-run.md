@@ -50,7 +50,8 @@ Proposed: the body of `effects::procs::test_header`.
 
 ## Test matrix
 
-`workspaceTest`, profile `interpreterV2`, a tree with `src/app/main.vib`
+`workspaceTest`, profile `interpreterV2`; a row that names another operation has
+that operation's profile (Q34). A tree with `src/app/main.vib`
 and `tests/run.vib`; the tests import `@std.assert` and `@app.main`.
 
 | Case id | Kind | Input | Expected | Specification |

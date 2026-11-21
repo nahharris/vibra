@@ -70,7 +70,8 @@ named_value}`.
 
 ## Test matrix
 
-`workspaceCheck`, profile `staticV2`, unless stated. The preamble is `L` of
+`workspaceCheck`, profile `staticV2`, unless stated; a row that names another
+operation has that operation's profile (Q34). The preamble is `L` of
 step 09, with `Sink` abbreviating `Proc({Str} Void {Log})`.
 
 | Case id | Kind | Input | Expected | Specification |
@@ -98,7 +99,7 @@ step 09, with `Sink` abbreviating `Proc({Str} Void {Log})`.
 | `V2-EFFECT-anon-fn-performs` | negative | `fn takes {line: Str} returns d: Void performs {Log} do … endfn` | `@syntax.invalidSection` at the section | 01 Grammar: a `fn` has no `performs` |
 | `V2-EFFECT-proc-type-row-duplicate` | negative | `Proc({Str} Void {Log Log})` | `@effect.duplicateRoot` at the second | 03 Effect ceilings |
 | `V2-EFFECT-proc-type-row-invalid` | negative | `Intent(Void {Memory})` | `@effect.invalidReference` | the same |
-| `V2-TYPE-NAMES-suspicious-row` | positive with warning | `Proc({Str} {Log})` | accepted; `@type.suspiciousRow` at the type | 01 Grammar: "when a result type is a tuple whose every component resolves to an operation interface" |
+| `V2-TYPE-NAMES-suspicious-row` | positive with warning | `Proc({Str} {Log})` | accepted; `@type.suspiciousRow` at the type | 01 Grammar: "the result operand of a written `Proc` or `Intent` type whose row is omitted is a tuple of at least one component" |
 | `V2-TYPE-NAMES-suspicious-row-returns` | positive | `fn pair takes {a: Log b: Clock} returns both: {Log Clock}` | accepted, no warning (Q6) | the same |
 | `V2-TYPE-NAMES-suspicious-row-with-row` | positive | `Proc({Str} {Log} {Log})` | accepted, no warning | the same |
 | `V2-RUNTIME-callback-awaited` | positive, `workspaceTest` | a test with `performs {Clock}` passing an anonymous `proc` that awaits `Clock.now(counter)` to a `proc` that awaits it twice | `@test.passed` | 03 Cold plans |

@@ -11,7 +11,7 @@ Crates: `vibra-host`.
   "Audit trace" whole; "Canonical value encoding" for `args` and `result`;
   [architecture](../architecture.md) "The completion receipt" and row
   A30; [questions](../spec-questions.md) Q7 (the projected policy), Q11
-  (the projected limits), Q13, Q24, Q29.
+  (the projected limits), Q13, Q24, Q29, Q32.
 
 ## Entry points
 
@@ -49,7 +49,8 @@ GrantProjection, OriginRecord, TRACE_FORMAT, encode, decode}`.
 3. The projection of a slot: `issuedBy` of its root; `policy` the hash of
    the normalized effective policy, or the empty string; `rights` the one
    interface; `limits` the bounds that are set, as Q11 rules; `root`
-   the root ordinal. Each projected policy is added to `policies`.
+   the root ordinal. Each projected policy is added to `policies`, every
+   rule naming the leaf of its root, or `@testWorld` (Q32).
 4. `drivers`: every driver identity bound in the run, sorted by provider.
 5. `Context::startup_event(leaf, provider, status, grant, failure)` for
    step 28.
@@ -77,6 +78,8 @@ row is committed with its receipt unless the row says otherwise.
 | projection without a policy | positive | a stream grant | `policy: ""`, no `limits` field | 06: "or the empty string for a provider without a policy" |
 | projection with a policy | positive | a directory grant with policy `P` | `policy` is `hash(normalize(P))`; `policies` has that key with the normal form | 06: "and a key of `policies`" |
 | projection after `restrict` | positive | the same grant restricted by `Q` | the hash of the effective policy of Q7; both documents are in `policies` when both are projected | 06: "every policy a grant projection refers to" |
+| rule roots after `restrict` | positive | a directory grant of leaf `@notes`, restricted by a source policy and narrowed by `sub(["d"])` | every rule of the projected effective policy has `root: @notes` (Q32) | 03 The wire form: "a rule a `restrict` or a `sub` contributes names the leaf its grant descends from" |
+| rule roots of a test-world grant | positive | a `@testWorld` directory root, then `restrict` | every rule of both projected policies has `root: @testWorld` (Q32) | 03 The wire form: "every rule of a grant that descends from a `TestWorld` directory grant names `@testWorld`" |
 | projection after `limit` | positive | `limit(invocations: 5)` | `limits: {invocations: 5u64}` only | 06: "a record of the bounds that are set" |
 | narrowing keeps the origin | positive | `restrict` and `sub` of a `@testWorld` root | `issuedBy: {kind: @testWorld}`, the same `root` | 06: "Narrowing keeps the origin record of the grant it narrows" |
 | two roots | positive | two root grants | `root: 1u64` and `root: 2u64` (Q13) | 06: "a run-local ordinal of the root grant" |
@@ -120,7 +123,7 @@ Redaction profiles other than `@none`; the trap record's origin (29).
 
 ## Completion evidence
 
-- [ ] Each of the 27 rows is a test, named in the report.
+- [ ] Each of the 29 rows is a test, named in the report.
 - [ ] `Receipt` derives neither `Clone` nor `Copy`: the report quotes
       the type.
 - [ ] The example row compares against text copied from the chapter, not

@@ -60,7 +60,8 @@ WorldDriver, VirtualFs}`.
    - `stat`: kind and size, zero for a directory;
    - stdin: the remaining input is of known size, which the driver
      reports to the gate as `size` before it yields a byte; a read yields
-     at most `max` bytes of it, then the empty value at the end (Q10); a
+     at most the count the gate reserved, the smaller of `max` and that
+     size, then the empty value at the end (Q10); a
      text read yields whole scalars, and a text `max` below 4 is
      `unsupported` (Q30);
    - stdout and stderr: appended to per-stream buffers;
@@ -106,10 +107,10 @@ by a test-only helper. The world `W` is the chapter's example document.
 | write without a parent | negative | `fs.writeText` `["no" "a.txt"]` | `Err(notFound)` | 06: "do not create parent directories" |
 | a refused create leaves the copy | negative | policy `actions: [@replace]`; `fs.writeText` `["new.txt"]` through a gate that sees `Create` | `Err(denied)`; a listing of `/notes` through an unrestricted grant equals the listing before | 03: "Never truncate or create before authorization" |
 | a refused replace leaves the copy | negative | policy `actions: [@create]`; `fs.writeText` `["a.txt"]` `"x"` | `Err(denied)`; a read returns `hello` | the same |
-| stdin once | positive | `io.stdinText` with `max: 16` twice | `Ok("x\ny")` then `Ok("")` | 06 Standard input: "a second completed read returns the empty value" |
-| stdin invalid text | negative | `stdin` a bytes record `[255]`; `io.stdinText` with `max: 16` | `Err(invalidText)`; a second read is empty | 06: "After a completed success or domain failure the position is at the end" |
-| stdin reports its size | boundary | `io.stdinBytes` with `max: 16` on `W` through a gate-recording wrapper | the gate saw `size: Some(3)` before the driver yielded a byte | 06: "A read first learns the size of the opened object, reserves it" |
-| stdin by count | positive | `io.stdinBytes` with `max: 2` three times on `W` | the bytes of `x\n`, of `y`, and none (Q10) | 06 Standard input: "a second completed read returns the empty value" |
+| stdin once | positive | `io.stdinText` with `max: 16` twice | `Ok("x\ny")` then `Ok("")` | 06 Standard input: "At the end of input a completed read returns the empty value" |
+| stdin invalid text | negative | `stdin` a bytes record `[255]`; `io.stdinText` with `max: 16` | `Err(invalidText)`; a second read is empty | 06 Standard input: "A completed read, a success or a domain failure, moves the position past the bytes the adapter took" |
+| stdin reports its size | boundary | `io.stdinBytes` with `max: 16` on `W` through a gate-recording wrapper | the gate saw `size: Some(3)` before the driver yielded a byte | 06 Standard input: "The bytes are reserved at the gate, before the stream yields one" |
+| stdin by count | positive | `io.stdinBytes` with `max: 2` three times on `W` | the bytes of `x\n`, of `y`, and none (Q10) | 06 Standard input: "At the end of input a completed read returns the empty value" |
 | stdin text below a scalar | negative | `io.stdinText` with `max: 3` on `W` | `Err(unsupported)`; a later read with `max: 16` returns `x\ny` (Q30) | 06 Error types: "nothing was attempted" |
 | stdout order | positive | `io.stdoutText "a"`, `io.stdoutBytes [98]`, `io.stderrText "e"` | `output()` is `ab` and `e` | 06: "A write delivers its whole value, in invocation order" |
 | variable present, absent | positive, negative | `env.readVar "HOME"`; `"NOPE"` with both in `names` | `Ok("/home/vibra")`; `Err(notPresent)` | 06 Environment |

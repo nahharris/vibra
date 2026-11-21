@@ -98,7 +98,7 @@ endproc
 | `V2-EFFECT-await-function-value` | negative | in a `proc`: `return await double` | `@effect.invalidAwait` at the `await` | the same |
 | `V2-EFFECT-await-in-fn-not-plan` | negative | `fn f returns n: I32 do return await 1i32 endfn` | exactly one `@effect.invalidAwait` (Q4) | 07, the same row |
 | `V2-EFFECT-plan-statement-unawaited` | negative | in a `proc`: the statement `double(1i32)` then `return 0i32` | `@type.mismatch` at the statement (Q3) | 03 Cold plans: "Applying a `proc` does not run it" |
-| `V2-EFFECT-plan-discarded` | positive | `let _ be double(1i32) endlet` | accepted | 01 `let`: "`let _ be risky() endlet` discards one explicitly" |
+| `V2-EFFECT-plan-discarded` | positive | `let _ be double(1i32) endlet` | accepted | 01 Bodies and statements: "`let _ be risky() endlet` discards a value explicitly" |
 | `V2-EFFECT-proc-result-is-plan` | negative | `fn f takes {n: I32} returns r: I32 do return double(n) endfn` | `@type.mismatch` at the returned expression | 02 Application: a `Proc` value applied gives "an `Intent`" |
 | `V2-EFFECT-proc-argument-mismatch` | negative | in a `proc`: `return await double("x")` | `@type.argumentMismatch` at `"x"` | 02 Application: "An argument that does not fit its slot" |
 | `V2-EFFECT-proc-arity` | negative | `return await double(1i32 2i32)` | `@type.argumentMismatch` | the same: "a wrong arity" |

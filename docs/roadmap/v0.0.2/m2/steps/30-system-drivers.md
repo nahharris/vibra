@@ -17,7 +17,7 @@ Crates: `vibra-host`.
   refusal and failure table; [tooling
   chapter](../../../../spec/05-tooling.md#program-arguments-execution-and-evaluation)
   Arguments; [architecture](../architecture.md) "The gate" and
-  "Settlement"; [questions](../spec-questions.md) Q10, Q24, Q28, Q30.
+  "Settlement"; [questions](../spec-questions.md) Q10, Q24, Q28, Q30, Q31.
 
 ## Entry points
 
@@ -54,9 +54,12 @@ adapters `streams`, `env`, `clock`, `random` as submodules.
 4. Standard input: before it reads, the adapter calls the gate with
    `size: Some(remaining)` when the input is a regular file and `None`
    otherwise (a pipe, a console, the in-memory reader of the tests unless
-   it declares a size); then it reads at most `max` bytes (Q10). The
+   it declares a size); then it reads at most the count the gate
+   reserved, which is never more than `max` (Q10). The
    empty value is the end of input; a text read returns whole scalars
-   and refuses a `max` below 4 as `unsupported` (Q30); undecodable text
+   and refuses a `max` below 4 as `unsupported` (Q30); the gate refuses an
+   unsized text read reserved below 4 bytes as `limitExceeded` (Q31);
+   undecodable text
    is `invalidText`; a read error is `other`. Progress is the bytes taken
    from the stream, whatever the reply (Q28).
 5. Standard output and error: a write delivers the whole value; a closed
@@ -86,23 +89,24 @@ arguments, so every row runs on the three platforms; the two rows marked
 
 | Row | Kind | Input | Expected | Specification |
 | --- | --- | --- | --- | --- |
-| stdin text | positive | stdin `x\ny`; `io.stdinText` with `max: 16` twice | `Ok("x\ny")`, `Ok("")` | 06 Standard input: "a second completed read returns the empty value" |
+| stdin text | positive | stdin `x\ny`; `io.stdinText` with `max: 16` twice | `Ok("x\ny")`, `Ok("")` | 06 Standard input: "At the end of input a completed read returns the empty value" |
 | stdin invalid text | negative | stdin `[255]`; `io.stdinText` with `max: 16` | `Err(invalidText)` | 06: "Text that cannot be decoded is `invalidText`" |
-| stdin read error | negative | `inputBytes: 5`; a reader that yields 3 bytes and then fails; `io.stdinBytes` with `max: 5`; then a read with `max: 3` | `Err(other)`, then `Err(limitExceeded)`: 3 were charged (Q28) | 06: "Input that cannot be read is `other`" |
-| stdin over the limit, a pipe | negative | an unsized reader holding `abc`; `inputBytes: 2`; `io.stdinBytes` with `max: 3` | `Err(limitExceeded)`; the reader was not read; a later unbounded read returns `abc` (Q10) | 06: "A rejection before dispatch … consumes nothing" |
+| stdin read error | negative | `inputBytes: 5`; a reader that yields 3 bytes and then fails; `io.stdinBytes` with `max: 5`; then a read with `max: 5` through a gate-recording wrapper | `Err(other)`; the second read is reserved at 2: 3 were charged (Q28) | 06: "Input that cannot be read is `other`" |
+| stdin past the limit, a pipe | negative | an unsized reader holding `abc`; `inputBytes: 2`; `io.stdinBytes` with `max: 3`, twice | `Ok` of `ab`, then `Err(limitExceeded)` with the reader not read again; a later unbounded read returns `c` (Q10) | 06 Standard input: "a loop that reads to the end through a bound smaller than the input reads up to the bound and then receives `limitExceeded`" |
 | stdin within the limit, a pipe | boundary | the same reader; `inputBytes: 3`; `max: 3` | `Ok` of `abc` (Q10) | 06: "A limit MUST be reserved before an operation could exceed its count or byte bound" |
-| stdin by count, a pipe | positive | the same reader; `max: 2` three times | `ab`, `c`, and no bytes (Q10) | 06 Standard input: "a second completed read returns the empty value" |
-| stdin, a file of known size | boundary | a reader that declares the size 3; `inputBytes: 3`; `max: 10` | `Ok` of `abc`: the gate saw `size: Some(3)` and 3 were reserved (Q10) | 06: "A read first learns the size of the opened object, reserves it" |
+| stdin by count, a pipe | positive | the same reader; `max: 2` three times | `ab`, `c`, and no bytes (Q10) | 06 Standard input: "At the end of input a completed read returns the empty value" |
+| stdin, a file of known size | boundary | a reader that declares the size 3; `inputBytes: 3`; `max: 10` | `Ok` of `abc`: the gate saw `size: Some(3)` and 3 were reserved (Q10) | 06 Standard input: "the reservation is the smaller of `max` and that size" |
 | stdin, an empty file at zero | boundary | a reader that declares the size 0; `inputBytes: 0`; `max: 1` | `Ok` of no bytes (Q10) | the same |
 | stdin text below a scalar | negative | `io.stdinText` with `max: 3` | `Err(unsupported)`; the reader was not read (Q30) | 06 Error types: "nothing was attempted" |
-| stdin text at a scalar boundary | boundary | stdin U+20AC then `a`; `io.stdinText` with `max: 4` twice | the two scalars, then `Ok("")` (Q30) | 06 Standard input: "a second completed read returns the empty value" |
+| stdin text, unsized, below one scalar | negative | an unsized reader holding `abc`; `inputBytes: 2`; `io.stdinText` with `max: 16` | `Err(limitExceeded)`; the reader was not read; a later unbounded text read returns `abc` (Q31) | 06 Standard input: "A text read of unknown size whose `max` is at least 4 and whose reservation is below 4 is `limitExceeded` before the stream is read" |
+| stdin text at a scalar boundary | boundary | stdin U+20AC then `a`; `io.stdinText` with `max: 4` twice | the two scalars, then `Ok("")` (Q30) | 06 Standard input: "At the end of input a completed read returns the empty value" |
 | stdout whole value | positive | `io.stdoutText "a"`, `io.stdoutBytes [98]` | the sink holds `ab` | 06: "A write delivers its whole value, in invocation order" |
 | stdout closed | negative | a sink that reports a broken pipe | `Err(closed)`, completed | 06: "A closed stream is `closed`" |
 | stdout partial failure, known | negative | `outputBytes: 10`; a sink that accepts 2 bytes of 5 and then fails, reporting the 2; then a write of 8; then a write of 1 | `Err(other)`, a completed event; then `Ok`; then `Err(limitExceeded)`: 2 were charged | 06: "The outcome MUST still say accurately whether the write completed or was submitted" |
 | stdout partial failure, unknown | negative | the same bound; a sink that fails without a count; then a write of 6; then a write of 5 | `Err(other)`, a completed event; then `Err(limitExceeded)`; then `Ok`: all 5 stay charged | 06 Accounting: "A consumption that might have happened MUST NOT be refunded" |
 | stream absent | negative | `acquire` of `@host.io.stdin` with no stdin in `inputs` | `Refused` | 04: "the process has no such stream" |
 | variable present | positive | `HOME=/h`; `env.readVar "HOME"` | `Ok("/h")` | 06 Environment |
-| variable absent | negative | `env.readVar "NOPE"` (in `names`) | `Err(notPresent)` | 06: "A missing name is `notPresent`" |
+| variable absent | negative | `env.readVar "NOPE"` (in `names`) | `Err(notPresent)` | 06: "A permitted name that is missing is `notPresent`" |
 | variable name unholdable | negative | `""`, `"A=B"`, a name with NUL | `Err(notPresent)` | 06: "So is a name no environment can hold" |
 | variable not Unicode | negative | a value of invalid UTF-16 or bytes, by platform | `Err(notUnicode)` | 06: "A value that is not Unicode is `notUnicode`" |
 | arguments exact | positive | arguments `a`, `--`, `-b`, the empty string | `Ok(["a" "--" "-b" ""])` | 05: "including another `--` or a token that begins with `-`" |
@@ -146,7 +150,7 @@ Directories (31); the command (32).
 
 ## Completion evidence
 
-- [ ] Each of the 30 rows is a test, named in the report.
+- [ ] Each of the 31 rows is a test, named in the report.
 - [ ] Every path from an operating-system write result to a `Progress`
       is quoted in the report with the count it carries.
 - [ ] The crate has no `unsafe`.

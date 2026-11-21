@@ -56,10 +56,10 @@ optionally reports a metric.
 1. Check, format, and test it. Its tests obtain every grant from
    `TestWorld`.
 2. Run it with `vibra run` under the target's grant bindings. Show: a
-   callback limited to the log grant cannot reach the reader; an unbound
-   optional grant arrives as `Option.none()`; a required grant that cannot
-   be acquired fails startup before the entry runs; a request outside a
-   grant's policy returns a typed denial.
+   callback limited to the log grant cannot reach the reader; an optional
+   grant whose leaf is refused arrives as `Option.none()`; a required grant
+   that cannot be acquired fails startup before the entry runs; a request
+   outside a grant's policy returns a typed denial.
 3. Start from an independently seeded defect and a failing test. Through
    machine-mode CLI only, read the failure, query the declaration, its type,
    contracts, and effects, preview a revision-checked edit, apply it, and

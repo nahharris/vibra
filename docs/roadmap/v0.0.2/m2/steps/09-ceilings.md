@@ -67,7 +67,8 @@ architecture gives them.
 
 ## Test matrix
 
-`workspaceCheck`, profile `staticV2`, unless a row says `workspaceTest`.
+`workspaceCheck`, profile `staticV2`, unless a row says `workspaceTest`, whose
+profile is `interpreterV2` (Q34).
 `L` is the preamble of step 08 with:
 
 ```vibra
