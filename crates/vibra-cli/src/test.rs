@@ -31,7 +31,7 @@ use vibra_schema::{
     TestResult, TrapRecord,
 };
 use vibra_workspace::{
-    Discovery, FailureKind, MemoryBudget, PROJECT_FILE_NAME, SuiteResult,
+    Discovery, FailureKind, MemoryBudget, PROJECT_FILE_NAME, SourceOrigin, SuiteResult,
     TestAssertionFailure, TestOutcome, TestSelector, WorkspaceCapture,
     observation_type, run_tests,
 };
@@ -237,9 +237,11 @@ fn finish(
                 _ => None,
             },
             trap: match &outcome {
-                TestOutcome::Trap { trap, .. } => Some(TrapRecord {
+                TestOutcome::Trap { trap, origin } => Some(TrapRecord {
                     trap_code: trap.code().as_atom().to_owned(),
-                    origin: None,
+                    origin: origin
+                        .as_ref()
+                        .map(|origin| span_document(origin, response)),
                 }),
                 _ => None,
             },
@@ -272,10 +274,16 @@ fn finish(
     });
 }
 
+/// The `SpanDocument` of a source origin, against the captured text of its
+/// source.
+fn span_document(origin: &SourceOrigin, response: &Response) -> SpanDocument {
+    let source_id = origin.source_id();
+    let text = response.sources.get(source_id).map_or("", String::as_str);
+    SpanDocument::render(origin.span(), &LineIndex::new(text), Some(source_id))
+}
+
 /// The `TestItem.failure` of a failed assertion.
 fn failure_record(failure: &TestAssertionFailure, response: &Response) -> TestFailure {
-    let source_id = failure.origin.source_id();
-    let text = response.sources.get(source_id).map_or("", String::as_str);
     let observation = matches!(failure.kind, FailureKind::Observation { .. });
     TestFailure {
         kind: if observation {
@@ -286,11 +294,7 @@ fn failure_record(failure: &TestAssertionFailure, response: &Response) -> TestFa
         assertion: Some(failure.assertion.clone()),
         expected: failure.expected.clone(),
         actual: failure.actual.clone(),
-        primary_span: SpanDocument::render(
-            failure.origin.span(),
-            &LineIndex::new(text),
-            Some(source_id),
-        ),
+        primary_span: span_document(&failure.origin, response),
         observation_error: observation.then(|| ObservationError {
             code: ObservationErrorCode::UnsupportedValue,
             value_type: observation_type(failure),

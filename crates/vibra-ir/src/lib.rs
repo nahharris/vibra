@@ -1,7 +1,7 @@
 //! The checked IR of Vibra: the types, values, and expressions a checked
 //! module set is made of, the canonical encodings of types and values, the
 //! closed `@compiler` intrinsic registry, the host registry, the boundary
-//! every host call passes ([`authority`]), the canonical origin table, and
+//! every host call passes ([`authority`]), the source origins of nodes, and
 //! the arena layout that toolchain-owned native code reads.
 //!
 //! The authority is `docs/spec`: the type chapter for [`Type`] and the
@@ -55,7 +55,7 @@ pub use nominal::{
     Case, Implementation, InterfaceDefinition, InterfaceMember, Invariant, TypeBody,
     TypeDefinition, Visibility,
 };
-pub use origin::{OriginTable, SourceOrigin};
+pub use origin::SourceOrigin;
 pub use pattern::{MatchArm, Pattern};
 pub use program::CheckedProgram;
 pub use signature::{

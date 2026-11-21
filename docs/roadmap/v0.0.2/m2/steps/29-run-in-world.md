@@ -68,7 +68,7 @@ architecture gives them; `vibra-conformance::workspace_run`.
    | `ExitCode` zero | `@command.ok` | `applicationCode: 0`, `programResult` its canonical text |
    | `ExitCode` non-zero | `@command.programFailed` | `applicationCode` the code, no trap |
    | refused required leaf, failed acquisition | `@command.operationalFailure` | the startup diagnostic; `programResult` absent |
-   | a defect trap | `@command.trap` | the trap record with its origin ordinal |
+   | a defect trap | `@command.trap` | the trap record with its source origin, when one is known |
    | memory exhaustion | `@command.operationalFailure` | `@runtime.memoryExhausted`; limits reached `memory` |
 
 3. Under `Launch::World` the program's streams are the world's; `stdout`
@@ -97,7 +97,7 @@ with the recipe `@out` from `@host.io.stdout`.
 | `V2-RUNTIME-run-static-error` | negative | `H` with a type error | `@command.diagnostics`; startup `notStarted`; an empty trace | 05: "static diagnostics prevent admission" |
 | `V2-RUNTIME-run-required-refused` | negative | `M` of step 26 with world `args: ["/missing"]` | `@command.operationalFailure`; `@grant.requiredUnavailable` at the `@notes` recipe; `programResult` absent; the `@args` events are kept | 05: "After a startup failure `programResult` is `null`"; "A failed command keeps the startup events that completed" |
 | `V2-RUNTIME-run-optional-absent` | positive | an entry with `metrics: Option(DirWriteText)` from a `@variablePath` whose variable is absent; it returns `ExitCode(0u8)` when it matches `Option.none()` | `@command.ok`; `@metrics` `refused` | 03: "An optional grant refused in the way its provider specifies becomes `Option.none()`" |
-| `V2-RUNTIME-run-trap` | negative | an entry that divides by zero after one write | `@command.trap`; the trap record's origin ordinal; one `@host` event; bindings `released` | 06: "a defect trap" |
+| `V2-RUNTIME-run-trap` | negative | an entry that divides by zero after one write | `@command.trap`; the trap record's source origin, the span record of the trapping operation written by hand from the case's source; one `@host` event; bindings `released` | 06: "a defect trap" |
 | `V2-RUNTIME-run-exhausted` | negative | an entry that recurses without end, under a small budget | `@command.operationalFailure`; `@runtime.memoryExhausted`; `applicationCode` absent | 06: "Memory exhaustion, startup failure, and tool failure keep their own categories" |
 | `ATK-release-on-trap` | negative | the trap row, with a wrapper driver counting releases | every acquired leaf released once, in reverse | 06: "On every ending of the process" |
 | `ATK-release-on-exhaustion` | negative | the exhaustion row, the same wrapper | the same | the same |

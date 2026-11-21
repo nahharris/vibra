@@ -9,8 +9,8 @@
 //! `outcomeUnknown`) is a [`HostReply::Err`]; a [`HostFault`] is only a
 //! defect or a host event, never a program result.
 
-use crate::Value;
 use crate::external::host::{HostErrorType, HostOp, TestWorldOp};
+use crate::{SourceOrigin, Value};
 
 /// An index into one context's grant table. It is not authority: the broker
 /// validates it on every use.
@@ -79,8 +79,9 @@ pub struct HostRequest<'v> {
     /// The ordinal of the invocation whose body performed that `await`;
     /// `None` for a startup read.
     pub parent: Option<u64>,
-    /// The source-origin ordinal of the `await`; zero for none.
-    pub origin: u64,
+    /// The source origin of the `await`; `None` when none is known, as
+    /// for a startup read.
+    pub origin: Option<&'v SourceOrigin>,
     /// The most result bytes the caller's memory budget can still account.
     pub room: u64,
 }

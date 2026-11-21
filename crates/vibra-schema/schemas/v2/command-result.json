@@ -559,7 +559,7 @@
       "else": { "properties": { "observationError": { "type": "object" } } }
     },
     "trapRecord": {
-      "description": "TrapRecord: one of the two defect traps, and the source-origin ordinal of the trapping operation when it is known.",
+      "description": "TrapRecord: one of the two defect traps, and the source origin of the trapping operation when it is known.",
       "type": "object",
       "additionalProperties": false,
       "required": ["trapCode", "origin"],
@@ -567,7 +567,9 @@
         "trapCode": {
           "enum": ["@runtime.invalidCheckedProgram", "@runtime.invalidHostValue"]
         },
-        "origin": { "type": ["integer", "null"], "minimum": 0 }
+        "origin": {
+          "oneOf": [{ "type": "null" }, { "$ref": "urn:vibra:schema:v2:diagnostic#/$defs/span" }]
+        }
       }
     },
     "observationError": {
@@ -578,7 +580,9 @@
       "properties": {
         "code": { "const": "unsupportedValue" },
         "type": { "type": ["string", "null"] },
-        "origin": { "type": ["integer", "null"], "minimum": 0 }
+        "origin": {
+          "oneOf": [{ "type": "null" }, { "$ref": "urn:vibra:schema:v2:diagnostic#/$defs/span" }]
+        }
       }
     },
     "fmtPayload": {

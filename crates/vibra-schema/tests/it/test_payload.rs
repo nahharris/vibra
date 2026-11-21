@@ -221,6 +221,37 @@ fn a_test_item_projects_the_test_record() {
     );
 }
 
+/// 05 `TrapRecord` and 06 Origins: an origin is the `SpanDocument` of the
+/// trapping operation, or `null`; an ordinal is not an origin.
+#[test]
+fn a_trap_origin_is_a_span_document_or_null() {
+    let mut known = trapped();
+    if let Some(trap) = &mut known.trap {
+        trap.origin = Some(SpanDocument::render(
+            ByteSpan::new(2, 5),
+            &LineIndex::new("a\nbcdef"),
+            Some("tests/math.vib"),
+        ));
+    }
+    let document = run(CommandOutcome::Trap, Status::Unknown, vec![known]);
+    validate_command_result(&document).expect("a known origin validates");
+    assert_eq!(
+        document["payload"]["tests"][0]["trap"]["origin"],
+        json!({
+            "sourceId": "tests/math.vib",
+            "start": 2,
+            "end": 5,
+            "startPosition": {"line": 2, "column": 1},
+            "endPosition": {"line": 2, "column": 4}
+        })
+    );
+    let absent = run(CommandOutcome::Trap, Status::Unknown, vec![trapped()]);
+    validate_command_result(&absent).expect("an absent origin validates");
+    let mut ordinal = absent;
+    ordinal["payload"]["tests"][0]["trap"]["origin"] = json!(1);
+    assert!(validate_command_result(&ordinal).is_err());
+}
+
 #[test]
 fn a_test_item_relates_its_result_to_its_fields() {
     let good = run(CommandOutcome::TestFailed, Status::Refuted, vec![failed()]);

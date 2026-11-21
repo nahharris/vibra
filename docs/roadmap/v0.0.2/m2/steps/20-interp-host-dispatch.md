@@ -54,7 +54,7 @@ arguments); `run_entry`, `EntryArgument`.
 2. An awaited `FunctionBody::Host(Operation(op))`: the receiver MUST be a
    `Grant`; build `HostArgument`s from the operands after it; fill
    `invocation` and `parent` from the current `Invocation`, whether the
-   `await` was in tail position or not, the origin ordinal of the
+   `await` was in tail position or not, the source origin of the
    `await`, and `room`, the bytes the memory budget can still account;
    call `HostContext::host` once. Then, in this order: build the member's
    `Result` value from the reply, with the types of the member's
@@ -106,7 +106,7 @@ among the requests.
 | invocation and parent | positive | the body (invocation 1) awaits a procedure (2) that awaits a pure procedure (3) and then a host member (4) | the request has `invocation: 4`, `parent: 2` (Q13) | 06 Invocations: "whose parent is the invocation whose body performed it" |
 | parent across a tail await | positive | the body (1) awaits `p` (2); `p` returns `await` of a host member in tail position (3); then the body awaits a host member (4) | requests `invocation: 3, parent: 2` and `invocation: 4, parent: 1` | the same |
 | the first invocation of an entry | positive | `run_entry` with `first_invocation: 3`; the entry's body awaits a host member | the request has `invocation: 4`, `parent: 3` | 06 Invocations: "Every `await` is an invocation" |
-| origin ordinal | positive | two awaits at different origins | the ordinals of the program's origin table | 06 Origins |
+| source origin | positive | two awaits at different origins | each request's `origin` is the record of its `await` node: its source identity and its two offsets | 06 Origins: "A source origin says where a node of the checked program was written" |
 | model receiver | positive | a type implementing `R`, widened to the interface, awaited | the `impl` body's result; no request | 03: "Dispatch on any other held value … selects that type's member" |
 | grant receiver through an interface value | positive | a `Grant` passed where `R` is expected, awaited in a callee | one request | 03: "dispatch on a sealed receiver selects them" |
 | host body with a model receiver | negative | an unchecked set that calls the `Host` body directly with a record | the trap `@runtime.invalidCheckedProgram` | 06 Host registry: "a record with similar fields is not a grant" |

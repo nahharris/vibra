@@ -18,7 +18,7 @@ Crates: `vibra-host`.
 | Existing | Symbol | Use |
 | --- | --- | --- |
 | `crates/vibra-ir/src/value.rs:18` | `pub enum Value` | the canonical data of arguments and results |
-| `crates/vibra-ir/src/origin.rs:12` | `pub struct SourceOrigin` | origins; the ordinal comes in the request |
+| `crates/vibra-ir/src/origin.rs:12` | `pub struct SourceOrigin` | origins; the request carries the `await`'s record, or none |
 
 From step 15: `broker::Context`, its pending event, and `commit`.
 
@@ -66,9 +66,10 @@ row is committed with its receipt unless the row says otherwise.
 
 | Row | Kind | Input | Expected | Specification |
 | --- | --- | --- | --- | --- |
-| one completed call | positive | `io.stdoutText "hello\n"` on a root with origin `{kind: @binding leaf: @out}`, invocation 2, parent 1, origin 1 | exactly the `@host` event of the chapter's example, field for field | 06 Audit trace, the example |
+| one completed call | positive | `io.stdoutText "hello\n"` on a root with origin `{kind: @binding leaf: @out}`, invocation 2, parent 1, the source origin `(src/hello/main.vib 42 68)` | exactly the `@host` event of the chapter's example, field for field | 06 Audit trace, the example |
 | fields in order | positive | the encoded event | `kind, invocation, parent, phase, op, driver, origin, grant, args, result` | 06, the host event table |
 | absent `parent` | positive | a startup read: phase `@startup`, no parent | the field is absent | 06: "absent for a startup read" |
+| absent `origin` | positive | a request with no source origin | the field is absent | 06 Origins: "Where no source origin is known, a document omits its optional `origin` field" |
 | denial before the adapter | negative | a policy refusal | `events` is empty | 06: "A refusal before the adapter is called … appends nothing" |
 | `limitExceeded` | negative | a grant at its bound | `events` is empty | the same |
 | size refusal at the gate | negative | `inputBytes: 4`; the driver finds 5 bytes | `Err(limitExceeded)`, no receipt; `events` is empty (Q29) | 06 Error types: "nothing was dispatched" |
@@ -123,7 +124,7 @@ Redaction profiles other than `@none`; the trap record's origin (29).
 
 ## Completion evidence
 
-- [ ] Each of the 29 rows is a test, named in the report.
+- [ ] Each of the 30 rows is a test, named in the report.
 - [ ] `Receipt` derives neither `Clone` nor `Copy`: the report quotes
       the type.
 - [ ] The example row compares against text copied from the chapter, not

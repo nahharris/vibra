@@ -82,8 +82,8 @@ pub struct ObservationError {
     /// The canonical `@type.v2` text of the operand's type, or `null`.
     #[serde(rename = "type")]
     pub value_type: Option<String>,
-    /// The source-origin ordinal of the observed expression, or `null`.
-    pub origin: Option<u64>,
+    /// The source origin of the observed expression, or `null`.
+    pub origin: Option<SpanDocument>,
 }
 
 /// `TestItem.failure`: the failed assertion that ended a test.
@@ -110,8 +110,9 @@ pub struct TestFailure {
 pub struct TrapRecord {
     /// The trap's atom, such as `@runtime.invalidCheckedProgram`.
     pub trap_code: String,
-    /// The source-origin ordinal of the trapping operation, or `null`.
-    pub origin: Option<u64>,
+    /// The source origin of the trapping operation, or `null` when none is
+    /// known.
+    pub origin: Option<SpanDocument>,
 }
 
 /// One event of a test's audit trace.

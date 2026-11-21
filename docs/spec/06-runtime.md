@@ -1396,7 +1396,7 @@ order. A leaf that startup never reached has no event.
 | `phase` | `@startup` for a read a recipe performs, `@entry` otherwise |
 | `op` | the exact registered wire symbol, `Str` |
 | `driver` | `{provider: Atom version: Str}`, the bound driver |
-| `origin` | the source-origin ordinal, `U64`; zero means no source origin |
+| `origin` | optional: the [source origin](#audit-trace) of the `await`; absent when none is known |
 | `grant` | the grant projection |
 | `args` | list of the canonical argument values after the grant, in parameter order; a path as the program wrote it, before a `sub` rebases it |
 | `result` | the canonical data of the operation's complete `Result` value |
@@ -1413,11 +1413,17 @@ test, the runner's run of the test body is invocation 1, and it is the
 parent of each `await` in that body. Because evaluation order is fixed,
 every executor numbers a run alike.
 
-**Origins.** The source origins of a checked program form one canonical
-**origin table**: every source origin of the reachable program, sorted by
-source identity, then start, then end, numbered from 1. The interpreter, the
-lowering, and the trace of a [trap](#traps) all write ordinals of this table,
-so the executors agree on them.
+**Origins.** A **source origin** says where a node of the checked program
+was written. It is a
+[span record](07-diagnostics-and-conformance.md#persistent-observations),
+`{sourceId: Str start: U64 end: U64}`: the source identity, as spans and
+diagnostics spell it, and the half-open byte offsets of the node. Nothing
+numbers origins. Where no source origin is known, a document omits its
+optional `origin` field, a JSON projection writes `null`, and a value holds
+`Option.none()`; where one is known, a JSON projection writes it as a
+[`SpanDocument`](07-diagnostics-and-conformance.md#diagnostic-documents-and-spans).
+The interpreter, native code, and the trace of a [trap](#traps) write the
+same record, so the executors agree on origins because they agree on spans.
 
 A **grant projection** is a closed record of `issuedBy` (the origin record
 below); `policy` (`Str`, the hash of its normalized
@@ -1443,7 +1449,8 @@ descends from a `TestWorld` has `{kind: @testWorld}`: a test has no startup
 leaf, and no leaf name can be mistaken for this form. Narrowing keeps the
 origin record of the grant it narrows.
 
-The example is shape only; its identities are placeholders:
+The example is shape only; its identities and the offsets of its origin are
+placeholders:
 
 ```vibon
 {
@@ -1478,7 +1485,7 @@ The example is shape only; its identities are placeholders:
       phase: @entry
       op: "io.stdoutText"
       driver: {provider: @host.io.stdout version: "0.0.2"}
-      origin: 1u64
+      origin: {sourceId: "src/hello/main.vib" start: 42u64 end: 68u64}
       grant: {
         issuedBy: {kind: @binding leaf: @out}
         policy: ""
@@ -1652,10 +1659,11 @@ runtime is wrong.
 
 - Source cannot catch a defect trap, and one MUST NOT be reported as an
   ordinary environmental error.
-- A trap keeps its source origin when one is known. Otherwise the
-  diagnostic has no source identity and primary span `0..0`.
-- The observation holds the exact trap code and origin, and every executor
-  MUST agree on them.
+- A trap keeps the [source origin](#audit-trace) of the failing operation
+  when one is known. Otherwise the diagnostic has no source identity and
+  primary span `0..0`.
+- The observation holds the exact trap code and the source origin record,
+  or no origin when none is known, and every executor MUST agree on them.
 
 `@runtime.divisionByZero` and `@runtime.unobservableFunction` are not trap
 codes and MUST NOT be emitted. Memory exhaustion and termination from

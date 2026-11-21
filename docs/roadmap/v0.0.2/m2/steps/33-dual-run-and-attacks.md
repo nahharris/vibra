@@ -44,9 +44,10 @@ Proposed: test-only `dual::{materialize, run_both, compare}` in
 2. `run_both(tree, world)`: the target under `Launch::World`, then under
    `Launch::System` with every `@fixedPath` re-rooted.
 3. `compare`: the `@command.*` result, the application code, both
-   captured streams, each binding's status, and the trace's events with
-   `drivers`, each `driver`, and the results of clock and random
-   operations removed. A difference prints both sides.
+   captured streams, each binding's status, and the trace's events, their
+   source origins included, with `drivers`, each `driver`, and the
+   results of clock and random operations removed. A difference prints
+   both sides.
 4. The attack runs: each builds its objects in the temporary directory
    after `materialize` and runs the target under `Launch::System` only.
    After a run that refuses a write, the test reads the temporary

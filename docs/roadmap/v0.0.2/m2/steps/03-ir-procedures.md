@@ -2,7 +2,7 @@
 
 Kind: infrastructure. Slice 1, below the checker: the checked IR of
 procedures, `await`, and host bodies, with the validation that makes rows
-and contexts facts of the IR; the dispatch trait; the origin table. Package
+and contexts facts of the IR; the dispatch trait; source origins. Package
 N4 of the native contract, IR half.
 Depends on: 02.
 Crates: `vibra-ir`, `vibra-interp`, `vibra-types`.
@@ -30,10 +30,10 @@ Crates: `vibra-ir`, `vibra-interp`, `vibra-types`.
 | `crates/vibra-ir/src/module_set.rs:58` | `pub struct CheckedFunction` | gains `context` |
 | `crates/vibra-ir/src/module_set.rs:482` | `pub fn try_new` | runs the new validation |
 | `crates/vibra-ir/src/constant.rs:28` | `Type::Fn(_) \| Type::Proc(_)` | the types no constant has; gains operation interfaces |
-| `crates/vibra-ir/src/origin.rs:12` | `pub struct SourceOrigin` | the element of the origin table |
+| `crates/vibra-ir/src/origin.rs:12` | `pub struct SourceOrigin` | the source origin record, unchanged |
 
 Proposed: `vibra-ir::effects`, `vibra-ir::authority` (the types of the
-architecture), `OriginTable` in `vibra-ir::origin`.
+architecture).
 
 ## Files owned
 
@@ -88,12 +88,10 @@ build every function with `BodyContext::Pure`.
    Invariant: `Value` has no variant for a grant or a plan.
 4. `authority.rs`: the data and the trait of the architecture, with no
    implementation. Invariant: the module names no type of `vibra-host`.
-5. `OriginTable::of(program)`: every source origin of the functions
-   reachable from the entry, sorted by source identity, start, end,
-   numbered from 1; `ordinal(&SourceOrigin)` is 0 for an origin outside
-   the table.
-6. The canonical encoding of a set writes `Await`, `Host`, and `context`,
-   and reads them back.
+5. Source origins: every node keeps the `SourceOrigin` record it was
+   written at, and `HostRequest::origin` is `Option<&SourceOrigin>`,
+   `None` when no source origin is known. Invariant: nothing numbers
+   origins; there is no origin table.
 
 ## Test matrix
 
@@ -120,10 +118,9 @@ one `proc` member `p: Proc({Self} Void {I})`; `J` is another.
 | `ATK-ir-grant-constant` | negative | a `Constant` whose type is the interface value type `DirReadText` | `IrError` | 03 Capability values: "No source expression makes a grant" |
 | a plan constant | negative | a `Constant` of type `Intent(Void {})` | `IrError` | 06 What has no encoding: "a plan … have no value encoding" |
 | a grant dict key | negative | a `Dict(DirReadText Str)` type in a signature | `IrError` | 03 Capability values: "cannot be … used as a dict key" |
-| origin table order | boundary | origins `(b.vib 0 4)`, `(a.vib 9 12)`, `(a.vib 2 30)`, `(a.vib 2 5)` | ordinals 4, 3, 2, 1 | 06 Audit trace: "sorted by source identity, then start, then end, numbered from 1" |
-| origin outside the table | boundary | an origin of an unreachable function | ordinal 0 | 06 Audit trace: "zero means no source origin" |
+| an origin known | positive | a function at `(a.vib 2 5)` whose body at `(a.vib 2 30)` is a sequence of nodes at `(a.vib 9 12)` and `(b.vib 0 4)` | the checked program keeps each record exactly | 06 Origins: "A source origin says where a node of the checked program was written" |
+| an origin absent | positive | a `HostRequest` of a startup read | `origin` is `None` | 06 Origins: "Where no source origin is known, … a value holds `Option.none()`" |
 | deep body | boundary | 100,000 nested single-statement sequences around one `Await`, validated on a 256 KiB thread | valid, no overflow | architecture, risk 5 |
-| encode and decode | positive | a set with `Await`, a `Host` body, and a `Procedure` context | identical bytes after a round trip | 06 Canonical value encoding |
 
 ## Diagnostics and schema changes
 
@@ -156,7 +153,7 @@ witness chain of a diagnostic, which is not a fact of the IR.
 
 ## Completion evidence
 
-- [ ] Each of the 22 rows is a test, named in the report.
+- [ ] Each of the 21 rows is a test, named in the report.
 - [ ] `git grep -n "trusted" crates/vibra-ir/src/effects.rs` finds nothing:
       the module validates and trusts no caller.
 - [ ] The files outside `vibra-ir` changed only by added `match` arms and

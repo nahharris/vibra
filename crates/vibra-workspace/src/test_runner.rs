@@ -346,8 +346,15 @@ impl TestRun {
             TestOutcome::AssertionFailed(failure) => {
                 fields.push(format!("failure: {}", failure_record(failure)));
             }
-            TestOutcome::Trap { trap, .. } => {
-                fields.push(format!("trap: {{trapCode: {}}}", trap.code().as_atom()));
+            TestOutcome::Trap { trap, origin } => {
+                let origin = origin
+                    .as_ref()
+                    .map(|origin| format!(" origin: {}", span_record(origin)))
+                    .unwrap_or_default();
+                fields.push(format!(
+                    "trap: {{trapCode: {}{origin}}}",
+                    trap.code().as_atom()
+                ));
             }
             _ => {}
         }

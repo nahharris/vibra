@@ -807,9 +807,10 @@ A test record has `name` (`Str`, the selector); `result` (a `@test.*` atom);
 `primarySpan`: span record, `observationError` optional record
 `code: Atom`, the observation error `@tool.unsupportedValue`, and
 `typeInfo: T` optional, the static type of the operand that could not be
-shown); `trap` (optional record
-`trapCode: Atom`, `origin: U64` optional); and `auditTrace` (the test's
-[`@auditTrace.v2`](06-runtime.md#audit-trace) document).
+shown); `trap` (optional record `trapCode: Atom`, `origin` optional, the
+[source origin](06-runtime.md#audit-trace) of the trapping operation); and
+`auditTrace` (the test's [`@auditTrace.v2`](06-runtime.md#audit-trace)
+document).
 
 ```vibon
 {
@@ -840,9 +841,9 @@ shown); `trap` (optional record
   that exhausts its memory is `@test.exhausted`, and the run's observation keeps
   every other record. A case MUST NOT depend on the exact allocation at which
   memory runs out. A tool limit is expected as unknown, with the limit profile.
-- An execution that traps records the code and origin and no value. Its
-  completed events are kept. The absence of an event is never evidence that
-  nothing external happened.
+- An execution that traps records the code and the source origin, when one
+  is known, and no value. Its completed events are kept. The absence of an
+  event is never evidence that nothing external happened.
 
 **`@targetRun.v2`** holds one run of a binary target, the observation of a
 `workspaceRun` case. A case expects one with the key `expect.targetRun`, as
@@ -856,7 +857,7 @@ it expects a `@testRun.v2` document with `expect.testRun`.
 | `stdout` | [bytes record](06-runtime.md#values) | every byte the program wrote to standard output |
 | `stderr` | bytes record | every byte the program wrote to standard error |
 | `startup` | list of startup records in processing order | one per processed leaf |
-| `trap` | optional record `trapCode: Atom`, `origin: U64` optional | the defect trap that ended the run |
+| `trap` | optional record `trapCode: Atom`, `origin` optional, the [source origin](06-runtime.md#audit-trace) of the trapping operation | the defect trap that ended the run |
 | `auditTrace` | an [`@auditTrace.v2`](06-runtime.md#audit-trace) document | the run's whole trace, its startup events first |
 
 A startup record has `binding` (the leaf's atom); `status` (`@released` for
@@ -1018,7 +1019,7 @@ These are minimum obligations. None of these tests exists yet.
     pending `ensures … else`, widening, or cleanup prevents a tail transfer.
     A built executable on Windows exits with the four fixed statuses for its
     own endings and passes application codes through; invocation ordinals
-    and origin ordinals agree across executors; an interface value round
+    and source origins agree across executors; an interface value round
     trips through `@value.v2` with its held type, and one holding a callable
     gives the observation error.
 14. **Tooling and approvals.** One engine and one revision across CLI and

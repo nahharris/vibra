@@ -15,8 +15,8 @@ use vibra_ir::{
     CheckedModuleSet, CheckedProgram, ClosureBody, Constant, Construction,
     ContractCall, EffectFault, Expr, FnType, FunctionBody, HostBinding, Implementation,
     ImplementationRecord, InterfaceDefinition, InterfaceKey, InterfaceMember, IrError,
-    Library, ModuleSetParts, NamedTypes, Node, OriginTable, ProcType, Row,
-    SignatureRecord, SourceOrigin, Type, TypeBody, TypeDefinition, Value, Visibility,
+    Library, ModuleSetParts, NamedTypes, Node, ProcType, Row, SignatureRecord,
+    SourceOrigin, Type, TypeBody, TypeDefinition, Value, Visibility,
 };
 
 use crate::{id, library_parts, library_type, node, origin, str_type};
@@ -731,7 +731,7 @@ fn a_grant_dict_key() {
     ));
 }
 
-// ----- the origin table -----
+// ----- source origins -----
 
 fn at(source: &str, start: usize, end: usize) -> SourceOrigin {
     SourceOrigin::new(source, ByteSpan::new(start, end))
@@ -744,75 +744,62 @@ fn void_at(origin: SourceOrigin) -> Node {
     )
 }
 
-/// 06 Audit trace: "sorted by source identity, then start, then end,
-/// numbered from 1".
+/// 06 Origins: "A source origin says where a node of the checked program
+/// was written … `{sourceId: Str start: U64 end: U64}`": a checked program
+/// keeps each node's record exactly as written, and two origins with the
+/// same source and offsets are the same origin.
 #[test]
-fn origin_table_order() {
+fn an_origin_known() {
     let body = Node::new(
         Expr::Sequence(vec![
             void_at(at("a.vib", 9, 12)),
-            void_at(at("a.vib", 2, 30)),
             void_at(at("b.vib", 0, 4)),
         ]),
-        at("b.vib", 0, 4),
+        at("a.vib", 2, 30),
     );
     let mut main = function("main", fn_type(Vec::new(), Type::Void), body, 0);
     main.origin = at("a.vib", 2, 5);
     let program = CheckedProgram::for_entry(build(vec![main]).unwrap(), 0).unwrap();
-    let table = OriginTable::of(&program);
-    let ordinals = [
-        at("b.vib", 0, 4),
-        at("a.vib", 9, 12),
-        at("a.vib", 2, 30),
-        at("a.vib", 2, 5),
-    ]
-    .map(|origin| table.ordinal(&origin));
-    assert_eq!(ordinals, [4, 3, 2, 1]);
-    assert_eq!(table.origins().len(), 4);
+    let main = &program.module_set().functions()[0];
+    assert_eq!(main.origin, at("a.vib", 2, 5));
+    let FunctionBody::Expr(body) = &main.body else {
+        panic!("an expression body");
+    };
+    assert_eq!(body.origin.source_id(), "a.vib");
+    assert_eq!(
+        (body.origin.span().start(), body.origin.span().end()),
+        (2, 30)
+    );
+    let Expr::Sequence(items) = &body.expr else {
+        panic!("a sequence");
+    };
+    let origins = items
+        .iter()
+        .map(|item| item.origin.clone())
+        .collect::<Vec<_>>();
+    assert_eq!(origins, [at("a.vib", 9, 12), at("b.vib", 0, 4)]);
 }
 
-/// 06 Audit trace: "zero means no source origin".
+/// 06 Origins: "Where no source origin is known, … a value holds
+/// `Option.none()`": a host request names the origin of its `await`, or
+/// none, as for a startup read.
 #[test]
-fn origin_outside_the_table() {
-    let mut used = function(
-        "used",
-        fn_type(Vec::new(), Type::Void),
-        void_at(at("u.vib", 5, 6)),
-        0,
-    );
-    used.origin = at("u.vib", 0, 9);
-    let mut unused = function(
-        "unused",
-        fn_type(Vec::new(), Type::Void),
-        void_at(at("z.vib", 1, 2)),
-        0,
-    );
-    unused.origin = at("z.vib", 0, 3);
-    let mut main = function(
-        "main",
-        fn_type(Vec::new(), Type::Void),
-        Node::new(
-            Expr::Call {
-                target: CallTarget::Direct {
-                    function: 0,
-                    type_arguments: Vec::new(),
-                },
-                arguments: Arguments::default(),
-            },
-            at("m.vib", 0, 4),
-        ),
-        0,
-    );
-    main.origin = at("m.vib", 0, 8);
-    let program =
-        CheckedProgram::for_entry(build(vec![used, unused, main]).unwrap(), 2).unwrap();
-    let table = OriginTable::of(&program);
-    assert_eq!(table.ordinal(&at("z.vib", 1, 2)), 0);
-    assert_eq!(table.ordinal(&at("z.vib", 0, 3)), 0);
-    assert_eq!(table.ordinal(&at("m.vib", 0, 4)), 1);
-    assert_eq!(table.ordinal(&at("m.vib", 0, 8)), 2);
-    assert_eq!(table.ordinal(&at("u.vib", 0, 9)), 3);
-    assert_eq!(table.ordinal(&at("u.vib", 5, 6)), 4);
+fn an_origin_absent() {
+    use vibra_ir::authority::{GrantToken, HostRequest};
+    let written = at("src/hello/main.vib", 42, 68);
+    let request = |origin, parent| HostRequest {
+        op: HostOp::IoStdoutText,
+        grant: GrantToken::new(1, 0, 0),
+        arguments: &[],
+        invocation: 2,
+        parent,
+        origin,
+        room: 0,
+    };
+    let entry = request(Some(&written), Some(1));
+    assert_eq!(entry.origin, Some(&at("src/hello/main.vib", 42, 68)));
+    let startup = request(None, None);
+    assert_eq!(startup.origin, None);
 }
 
 // ----- depth -----

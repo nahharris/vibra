@@ -43,7 +43,7 @@ crate that holds an interpreter and a broker at once.
 | The entry shape of a target | `vibra-types::check::effects::entry` | 25 |
 | `Await`, host bodies, row re-validation | `vibra-ir::effects` | 03 |
 | The dispatch trait and its data | `vibra-ir::authority` | 03 |
-| The origin table | `vibra-ir::origin` | 03 |
+| Source origins, the record a trap and an event name | `vibra-ir::origin` | 03 |
 | Host registry major 2, test-world registry | `vibra-ir::external::host` | 02 |
 | The three grant rows | `vibra-ir::external::compiler` | 02 |
 | Plans, `await`, invocation ordinals | `vibra-interp::plan` | 06 |
@@ -167,7 +167,8 @@ pub struct HostRequest<'v> {
     pub arguments: &'v [HostArgument<'v>],
     pub invocation: u64,
     pub parent: Option<u64>,
-    pub origin: u64,
+    /// The source origin of the `await`; `None` when none is known.
+    pub origin: Option<&'v SourceOrigin>,
     /// The most result bytes the caller's memory budget can still account.
     pub room: u64,
 }
