@@ -23,10 +23,16 @@
 //!
 //! # Position in the architecture
 //!
-//! This crate depends on `vibra-diagnostics`, `vibra-fmt`, `vibra-interp`,
-//! `vibra-ir`, `vibra-resolve`, `vibra-syntax`, and `vibra-types`. It is
-//! the tooling crate that reads a project's files; no language crate depends
-//! on it.
+//! This crate depends on `vibra-diagnostics`, `vibra-fmt`, `vibra-host`,
+//! `vibra-interp`, `vibra-ir`, `vibra-resolve`, `vibra-syntax`, and
+//! `vibra-types`. It is the tooling crate that reads a project's files, and
+//! the only crate that holds an interpreter and the host broker at once; no
+//! language crate depends on it.
+
+pub mod binding;
+pub mod dependencies;
+pub mod entry;
+pub mod run;
 
 mod discovery;
 mod format_plan;
