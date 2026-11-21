@@ -1,0 +1,31 @@
+use @std.assert enduse
+
+use @pilot.range enduse
+
+test "an ordered range has its span"
+  do
+    assert.equal(3i32 range.spanOr(2i32 5i32 -7i32))
+endtest
+
+test "a reversed range gives the fallback"
+  do
+    assert.equal(-7i32 range.spanOr(5i32 2i32 -7i32))
+endtest
+
+test "equal bounds span zero"
+  do
+    assert.equal(0i32 range.spanOr(4i32 4i32 -7i32))
+endtest
+
+test "the constant reversed range is handled"
+  do
+    assert.equal(-7i32 range.reversedSpanOr(-7i32))
+endtest
+
+test "a reversed construction is the error"
+  do
+    assert.equal(
+      Result.err(error: range.RangeError.invalid())
+      range.makeRange(5i32 2i32)
+    )
+endtest

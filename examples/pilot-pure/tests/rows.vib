@@ -1,0 +1,30 @@
+use @std.assert enduse
+
+use @pilot.rows enduse
+
+test "a later row of a key wins and the entries are in key order"
+  do
+    let index be
+      rows.indexRows(
+        [
+          rows.Row(key: "b" amount: 1i32)
+          rows.Row(key: "a" amount: 2i32)
+          rows.Row(key: "b" amount: 3i32)
+        ]
+      )
+    endlet
+    assert.equal([{"a" 2i32} {"b" 3i32}] Dict.entries(index))
+endtest
+
+test "the latest amount of a key"
+  do
+    assert.equal(
+      Option.some(value: 3i32)
+      rows.latest([rows.Row(key: "b" amount: 1i32) rows.Row(key: "b" amount: 3i32)] "b")
+    )
+endtest
+
+test "a missing key has no amount"
+  do
+    assert.equal(Option.none() rows.latest([] "a"))
+endtest

@@ -1,0 +1,24 @@
+use @std.assert enduse
+
+use @pilot.optional enduse
+
+test "nothing stays nothing"
+  do
+    assert.equal(Option.none() optional.adjust(Option.none() 2i32))
+endtest
+
+test "a positive value is offset"
+  do
+    assert.equal(
+      Option.some(value: 5i32)
+      optional.adjust(Option.some(value: 3i32) 2i32)
+    )
+endtest
+
+test "a value that is not positive is clamped before the offset"
+  do
+    assert.equal(
+      Option.some(value: 2i32)
+      optional.adjust(Option.some(value: -3i32) 2i32)
+    )
+endtest
