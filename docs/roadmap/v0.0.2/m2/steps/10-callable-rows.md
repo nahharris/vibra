@@ -70,7 +70,8 @@ named_value}`.
 
 ## Test matrix
 
-`workspaceCheck`, profile `staticV2`, unless stated. The preamble is `L` of
+`workspaceCheck`, profile `staticV2`, unless stated; a row that names another
+operation has that operation's profile (Q34). The preamble is `L` of
 step 09, with `Sink` abbreviating `Proc({Str} Void {Log})`.
 
 | Case id | Kind | Input | Expected | Specification |

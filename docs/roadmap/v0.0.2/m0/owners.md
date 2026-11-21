@@ -270,6 +270,8 @@ intrinsic registry".
 | Command `run` | M2 32 / M2 29 | host tests of M2 step 32 over the `V2-RUNTIME-run-*` projects; `V2-GRANT-release-optional-absent` | `@grant.requiredUnavailable`, `@grant.acquisitionFailed`, `@runtime.memoryExhausted`, `@tool.unavailable` | `urn:vibra:schema:v2:command-result` |
 | The run observation of a `workspaceRun` case | M2 29 | the `V2-RUNTIME-run-*` cases of M2 step 29 | none | `@targetRun.v2` |
 | The toolchain record of the workspace revision | M2 21 | the host tests "the toolchain record" and "the revision follows the library" of M2 step 21 | none | `@toolchain.v2` |
+| A case names the profile of its operation | M2 01 | the host tests "manifest: the profile of the operation", "manifest: another profile", and "manifest: a profile with no operation of its own" of M2 step 01 | none | `case.toml` |
+| The JSON spelling of a code | M2 32 | the host test "observation error code in JSON" of M2 step 32 | `@tool.unsupportedValue` | `urn:vibra:schema:v2:command-result` |
 | Case operations of each conformance profile; the `help` inventory derived from them | M2 32 | the host tests "inventory" and "inventory derived from the profiles" of M2 step 32 | none | `urn:vibra:schema:v2:command-result` |
 | Command `eval` | M3 | | | |
 | `project` commands | no owner; see the findings | | | |

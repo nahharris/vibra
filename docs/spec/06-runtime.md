@@ -1034,17 +1034,22 @@ access by itself.
   succeeds at a zero budget.
 - When the size is not known (a pipe, a console), the reservation is the
   smaller of `max` and what remains of the `inputBytes` bound of the grant
-  and of every ancestor. The call is `limitExceeded` before dispatch only
-  when `max` is positive and nothing remains. The read returns at most the
-  reserved count, so a loop that reads to the end through a bound smaller
-  than the input reads up to the bound and then receives `limitExceeded`.
+  and of every ancestor. The call is `limitExceeded` before the stream is
+  read only when `max` is positive and nothing remains, or for a text
+  read as the next item states. The read returns at most
+  the reserved count, so a loop that reads to the end through a bound
+  smaller than the input reads up to the bound and then receives
+  `limitExceeded`.
 - A text read returns the longest prefix of whole scalars that fits in its
   reservation, and consumes exactly those bytes. A text `max` below 4, the
   length of the longest scalar, is `unsupported` before the stream is
-  touched. A byte read accepts every count; a `max` of zero returns the
-  empty value and consumes nothing, as a zero `count` of random bytes does.
-- A rejection before dispatch (`denied`, `limitExceeded`, `unsupported`)
-  consumes nothing.
+  read. A text read of unknown size whose `max` is at least 4 and whose
+  reservation is below 4 is `limitExceeded` before the stream is read, so
+  a completed text read is empty only at the end of input. A byte read
+  accepts every count; a `max` of zero returns the empty value and
+  consumes nothing, as a zero `count` of random bytes does.
+- A rejection before the stream is read (`denied`, `limitExceeded`,
+  `unsupported`) consumes nothing.
 - Input that cannot be read is `other`. Text that cannot be decoded is
   `invalidText`, and the bytes the adapter took for it are consumed.
 

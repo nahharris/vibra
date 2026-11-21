@@ -399,7 +399,8 @@ the bytes of a read the same way: the size of a file; for a stream read,
 the smaller of its `max` and the remaining size when the adapter knows
 it, and otherwise the smaller of `max` and what remains of the
 `inputBytes` bound on the grant and on every ancestor, refused as
-`limitExceeded` only when `max` is positive and nothing remains (Q10).
+`limitExceeded` only when `max` is positive and nothing remains, or when
+a text read is reserved below 4 bytes (Q10, Q31).
 The gate returns the reserved count, and the driver reads at most that
 many bytes. When the driver returns,
 the broker settles each byte reservation, on the grant and on every

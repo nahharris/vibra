@@ -318,8 +318,10 @@ Each ruling is stated in the chapter sections its **Anchor** names.
   - **Input of unknown size** (a pipe, a console): the broker reserves
     the smaller of `max` and what remains of the `inputBytes` bound of the
     grant and of every ancestor. The call is refused with `limitExceeded`
-    before dispatch only when `max` is positive and nothing remains, and
-    the read returns at most the reserved count.
+    before the stream is read only when `max` is positive and nothing
+    remains, or for a text read as
+    [Q31](#q31-a-text-read-of-unknown-size-reserved-below-one-scalar)
+    rules, and the read returns at most the reserved count.
 
   For input of known size, a reservation over the remaining `inputBytes`
   bound is `limitExceeded` with nothing consumed. So a limit is always
@@ -717,6 +719,68 @@ Each ruling is stated in the chapter sections its **Anchor** names.
   value and consumes nothing, as a zero `count` of random bytes does.
 - **Depends.** Steps 16, 30. Rows "stdin text below a scalar" of both.
   Every other text row uses a count of at least 4.
+
+### Q31. A text read of unknown size reserved below one scalar
+
+- **Anchor.** [06 Closed operation semantics](../../../spec/06-runtime.md#closed-operation-semantics).
+- **Question.** Through a bound with one to three bytes left, a text
+  read of unknown size with `max` at least 4 is reserved below 4. The
+  longest prefix of whole scalars that fits may be empty, and the empty
+  value is the end of input, so `readAllText` would stop early with no
+  error.
+- **Program.** A pipe holding `abc`; `inputBytes: 2u64`;
+  `StdinText.read(input 16u64)`.
+- **Ruling.** Such a read is `limitExceeded` before the stream is read,
+  so a completed text read is empty only at the end of input.
+- **Depends.** Steps 15, 30. Rows "stdin text, unsized, below one scalar"
+  of both.
+
+### Q32. The `root` of a rule in an effective policy
+
+- **Anchor.** [03 The wire form](../../../spec/03-effects.md#the-wire-form),
+  [03 Narrowing](../../../spec/03-effects.md#narrowing).
+- **Question.** A source policy has no `root`, and a `TestWorld`
+  directory grant has no leaf. What `root` do the rules of a normalized
+  effective policy carry?
+- **Ruling.** A rule a `restrict` or a `sub` contributes names the leaf
+  its grant descends from; every rule of a grant that descends from a
+  `TestWorld` directory grant names `@testWorld`.
+- **Depends.** Step 17. Rows "rule roots after `restrict`" and "rule roots
+  of a test-world grant".
+
+### Q33. Expected revisions after a library change
+
+- **Anchor.** [05 Snapshot, claim and witness identity](../../../spec/05-tooling.md#snapshot-claim-and-witness-identity).
+- **Question.** The `stdlib` digest of the toolchain record covers the
+  embedded manifest, which holds the digest of every module, so every
+  change to the library changes every expected `revision` in the corpus.
+  Who recomputes them?
+- **Ruling.** Step 21 checks in the recomputation tool, and every step
+  that changes the library runs it as a validation line.
+- **Depends.** Steps 21, 24: rows "the script agrees with the engine"
+  and "the script finds a stale revision" of step 21. Steps 18 and 19
+  change the library before step 21 adds the toolchain record and the
+  tool, so no expected revision depends on the library while they run.
+
+### Q34. The profile a case names
+
+- **Anchor.** [07 Conformance profiles](../../../spec/07-diagnostics-and-conformance.md#conformance-profiles).
+- **Question.** The profile table gives each case operation one own
+  profile. May a case name another profile for its operation?
+- **Ruling.** No. A case names the profile its operation belongs to, and
+  the manifest rejects any other.
+- **Depends.** Steps 01, 21. Rows "manifest: the profile of the
+  operation" and "manifest: another profile" of step 01.
+
+### Q35. The JSON spelling of a code
+
+- **Anchor.** [05 Versioned envelope and results](../../../spec/05-tooling.md#versioned-envelope-and-results),
+  [05 Command payloads](../../../spec/05-tooling.md#command-payloads).
+- **Question.** `ObservationError.code` is `"unsupportedValue"` in JSON
+  and `@tool.unsupportedValue` in VIBON.
+- **Ruling.** In JSON a code is spelled as its full atom text, so the
+  payload carries `"@tool.unsupportedValue"`.
+- **Depends.** Step 32. Row "observation error code in JSON".
 
 ## Where the tree contradicts the M2 chapters
 

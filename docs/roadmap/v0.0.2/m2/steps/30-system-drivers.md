@@ -17,7 +17,7 @@ Crates: `vibra-host`.
   refusal and failure table; [tooling
   chapter](../../../../spec/05-tooling.md#program-arguments-execution-and-evaluation)
   Arguments; [architecture](../architecture.md) "The gate" and
-  "Settlement"; [questions](../spec-questions.md) Q10, Q24, Q28, Q30.
+  "Settlement"; [questions](../spec-questions.md) Q10, Q24, Q28, Q30, Q31.
 
 ## Entry points
 
@@ -57,7 +57,9 @@ adapters `streams`, `env`, `clock`, `random` as submodules.
    it declares a size); then it reads at most the count the gate
    reserved, which is never more than `max` (Q10). The
    empty value is the end of input; a text read returns whole scalars
-   and refuses a `max` below 4 as `unsupported` (Q30); undecodable text
+   and refuses a `max` below 4 as `unsupported` (Q30); the gate refuses an
+   unsized text read reserved below 4 bytes as `limitExceeded` (Q31);
+   undecodable text
    is `invalidText`; a read error is `other`. Progress is the bytes taken
    from the stream, whatever the reply (Q28).
 5. Standard output and error: a write delivers the whole value; a closed
@@ -96,6 +98,7 @@ arguments, so every row runs on the three platforms; the two rows marked
 | stdin, a file of known size | boundary | a reader that declares the size 3; `inputBytes: 3`; `max: 10` | `Ok` of `abc`: the gate saw `size: Some(3)` and 3 were reserved (Q10) | 06 Standard input: "the reservation is the smaller of `max` and that size" |
 | stdin, an empty file at zero | boundary | a reader that declares the size 0; `inputBytes: 0`; `max: 1` | `Ok` of no bytes (Q10) | the same |
 | stdin text below a scalar | negative | `io.stdinText` with `max: 3` | `Err(unsupported)`; the reader was not read (Q30) | 06 Error types: "nothing was attempted" |
+| stdin text, unsized, below one scalar | negative | an unsized reader holding `abc`; `inputBytes: 2`; `io.stdinText` with `max: 16` | `Err(limitExceeded)`; the reader was not read; a later unbounded text read returns `abc` (Q31) | 06 Standard input: "A text read of unknown size whose `max` is at least 4 and whose reservation is below 4 is `limitExceeded` before the stream is read" |
 | stdin text at a scalar boundary | boundary | stdin U+20AC then `a`; `io.stdinText` with `max: 4` twice | the two scalars, then `Ok("")` (Q30) | 06 Standard input: "At the end of input a completed read returns the empty value" |
 | stdout whole value | positive | `io.stdoutText "a"`, `io.stdoutBytes [98]` | the sink holds `ab` | 06: "A write delivers its whole value, in invocation order" |
 | stdout closed | negative | a sink that reports a broken pipe | `Err(closed)`, completed | 06: "A closed stream is `closed`" |
@@ -147,7 +150,7 @@ Directories (31); the command (32).
 
 ## Completion evidence
 
-- [ ] Each of the 30 rows is a test, named in the report.
+- [ ] Each of the 31 rows is a test, named in the report.
 - [ ] Every path from an operating-system write result to a `Progress`
       is quoted in the report with the count it carries.
 - [ ] The crate has no `unsafe`.

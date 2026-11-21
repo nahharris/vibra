@@ -76,11 +76,13 @@ cargo fmt --all --check
 cargo clippy --locked --offline --workspace --all-targets --all-features -- -D warnings
 cargo test --locked --offline -p vibra-host -p vibra-interp -p vibra-types -p vibra-workspace -p vibra-conformance --all-features
 cargo run --locked --offline -p vibra-conformance --bin vibra-conformance -- --root conformance/cases
+& conformance/tools/revisions.ps1 -Root conformance/cases -Check
 $env:RUSTDOCFLAGS='-D warnings'
 cargo doc --locked --offline --workspace --no-deps --all-features
 ```
 
-Read: all exit 0.
+Read: all exit 0. A fix that changes the library first recomputes the
+expected revisions with `revisions.ps1 -Write` (Q33).
 
 ## Stays unavailable
 

@@ -160,7 +160,7 @@ every code any chapter cites is in the registry.
 | Field | Content |
 | --- | --- |
 | `schemaVersion` | `2` |
-| `code`, `level` | the exact atoms, as strings |
+| `code`, `level` | the exact atoms, as strings with their `@`, as the [JSON projection](05-tooling.md#versioned-envelope-and-results) spells every code |
 | `message` | text for a person |
 | `primarySpan` | a `SpanDocument` |
 | `related` | array of `{span, message}` |
@@ -1048,8 +1048,10 @@ smaller profile.
 | `fullV2` | everything a release requires: language, library, projects, tooling, interpreter, and native targets | none of its own: it includes every profile |
 
 Each [case operation](#case-operations-and-inputs) is the own operation of
-exactly one profile. A profile that includes another covers that profile's
-operations as well. The
+exactly one profile. A case names the profile its operation belongs to; a
+case manifest that names any other is malformed, and loading the corpus
+rejects it. A profile that
+includes another covers that profile's operations as well. The
 [`help` inventory](05-tooling.md#command-payloads) is derived from this
 table: a command's `profiles` are the profiles of the operations it offers.
 

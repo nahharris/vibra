@@ -48,11 +48,11 @@ verdict is that the Windows adapter meets the contract.
 
 ## Exit evidence
 
-- A cross-chapter review record with no open contradiction.
-- The owner table: form, conformance case, diagnostics, schema.
-- The native contract comparison.
-- The feasibility record. If the adapter cannot meet the contract, the file
-  operations it would back are marked unsupported on Windows, M2's gate
+- The [owner table](owners.md): form, conformance case, diagnostics,
+  schema.
+- The [native contract comparison](native-contract.md).
+- The [feasibility record](file-scope-feasibility.md). If the adapter
+  cannot meet the contract, the file operations it would back are marked unsupported on Windows, M2's gate
   program cannot pass there, and the plan returns to the specification
   before M2 starts.
 

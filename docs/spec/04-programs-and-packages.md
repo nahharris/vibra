@@ -509,10 +509,9 @@ report each leaf with these same three outcomes. A driver the platform does
 not support at all is a different case: it is rejected at admission, as
 `@tool.unavailable`, before any leaf is processed.
 
-On every ending of the process, including a failed startup, the acquired
-grants are released in reverse acquisition order. The
-[runtime chapter](06-runtime.md#entry-outcome) defines the outcomes, the
-release, and how the exit code is reported.
+The [runtime chapter](06-runtime.md#entry-outcome) defines the outcomes,
+the release of the acquired grants on every ending of the process, a
+failed startup included, and how the exit code is reported.
 
 ## Modules and imports
 

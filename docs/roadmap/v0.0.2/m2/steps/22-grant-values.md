@@ -62,9 +62,10 @@ check_equatable, check_dict_key}`.
 
 ## Test matrix
 
-`workspaceTest`, profile `interpreterV2`, unless stated. `dir` is the
-record `TestWorld.directory(w files: [aTxt: "A" bBin: "B" subTxt: "S"])`
-with paths `["a.txt"]`, `["b.bin"]`, `["sub" "s.txt"]`; `textOnly` is the
+`workspaceTest`, profile `interpreterV2`, unless stated; a row that names
+another operation has that operation's profile (Q34). `dir` is the record
+`TestWorld.directory(w files: [aTxt: "A" bBin: "B" subTxt: "S"])` with
+paths `["a.txt"]`, `["b.bin"]`, `["sub" "s.txt"]`; `textOnly` is the
 chapter's policy value. `Memory` is the memory-only model of step 19,
 holding the text `"M"`, whose narrowing members return it. `Forward` is
 the grant-backed model of Q1: a type over `{inner: DirReadText}` whose

@@ -16,7 +16,8 @@ Crates: `vibra-host`, `vibra-conformance`.
   [architecture](../architecture.md) "The host" whole (lineages, the
   gate, settlement, the order of a mutating call), "The completion
   receipt", rows A5 to A14, A23, A25, A30;
-  [questions](../spec-questions.md) Q7, Q8, Q10, Q11, Q12, Q14, Q28, Q29.
+  [questions](../spec-questions.md) Q7, Q8, Q9, Q10, Q11, Q12, Q14, Q28, Q29,
+  Q31.
 
 ## Entry points
 
@@ -78,11 +79,12 @@ Measured, Acquire, Action, ResourceId, DriverIdentity}`.
    `Found::size`; when the size is `None`, the smaller of `max` and what
    remains of the `inputBytes` bound on the slot and on every ancestor,
    which is `limitExceeded` only when `max` is positive and nothing
-   remains (Q10). The gate returns the reserved count as `Reserved`, and
-   the driver reads at most that many bytes. The broker keeps the gate's
-   reason. Invariant: the gate has answered before the driver
-   reads, creates, or changes anything, and a driver whose gate refused
-   returns `Completion::Refused`; any other completion after a refusal is
+   remains, or for a text read reserved below 4 bytes (Q10, Q31). The
+   gate returns the reserved count as `Reserved`, and the driver reads at
+   most that many bytes. The broker keeps the gate's reason. Invariant:
+   the gate has answered before the driver reads, creates, or changes
+   anything, and a driver whose gate refused returns
+   `Completion::Refused`; any other completion after a refusal is
    `InvalidHostValue`.
 6. Map a gate refusal: a policy or hard-link refusal is the completed
    reply `denied`, with a receipt; `limitExceeded` and `unsupported` have
@@ -172,14 +174,15 @@ means no event is due.
 | env name inside the set | positive | `names: ["HOME"]`; `env.readVar("HOME")` | the driver's value | 06 Environment: "reads one permitted name" |
 | env name outside the set | negative | `env.readVar("PATH")` | `Err(denied)`; no driver call (Q12) | 06: "Neither grant exposes anything outside its reviewed scope" |
 | stdin, known size, within | boundary | `inputBytes: 3`; `io.stdinBytes` with `max: 3`; the driver reports `size: Some(3)` and holds `abc` | `Ok` of the bytes `abc`; 3 charged | 06 Standard input: "the reservation is the smaller of `max` and that size" |
-| stdin, known size, over | negative | `inputBytes: 2`; `max: 3`; `size: Some(3)` | `Err(limitExceeded)`; the driver's `read` step is not reached; no receipt; a later unbounded read returns `abc` | 06 Standard input: "A rejection before dispatch" |
+| stdin, known size, over | negative | `inputBytes: 2`; `max: 3`; `size: Some(3)` | `Err(limitExceeded)`; the driver's `read` step is not reached; no receipt; a later unbounded read returns `abc` | 06 Standard input: "A rejection before the stream is read" |
 | stdin, known size below the count | boundary | `inputBytes: 3`; `max: 10`; `size: Some(3)` | `Ok` of `abc`: the smaller of the two was reserved (Q10) | 06 Standard input: "the reservation is the smaller of `max` and that size" |
 | stdin, known size, empty at zero | boundary | `inputBytes: 0`; `max: 1`; `size: Some(0)` | `Ok` of no bytes (Q10) | the same |
 | stdin, unsized, within the count | boundary | `inputBytes: 10`; `max: 10`; `size: None`; the driver holds `abc` and completes with `input: Known(3)` | `Ok` of `abc`; 10 reserved at the gate, 3 charged, 7 refunded: a later read with `max: 7` is `Ok` | 06: "A limit MUST be reserved before an operation could exceed its count or byte bound" |
 | stdin, unsized, a short count | boundary | `inputBytes: 2`; `max: 2`; `size: None`; the driver holds `abc` | `Ok` of `ab`; 2 charged; the driver still holds `c` (Q10) | the same |
 | stdin, unsized, a count above the bound | boundary | `inputBytes: 2`; `max: 3`; `size: None`; the driver holds `abc` | `Ok` of `ab`: the gate reserved 2, the smaller of `max` and the remaining bound; 2 charged; the driver still holds `c` (Q10) | 06 Standard input: "the reservation is the smaller of `max` and what remains of the `inputBytes` bound of the grant and of every ancestor" |
-| stdin, unsized, nothing remains | negative | the grant of the row above after its read; `max: 3` | `Err(limitExceeded)`; the driver's `read` step is not reached; no receipt; a later read through an unbounded grant on the same resource returns `c` (Q10) | 06 Standard input: "The call is `limitExceeded` before dispatch only when `max` is positive and nothing remains" |
+| stdin, unsized, nothing remains | negative | the grant of the row above after its read; `max: 3` | `Err(limitExceeded)`; the driver's `read` step is not reached; no receipt; a later read through an unbounded grant on the same resource returns `c` (Q10) | 06 Standard input: "The call is `limitExceeded` before the stream is read only when `max` is positive and nothing remains" |
 | stdin, unsized, a remaining bound below the count | boundary | a parent with `inputBytes: 5` that has 3 charged; a child of it with no bound of its own; through the child, `max: 10`; `size: None`; the driver holds `abcd` | `Ok` of `ab`: the gate reserved 2, what remains of the parent's bound (Q10) | the same |
+| stdin text, unsized, below one scalar | negative | `inputBytes: 2`; `io.stdinText` with `max: 16`; `size: None`; the driver holds `abc` | `Err(limitExceeded)`; the driver's `read` step is not reached; no receipt; nothing charged (Q31) | 06 Standard input: "A text read of unknown size whose `max` is at least 4 and whose reservation is below 4 is `limitExceeded` before the stream is read" |
 | deep ancestry | boundary | 10,000 chained `limit` calls, then a read, on a 256 KiB thread | `Ok`, no overflow | architecture, risk 5 |
 | a call while an event is pending | negative | a completed call whose receipt is not committed, then a second call | `InvalidHostValue` for the second | 06 step 5: "Advance the continuation consistently with the completion, and then append the completed event" |
 | a receipt of another context | negative | `commit` with a receipt a second `Context` returned | `InvalidHostValue` | 06 Traps: "a boundary value that is invalid, stale, foreign, or of the wrong kind" |
@@ -215,7 +218,7 @@ The fake world (16); events (17); startup (28); real drivers (30, 31).
 
 ## Completion evidence
 
-- [ ] Each of the 61 rows is a test, named in the report.
+- [ ] Each of the 62 rows is a test, named in the report.
 - [ ] `Context::issue` is `pub(crate)`; `git grep -n "fn issue"
       crates/vibra-host/src` shows one definition.
 - [ ] No function of `broker.rs` caches a decision between calls, and a

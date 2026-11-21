@@ -71,7 +71,8 @@ Proposed: `vibra-workspace::dependencies::{load, DependencyUnit}`.
 
 ## Test matrix
 
-`workspaceCheck`, profile `staticV2`; trees with a second package under
+`workspaceCheck`, profile `staticV2`; a row that names another operation has
+that operation's profile (Q34). Trees with a second package under
 `lib/money/` holding `project.vibon` and `src/money/amount.vib`.
 
 | Case id | Kind | Input | Expected | Specification |

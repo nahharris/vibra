@@ -277,6 +277,10 @@ relate fields.
 JSON is the only place `null` appears: it is the **JSON projection** of an
 absent optional field of a VIBON document, and of an unavailable fact.
 Every VIBON document a response carries is embedded as its canonical text.
+A code, whether a diagnostic code of the registry, a `@command.*` result,
+or a `@test.*` result, is spelled in JSON as its full atom text, `@`
+included: an observation error carries `"@tool.unsupportedValue"`, never
+`"unsupportedValue"`.
 Every structured response is a closed object with these fields:
 
 ```json
@@ -370,7 +374,7 @@ in the
 | `TestItem` | `name`, the selector; `result`, the `@test.*` atom; `failure` (nullable); `trap` (nullable); `auditTrace`: `AuditEvent[]`, the test's events; `diagnostics`: string[], the codes of the envelope's diagnostics attributed to the item; `status`, that of the command result the item's result corresponds to: `passed` for `@test.passed`, `refuted` for `@test.assertionFailed` and `@test.invalid`, `unknown` for `@test.trap` and `@test.exhausted`, and `unsupported` for `@test.unavailable` |
 | `TestItem.failure` | `kind`: `assertion` or `observation`; `assertion`, `expected`, `actual`: canonical text or null; `primarySpan`: `SpanDocument`; `observationError`: null for an assertion |
 | `TrapRecord` | `trapCode`; `origin` (nullable) |
-| `ObservationError` | `code`: `unsupportedValue`, the JSON spelling of the observation error `@tool.unsupportedValue`; `type`: the canonical `@type.v2` text of the operand's type, or null; `origin`: a `U64`, or null |
+| `ObservationError` | `code`: `"@tool.unsupportedValue"`, the observation error; `type`: the canonical `@type.v2` text of the operand's type, or null; `origin`: a `U64`, or null |
 | `StartupRecord` | `status`: `notStarted`, `acquired`, or `failed`; `bindings`; `auditTrace`: `AuditEvent[]`, the `@startup` events and the `@host` events of phase `@startup`; `failure`: null or `{binding, code, origin}`, where `code` is `@grant.requiredUnavailable` for a refused required leaf and `@grant.acquisitionFailed` for a failed acquisition; `null` with the status `failed` when a defect trap ended startup, which no leaf stopped |
 | `StartupRecord.bindings[]` | one per processed leaf, in processing order: `name`; `recipeIdentity`: `sha256:` and the SHA-256 of `vibraRecipeIdentityV2`, a zero byte, and the canonical bytes of the recipe with its policy normalized; `providerIdentity`: `{provider, version}`; `status`: `refused` or `failed`, two outcomes of the [startup order](04-programs-and-packages.md#startup-order), or `released` for an acquired leaf, since every acquired binding of a finished command is released; `acquired` is the status inside the `@startup` event, which is appended before release; `grantProjection` (nullable) |
 

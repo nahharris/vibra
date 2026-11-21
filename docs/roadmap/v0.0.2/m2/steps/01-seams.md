@@ -12,7 +12,9 @@ Crates: `vibra-conformance`, `vibra-host`, `vibra-workspace`.
   implementation guide"; [diagnostics
   chapter](../../../../spec/07-diagnostics-and-conformance.md#rule-identities-and-example-coverage)
   "Rule identities and example coverage";
-  [architecture](../architecture.md) sections 1 and 4.
+  [architecture](../architecture.md) sections 1 and 4; [diagnostics
+  chapter](../../../../spec/07-diagnostics-and-conformance.md#conformance-profiles)
+  "Conformance profiles"; [questions](../spec-questions.md) Q34.
 
 ## Entry points
 
@@ -23,13 +25,19 @@ Crates: `vibra-conformance`, `vibra-host`, `vibra-workspace`.
 | `crates/vibra-conformance/src/rules.rs:280` | `pub fn from_path` | gains the directory |
 | `crates/vibra-conformance/src/corpus.rs:213` | `rules_path` | where the corpus finds the index |
 | `crates/vibra-conformance/tests/it/architecture_boundary.rs:23` | `ARCHITECTURE` | the dependency table |
+| `crates/vibra-conformance/src/manifest.rs:68` | `pub enum ManifestError` | the error of a case naming another profile |
+| `crates/vibra-conformance/src/profile.rs:23` | `pub enum ConformanceProfile` | gains the profile of each operation |
 
-Proposed: `RuleIndex::from_root`; the directory `conformance/rules/`.
+Proposed: `RuleIndex::from_root`; the directory `conformance/rules/`;
+`ConformanceOperation::profile`.
 
 ## Files owned
 
 - `crates/vibra-conformance/src/rules.rs`
 - `crates/vibra-conformance/src/corpus.rs`
+- `crates/vibra-conformance/src/manifest.rs`
+- `crates/vibra-conformance/src/profile.rs`
+- `crates/vibra-conformance/tests/it/manifest.rs`
 - `crates/vibra-conformance/tests/it/architecture_boundary.rs`
 - `crates/vibra-conformance/tests/it/rules_directory.rs`
 - `crates/vibra-host/Cargo.toml`
@@ -61,6 +69,13 @@ Proposed: `RuleIndex::from_root`; the directory `conformance/rules/`.
    file's contents and never a module declaration.
 6. Update `Cargo.lock` with one `cargo metadata --offline` run without
    `--locked`; state in the report that only the two edges changed.
+7. `ConformanceOperation::profile` returns the own profile of each
+   operation, as the profile table of the diagnostics chapter gives it.
+   Decoding a case manifest rejects a `profile` other than that of its
+   `operation`, naming both (Q34). The manifest tests that use another
+   profile, among them the `fullV2` manifests of every operation, name
+   the operation's own profile. Invariant: every case of the corpus loads
+   unchanged.
 
 ## Test matrix
 
@@ -76,6 +91,9 @@ a temporary directory.
 | rules: bad header in a directory file | negative | `rules/x.tsv` starting `id\tstatus` | the header error, naming `rules/x.tsv` | the same |
 | rules: not a `.tsv` | boundary | `rules/README.md` | ignored | — (harness rule) |
 | architecture: new edges | positive | the workspace as it is after task 4 | the test passes | architecture, section 1 |
+| manifest: the profile of the operation | positive | the whole corpus; and one manifest per operation naming its own profile | every case loads (Q34) | 07 Conformance profiles: "A case names the profile its operation belongs to" |
+| manifest: another profile | negative | `operation = "workspaceCheck"`, `profile = "interpreterV2"` | the manifest error naming `workspaceCheck` and `staticV2` (Q34) | 07: "a case manifest that names any other is malformed, and loading the corpus rejects it" |
+| manifest: a profile with no operation of its own | negative | `operation = "interpret"`, `profile = "fullV2"`; and the same with `nativeV1` | the manifest error naming `interpreterV2` (Q34) | the same |
 | architecture: forbidden edge | negative | a manifest table with `vibra-interp` → `vibra-host` given to the checking function | the test reports that edge | architecture, section 1 |
 
 ## Diagnostics and schema changes
@@ -110,7 +128,7 @@ Any case, any registry row, any module of `vibra-host`.
 
 - [ ] `git diff --stat` names only the files owned.
 - [ ] `Cargo.lock` gained exactly two dependency lines.
-- [ ] The eight rows above are tests, named in the report.
+- [ ] The eleven rows above are tests, named in the report.
 - [ ] The declared modules are empty and documented with the step that
       fills each.
 - [ ] The validation commands exit 0.

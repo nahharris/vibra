@@ -363,10 +363,10 @@ At startup the runtime acquires grants in the
 chapter defines. A required grant that cannot be acquired prevents the entry
 from running. An optional grant refused in the way its provider specifies
 becomes `Option.none()`; a malformed recipe or an incompatible driver is an
-error, never an absence. On every ending of the process, a failed startup
-included, the acquired grants are released in reverse acquisition order.
-Release is not rollback: an external effect that already happened is
-reported, not undone.
+error, never an absence. On every ending of the process the acquired
+grants are released, as the [runtime chapter](06-runtime.md#entry-outcome)
+states. Release is not rollback: an external effect that already happened
+is reported, not undone.
 
 No operation returns `Never`, and none terminates the process. The
 [runtime chapter](06-runtime.md#entry-outcome) defines how a run ends.
@@ -447,7 +447,11 @@ Unknown fields, kinds, and versions are rejected.
 | `@fileRule` | `root`, `prefix` (list of names), `depth` (`@children`, `@tree`), `actions` (set of `@read`, `@replace`, `@create`, `@stat`), `names` |
 | `@directoryRule` | `root`, `prefix`, `depth` (`@self`, `@children`, `@tree`), `actions` (set of `@list`, `@stat`) |
 
-`root` names the grant leaf whose recipe holds the directory. `names` is a
+`root` names the grant leaf whose recipe holds the directory. In an
+[effective policy](#narrowing) every rule has a `root`: a rule a `restrict`
+or a `sub` contributes names the leaf its grant descends from, and every
+rule of a grant that descends from a `TestWorld` directory grant names
+`@testWorld`. `names` is a
 record whose `kind` is `@anyName`; `@exact` with `names`; `@suffix` with
 `value`; or `@allOf` or `@anyOf` with `items`.
 

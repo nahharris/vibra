@@ -15,7 +15,7 @@ Crates: `vibra-cli`, `vibra-schema`.
   chapter](../../../../spec/06-runtime.md#entry-outcome) the outcome
   table; [diagnostics
   chapter](../../../../spec/07-diagnostics-and-conformance.md#conformance-profiles)
-  "Conformance profiles"; [questions](../spec-questions.md) Q18, Q21.
+  "Conformance profiles"; [questions](../spec-questions.md) Q18, Q21, Q35.
 
 ## Entry points
 
@@ -46,6 +46,7 @@ StartupRecordDocument, BindingRecordDocument, TrapRecordDocument}`.
 - `crates/vibra-cli/tests/it/unavailable.rs`
 - `crates/vibra-cli/tests/it/inventory.rs`
 - `crates/vibra-schema/src/run_payload.rs`
+- `crates/vibra-schema/src/test_payload.rs`
 - `crates/vibra-schema/src/lib.rs`
 - `crates/vibra-schema/schemas/v2/command-result.json`
 - `crates/vibra-schema/tests/it/payloads.rs`
@@ -76,6 +77,10 @@ StartupRecordDocument, BindingRecordDocument, TrapRecordDocument}`.
    profile by hand.
 7. The envelope validates against the published schema before it is
    written.
+8. `ObservationError.code` is spelled `"@tool.unsupportedValue"` in
+   JSON, in `test_payload.rs` and in the `const` of the published schema,
+   as every code is (Q35). Invariant: no code in a JSON document loses its
+   `@`.
 
 ## Test matrix
 
@@ -106,13 +111,15 @@ print `NOT RUN` elsewhere.
 | no world switch | negative | `vibra run --world w.vibon` | exit 2 | 06: "The shipped launcher has no user-selectable world or replay switch" |
 | inventory | positive | `vibra help --format json` | the `run` capability has `supported: true`, `operations: ["workspaceRun"]`, and `profiles: ["interpreterV2"]` | 05 `CommandCapability`: "the profiles of those operations in the" |
 | inventory derived from the profiles | positive | `vibra help --format json` | `fmt` has `profiles: ["toolingV2"]`; `test` has `["interpreterV2"]`; `check` has `["staticV2"]`; `help` has `["toolingV2"]` (C13) | 07 Conformance profiles: "a command's `profiles` are the profiles of the operations it offers" |
+| observation error code in JSON | positive | `vibra test --format json` on the project of `V2-PROJECT-test-unobservable` | `failure.observationError.code` is `"@tool.unsupportedValue"`; the envelope validates (Q35) | 05 Versioned envelope and results: "is spelled in JSON as its full atom text, `@` included" |
 | only caller of the system launch | negative, architecture test | the workspace searched for `Launch::System` | constructed in `crates/vibra-cli/src/run.rs`, and in the test files `crates/vibra-workspace/tests/it/dual_run.rs` and `crates/vibra-workspace/tests/it/attacks_run.rs`, which the test allows by name whether or not they exist | architecture, row A27 |
 
 ## Diagnostics and schema changes
 
 Results: every `@command.*` of the table. Schema:
 `urn:vibra:schema:v2:command-result` gains the `run` payload and its
-records; `payload.auditTrace` and `startup.auditTrace` as Q18 rules.
+records, and `ObservationError.code` becomes `"@tool.unsupportedValue"`;
+`payload.auditTrace` and `startup.auditTrace` as Q18 rules.
 
 ## Validation
 
@@ -139,7 +146,7 @@ A world or replay switch; approval of a target's authority.
 
 ## Completion evidence
 
-- [ ] Each of the 22 rows is a test, named in the report.
+- [ ] Each of the 23 rows is a test, named in the report.
 - [ ] The report pastes the JSON envelope of the hello run.
 - [ ] `vibra help` lists `run` as supported; the profiles of `fmt` and
       `test` changed as the derivation gives, and nothing else changed.

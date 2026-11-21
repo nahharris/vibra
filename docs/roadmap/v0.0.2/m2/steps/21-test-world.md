@@ -19,7 +19,7 @@ Crates: `stdlib`, `vibra-host`, `vibra-types`, `vibra-workspace`,
   and model profiles"; [tooling
   chapter](../../../../spec/05-tooling.md#command-payloads) `TestItem`,
   "Snapshot, claim and witness identity" (the `toolchain` record);
-  [questions](../spec-questions.md) Q12, Q13, Q15, Q16.
+  [questions](../spec-questions.md) Q12, Q13, Q15, Q16, Q33, Q34.
 
 ## Entry points
 
@@ -44,6 +44,7 @@ Proposed: `stdlib/src/std/test.vib`; `vibra-host::test_world`
 - `crates/vibra-workspace/src/test_runner.rs`
 - `crates/vibra-workspace/src/lib.rs`
 - `crates/vibra-workspace/src/snapshot.rs`
+- `conformance/tools/revisions.ps1`
 - `crates/vibra-workspace/src/revision.rs`
 - `crates/vibra-schema/src/test_payload.rs`
 - `crates/vibra-conformance/src/manifest.rs`
@@ -79,10 +80,17 @@ Proposed: `stdlib/src/std/test.vib`; `vibra-host::test_world`
 8. Every snapshot gains the one `toolchain` record (C12): kind
    `toolchain`, identifier `@toolchain`, the canonical bytes of the
    `@toolchain.v2` document of the tooling chapter, with `stdlib` the
-   digest of the embedded manifest. Every expected `revision` in the
-   corpus is recomputed with it by one script, which the report shows.
-   Invariant: no snapshot has a second toolchain record, and no
-   revision is computed without one.
+   digest of the embedded manifest. Invariant: no snapshot has a second
+   toolchain record, and no revision is computed without one.
+9. Check in `conformance/tools/revisions.ps1` (Q33). It computes the
+   workspace revision of each case by the formula of the tooling chapter,
+   from the case's input bytes and the toolchain record, with no code of
+   the engine, since expected results are written from the specification.
+   `-Write` rewrites every expected `revision` of the corpus; `-Check`
+   changes nothing and exits 1 naming each case whose expected
+   `revision` differs. Recompute the corpus with `-Write`. Invariant:
+   every step that changes the library runs it, with `-Check` in its
+   validation.
 
 ## Positions
 
@@ -94,18 +102,20 @@ Proposed: `stdlib/src/std/test.vib`; `vibra-host::test_world`
 
 ## Test matrix
 
-`workspaceTest`, profile `interpreterV2`; each case states the item results
-and the complete trace. Tests import what they use; `w` is the world.
+`workspaceTest`, profile `interpreterV2`, except the rows marked
+`workspaceCheck`, whose profile is `staticV2` (Q34); each case states the
+item results and the complete trace. Tests import what they use; `w` is
+the world.
 
 | Case id | Kind | Input | Expected | Specification |
 | --- | --- | --- | --- | --- |
 | `V2-GRANT-test-reads-note` | positive | the chapter's test "counts the lines of a note" with its `notes` module | `@test.passed`; one `@host` event `fs.readText`, `issuedBy: {kind: @testWorld}` | 04 Tests, the example |
-| `V2-GRANT-test-without-world` | negative, `workspaceCheck` | a test with no `takes` whose body names `TestWorld.clocks(world)` | `@name.unknownSymbol` at `world` | 04: "A test without `takes` receives no grant and can perform no host operation" |
-| `V2-EFFECT-test-row-missing-test-world` | negative, `workspaceCheck` | `takes {world: TestWorld}` with `performs {WallClock}`, awaiting `TestWorld.clocks(world)` | `@effect.outsideCeiling` for `TestWorld` | 04: "it MUST appear in the test's `performs` row" |
-| `V2-EFFECT-test-row-missing-operation` | negative, `workspaceCheck` | `performs {TestWorld}`, then `await WallClock.read(wall)` | `@effect.outsideCeiling` for `WallClock` | 03 Tests: "the test's row MUST also name whatever it then performs" |
+| `V2-GRANT-test-without-world` | negative, `workspaceCheck`, `staticV2` | a test with no `takes` whose body names `TestWorld.clocks(world)` | `@name.unknownSymbol` at `world` | 04: "A test without `takes` receives no grant and can perform no host operation" |
+| `V2-EFFECT-test-row-missing-test-world` | negative, `workspaceCheck`, `staticV2` | `takes {world: TestWorld}` with `performs {WallClock}`, awaiting `TestWorld.clocks(world)` | `@effect.outsideCeiling` for `TestWorld` | 04: "it MUST appear in the test's `performs` row" |
+| `V2-EFFECT-test-row-missing-operation` | negative, `workspaceCheck`, `staticV2` | `performs {TestWorld}`, then `await WallClock.read(wall)` | `@effect.outsideCeiling` for `WallClock` | 03 Tests: "the test's row MUST also name whatever it then performs" |
 | `V2-PROJECT-test-takes-renamed` | positive | `takes {sandbox: TestWorld}` | `@test.passed` (Q15) | 04: "A test with `takes {world: TestWorld}`" |
-| `V2-PROJECT-test-takes-two` | negative, `workspaceCheck` | `takes {a: TestWorld b: TestWorld}` | `@syntax.invalidForm` at the `takes` section | 01 `test` |
-| `V2-PROJECT-test-takes-other-type` | negative, `workspaceCheck` | `takes {world: Str}` | `@syntax.invalidForm` at the `takes` section (Q15) | the same |
+| `V2-PROJECT-test-takes-two` | negative, `workspaceCheck`, `staticV2` | `takes {a: TestWorld b: TestWorld}` | `@syntax.invalidForm` at the `takes` section | 01 `test` |
+| `V2-PROJECT-test-takes-other-type` | negative, `workspaceCheck`, `staticV2` | `takes {world: Str}` | `@syntax.invalidForm` at the `takes` section (Q15) | the same |
 | `V2-GRANT-test-directory-default` | positive | `TestWorld.directory(w)`; `DirList.entries(list root)` | `Ok([])` | 04: "`files: Dict(RelativePath Str) be [:]`" |
 | `V2-GRANT-test-directory-two-files` | positive | `files: [a: "1" b: "2"]` with paths `["b.txt"]` and `["d" "a.txt"]`; list `[]` | `Ok(["b.txt" "d"])` (Q16) | 04: "A multi-name path in `files` implies its parent directories" |
 | `V2-GRANT-test-directory-fresh` | positive | two `directory` calls; write through the first, read through the second | `Err(notFound)` | 04: "`directory` and `streams` make a new resource on every call" |
@@ -134,6 +144,8 @@ and the complete trace. Tests import what they use; `w` is the world.
 | foreign world's grant | negative, host test | a token issued by one test's context used in another's | `InvalidHostValue` | 04: "Grants from one test's world are unusable in another" |
 | the toolchain record | positive, host test | a snapshot of `examples/hello/` | exactly one record of kind `toolchain`, identifier `@toolchain`, whose bytes are the canonical bytes of the chapter's `@toolchain.v2` example with `stdlib` the digest of the embedded manifest (C12) | 05: "Every snapshot has exactly one `toolchain` record, whose bytes are the canonical bytes of this document" |
 | the revision follows the library | positive, host test | two snapshots of one project whose embedded manifests differ in one byte | two workspace revisions (C12) | 05: "a revision changes with the toolchain and with its embedded library even when no project byte changes" |
+| the script agrees with the engine | positive, script | `revisions.ps1 -Check` over the corpus after `-Write`, and the host test's snapshot of `examples/hello/` | exit 0; the script's revision of `examples/hello/` equals the engine's (Q33) | 05: "A revision written in an expected observation, such as the `revision` of an audit trace, is computed with this record" |
+| the script finds a stale revision | negative, script | one expected `revision` changed by one digit | `-Check` exits 1 and names that case (Q33) | the same |
 
 ## Diagnostics and schema changes
 
@@ -151,6 +163,7 @@ cargo fmt --all --check
 cargo clippy --locked --offline --workspace --all-targets --all-features -- -D warnings
 cargo test --locked --offline -p vibra-host -p vibra-types -p vibra-workspace -p vibra-schema -p vibra-cli -p vibra-conformance --all-features
 cargo run --locked --offline -p vibra-conformance --bin vibra-conformance -- --root conformance/cases
+& conformance/tools/revisions.ps1 -Root conformance/cases -Check
 $env:RUSTDOCFLAGS='-D warnings'
 cargo doc --locked --offline --workspace --no-deps --all-features
 ```
@@ -174,7 +187,8 @@ Narrowing and limits under test (22); recipes under a world (28).
       script that computed `revision`, with the toolchain record, and the
       library `seed`.
 - [ ] Every expected `revision` the corpus held before the step was
-      recomputed by that script, and the report lists the files.
+      recomputed by `conformance/tools/revisions.ps1`, and the report
+      lists the files.
 - [ ] `V2-PROJECT-test-unavailable-item` of M1 is rewritten or deleted,
       and the report says which.
 - [ ] The validation commands exit 0.

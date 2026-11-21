@@ -76,7 +76,8 @@ and `effects::members::{contract_member, impl_member}`.
 
 ## Test matrix
 
-`workspaceCheck`, profile `staticV2`, unless a row says otherwise. `L`
+`workspaceCheck`, profile `staticV2`, unless a row names another operation,
+which has that operation's profile (Q34). `L`
 abbreviates:
 
 ```vibra
