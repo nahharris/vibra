@@ -16,6 +16,7 @@ mod deep_nesting;
 mod diagnostic_registry;
 mod encoding_readback;
 mod exit_evidence;
+mod host_testing_feature;
 mod interpret;
 mod manifest;
 mod owner_coverage;
