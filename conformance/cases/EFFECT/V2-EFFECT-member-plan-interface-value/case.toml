@@ -1,0 +1,12 @@
+id = "V2-EFFECT-member-plan-interface-value"
+rule = "V2-EFFECT-member-plan-interface-value"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#cold-plans-and-performed-rows: a fn may build a plan of a contract proc member through an interface value"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

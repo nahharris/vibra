@@ -2,18 +2,18 @@ id = "V2-TOOL-unavailable-test-row"
 rule = "V2-TOOL-unavailable-test-row"
 profile = "interpreterV2"
 operation = "workspaceTest"
-description = "05-tooling.md#tests-and-selection: a test whose row is not empty is unavailable and the other test runs"
+description = "03-effects.md#effect-ceilings: a test row entry that names a plain type is an invalid reference at the entry and every item is invalid"
 
 [inputs]
 tree = "tree"
 project = "tree/project.vibon"
 
 [expect]
-verdict = "unsupported"
+verdict = "refuted"
 testRun = "test-run.vibon"
 
 [[expect.diagnostics]]
-code = "@tool.unavailable"
+code = "@effect.invalidReference"
 level = "@error"
 source = "tests/run.vib"
-span = { start = 75, end = 115 }
+span = { start = 96, end = 103 }

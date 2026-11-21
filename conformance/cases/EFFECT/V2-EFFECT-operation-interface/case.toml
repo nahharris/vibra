@@ -1,0 +1,13 @@
+id = "V2-EFFECT-operation-interface"
+rule = "V2-EFFECT-operation-interface"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#operation-interfaces: a proc member's type is Proc with its owner as its row; the types snapshot lists each member with its complete row"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+types = "types.vibon"

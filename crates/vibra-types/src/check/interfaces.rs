@@ -386,8 +386,9 @@ impl<'a> Program<'a> {
             for member in view.members() {
                 let Some(name) = member.name() else { continue };
                 let what = format!("the member `{interface_name}.{}`", name.text());
-                if effects::members::contract_member(self, module, &member, &what)
-                    == Hook::Reported
+                if effects::members::contract_member(
+                    self, module, index, &member, &what,
+                ) == Hook::Reported
                 {
                     continue;
                 }
@@ -468,6 +469,7 @@ impl<'a> Program<'a> {
                     bounds: all_bounds,
                     receiver,
                     default,
+                    row: effects::members::contract_row(self, index, &member),
                 });
             }
             if let Some(data) = self.interfaces.get_mut(index) {
@@ -503,7 +505,13 @@ impl<'a> Program<'a> {
             .get(module)
             .map(|data| (data.path.clone(), data.embedded))
             .unwrap_or_default();
-        let identity = self.identity_of(&path, embedded, &interface_name, "@fn", &name);
+        let identity = self.identity_of(
+            &path,
+            embedded,
+            &interface_name,
+            effects::procs::identity_kind(member),
+            &name,
+        );
         self.functions.push(FnData {
             module,
             owner: None,
@@ -1041,7 +1049,7 @@ impl<'a> Program<'a> {
                 usable = false;
                 continue;
             }
-            if effects::members::impl_member(self, module, &member, &what)
+            if effects::members::impl_member(self, module, interface, &member, &what)
                 == Hook::Reported
             {
                 usable = false;

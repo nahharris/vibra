@@ -672,6 +672,11 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         self.test && self.frames.is_empty()
     }
 
+    /// The program whose body is being checked.
+    pub(crate) const fn program(&self) -> &'p Program<'a> {
+        self.program
+    }
+
     /// Checks the body of a callable of type `signature` whose parameters
     /// are written as `patterns` and whose labelled parameters are written
     /// as `labelled`, with the type parameters `binders` and `self_type`
@@ -2823,7 +2828,9 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                         let (params, result) = flatten(&signature);
                         (
                             params,
-                            result.map(|result| effects::procs::applied(data, result)),
+                            result.map(|result| {
+                                effects::procs::applied(program, data, result)
+                            }),
                         )
                     }
                     None => (None, None),

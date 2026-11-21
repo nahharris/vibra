@@ -1,0 +1,12 @@
+id = "V2-EFFECT-generic-operation-interface"
+rule = "V2-EFFECT-generic-operation-interface"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#operation-interfaces: every application of a generic operation interface is one root"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

@@ -320,6 +320,8 @@ pub(crate) struct InterfaceMemberData {
     pub(crate) receiver: Option<usize>,
     /// The function holding the default body of a default member.
     pub(crate) default: Option<usize>,
+    /// The complete row of a `proc` member; `None` for a `fn`.
+    pub(crate) row: Option<vibra_ir::Row>,
 }
 
 /// One `interface`.

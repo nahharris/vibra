@@ -1,0 +1,19 @@
+id = "V2-EFFECT-row-duplicate-alias"
+rule = "V2-EFFECT-row-duplicate-alias"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#effect-ceilings: one interface under two spellings is a duplicate root; an import name never identifies a root"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@effect.duplicateRoot"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 98, end = 105 }
+related = [{ source = "src/app/main.vib", span = { start = 90, end = 97 } }]

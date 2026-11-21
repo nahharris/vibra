@@ -1,0 +1,18 @@
+id = "V2-EFFECT-row-names-type"
+rule = "V2-EFFECT-row-names-type"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#effect-ceilings: a row entry naming a type is an invalid reference"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@effect.invalidReference"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 451, end = 457 }

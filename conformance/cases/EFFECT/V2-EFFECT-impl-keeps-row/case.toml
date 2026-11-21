@@ -1,0 +1,12 @@
+id = "V2-EFFECT-impl-keeps-row"
+rule = "V2-EFFECT-impl-keeps-row"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#operation-interfaces: an implementation member that keeps its contract member's row is accepted"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

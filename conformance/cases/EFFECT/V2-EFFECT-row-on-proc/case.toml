@@ -1,0 +1,12 @@
+id = "V2-EFFECT-row-on-proc"
+rule = "V2-EFFECT-row-on-proc"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#effect-ceilings: a proc row names operation interfaces and a proc may build a plan within it"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

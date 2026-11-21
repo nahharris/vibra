@@ -247,7 +247,33 @@ fn a_test_reaching_an_unsupported_form_is_unavailable_and_the_others_run()
 }
 
 #[test]
-fn a_test_that_takes_or_performs_is_unavailable_over_the_test() -> Result<(), String> {
+fn a_test_that_takes_a_world_is_unavailable_over_the_test() -> Result<(), String> {
+    let tests = "use @std.assert enduse\n\n\
+                 type World of I32 endtype\n\n\
+                 test \"world\" takes {world: World} do endtest\n\n\
+                 test \"plain\" do assert.true(true) endtest\n";
+    let result = check(MATH, &[("@tests.math", tests)], &["@tests"])?;
+    assert_eq!(
+        faults(&result),
+        [(
+            DiagnosticCode::ToolUnavailable,
+            at(tests, "test \"world\" takes {world: World} do endtest", 0)
+        )]
+    );
+    let names = result
+        .tests()
+        .iter()
+        .map(|test| (test.name(), test.function().is_some()))
+        .collect::<Vec<_>>();
+    assert_eq!(names, [("world", false), ("plain", true)]);
+    Ok(())
+}
+
+/// A test's row names operation interfaces (`docs/spec/03-effects.md`,
+/// "Effect ceilings"): one that names a plain type is
+/// `@effect.invalidReference` at the entry, an error, so no test runs.
+#[test]
+fn a_test_row_that_names_a_type_is_an_invalid_reference() -> Result<(), String> {
     let tests = "use @std.assert enduse\n\n\
                  type Missing of I32 endtype\n\n\
                  test \"effects\" performs {Missing} do endtest\n\n\
@@ -256,16 +282,11 @@ fn a_test_that_takes_or_performs_is_unavailable_over_the_test() -> Result<(), St
     assert_eq!(
         faults(&result),
         [(
-            DiagnosticCode::ToolUnavailable,
-            at(tests, "test \"effects\" performs {Missing} do endtest", 0)
+            DiagnosticCode::EffectInvalidReference,
+            at(tests, "Missing", 1)
         )]
     );
-    let names = result
-        .tests()
-        .iter()
-        .map(|test| (test.name(), test.function().is_some()))
-        .collect::<Vec<_>>();
-    assert_eq!(names, [("effects", false), ("plain", true)]);
+    assert!(result.tests().is_empty());
     Ok(())
 }
 

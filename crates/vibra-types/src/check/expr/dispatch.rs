@@ -30,6 +30,7 @@ use super::{
 };
 use crate::check::callables::mark_tail;
 use crate::check::declare::{BoundData, BoundGoal, GoalHead, key_diagnostic};
+use crate::check::effects;
 use crate::check::interfaces::same_head;
 
 /// The most goals one search for evidence visits.
@@ -615,7 +616,7 @@ impl<'a> BodyChecker<'_, 'a> {
         let Type::Fn(signature) = &substituted else {
             return None;
         };
-        let signature = signature.as_ref().clone();
+        let signature = effects::members::applied(declared, signature.as_ref().clone());
         let mut names = declared.binders.clone();
         names.push("Self".to_owned());
         names.extend(data.associated.iter().map(|(name, _)| name.clone()));
@@ -1538,6 +1539,9 @@ impl<'a> BodyChecker<'_, 'a> {
         span: ByteSpan,
         expected: Option<&Type>,
     ) -> Out {
+        if effects::members::named_as_value(self, interface, member, span) {
+            return Out::error();
+        }
         let Some((names, signature, mut dispatch)) =
             self.contract_signature(interface, member, span)
         else {

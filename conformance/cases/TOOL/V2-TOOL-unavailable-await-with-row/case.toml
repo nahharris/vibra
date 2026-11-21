@@ -1,0 +1,18 @@
+id = "V2-TOOL-unavailable-await-with-row"
+rule = "V2-TOOL-unavailable-await-with-row"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "07-diagnostics-and-conformance.md#runtime-and-tool-failures: an await of a plan whose row is not empty is outside this checker, at the await"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "unsupported"
+
+[[expect.diagnostics]]
+code = "@tool.unavailable"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 484, end = 507 }

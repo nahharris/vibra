@@ -1,0 +1,12 @@
+id = "V2-EFFECT-fn-member-pure"
+rule = "V2-EFFECT-fn-member-pure"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#operation-interfaces: a fn member of an operation interface is pure, and a fn may apply it"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

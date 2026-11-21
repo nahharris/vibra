@@ -20,10 +20,16 @@ const ADDS: &str = "test \"adds\" do assert.equal(3i32 math.add(1i32 2i32)) endt
 const ADDS_WRONG: &str =
     "test \"adds\" do assert.equal(4i32 math.add(1i32 2i32)) endtest\n";
 
-/// A test whose row is not empty, which stays unavailable until rows are
-/// read; the row names a plain type so that the name resolves.
-const EFFECTS: &str = "test \"effects\" performs {Missing} do assert.true(true) endtest\n\
-                       type Missing of I32 endtype\n";
+/// A test that awaits a plan whose row is not empty, which stays
+/// unavailable until ceilings are checked.
+const EFFECTS: &str = "test \"effects\" performs {Log} do \
+                       let _ be await Log.append(Memory(1i32) \"x\") endlet \
+                       assert.true(true) endtest\n\
+                       interface Log proc append takes {log: Self entry: Str} \
+                       returns d: Void endproc endinterface\n\
+                       type Memory of I32 impl Log proc append \
+                       takes {log: Self entry: Str} returns d: Void do return void \
+                       endproc endimpl endtype\n";
 
 /// A library project with `src/app/math.vib` and `files`.
 fn project(label: &str, files: &[(&str, &str)]) -> TempDir {
@@ -361,11 +367,11 @@ fn test_unavailable_item() {
     assert_eq!(code, 4, "{document}");
     assert_eq!(document["result"], "@command.unavailable");
     assert_eq!(document["status"], "unsupported");
-    // The whole declaration of the first test, bytes 46..108.
+    // The `await` in the first test, bytes 88..122.
     assert_eq!(codes(&document), ["@tool.unavailable"]);
     let span = &document["diagnostics"][0]["primarySpan"];
     assert_eq!(span["sourceId"], "tests/math.vib");
-    assert_eq!((&span["start"], &span["end"]), (&json!(46), &json!(108)));
+    assert_eq!((&span["start"], &span["end"]), (&json!(88), &json!(122)));
     assert_eq!(counts(&document), (2, 1, 1));
     let items = &document["payload"]["tests"];
     assert_eq!(items[0]["name"], "@tests.math::\"effects\"");

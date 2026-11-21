@@ -551,7 +551,7 @@ fn abstract_guards(
                         &source.path,
                         source.embedded,
                         &interface.name,
-                        "@fn",
+                        effects::procs::identity_kind(&view),
                         &member.name,
                     ),
                     qualified: format!("{}.{}", interface.name, member.name),
@@ -1259,7 +1259,7 @@ fn assemble(
                 &member.binders,
                 &member.bounds,
                 member.receiver,
-                member.signature.clone(),
+                effects::members::member_type(member),
                 &associated,
             )?;
             // A default body the checker skipped leaves its member out of
@@ -1429,7 +1429,7 @@ fn assemble(
             exit_guard: None,
             slot_count,
             origin: origin(program, data.module, data.view.construct().span()),
-            context: effects::procs::test_context(data),
+            context: effects::procs::test_context(program, data),
         });
     }
     for (ty, at) in &anonymous {
@@ -1667,21 +1667,21 @@ fn signature_record(
         .map_err(|error| error.to_string())
 }
 
-/// The signature record of a member of an interface with the associated
-/// types `associated`.
+/// The signature record of a member of an interface of the callable type
+/// `ty`, with the associated types `associated`.
 fn member_record(
     program: &Program<'_>,
     binders: &[String],
     bounds: &[Option<BoundData>],
     receiver: Option<usize>,
-    signature: FnType,
+    ty: Type,
     associated: &[String],
 ) -> Result<SignatureRecord, String> {
     let binders = binders_of(program, binders, bounds)?;
     SignatureRecord::interface_member(
         binders,
         receiver.and_then(|slot| u64::try_from(slot).ok()),
-        Type::function(signature),
+        ty,
         associated.to_vec(),
     )
     .map_err(|error| error.to_string())
@@ -1701,7 +1701,7 @@ fn function_record(
         let binders = binders_of(program, &data.binders, &data.bounds)?;
         return SignatureRecord::new(
             binders,
-            effects::procs::callable_type(data, signature),
+            effects::procs::callable_type(program, data, signature),
         )
         .map_err(|error| error.to_string());
     };
@@ -1718,7 +1718,7 @@ fn function_record(
         &data.binders,
         &data.bounds,
         receiver,
-        signature,
+        effects::procs::callable_type(program, data, signature),
         &associated,
     )
 }
@@ -1803,6 +1803,49 @@ fn types_document(program: &Program<'_>, obligations: &[Obligation]) -> Option<S
                 record.encode().ok()?
             ),
         ));
+    }
+    // An abstract member has no function; a default member is one above.
+    for data in &program.interfaces {
+        let Some(source) = program.modules.get(data.module) else {
+            continue;
+        };
+        if !local(data.module) || data.id.is_none() {
+            continue;
+        }
+        let associated = data
+            .associated
+            .iter()
+            .map(|(name, _)| name.clone())
+            .collect::<Vec<_>>();
+        for member in data
+            .members
+            .iter()
+            .filter(|member| member.default.is_none())
+        {
+            let identity = program.identity_of(
+                &source.path,
+                source.embedded,
+                &data.name,
+                effects::members::identity_kind(member),
+                &member.name,
+            );
+            let record = member_record(
+                program,
+                &member.binders,
+                &member.bounds,
+                member.receiver,
+                effects::members::member_type(member),
+                &associated,
+            )
+            .ok()?;
+            callables.push((
+                identity.clone(),
+                format!(
+                    "{{declaration: \"{identity}\" signature: {}}}",
+                    record.encode().ok()?
+                ),
+            ));
+        }
     }
     let mut implementations = Vec::new();
     for data in &program.impls {

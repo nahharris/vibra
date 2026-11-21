@@ -1,0 +1,18 @@
+id = "V2-EFFECT-row-on-test-invalid"
+rule = "V2-EFFECT-row-on-test-invalid"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#effect-ceilings: a test row entry that is no operation interface is an invalid reference"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@effect.invalidReference"
+level = "@error"
+source = "tests/run.vib"
+span = { start = 321, end = 326 }

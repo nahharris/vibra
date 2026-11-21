@@ -36,10 +36,6 @@ fn every_type_position_of_a_declaration_is_resolved() {
         ),
         ("fn f returns r: Nope do return 1u8 endfn\n", "Nope"),
         ("let limit: Nope be 1u8 endlet\n", "Nope"),
-        (
-            "proc p returns r: U8 performs {Nope} do return 1u8 endproc\n",
-            "Nope",
-        ),
         ("type A of Iter(Item: Nope) endtype\n", "Nope"),
     ] {
         assert_one(
@@ -49,6 +45,32 @@ fn every_type_position_of_a_declaration_is_resolved() {
             &[],
         );
     }
+}
+
+/// A row entry that names nothing is the effect checker's
+/// `@effect.invalidReference` (`docs/spec/03-effects.md`, "Effect
+/// ceilings"; `docs/spec/07-diagnostics-and-conformance.md`, "one that
+/// resolves to nothing included"), so resolution reports none of them; a
+/// type written beside the row is still resolved.
+#[test]
+fn resolution_leaves_a_row_entry_that_names_nothing_to_the_checker() {
+    for text in [
+        "proc p returns r: U8 performs {Nope} do return 1u8 endproc\n",
+        "proc p returns r: U8 performs {Nope.Deeper} do return 1u8 endproc\n",
+        "use @std.option enduse\n\
+         proc p returns r: U8 performs {option.Nope} do return 1u8 endproc\n",
+        "test \"t\" performs {Nope} do endtest\n",
+    ] {
+        assert_clean(&resolve_main(text));
+    }
+    let text =
+        "proc p takes {x: Nope} returns r: U8 performs {Gone} do return 1u8 endproc\n";
+    assert_one(
+        &resolve_main(text),
+        C::NameUnknownSymbol,
+        span_of(text, "Nope", 0),
+        &[],
+    );
 }
 
 #[test]

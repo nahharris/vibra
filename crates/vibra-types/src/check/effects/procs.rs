@@ -9,19 +9,20 @@
 //! A module-level `proc` and a `proc` member of a type are functions of the
 //! program, as a `fn` is: their headers, type parameters, `given`, labelled
 //! parameters, parameter patterns, and guards are read and checked the way a
-//! `fn`'s are, and only the type they denote differs. A `proc` with no
-//! `performs`, or with `performs {}`, has the type `Proc({…} R {})`; it is
-//! never given a `Fn` type. Applying one builds a plan of type
-//! `Intent(R {})` and enters nothing, so a bare `requires` of the callee is
+//! `fn`'s are, and only the type they denote differs. A `proc` has the type
+//! `Proc({…} R {Row})` with its written row, resolved by [`super::rows`],
+//! empty when no `performs` or `performs {}` is written; it is never given a
+//! `Fn` type. Applying one builds a plan of type `Intent(R {Row})` and
+//! enters nothing, so a bare `requires` of the callee is
 //! an obligation of the application, where the plan is built. `await plan`
 //! is valid in the body of a `proc` and in the body of a test, at any depth
 //! of `if`, `match`, `do`, and `let`, and not in a guard, a labelled
 //! default, or an anonymous callable written there; its operand MUST be a
 //! plan.
 //!
-//! A test with no `takes` and an empty row, written or not, runs in a
-//! procedure context with the empty row. It is never given a `Proc` type:
-//! it is not applicable, and nothing builds a plan of it.
+//! A test with no `takes` runs in a procedure context with its written
+//! row, which MUST resolve as a `proc`'s does. It is never given a `Proc`
+//! type: it is not applicable, and nothing builds a plan of it.
 //!
 //! A `proc` is not a certified function (`docs/spec/02-type-system.md`,
 //! "Predicates"): its application builds a plan, so it is never read
@@ -29,18 +30,18 @@
 //! at the application nor at an `await` of the plan, which the chapter does
 //! not name a call that returns.
 //!
-//! Step 08 reads a non-empty row through [`super::rows`]; until then a
-//! `proc` or a test with one is `@tool.unavailable`. Step 10 lifts a `proc`
-//! named as a value and the application of a procedure value; step 21 lifts
-//! a test that takes a world.
+//! An `await` of a plan whose row is not empty stays `@tool.unavailable`
+//! until step 09 checks ceilings. Step 10 lifts a `proc` named as a value
+//! and the application of a procedure value; step 21 lifts a test that
+//! takes a world.
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 use vibra_ir::{
     BodyContext, Expr as IrExpr, FnType, IntentType, Node, ProcType, Row, Type,
 };
-use vibra_syntax::SyntaxKind;
 use vibra_syntax::source::{Callable, CallableKind, Expr};
 
+use super::rows;
 use crate::check::declare::{
     BoundData, Entity, FnData, NoType, Program, Scope, TestData,
 };
@@ -102,43 +103,21 @@ pub(crate) fn identity_kind(view: &Callable<'_>) -> &'static str {
 
 /// The header of the callable `data` read in `scope`, when this hook reads
 /// it; `None` when the shared checker reads it as a `fn`'s: a `fn` with no
-/// row, and a `proc` with an empty row, whose type is then
-/// [`callable_type`].
-///
-/// A `proc` whose row is not empty is `@tool.unavailable` at its `performs`
-/// section until step 08; a `fn` that writes a row, which the reader
-/// rejects, is not supported.
+/// row, and a `proc` whose row resolves ([`super::rows::resolve`]), whose
+/// type is then [`callable_type`]. A `proc` whose row does not resolve has
+/// that row's fault; a `fn` that writes a row, which the reader rejects, is
+/// not supported.
 pub(crate) fn header(
-    _program: &Program<'_>,
+    program: &Program<'_>,
     data: &FnData<'_>,
     _scope: Scope<'_>,
 ) -> Option<Result<Header, NoType>> {
     let row = data.view.performs();
     match data.view.kind() {
         CallableKind::Fn => row.is_some().then_some(Err(NoType::Unsupported)),
-        CallableKind::Proc => {
-            let row = row.filter(|row| !row.paths().is_empty())?;
-            let section = data
-                .view
-                .node()
-                .children()
-                .iter()
-                .find(|child| child.kind() == SyntaxKind::Performs)
-                .map_or(row.node().span(), |section| {
-                    let start = section
-                        .children()
-                        .first()
-                        .map_or(section.span().start(), |keyword| {
-                            keyword.span().start()
-                        });
-                    ByteSpan::new(start, row.node().span().end())
-                });
-            Some(Err(NoType::Fault(Box::new(Diagnostic::new(
-                DiagnosticCode::ToolUnavailable,
-                section,
-                "a `proc` that performs operations is not supported by this checker yet",
-            )))))
-        }
+        CallableKind::Proc => rows::resolve(program, data.module, row, None)
+            .err()
+            .map(Err),
     }
 }
 
@@ -151,9 +130,19 @@ pub(crate) fn describe(data: &FnData<'_>) -> String {
 }
 
 /// The row of the callable `data`: its ceiling when it is a `proc`, `None`
-/// for a `fn`. A `proc` with a header has an empty row until step 08.
-fn row(data: &FnData<'_>) -> Option<Row> {
-    (data.view.kind() == CallableKind::Proc).then(Row::empty)
+/// for a `fn`. The ceiling of a member of an interface or of an
+/// implementation is the member's complete row: the interface and the
+/// written row. A `proc` with a header has a row that resolves, so its
+/// faults are reported where the header is read and not here.
+fn row(program: &Program<'_>, data: &FnData<'_>) -> Option<Row> {
+    if data.view.kind() != CallableKind::Proc {
+        return None;
+    }
+    let owner = data.contract.or(data.implements);
+    Some(
+        rows::resolve(program, data.module, data.view.performs(), owner)
+            .unwrap_or_default(),
+    )
 }
 
 /// Whether applying the callable `data` builds a plan: it is a `proc`. Such
@@ -161,13 +150,18 @@ fn row(data: &FnData<'_>) -> Option<Row> {
 /// `ensures` is never a certified result (`GUARD-7`): the contract review
 /// asks this before it treats a callable as a certified function.
 pub(crate) fn builds_plan(data: &FnData<'_>) -> bool {
-    row(data).is_some()
+    data.view.kind() == CallableKind::Proc
 }
 
-/// The type the callable `data`, whose header is `signature`, denotes: the
-/// `Proc` type of a `proc`, the `Fn` type of a `fn`.
-pub(crate) fn callable_type(data: &FnData<'_>, signature: FnType) -> Type {
-    match row(data) {
+/// The type the callable `data` of `program`, whose header is `signature`,
+/// denotes: the `Proc` type of a `proc`, with its row, the `Fn` type of a
+/// `fn`.
+pub(crate) fn callable_type(
+    program: &Program<'_>,
+    data: &FnData<'_>,
+    signature: FnType,
+) -> Type {
+    match row(program, data) {
         Some(effects) => Type::Proc(Box::new(ProcType {
             parameters: signature.parameters,
             labels: signature.labels,
@@ -178,11 +172,11 @@ pub(crate) fn callable_type(data: &FnData<'_>, signature: FnType) -> Type {
     }
 }
 
-/// The type of an application of the callable `data` whose header gives
-/// the result `result`: for a `proc` the plan it builds, `Intent(result
-/// {Row})`, of the kind `@procPlan`; for a `fn` its result.
-pub(crate) fn applied(data: &FnData<'_>, result: Type) -> Type {
-    match row(data) {
+/// The type of an application of the callable `data` of `program` whose
+/// header gives the result `result`: for a `proc` the plan it builds,
+/// `Intent(result {Row})` with the `proc`'s row; for a `fn` its result.
+pub(crate) fn applied(program: &Program<'_>, data: &FnData<'_>, result: Type) -> Type {
+    match row(program, data) {
         Some(effects) => Type::Intent(Box::new(IntentType { result, effects })),
         None => result,
     }
@@ -295,7 +289,7 @@ pub(crate) fn finish_await<'a>(
 /// position: a `proc` awaits the plan the call builds, since a tail call of
 /// a procedure builds a plan and returns nothing it could run.
 pub(crate) fn stub(data: &FnData<'_>, call: Node) -> Node {
-    if row(data).is_none() {
+    if !builds_plan(data) {
         return call;
     }
     let mut call = call;
@@ -314,31 +308,44 @@ pub(crate) fn stub(data: &FnData<'_>, call: Node) -> Node {
 
 /// The context the body of the callable `data` runs in: a `proc`'s is a
 /// procedure context with its ceiling, which equals the row of its type.
-pub(crate) fn lower(_program: &Program<'_>, data: &FnData<'_>) -> BodyContext {
-    row(data).map_or(BodyContext::Pure, BodyContext::Procedure)
+pub(crate) fn lower(program: &Program<'_>, data: &FnData<'_>) -> BodyContext {
+    row(program, data).map_or(BodyContext::Pure, BodyContext::Procedure)
 }
 
-/// The `@tool.unavailable` of the test `test`, over the test and with no
-/// source, when its header is not supported; `None` when its body is
-/// checked. A test with no `takes`, and with no `performs` or
-/// `performs {}`, is supported; a test that takes a world (step 21) or
-/// writes a row that is not empty (step 08) is not.
-pub(crate) fn test_header(test: &TestData<'_>) -> Option<Diagnostic> {
-    let row = test.view.performs().filter(|row| !row.paths().is_empty());
-    if test.view.takes().is_none() && row.is_none() {
-        return None;
+/// The fault of the header of the test `test`, with no source, when its
+/// body is not checked; `None` when it is. A test with no `takes` whose
+/// row resolves, written or not, is checked. A row that does not resolve
+/// has its fault; a test that takes a world is `@tool.unavailable` over
+/// the test until step 21.
+pub(crate) fn test_header(
+    program: &Program<'_>,
+    test: &TestData<'_>,
+) -> Option<Diagnostic> {
+    if test.view.takes().is_some() {
+        return Some(Diagnostic::new(
+            DiagnosticCode::ToolUnavailable,
+            test.view.construct().span(),
+            "a test that takes a world is not supported by this checker yet",
+        ));
     }
-    Some(Diagnostic::new(
-        DiagnosticCode::ToolUnavailable,
-        test.view.construct().span(),
-        "a test that takes a world or performs operations is not supported \
-         by this checker yet",
-    ))
+    match rows::resolve(program, test.module, test.view.performs(), None) {
+        Ok(_) => None,
+        Err(NoType::Fault(diagnostic)) => Some(*diagnostic),
+        Err(NoType::Unsupported | NoType::Unresolved) => Some(Diagnostic::new(
+            DiagnosticCode::ToolUnavailable,
+            test.view.construct().span(),
+            "a test whose row names an interface this checker does not support is not supported by this checker yet",
+        )),
+    }
 }
 
-/// The context the lowered body of the test `test` runs in: a procedure
-/// context with its row, which is empty for every test [`test_header`]
-/// supports. A test is not applicable, so it has no `Proc` type.
-pub(crate) fn test_context(_test: &TestData<'_>) -> BodyContext {
-    BodyContext::Procedure(Row::empty())
+/// The context the lowered body of the test `test` of `program` runs in: a
+/// procedure context with its row, which resolves for every test
+/// [`test_header`] checks. A test is not applicable, so it has no `Proc`
+/// type.
+pub(crate) fn test_context(program: &Program<'_>, test: &TestData<'_>) -> BodyContext {
+    BodyContext::Procedure(
+        rows::resolve(program, test.module, test.view.performs(), None)
+            .unwrap_or_default(),
+    )
 }

@@ -24,4 +24,4 @@ V2-EFFECT-proc-argument-mismatch	active	02-type-system.md#application
 V2-EFFECT-proc-arity	active	02-type-system.md#application
 V2-EFFECT-proc-missing-return	active	01-source-language.md#return-try-await
 V2-CONTRACT-proc-requires-refuted-at-build	active	03-effects.md#cold-plans-and-performed-rows
-V2-TOOL-unavailable-proc-row	active	07-diagnostics-and-conformance.md#runtime-and-tool-failures
+V2-TOOL-unavailable-proc-row	active	03-effects.md#effect-ceilings

@@ -2,17 +2,17 @@ id = "V2-TOOL-unavailable-proc-row"
 rule = "V2-TOOL-unavailable-proc-row"
 profile = "staticV2"
 operation = "workspaceCheck"
-description = "07-diagnostics-and-conformance.md#runtime-and-tool-failures: a proc that performs operations is outside this checker, at its performs section"
+description = "03-effects.md#effect-ceilings: a proc row entry that names a plain type is an invalid reference at the entry"
 
 [inputs]
 tree = "tree"
 project = "tree/project.vibon"
 
 [expect]
-verdict = "unsupported"
+verdict = "refuted"
 
 [[expect.diagnostics]]
-code = "@tool.unavailable"
+code = "@effect.invalidReference"
 level = "@error"
 source = "src/app/main.vib"
-span = { start = 51, end = 69 }
+span = { start = 61, end = 68 }

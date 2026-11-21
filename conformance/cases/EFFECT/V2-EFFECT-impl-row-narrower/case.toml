@@ -1,0 +1,19 @@
+id = "V2-EFFECT-impl-row-narrower"
+rule = "V2-EFFECT-impl-row-narrower"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#operation-interfaces: an implementation member that omits its contract member's row is a mismatch at its name"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.mismatch"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 420, end = 426 }
+related = [{ source = "src/app/main.vib", span = { start = 297, end = 303 } }]

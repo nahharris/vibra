@@ -1,0 +1,13 @@
+id = "V2-EFFECT-row-two-roots"
+rule = "V2-EFFECT-row-two-roots"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#effect-ceilings: a row's roots are sorted by the bytes of their path, whatever the written order"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+types = "types.vibon"

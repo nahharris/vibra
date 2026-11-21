@@ -1,0 +1,18 @@
+id = "V2-EFFECT-row-not-operation-interface"
+rule = "V2-EFFECT-row-not-operation-interface"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#operation-interfaces: an interface with only fn members is no root, so a row entry naming it is an invalid reference"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@effect.invalidReference"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 451, end = 456 }

@@ -1,0 +1,16 @@
+interface Log
+  proc append
+    takes {log: Self entry: Str}
+    returns done: Void
+  endproc
+endinterface
+
+interface Clock
+  proc now takes {clock: Self} returns at: I64 endproc
+endinterface
+
+interface Shown
+  fn show takes {value: Self} returns text: Str endfn
+endinterface
+interface Store(T) proc put takes {s: Self value: T} returns d: Void endproc endinterface
+proc p takes {a: Store(Str) b: Store(I32)} returns d: Void performs {Store} do return void endproc

@@ -1,0 +1,1 @@
+interface Log visibility @public proc append takes {log: Self entry: Str} returns done: Void endproc endinterface

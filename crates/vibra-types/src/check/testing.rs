@@ -5,7 +5,7 @@
 //! `@tests` that declares a test contains an import that resolves to the
 //! module `@std.assert` (`@module.missingRequiredImport` at its first test's
 //! name). [`effects::procs::test_header`] decides whether the header of a
-//! test that takes a world or performs operations is supported.
+//! test is checked: its row resolves, and it takes no world.
 //!
 //! When every error is `@tool.unavailable`, a test whose declaration
 //! closure holds an unsupported form is unavailable and the other tests
@@ -27,8 +27,8 @@ const ASSERT_MODULE: &str = "@std.assert";
 pub(crate) struct TestFaults {
     /// Every fault, in written order per module.
     pub(crate) diagnostics: Vec<Diagnostic>,
-    /// The `@tool.unavailable` of each test that takes a world or performs
-    /// operations, by test index.
+    /// The `@tool.unavailable` of each test that takes a world, by test
+    /// index.
     pub(crate) unavailable: BTreeMap<usize, Diagnostic>,
 }
 
@@ -37,7 +37,7 @@ pub(crate) struct TestFaults {
 /// supports.
 pub(crate) fn checked_test(program: &Program<'_>, index: usize) -> bool {
     program.tests.get(index).is_some_and(|test| {
-        effects::procs::test_header(test).is_none()
+        effects::procs::test_header(program, test).is_none()
             && program
                 .modules
                 .get(test.module)
@@ -98,12 +98,14 @@ pub(crate) fn declaration_faults(program: &Program<'_>) -> TestFaults {
             );
         }
         for (index, test) in tests {
-            let Some(diagnostic) = effects::procs::test_header(test) else {
+            let Some(diagnostic) = effects::procs::test_header(program, test) else {
                 continue;
             };
             let diagnostic = diagnostic.with_source_id(source);
             faults.diagnostics.push(diagnostic.clone());
-            faults.unavailable.insert(index, diagnostic);
+            if diagnostic.code() == DiagnosticCode::ToolUnavailable {
+                faults.unavailable.insert(index, diagnostic);
+            }
         }
     }
     faults

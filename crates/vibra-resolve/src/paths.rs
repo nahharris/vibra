@@ -415,9 +415,21 @@ impl<'a> Walker<'_, 'a, '_> {
         }
     }
 
+    /// Resolves the entries of an effect row. An entry that names nothing is
+    /// not reported here: a row entry that is no operation interface, one
+    /// that resolves to nothing included, is the effect checker's
+    /// `@effect.invalidReference` (`docs/spec/03-effects.md`, "Effect
+    /// ceilings").
     fn row(&mut self, scope: &Scope, row: Row<'a>) {
         for path in row.paths() {
+            let reported = self.out.len();
             self.path(scope, path, Position::Row);
+            let found = self.out.split_off(reported);
+            self.out.extend(
+                found
+                    .into_iter()
+                    .filter(|found| found.code() != DiagnosticCode::NameUnknownSymbol),
+            );
         }
     }
 

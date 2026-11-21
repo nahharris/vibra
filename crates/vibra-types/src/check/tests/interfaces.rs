@@ -253,45 +253,39 @@ fn an_implementation_is_bounded_only_as_its_enclosing_type() {
 }
 
 #[test]
-fn a_proc_member_is_unavailable_in_an_interface_or_an_implementation() {
-    // A `proc` member of an interface or of an implementation is
-    // unavailable, whatever the member it supplies; a `proc` member of a
-    // type is checked as a procedure (`tests::procs`).
+fn an_implementation_member_keeps_the_kind_of_its_contract_member() {
+    // `docs/spec/03-effects.md`, "Operation interfaces": an implementation
+    // keeps each member's row, so a `proc` member is implemented by a
+    // `proc` and a `fn` member by a `fn`; the other kind is `@type.mismatch`
+    // at the member's name (`tests::rows` has the rows themselves).
     let log = "interface Log proc append takes {log: Self entry: Str} returns r: U8 \
                endproc endinterface\n";
     let pick =
         "interface Pick fn pick takes {x: Self} returns r: U8 endfn endinterface\n";
-    for (source, member) in [
-        (
-            format!(
-                "{log}type Mem of U8 impl Log proc append takes {{log: Self entry: Str}} \
-                 returns r: U8 do return 1u8 endproc endimpl endtype\n"
-            ),
-            "proc append",
+    let source = format!(
+        "{log}type Mem of U8 impl Log proc append takes {{log: Self entry: Str}} \
+         returns r: U8 do return 1u8 endproc endimpl endtype\n"
+    );
+    assert_eq!(faults(&source), [], "{source}");
+    for source in [
+        format!(
+            "{log}type Mem of U8 impl Log fn append takes {{log: Self entry: Str}} \
+             returns r: U8 do return 1u8 endfn endimpl endtype\n"
         ),
-        (
-            format!(
-                "{log}type Mem of U8 impl Log fn append takes {{log: Self entry: Str}} \
-                 returns r: U8 do return 1u8 endfn endimpl endtype\n"
-            ),
-            "proc append",
-        ),
-        (
-            format!(
-                "{pick}type Box of U8 impl Pick proc pick takes {{x: Self}} returns r: U8 \
-                 do return 1u8 endproc endimpl endtype\n"
-            ),
-            "proc pick",
+        format!(
+            "{pick}type Box of U8 impl Pick proc pick takes {{x: Self}} returns r: U8 \
+             do return 1u8 endproc endimpl endtype\n"
         ),
     ] {
-        let found = faults(&source);
-        assert_eq!(found.len(), 1, "{source}\n{found:?}");
-        assert!(
-            found
-                .iter()
-                .all(|(code, span)| *code == DiagnosticCode::ToolUnavailable
-                    && span.start() == at(&source, member, 0).start()),
-            "{source}\n{found:?}"
+        let name = if source.contains("Pick") {
+            "pick"
+        } else {
+            "append"
+        };
+        assert_eq!(
+            faults(&source),
+            [(DiagnosticCode::TypeMismatch, at(&source, name, 1))],
+            "{source}"
         );
     }
 }

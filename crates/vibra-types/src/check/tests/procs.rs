@@ -393,16 +393,22 @@ fn a_bare_requires_is_discharged_where_the_plan_is_built() -> Result<(), String>
 
 #[test]
 fn what_stays_unavailable() -> Result<(), String> {
-    // A row that is not empty, at the `performs` section.
-    let source = "type Missing of I32 endtype\n\
-                  proc p returns r: Void performs {Missing} do return void endproc\n";
-    let result = check_source(SOURCE, source);
-    let found = faults(source);
+    // An `await` of a plan whose row is not empty, at the `await`, until
+    // step 09 checks ceilings.
+    let log = "interface Log proc append takes {log: Self entry: Str} returns d: Void \
+               endproc endinterface\n\
+               type Memory of I32 impl Log proc append takes {log: Self entry: Str} \
+               returns d: Void do return void endproc endimpl endtype\n";
+    let source = format!(
+        "{log}proc p takes {{m: Memory}} returns d: Void performs {{Log}} do \
+         return await Log.append(m \"x\") endproc\n"
+    );
+    let result = check_source(SOURCE, &source);
     assert_eq!(
-        found,
+        faults(&source),
         [(
             DiagnosticCode::ToolUnavailable,
-            at(source, "performs {Missing}", 0)
+            at(&source, "await Log.append(m \"x\")", 0)
         )]
     );
     assert!(result.only_unavailable());
@@ -412,19 +418,31 @@ fn what_stays_unavailable() -> Result<(), String> {
         faults(&source),
         [(DiagnosticCode::ToolUnavailable, at(&source, "double", 1))]
     );
-    // A test that writes a row that is not empty is unavailable over the
-    // test (step 08). The row names a plain type, as above, so that the
-    // name resolves.
-    let test = "use @std.assert enduse\n\
-                type Missing of I32 endtype\n\
-                test \"row\" performs {Missing} do endtest\n\
-                test \"plain\" do assert.true(true) endtest\n";
-    let result = in_tests("", test)?;
+    // A contract `proc` member named as a value.
+    let source = format!(
+        "{log}fn f returns r: I32 do let _: Fn({{Memory Str}} Void) be Log.append endlet \
+         return 1i32 endfn\n"
+    );
+    assert_eq!(
+        faults(&source),
+        [(
+            DiagnosticCode::ToolUnavailable,
+            at(&source, "Log.append", 0)
+        )]
+    );
+    // A test whose body awaits a plan with a row is unavailable, and the
+    // other test still runs.
+    let test = format!(
+        "use @std.assert enduse\n{log}\
+         test \"row\" performs {{Log}} do let _ be await Log.append(Memory(1i32) \"x\") endlet endtest\n\
+         test \"plain\" do assert.true(true) endtest\n"
+    );
+    let result = in_tests("", &test)?;
     assert_eq!(
         codes_at(&result),
         [(
             DiagnosticCode::ToolUnavailable,
-            at(test, "test \"row\" performs {Missing} do endtest", 0)
+            at(&test, "await Log.append(Memory(1i32) \"x\")", 0)
         )]
     );
     assert!(result.only_unavailable());
