@@ -1,7 +1,9 @@
 # Execution targets
 
 The [Nexus proposal](nexus.md) describes the planned native direction and
-its follow-on research. The sections below preserve earlier WebAssembly
+its follow-on research. The [interaction nets note](interaction-nets.md)
+reasons about nets as a Nexus evaluator and as a model for the language,
+without scheduling either. The sections below preserve earlier WebAssembly
 alternatives and backend-independent compiler research. The
 [v0.0.3 roadmap](../../v0.0.3/README.md) owns the native cutover.
 
