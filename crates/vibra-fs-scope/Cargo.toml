@@ -1,6 +1,6 @@
 [package]
 name = "vibra-fs-scope"
-description = "The Windows file-scope adapter: files opened relative to a held directory handle, without following reparse points, with the real entry name checked. Its Windows module is the second place in the workspace with unsafe code."
+description = "The Windows file-scope adapter: entries opened relative to a held directory handle, without following reparse points, each reporting the names the filesystem gives it. Its Windows module is the second place in the workspace with unsafe code."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

@@ -1,20 +1,25 @@
 //! The checked IR of Vibra: the types, values, and expressions a checked
 //! module set is made of, the canonical encodings of types and values, the
-//! closed `@compiler` intrinsic registry, the host registry, and the arena
-//! layout that toolchain-owned native code reads.
+//! closed `@compiler` intrinsic registry, the host registry, the boundary
+//! every host call passes ([`authority`]), the canonical origin table, and
+//! the arena layout that toolchain-owned native code reads.
 //!
 //! The authority is `docs/spec`: the type chapter for [`Type`] and the
-//! declarations, the runtime chapter for evaluation, the encodings, the
-//! registry, and the traps. Checking a program is not done here; this
+//! declarations, the effects chapter for where an `await` stands, rows and
+//! their ceilings, and host bindings, the runtime chapter for evaluation,
+//! the encodings, the registry, and the traps. Checking a program is not
+//! done here; this
 //! crate validates what a checker built, so a checker defect is an
 //! [`IrError`] and never an execution.
 
 use std::fmt;
 
 pub mod arena;
+pub mod authority;
 mod check;
 mod conformance;
 mod constant;
+mod effects;
 mod encode;
 mod expr;
 pub mod external;
@@ -32,6 +37,7 @@ mod value;
 
 pub use conformance::select_implementation;
 pub use constant::Constant;
+pub use effects::EffectFault;
 pub use encode::{
     CANONICAL_NAN_F32, CANONICAL_NAN_F64, EncodeError, TypeTable, encode_open_type,
     encode_type, encode_value, type_document, value_document,
@@ -42,14 +48,14 @@ pub use expr::{
 };
 pub use library::{Library, LibraryTypes};
 pub use module_set::{
-    Callable, CheckedFunction, CheckedGlobal, CheckedModuleSet, Facts, Flow,
-    FunctionBody, ModuleSetParts,
+    BodyContext, Callable, CheckedFunction, CheckedGlobal, CheckedModuleSet, Facts,
+    Flow, FunctionBody, HostBinding, ModuleSetParts,
 };
 pub use nominal::{
     Case, Implementation, InterfaceDefinition, InterfaceMember, Invariant, TypeBody,
     TypeDefinition, Visibility,
 };
-pub use origin::SourceOrigin;
+pub use origin::{OriginTable, SourceOrigin};
 pub use pattern::{MatchArm, Pattern};
 pub use program::CheckedProgram;
 pub use signature::{
@@ -164,6 +170,40 @@ pub enum IrError {
         /// The name of the function it instantiates.
         callee: String,
     },
+    /// A rule of the effects chapter that the IR does not keep: an `await`
+    /// out of place or outside its ceiling, a row entry that is no root, or
+    /// a host binding that is not its registry row's.
+    Effect {
+        /// The function, or the module value whose initializer it is, that
+        /// the failure is in; `None` for a type outside every body.
+        owner: Option<String>,
+        /// What is wrong, boxed so that every `Result` of the crate stays
+        /// small on the stack.
+        fault: Box<EffectFault>,
+    },
+    /// A type that has no encoding where one is required: it is, or holds,
+    /// an operation interface value type, a `Proc`, or an `Intent`.
+    NoEncoding {
+        /// Where the encoding is required: a constant, or a dict key.
+        what: &'static str,
+        /// The type.
+        ty: Box<Type>,
+    },
+}
+
+impl IrError {
+    /// This error, attributed to `owner` when it is an effect failure that
+    /// names no owner yet.
+    #[must_use]
+    pub(crate) fn owned_by(self, owner: &str) -> Self {
+        match self {
+            Self::Effect { owner: None, fault } => Self::Effect {
+                owner: Some(owner.to_owned()),
+                fault,
+            },
+            other => other,
+        }
+    }
 }
 
 impl fmt::Display for IrError {
@@ -216,6 +256,15 @@ impl fmt::Display for IrError {
             Self::ExpandingInstantiation { name, callee, .. } => write!(
                 formatter,
                 "`{name}` instantiates `{callee}` at a type built around a type parameter that the instantiation reaches again"
+            ),
+            Self::Effect {
+                owner: Some(owner),
+                fault,
+            } => write!(formatter, "in `{owner}`: {fault}"),
+            Self::Effect { owner: None, fault } => write!(formatter, "{fault}"),
+            Self::NoEncoding { what, ty } => write!(
+                formatter,
+                "{what} of type {ty}, which holds a grant, a procedure, or a plan and has no encoding"
             ),
         }
     }

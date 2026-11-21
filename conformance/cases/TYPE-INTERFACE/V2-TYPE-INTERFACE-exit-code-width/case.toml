@@ -1,0 +1,18 @@
+id = "V2-TYPE-INTERFACE-exit-code-width"
+rule = "V2-TYPE-INTERFACE-exit-code-width"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "06-runtime.md#entry-outcome: ExitCode wraps a U8, so an I32 argument does not fit its slot"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.argumentMismatch"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 80, end = 86 }

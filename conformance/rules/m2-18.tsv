@@ -1,0 +1,9 @@
+identity	status	anchor
+V2-TYPE-INTERFACE-exit-code	active	06-runtime.md#entry-outcome
+V2-TYPE-INTERFACE-exit-code-width	active	06-runtime.md#entry-outcome
+V2-TYPE-INTERFACE-grant-limits	active	03-effects.md#narrowing
+V2-TYPE-INTERFACE-grant-limits-missing-field	active	03-effects.md#narrowing
+V2-TYPE-INTERFACE-grant-limits-wrong-width	active	03-effects.md#narrowing
+V2-TYPE-INTERFACE-scope-error-cases	active	03-effects.md#narrowing
+V2-TYPE-INTERFACE-scope-error-unknown-case	active	03-effects.md#narrowing
+V2-TYPE-INTERFACE-std-policy-types	active	03-effects.md#narrowing

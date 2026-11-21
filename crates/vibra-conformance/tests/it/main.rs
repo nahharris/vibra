@@ -19,5 +19,6 @@ mod exit_evidence;
 mod interpret;
 mod manifest;
 mod owner_coverage;
+mod rules_directory;
 mod runner;
 mod spec_examples;

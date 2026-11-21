@@ -38,6 +38,16 @@
       languageRoles: [@option]
     }
     {
+      path: @std.policy
+      digest: "sha256:4701704364d25c683e52b32e014f78894d130e7004a3066e655c4fd21b63e5a2"
+      languageRoles: []
+    }
+    {
+      path: @std.process
+      digest: "sha256:404a618cdef3c83f9c9d48507cb589b68fe5b4b5a9460a9d124a931a809c407c"
+      languageRoles: []
+    }
+    {
       path: @std.result
       digest: "sha256:65e3263072955285b838492df574a49afbb958acfadea7c0881d33377b2e224f"
       languageRoles: [@result]

@@ -3,7 +3,7 @@
 //! registry").
 //!
 //! A row with vectors runs every vector through `evaluate`: the vectors are
-//! the registry's hand-written samples. The sixteen rows without vectors
+//! the registry's hand-written samples. The nineteen rows without vectors
 //! have tests written here by hand from the chapter.
 
 use vibra_diagnostics::DiagnosticCode;
@@ -323,7 +323,47 @@ const HAND_ROWS: &[&str] = &[
     "assert.true",
     "assert.false",
     "assert.equal",
+    "grant.restrict",
+    "grant.sub",
+    "grant.limit",
 ];
+
+/// A grant row applied to `Void` operands. The rows narrow a sealed grant,
+/// and no module set binds their narrowing types yet, so an expression that
+/// applies one is not a checked program.
+fn grant_row(intrinsic: CompilerIntrinsic) {
+    let node = generic_row(
+        intrinsic,
+        vec![Type::Void],
+        vec![var(0, Type::Void), var(1, Type::Void)],
+    );
+    assert_eq!(
+        evaluate(
+            &library_set(),
+            &node.expr,
+            &[Value::Void, Value::Void],
+            LIMITS
+        ),
+        Evaluation::Defect(Trap::InvalidCheckedProgram),
+        "{}",
+        intrinsic.symbol()
+    );
+}
+
+#[test]
+fn grant_restrict() {
+    grant_row(CompilerIntrinsic::GrantRestrict);
+}
+
+#[test]
+fn grant_sub() {
+    grant_row(CompilerIntrinsic::GrantSub);
+}
+
+#[test]
+fn grant_limit() {
+    grant_row(CompilerIntrinsic::GrantLimit);
+}
 
 #[test]
 fn every_registry_row_has_a_test_named_after_its_wire_symbol() {

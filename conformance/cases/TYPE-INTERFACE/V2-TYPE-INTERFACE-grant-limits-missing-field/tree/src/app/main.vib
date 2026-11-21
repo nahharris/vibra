@@ -1,0 +1,3 @@
+use @std.policy enduse
+
+fn f returns limits: policy.GrantLimits do return policy.GrantLimits(invocations: Option.none()) endfn

@@ -10,6 +10,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use vibra_ir::external::RowType;
+use vibra_ir::external::compiler::NarrowingType;
 use vibra_ir::{Library, Type};
 use vibra_syntax::TypeExpr;
 use vibra_syntax::source::{Declaration, Module, TypeBody, TypeForm};
@@ -159,6 +160,8 @@ pub(crate) enum Written {
     SelfType,
     /// An associated type, by name, inside its interface.
     Associated(String),
+    /// A narrowing type of the grant rows.
+    Narrowing(NarrowingType),
 }
 
 impl Written {
@@ -176,6 +179,7 @@ impl Written {
             RowType::Library(library, arguments) => {
                 Self::Library(*library, all(arguments))
             }
+            RowType::Narrowing(declaration) => Self::Narrowing(*declaration),
         }
     }
 }

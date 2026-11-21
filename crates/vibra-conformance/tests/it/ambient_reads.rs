@@ -173,6 +173,15 @@ fn the_tooling_exceptions_and_the_provider_crate_exist_and_the_provider_does_rea
     }
     for provider_crate in PROVIDER_CRATES {
         assert!(crates.contains(*provider_crate));
+    }
+    // `vibra-host` has no system driver until M2 step 30, so it names no
+    // ambient API at all.
+    let host = scan(&root, "vibra-host");
+    assert!(
+        host.is_empty(),
+        "`vibra-host` reads ambient state: {host:?}"
+    );
+    for provider_crate in ["vibra-host-v1"] {
         // The audit is not vacuous: the provider is where the reads are.
         let provider = scan(&root, provider_crate);
         for api in [

@@ -1,0 +1,16 @@
+// The plain data of narrowing: the refusals of `restrict` and `sub`, and the
+// bounds `limit` takes, where `Option.none()` leaves a bound as it was. The
+// module imports nothing, so every operation module can import it.
+
+type ScopeError
+  case invalidPolicy
+  case unsupportedVersion
+  case policyTooComplex
+  case foreignRoot
+  visibility @public
+endtype
+
+type GrantLimits
+  of {invocations: Option(U64) inputBytes: Option(U64) outputBytes: Option(U64)}
+  visibility @public
+endtype

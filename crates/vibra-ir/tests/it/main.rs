@@ -11,6 +11,7 @@
     missing_docs
 )]
 
+mod effects;
 mod encode;
 mod instantiation;
 mod migration;

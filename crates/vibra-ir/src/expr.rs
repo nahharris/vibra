@@ -10,14 +10,17 @@
 //!
 //! There is no union widening, no member pattern, no tuple projection, no
 //! variadic tail, no `ArrayOf` or `DictOf`, no integer `Div` or `Rem`, no row
-//! tail, and no plan or `await` node. A bare guard is discharged by the checker
-//! and leaves no node; a guard with a consequence lives on
+//! tail, and no plan node: a plan is built by a call whose callee has a
+//! `Proc` type, and run by [`Expr::Await`]. A bare guard is discharged by the
+//! checker and leaves no node; a guard with a consequence lives on
 //! [`crate::CheckedFunction`] or on [`crate::Invariant`].
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use crate::conformance::Evidence;
+use crate::constant::check_encodable;
+use crate::effects;
 use crate::encode::{TypeTable, encode_value};
 use crate::external::CompilerIntrinsic;
 use crate::{
@@ -172,6 +175,7 @@ impl Expr {
                     nodes.push(value);
                 }
                 Self::Field { record: value, .. }
+                | Self::Await { plan: value }
                 | Self::Return(value)
                 | Self::Try(value)
                 | Self::WidenAtom(value) => nodes.push(value),
@@ -250,6 +254,7 @@ impl Expr {
                 nodes.extend(arguments.labelled.iter().map(|(_, node)| node));
             }
             Self::Field { record: value, .. }
+            | Self::Await { plan: value }
             | Self::Return(value)
             | Self::Try(value)
             | Self::WidenToInterface { value, .. }
@@ -345,6 +350,7 @@ impl Expr {
                 }
             }
             Self::Field { record: node, .. }
+            | Self::Await { plan: node }
             | Self::Return(node)
             | Self::Try(node)
             | Self::WidenToInterface { value: node, .. }
@@ -481,6 +487,13 @@ pub enum Expr {
         target: CallTarget,
         /// The arguments.
         arguments: Arguments,
+    },
+    /// `await plan`: runs the plan, an `Intent`, and yields its result. It
+    /// is valid only in a body that runs in a procedure context
+    /// (`docs/spec/03-effects.md`, "Cold plans and performed rows").
+    Await {
+        /// The plan.
+        plan: Box<Node>,
     },
     /// `return`, which leaves the nearest callable activation.
     Return(Box<Node>),
@@ -681,8 +694,10 @@ fn names_equal<'a>(
 }
 
 impl<'a> Tables<'a> {
-    /// Checks the shape of `ty` in `scope`, and that every declared type and
-    /// interface it names exists at its arity, with every choice.
+    /// Checks the shape of `ty` in `scope`, that every declared type and
+    /// interface it names exists at its arity, with every choice, that every
+    /// row entry is an operation interface, and that no dict key holds an
+    /// operation interface value type, a `Proc`, or an `Intent`.
     pub(crate) fn check_type(
         &self,
         ty: &Type,
@@ -706,6 +721,17 @@ impl<'a> Tables<'a> {
                         actual: arguments.len(),
                     });
                 }
+                if self.library.get(Library::Dict) == Some(id)
+                    && let Some(key) = arguments.first()
+                {
+                    check_encodable("a dict key", key, self.interfaces)?;
+                }
+            }
+            Type::Proc(signature) => {
+                effects::check_row(self.interfaces, &signature.effects)?
+            }
+            Type::Intent(intent) => {
+                effects::check_row(self.interfaces, &intent.effects)?
             }
             Type::Interface(id, arguments, choices) => {
                 let interface = self
@@ -924,9 +950,11 @@ impl<'a> Checker<'a> {
         self.tables.check_applications(self.evidence, ty)
     }
 
-    /// Checks that a constant's value fits its type, as its encoding does.
+    /// Checks that a constant's type has an encoding and its value fits the
+    /// type, as its encoding does.
     pub(crate) fn check_constant(&self, constant: &Constant) -> Result<(), IrError> {
         self.check_type(constant.value_type())?;
+        check_encodable("a constant", constant.value_type(), self.tables.interfaces)?;
         encode_value(constant.value(), constant.value_type(), self.tables.table)
             .map(drop)
             .map_err(|error| IrError::InvalidExpression(format!("a constant: {error}")))

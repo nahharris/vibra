@@ -17,7 +17,9 @@ use crate::expr::{
 };
 use crate::external::{CompilerIntrinsic, RowType};
 use crate::module_set::{Gathered, contract_targets, ordered_targets};
-use crate::{Callable, Facts, IrError, Library, NamedTypes, Type};
+use crate::{
+    Callable, EffectFault, Facts, IrError, Library, NamedTypes, Type, effects,
+};
 
 /// What a node asks for next.
 enum Next<'n> {
@@ -510,6 +512,26 @@ impl Checker<'_> {
             Expr::TailCall { target, arguments } => {
                 self.call(frame, stage, input, sink, target, arguments, true)?
             }
+            Expr::Await { plan } => match stage {
+                0 => {
+                    if self.in_guard {
+                        return Err(IrError::MisplacedNode("an await inside a guard"));
+                    }
+                    Next::Operand(plan)
+                }
+                _ => {
+                    let operand = arrived(input)?;
+                    let Type::Intent(intent) = &operand else {
+                        return Err(effects::effect(EffectFault::NotAPlan(Box::new(
+                            operand,
+                        ))));
+                    };
+                    if let Some(facts) = sink.facts() {
+                        facts.awaited.push(intent.effects.clone());
+                    }
+                    Next::Done(intent.result.clone())
+                }
+            },
             Expr::Return(value) => match stage {
                 0 => {
                     if self.in_guard {

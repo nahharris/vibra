@@ -29,6 +29,7 @@ fn function(
     slot_count: usize,
 ) -> CheckedFunction {
     CheckedFunction {
+        context: vibra_ir::BodyContext::Pure,
         name: name.to_owned(),
         signature,
         defaults: Vec::new(),

@@ -1,0 +1,3 @@
+use @std.process.ExitCode enduse
+
+fn bad returns c: ExitCode do return ExitCode(256i32) endfn
