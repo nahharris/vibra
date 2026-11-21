@@ -1,0 +1,19 @@
+id = "V2-EFFECT-impl-host-member-missing"
+rule = "V2-EFFECT-impl-host-member-missing"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#implementations: the host-bound member is abstract for an implementation, so one without read is missing an abstract member"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.missingAbstractMember"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 229, end = 245 }
+related = [{ source = "stdlib/src/std/fs.vib", span = { start = 3372, end = 3376 } }]

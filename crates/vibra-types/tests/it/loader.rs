@@ -15,7 +15,7 @@ fn the_embedded_library_loads() {
         stdlib.modules().len(),
         stdlib.roles().len()
     );
-    assert_eq!(stdlib.modules().len(), 11);
+    assert_eq!(stdlib.modules().len(), 16);
     assert_eq!(stdlib.roles().len(), 9);
     assert_eq!(stdlib.package_name(), "std");
     assert_eq!(stdlib.package_version(), "0.0.2");
@@ -140,6 +140,9 @@ fn the_overlay_is_the_unit_std() {
             ),
             ("@std.bytes", "bytes".to_owned(), "stdlib/src/std/bytes.vib"),
             ("@std.core", "core".to_owned(), "stdlib/src/std/core.vib"),
+            ("@std.env", "env".to_owned(), "stdlib/src/std/env.vib"),
+            ("@std.fs", "fs".to_owned(), "stdlib/src/std/fs.vib"),
+            ("@std.io", "io".to_owned(), "stdlib/src/std/io.vib"),
             ("@std.iter", "iter".to_owned(), "stdlib/src/std/iter.vib"),
             (
                 "@std.option",
@@ -157,11 +160,17 @@ fn the_overlay_is_the_unit_std() {
                 "stdlib/src/std/process.vib"
             ),
             (
+                "@std.random",
+                "random".to_owned(),
+                "stdlib/src/std/random.vib"
+            ),
+            (
                 "@std.result",
                 "result".to_owned(),
                 "stdlib/src/std/result.vib"
             ),
             ("@std.str", "str".to_owned(), "stdlib/src/std/str.vib"),
+            ("@std.time", "time".to_owned(), "stdlib/src/std/time.vib"),
         ]
     );
     assert_eq!(&overlay.prelude, stdlib.prelude());
@@ -192,12 +201,17 @@ fn the_overlay_is_resolution_s_embedded_unit() {
             ("@std.builtin", "stdlib/src/std/builtin.vib"),
             ("@std.bytes", "stdlib/src/std/bytes.vib"),
             ("@std.core", "stdlib/src/std/core.vib"),
+            ("@std.env", "stdlib/src/std/env.vib"),
+            ("@std.fs", "stdlib/src/std/fs.vib"),
+            ("@std.io", "stdlib/src/std/io.vib"),
             ("@std.iter", "stdlib/src/std/iter.vib"),
             ("@std.option", "stdlib/src/std/option.vib"),
             ("@std.policy", "stdlib/src/std/policy.vib"),
             ("@std.process", "stdlib/src/std/process.vib"),
+            ("@std.random", "stdlib/src/std/random.vib"),
             ("@std.result", "stdlib/src/std/result.vib"),
             ("@std.str", "stdlib/src/std/str.vib"),
+            ("@std.time", "stdlib/src/std/time.vib"),
         ]
     );
     for module in unit.modules() {

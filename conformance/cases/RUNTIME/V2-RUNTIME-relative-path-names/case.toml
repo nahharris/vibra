@@ -1,0 +1,13 @@
+id = "V2-RUNTIME-relative-path-names"
+rule = "V2-RUNTIME-relative-path-names"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "03-effects.md#filesystem-policies: the RelativePath constructor rejects each name the profile rejects and accepts the nearest accepted name"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

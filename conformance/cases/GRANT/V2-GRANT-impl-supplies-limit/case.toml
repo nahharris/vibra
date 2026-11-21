@@ -1,0 +1,12 @@
+id = "V2-GRANT-impl-supplies-limit"
+rule = "V2-GRANT-impl-supplies-limit"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#narrowing: DirReadText.limit called on a Memory viewed as a DirReadText dispatches to the member the model supplies"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

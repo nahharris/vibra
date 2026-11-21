@@ -820,6 +820,7 @@ const ACCEPTED_EFFECT_CASES: &[(&str, &[CaseModule])] = &[
     case!("V2-EFFECT-default-proc-member": app "main"),
     case!("V2-EFFECT-fn-member-pure": app "main"),
     case!("V2-EFFECT-generic-operation-interface": app "main"),
+    case!("V2-EFFECT-impl-host-member-supplied": app "main"),
     case!("V2-EFFECT-impl-in-interface": app "main", app "note"),
     case!("V2-EFFECT-impl-keeps-row": app "main"),
     case!("V2-EFFECT-intent-type-result": app "main"),
@@ -846,6 +847,10 @@ const ACCEPTED_EFFECT_CASES: &[(&str, &[CaseModule])] = &[
     case!("V2-EFFECT-row-on-proc": app "main"),
     case!("V2-EFFECT-row-on-test": app "main", tests "run"),
     case!("V2-EFFECT-row-two-roots": app "main"),
+    case!("V2-EFFECT-std-copy-note": app "main"),
+    case!("V2-EFFECT-std-each-interface": app "main"),
+    case!("V2-EFFECT-std-prepare-write": app "main"),
+    case!("V2-EFFECT-std-read-all": app "main"),
     case!("V2-EFFECT-test-row-empty-written": app "main", tests "run"),
 ];
 

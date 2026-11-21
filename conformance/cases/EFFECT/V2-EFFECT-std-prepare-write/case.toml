@@ -1,0 +1,12 @@
+id = "V2-EFFECT-std-prepare-write"
+rule = "V2-EFFECT-std-prepare-write"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#cold-plans-and-performed-rows: the chapter's prepareWrite builds a plan of DirWriteText.write in a fn and writeTwice awaits it twice"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

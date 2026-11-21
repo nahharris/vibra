@@ -32,18 +32,28 @@
 //! (`@external.unknownSymbol` at the symbol); the interface that encloses it,
 //! by module and name, MUST be the row's owner (`@external.ownerMismatch` at
 //! the symbol, related to the owner); its name MUST be the owner's member
-//! that the row names, and it MUST be a `proc` (each
-//! `@external.signatureMismatch` at the declaration).
+//! that the row names, it MUST be a `proc`, and for a host row its written
+//! signature MUST be the row's with `Self` first and no `performs`, so that
+//! its complete row is `{owner}` (each `@external.signatureMismatch` at the
+//! declaration, the row's signature in a note). The signature of a
+//! test-world row is not compared here: `@std.test` does not exist yet.
+//!
+//! The three narrowing rows `grant.restrict`, `grant.sub`, and `grant.limit`
+//! are bound in the standard operation interfaces with their generic `G` read
+//! as the interface's `Self`: `grant.limit` in each of the 17, the other two
+//! in the six `Dir…` interfaces of `@std.fs`; any other owner is
+//! `@external.ownerMismatch`.
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
-use vibra_ir::external::host::{host_row, test_world_row};
-use vibra_ir::external::{CompilerIntrinsic, FloatOp, IntegerOp};
+use vibra_ir::Library;
+use vibra_ir::external::host::{HostInterface, HostRow, host_row, test_world_row};
+use vibra_ir::external::{CompilerIntrinsic, FloatOp, IntegerOp, RowType};
 use vibra_syntax::SyntaxKind;
 use vibra_syntax::source::{
     Callable, CallableKind, Declaration, Module, TypeBody, TypeForm,
 };
 
-use super::names::{LibraryNames, Scope, Written};
+use super::names::{HostDeclaration, LibraryNames, Scope, Written};
 
 /// The faults of the external declarations of `module`, whose module path
 /// atom is `path`: `@external.unknownSymbol`, `@external.ownerMismatch`, and
@@ -208,6 +218,10 @@ fn check(
                 ));
                 return;
             };
+            if is_grant_row(row) {
+                check_grant(callable, row, &symbol, symbol_span, site, scope, found);
+                return;
+            }
             let destination = conversion.then(|| conversion_destination(row)).flatten();
             let (row_owner, member) = match destination {
                 Some(destination) => (destination, "convert".to_owned()),
@@ -252,7 +266,8 @@ fn check(
             }
         }
         "@host" => {
-            let (row_owner, member) = if let Some(row) = host_row(&symbol) {
+            let operation = host_row(&symbol);
+            let (row_owner, member) = if let Some(row) = operation {
                 (row.owner.owner(), row.owner.member())
             } else if let Some(row) = test_world_row(&symbol) {
                 (row.owner(), row.op.member())
@@ -298,10 +313,187 @@ fn check(
                         "the host row `{symbol}` is an operation, which a `proc` binds"
                     ),
                 ));
+                return;
+            }
+            if let Some(row) = operation
+                && !host_signature_fits(callable, row, scope)
+            {
+                found.push(
+                    Diagnostic::new(
+                        DiagnosticCode::ExternalSignatureMismatch,
+                        declaration_span,
+                        format!("the signature differs from the host row `{symbol}`"),
+                    )
+                    .with_note(format!("expected {}", row.signature())),
+                );
             }
         }
         _ => {}
     }
+}
+
+/// Whether `row` is one of the three narrowing rows, `grant.restrict`,
+/// `grant.sub`, and `grant.limit`.
+const fn is_grant_row(row: CompilerIntrinsic) -> bool {
+    matches!(
+        row,
+        CompilerIntrinsic::GrantRestrict
+            | CompilerIntrinsic::GrantSub
+            | CompilerIntrinsic::GrantLimit
+    )
+}
+
+/// The check of a narrowing row (`docs/spec/03-effects.md`, "Narrowing";
+/// `docs/spec/06-runtime.md`, "Compiler intrinsic registry"). The rows are
+/// bound in the standard operation interfaces, generic over the grant type,
+/// which in the interface is `Self`: `grant.limit` in each of the 17, and
+/// `grant.restrict` and `grant.sub` in the six `Dir…` interfaces of
+/// `@std.fs`. Another owner is `@external.ownerMismatch` at the symbol;
+/// another name or signature `@external.signatureMismatch` at the
+/// declaration.
+fn check_grant(
+    callable: &Callable<'_>,
+    row: CompilerIntrinsic,
+    symbol: &str,
+    symbol_span: ByteSpan,
+    site: &Site<'_>,
+    scope: &Scope<'_>,
+    found: &mut Vec<Diagnostic>,
+) {
+    let declaration_span = callable.construct().span();
+    let directories_only = row != CompilerIntrinsic::GrantLimit;
+    let owner = site.interface.as_deref().and_then(|path| {
+        HostInterface::ALL
+            .into_iter()
+            .find(|interface| interface.owner().path() == path)
+    });
+    let owned = owner.is_some_and(|interface| {
+        !directories_only || interface.module() == DIRECTORY_MODULE
+    });
+    if !owned {
+        let owners = if directories_only {
+            "the six `Dir…` interfaces of `@std.fs`"
+        } else {
+            "the standard operation interfaces"
+        };
+        let mut diagnostic = Diagnostic::new(
+            DiagnosticCode::ExternalOwnerMismatch,
+            symbol_span,
+            format!(
+                "the row `{symbol}` is bound in {owners}, not by the owner of this declaration"
+            ),
+        );
+        if let Some(span) = site.owner_span {
+            diagnostic = diagnostic.with_related(span, "the owner of the declaration");
+        }
+        found.push(diagnostic);
+        return;
+    }
+    if let Some(diagnostic) =
+        name_fault(callable, symbol, &row.member(), declaration_span)
+    {
+        found.push(diagnostic);
+        return;
+    }
+    let (parameters, result) = row.signature();
+    let as_self = |ty: &RowType| grant_written(ty);
+    let has_bound = callable
+        .given()
+        .is_some_and(|given| !given.entries().is_empty());
+    let takes = callable.takes();
+    let fits = callable.kind() == CallableKind::Fn
+        && !has_bound
+        && callable.requires().is_none()
+        && callable.ensures().is_none()
+        && callable.labelled().is_empty()
+        && scope.binder_count() == 0
+        && takes.len() == parameters.len()
+        && takes
+            .iter()
+            .zip(&parameters)
+            .all(|((_, written), expected)| scope.read(written) == as_self(expected))
+        && callable
+            .result()
+            .is_some_and(|(_, written)| scope.read(&written) == as_self(&result));
+    if !fits {
+        found.push(
+            Diagnostic::new(
+                DiagnosticCode::ExternalSignatureMismatch,
+                declaration_span,
+                format!("the signature differs from the row `{symbol}`"),
+            )
+            .with_note(format!(
+                "expected {} with `G` the interface's `Self`",
+                expected_signature(row)
+            )),
+        );
+    }
+}
+
+/// The module of the six `Dir…` interfaces.
+const DIRECTORY_MODULE: &str = "@std.fs";
+
+/// A type of a narrowing row with its generic `G` read as `Self`; `None` for
+/// a shape the three rows do not have.
+fn grant_written(ty: &RowType) -> Option<Written> {
+    match ty {
+        RowType::Generic(0) => Some(Written::SelfType),
+        RowType::Narrowing(declaration) => Some(Written::Narrowing(*declaration)),
+        RowType::Library(library, arguments) => Some(Written::Library(
+            *library,
+            arguments
+                .iter()
+                .map(grant_written)
+                .collect::<Option<Vec<_>>>()?,
+        )),
+        _ => None,
+    }
+}
+
+/// Whether the written signature of `callable` is the signature of the host
+/// row `row`: a `proc` with no bound, guard, labelled parameter, type
+/// parameter, or `performs`, whose parameters are `Self` and then the row's,
+/// and whose result is `Result` of the row's `Ok` type and error type. Its
+/// complete row is then `{owner}`, the row's.
+fn host_signature_fits(
+    callable: &Callable<'_>,
+    row: &HostRow,
+    scope: &Scope<'_>,
+) -> bool {
+    let has_bound = callable
+        .given()
+        .is_some_and(|given| !given.entries().is_empty());
+    if has_bound
+        || callable.performs().is_some()
+        || callable.requires().is_some()
+        || callable.ensures().is_some()
+        || !callable.labelled().is_empty()
+        || scope.binder_count() != 0
+    {
+        return false;
+    }
+    let takes = callable.takes();
+    let expected = std::iter::once(Some(Written::SelfType))
+        .chain(
+            row.parameters
+                .iter()
+                .map(|parameter| Written::of_host(parameter.ty)),
+        )
+        .collect::<Vec<_>>();
+    let result = Written::of_host(row.ok).map(|ok| {
+        Written::Library(
+            Library::Result,
+            vec![ok, Written::Host(HostDeclaration::Error(row.error))],
+        )
+    });
+    takes.len() == expected.len()
+        && takes.iter().zip(&expected).all(|((_, written), expected)| {
+            expected.is_some() && scope.read(written) == *expected
+        })
+        && result.is_some()
+        && callable
+            .result()
+            .is_some_and(|(_, written)| scope.read(&written) == result)
 }
 
 /// The owner of the destination of a conversion row, the type whose
@@ -426,20 +618,167 @@ mod tests {
             .collect()
     }
 
-    fn interface(name: &str, member: &str, symbol: &str) -> String {
+    /// An interface `name` whose one member `member` binds `symbol` with
+    /// `external @host`, taking `takes` and returning `returns`.
+    fn bound(
+        name: &str,
+        member: &str,
+        symbol: &str,
+        takes: &str,
+        returns: &str,
+    ) -> String {
         format!(
             "interface {name}\n  visibility @public\n  proc {member}\n    \
-             takes {{grant: Self}}\n    returns done: Void\n    external @host\n    \
+             takes {{{takes}}}\n    returns outcome: {returns}\n    external @host\n    \
              symbol \"{symbol}\"\n  endproc\nendinterface\n"
         )
     }
 
+    /// An interface `name` whose one member `member` binds `symbol` with
+    /// `external @host` and the signature of no host row.
+    fn interface(name: &str, member: &str, symbol: &str) -> String {
+        bound(name, member, symbol, "grant: Self", "Void")
+    }
+
+    /// An interface `name` with the narrowing member `member` bound to
+    /// `symbol` with `external @compiler`, taking `takes` and returning
+    /// `returns`.
+    fn narrowing(
+        name: &str,
+        member: &str,
+        symbol: &str,
+        takes: &str,
+        returns: &str,
+    ) -> String {
+        format!(
+            "interface {name}\n  visibility @public\n  fn {member}\n    \
+             takes {{{takes}}}\n    returns narrowed: {returns}\n    external @compiler\n    \
+             symbol \"{symbol}\"\n  endfn\nendinterface\n"
+        )
+    }
+
+    fn codes(found: Vec<(DiagnosticCode, String)>) -> Vec<DiagnosticCode> {
+        found.into_iter().map(|(code, _)| code).collect()
+    }
+
     #[test]
     fn a_host_row_on_its_owner_is_accepted() {
-        let source = interface("StdoutText", "write", "io.stdoutText");
+        let source = bound(
+            "StdoutText",
+            "write",
+            "io.stdoutText",
+            "grant: Self value: Str",
+            "Result(Void IoError)",
+        );
         assert_eq!(check("@std.io", &source), Vec::new());
-        let source = interface("DirList", "entries", "fs.readEntries");
+        let source = bound(
+            "DirList",
+            "entries",
+            "fs.readEntries",
+            "grant: Self at: RelativePath",
+            "Result(List(Str) FsError)",
+        );
         assert_eq!(check("@std.fs", &source), Vec::new());
+    }
+
+    #[test]
+    fn another_signature_than_the_host_row_s_is_a_signature_mismatch() {
+        let mismatch = vec![DiagnosticCode::ExternalSignatureMismatch];
+        let text = |takes: &str, returns: &str| {
+            bound("DirReadText", "read", "fs.readText", takes, returns)
+        };
+        let at_str = text("grant: Self at: Str", "Result(Str FsError)");
+        assert_eq!(codes(check("@std.fs", &at_str)), mismatch);
+        let bytes = text("grant: Self at: RelativePath", "Result(Bytes FsError)");
+        assert_eq!(codes(check("@std.fs", &bytes)), mismatch);
+        let error = text("grant: Self at: RelativePath", "Result(Str ScopeError)");
+        let error = format!("use @std.policy.ScopeError enduse\n\n{error}");
+        assert_eq!(codes(check("@std.fs", &error)), mismatch);
+        let extra = text(
+            "grant: Self at: RelativePath max: U64",
+            "Result(Str FsError)",
+        );
+        assert_eq!(codes(check("@std.fs", &extra)), mismatch);
+    }
+
+    #[test]
+    fn performs_on_a_host_bound_member_is_a_signature_mismatch() {
+        let source = "interface StdoutText\n  visibility @public\n  proc write\n    \
+                      takes {grant: Self value: Str}\n    \
+                      returns outcome: Result(Void IoError)\n    \
+                      performs {StdoutText}\n    external @host\n    \
+                      symbol \"io.stdoutText\"\n  endproc\nendinterface\n";
+        assert_eq!(
+            codes(check("@std.io", source)),
+            vec![DiagnosticCode::ExternalSignatureMismatch]
+        );
+    }
+
+    #[test]
+    fn a_narrowing_row_on_an_operation_interface_is_accepted() {
+        let limit = narrowing(
+            "StdinText",
+            "limit",
+            "grant.limit",
+            "grant: Self limits: GrantLimits",
+            "Self",
+        );
+        let limit = format!("use @std.policy.GrantLimits enduse\n\n{limit}");
+        assert_eq!(check("@std.io", &limit), Vec::new());
+        let sub = narrowing(
+            "DirList",
+            "sub",
+            "grant.sub",
+            "grant: Self prefix: RelativePath",
+            "Result(Self ScopeError)",
+        );
+        let sub = format!("use @std.policy.ScopeError enduse\n\n{sub}");
+        assert_eq!(check("@std.fs", &sub), Vec::new());
+    }
+
+    #[test]
+    fn a_narrowing_row_elsewhere_is_an_owner_mismatch_at_the_symbol() {
+        let owner = vec![(
+            DiagnosticCode::ExternalOwnerMismatch,
+            "\"grant.restrict\"".to_owned(),
+        )];
+        let restrict = narrowing(
+            "StdinText",
+            "restrict",
+            "grant.restrict",
+            "grant: Self policy: FsPolicy",
+            "Result(Self ScopeError)",
+        );
+        assert_eq!(check("@std.io", &restrict), owner);
+        let local = narrowing(
+            "Local",
+            "limit",
+            "grant.limit",
+            "grant: Self limits: GrantLimits",
+            "Self",
+        );
+        assert_eq!(
+            codes(check("@std.io", &local)),
+            vec![DiagnosticCode::ExternalOwnerMismatch]
+        );
+    }
+
+    #[test]
+    fn another_narrowing_signature_is_a_signature_mismatch() {
+        let source = narrowing(
+            "StdinText",
+            "limit",
+            "grant.limit",
+            "grant: Self limits: GrantLimits",
+            "Result(Self ScopeError)",
+        );
+        let source = format!(
+            "use @std.policy.GrantLimits enduse\n\nuse @std.policy.ScopeError enduse\n\n{source}"
+        );
+        assert_eq!(
+            codes(check("@std.io", &source)),
+            vec![DiagnosticCode::ExternalSignatureMismatch]
+        );
     }
 
     #[test]
@@ -474,11 +813,10 @@ mod tests {
     #[test]
     fn the_member_must_be_the_owner_s_member() {
         let source = interface("StdoutText", "stdoutText", "io.stdoutText");
-        let codes = check("@std.io", &source)
-            .into_iter()
-            .map(|(code, _)| code)
-            .collect::<Vec<_>>();
-        assert_eq!(codes, vec![DiagnosticCode::ExternalSignatureMismatch]);
+        assert_eq!(
+            codes(check("@std.io", &source)),
+            vec![DiagnosticCode::ExternalSignatureMismatch]
+        );
     }
 
     #[test]

@@ -1,0 +1,13 @@
+id = "V2-EFFECT-std-each-interface"
+rule = "V2-EFFECT-std-each-interface"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#standard-operation-inventory: one proc per standard operation interface awaits its member; each proc has the result type of its host registry row"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+types = "types.vibon"

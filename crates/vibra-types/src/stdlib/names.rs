@@ -1,6 +1,7 @@
 //! What the names of the standard library denote, as far as the load checks
-//! need: the declarations that play a role, the three core types, and the
-//! builtin types; and the reading of a written type expression into the type
+//! need: the declarations that play a role, the three core types, the builtin
+//! types, the narrowing types of the grant rows, and the types the host rows
+//! name; and the reading of a written type expression into the type
 //! language of the registry rows.
 //!
 //! This is not resolution. It reads the names a standard-library module can
@@ -11,6 +12,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use vibra_ir::external::RowType;
 use vibra_ir::external::compiler::NarrowingType;
+use vibra_ir::external::host::{HostErrorType, HostType};
 use vibra_ir::{Library, Type};
 use vibra_syntax::TypeExpr;
 use vibra_syntax::source::{Declaration, Module, TypeBody, TypeForm};
@@ -40,6 +42,53 @@ pub(crate) enum Named {
     Core(Type),
     /// The builtin `List(T)`.
     List,
+    /// A narrowing type of the grant rows.
+    Narrowing(NarrowingType),
+    /// A type a host row names that is no library declaration.
+    Host(HostDeclaration),
+}
+
+/// A type of an operation module that a host row names: an error type,
+/// `FsKind`, or `FsMetadata` (`docs/spec/06-runtime.md`, "Error types").
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum HostDeclaration {
+    /// The error type of a host row.
+    Error(HostErrorType),
+    /// `FsKind` of `@std.fs`.
+    FsKind,
+    /// `FsMetadata` of `@std.fs`.
+    FsMetadata,
+}
+
+/// The four narrowing types the grant rows name (`docs/spec/03-effects.md`,
+/// "Narrowing").
+pub(crate) const NARROWING_TYPES: [NarrowingType; 4] = [
+    NarrowingType::FsPolicy,
+    NarrowingType::RelativePath,
+    NarrowingType::ScopeError,
+    NarrowingType::GrantLimits,
+];
+
+/// What the type declaration `name` of the module `module` is when it is a
+/// narrowing type or a host type.
+fn operation_type(module: &str, name: &str) -> Option<Named> {
+    if let Some(narrowing) = NARROWING_TYPES
+        .into_iter()
+        .find(|narrowing| narrowing.module() == module && narrowing.name() == name)
+    {
+        return Some(Named::Narrowing(narrowing));
+    }
+    if let Some(error) = HostErrorType::ALL
+        .into_iter()
+        .find(|error| error.module() == module && error.name() == name)
+    {
+        return Some(Named::Host(HostDeclaration::Error(error)));
+    }
+    match (module, name) {
+        ("@std.fs", "FsKind") => Some(Named::Host(HostDeclaration::FsKind)),
+        ("@std.fs", "FsMetadata") => Some(Named::Host(HostDeclaration::FsMetadata)),
+        _ => None,
+    }
 }
 
 /// The compiler-owned type of the wire tag `tag` (with its `@`), or `None`
@@ -105,7 +154,7 @@ impl LibraryNames {
                                 .iter()
                                 .find(|(_, core)| *core == name.text())
                                 .map(|(library, _)| Named::Library(*library)),
-                            _ => None,
+                            _ => operation_type(path, name.text()),
                         };
                         (name.text(), named)
                     }
@@ -162,6 +211,8 @@ pub(crate) enum Written {
     Associated(String),
     /// A narrowing type of the grant rows.
     Narrowing(NarrowingType),
+    /// A type a host row names that is no library declaration.
+    Host(HostDeclaration),
 }
 
 impl Written {
@@ -181,6 +232,31 @@ impl Written {
             }
             RowType::Narrowing(declaration) => Self::Narrowing(*declaration),
         }
+    }
+
+    /// The host type `ty`, or `None` for one no written type of this
+    /// language holds: a structural record, a grant interface, and
+    /// `TestWorld`. The registry's types nest a few levels at most, so the
+    /// recursion is bounded by the registry.
+    pub(crate) fn of_host(ty: HostType) -> Option<Self> {
+        Some(match ty {
+            HostType::Void => Self::Core(Type::Void),
+            HostType::I64 => Self::Core(Type::I64),
+            HostType::U64 => Self::Core(Type::U64),
+            HostType::Str => Self::Library(Library::Str, Vec::new()),
+            HostType::Bytes => Self::Library(Library::Bytes, Vec::new()),
+            HostType::RelativePath => Self::Narrowing(NarrowingType::RelativePath),
+            HostType::FsKind => Self::Host(HostDeclaration::FsKind),
+            HostType::FsMetadata => Self::Host(HostDeclaration::FsMetadata),
+            HostType::List(element) => Self::List(Box::new(Self::of_host(*element)?)),
+            HostType::Dict(key, value) => Self::Library(
+                Library::Dict,
+                vec![Self::of_host(*key)?, Self::of_host(*value)?],
+            ),
+            HostType::Interface(_) | HostType::TestWorld | HostType::Record(_) => {
+                return None;
+            }
+        })
     }
 }
 
@@ -392,6 +468,12 @@ fn apply(named: &Named, arguments: Vec<Written>) -> Option<Written> {
         Named::Library(library) => (arguments.len() == library.arity())
             .then_some(Written::Library(*library, arguments)),
         Named::Core(ty) => arguments.is_empty().then(|| Written::Core(ty.clone())),
+        Named::Narrowing(declaration) => arguments
+            .is_empty()
+            .then_some(Written::Narrowing(*declaration)),
+        Named::Host(declaration) => {
+            arguments.is_empty().then_some(Written::Host(*declaration))
+        }
         Named::List => {
             let mut arguments = arguments;
             match (arguments.pop(), arguments.is_empty()) {

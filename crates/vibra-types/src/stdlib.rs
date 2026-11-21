@@ -24,6 +24,7 @@ use std::sync::OnceLock;
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 use vibra_ir::external::CompilerIntrinsic;
+use vibra_ir::external::compiler::NarrowingType;
 use vibra_ir::external::host::host_row;
 use vibra_ir::{IrError, Library, LibraryTypes, TypeId};
 use vibra_resolve::{EmbeddedUnit, PackageId, PreludeBinding, SourceModule};
@@ -37,6 +38,7 @@ pub use names::LibraryNames;
 pub use roles::Role;
 
 use manifest::{MANIFEST_SOURCE_ID, Manifest, order_faults};
+pub(crate) use names::NARROWING_TYPES;
 use names::{BUILTIN_MODULE, intrinsic};
 use roles::{Claim, Parsed, check_core_types, check_roles};
 
@@ -94,7 +96,7 @@ const EMBEDDED_MANIFEST: &[u8] = include_bytes!("../../../stdlib/manifest.vibon"
 
 /// Every module compiled into the toolchain, by module path atom, in
 /// manifest order.
-const EMBEDDED_MODULES: [(&str, &[u8]); 11] = [
+const EMBEDDED_MODULES: [(&str, &[u8]); 16] = [
     (
         "@std.assert",
         include_bytes!("../../../stdlib/src/std/assert.vib"),
@@ -116,6 +118,12 @@ const EMBEDDED_MODULES: [(&str, &[u8]); 11] = [
         include_bytes!("../../../stdlib/src/std/core.vib"),
     ),
     (
+        "@std.env",
+        include_bytes!("../../../stdlib/src/std/env.vib"),
+    ),
+    ("@std.fs", include_bytes!("../../../stdlib/src/std/fs.vib")),
+    ("@std.io", include_bytes!("../../../stdlib/src/std/io.vib")),
+    (
         "@std.iter",
         include_bytes!("../../../stdlib/src/std/iter.vib"),
     ),
@@ -132,12 +140,20 @@ const EMBEDDED_MODULES: [(&str, &[u8]); 11] = [
         include_bytes!("../../../stdlib/src/std/process.vib"),
     ),
     (
+        "@std.random",
+        include_bytes!("../../../stdlib/src/std/random.vib"),
+    ),
+    (
         "@std.result",
         include_bytes!("../../../stdlib/src/std/result.vib"),
     ),
     (
         "@std.str",
         include_bytes!("../../../stdlib/src/std/str.vib"),
+    ),
+    (
+        "@std.time",
+        include_bytes!("../../../stdlib/src/std/time.vib"),
     ),
 ];
 
@@ -761,6 +777,15 @@ pub fn load_stdlib_from(inputs: &StdlibInputs<'_>) -> Result<Stdlib, StdlibError
             ))),
         }
     }
+    for narrowing in narrowing_declarations(&parsed, package) {
+        match narrowing.1.type_id() {
+            Ok(id) => library_types = library_types.with_narrowing(narrowing.0, id),
+            Err(error) => faults.push(Fault::bare(format!(
+                "`{}` has no identity in the checked IR: {error}",
+                narrowing.1.path()
+            ))),
+        }
+    }
     if !faults.is_empty() {
         return Err(StdlibError::new(faults));
     }
@@ -899,6 +924,7 @@ fn binding_faults(
     let compiler = listed(&manifest.compiler);
     let host = listed(&manifest.host);
     let mut faults = Vec::new();
+    let mut bound_host: BTreeMap<String, usize> = BTreeMap::new();
     for module in parsed {
         for diagnostic in check_externals(&module.module, module.path, names) {
             faults.push(Fault::of_diagnostic(module.source_id, &diagnostic));
@@ -931,6 +957,29 @@ fn binding_faults(
                     ),
                 ));
             }
+            if what == "host" {
+                let count = bound_host.entry(symbol.clone()).or_default();
+                *count += 1;
+                if *count == 2 {
+                    faults.push(Fault::at(
+                        module.source_id,
+                        callable.construct().span(),
+                        format!("`{symbol}` is bound by more than one declaration"),
+                    ));
+                }
+            }
+        }
+    }
+    for symbol in &manifest.host {
+        if !bound_host.contains_key(&symbol.text) {
+            faults.push(Fault::at(
+                MANIFEST_SOURCE_ID,
+                symbol.span,
+                format!(
+                    "the host symbol `{}` is bound by no declaration",
+                    symbol.text
+                ),
+            ));
         }
     }
     faults
@@ -961,6 +1010,39 @@ fn callables<'a>(module: &Module<'a>) -> Vec<vibra_syntax::source::Callable<'a>>
         }
     }
     all
+}
+
+/// The declaration of each narrowing type the grant rows name that the
+/// library declares as a type of its module (`docs/spec/03-effects.md`,
+/// "Narrowing").
+fn narrowing_declarations(
+    parsed: &[Parsed<'_>],
+    package: (&str, &str),
+) -> Vec<(NarrowingType, StdlibDeclaration)> {
+    NARROWING_TYPES
+        .into_iter()
+        .filter(|narrowing| {
+            parsed
+                .iter()
+                .filter(|module| module.path == narrowing.module())
+                .flat_map(|module| module.module.declarations())
+                .any(|declaration| {
+                    matches!(&declaration, Declaration::Type(decl)
+                        if decl.name().is_some_and(|name| name.text() == narrowing.name()))
+                })
+        })
+        .map(|narrowing| {
+            (
+                narrowing,
+                StdlibDeclaration::new(
+                    package,
+                    narrowing.module(),
+                    narrowing.name(),
+                    "@type",
+                ),
+            )
+        })
+        .collect()
 }
 
 /// The faults of the manifest's `languageRoles`: each module's list names

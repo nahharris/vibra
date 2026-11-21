@@ -588,3 +588,152 @@ fn every_application_of_a_generic_operation_interface_is_one_root() -> Result<()
     );
     Ok(())
 }
+
+/// A project module that imports every standard operation interface, so the
+/// checked module set holds the embedded operation modules.
+fn every_operation_interface() -> String {
+    let mut source = String::new();
+    for interface in vibra_ir::external::host::HostInterface::ALL {
+        source.push_str(&format!(
+            "use {}.{} enduse\n\n",
+            interface.module(),
+            interface.name()
+        ));
+    }
+    source.push_str("fn f returns r: I32 do return 1i32 endfn\n");
+    source
+}
+
+/// Each of the 17 standard operation interfaces has its one host-bound
+/// member: a `proc` whose complete row is `{owner}` and whose default body
+/// is the host binding of its row (`docs/spec/03-effects.md`, "Operation
+/// interfaces"; `docs/spec/06-runtime.md`, "Host registry").
+#[test]
+fn every_host_bound_member_has_the_owner_row_and_lowers_to_its_binding()
+-> Result<(), String> {
+    use vibra_ir::external::host::HostInterface;
+    use vibra_ir::{FunctionBody, HostBinding};
+    let result = modules(&[("@app.main", &every_operation_interface())])?;
+    if !result.diagnostics().is_empty() {
+        return Err(format!("{:#?}", result.diagnostics()));
+    }
+    let set = result.module_set().ok_or("no module set")?;
+    for interface in HostInterface::ALL {
+        let owner = interface.owner().path();
+        let path = owner.trim_start_matches('@').to_owned();
+        let (_, definition) = set
+            .interfaces()
+            .iter()
+            .find(|(id, _)| id.path() == path)
+            .ok_or(format!("no interface `{path}`"))?;
+        let member = definition
+            .members()
+            .iter()
+            .find(|member| member.name == interface.member())
+            .ok_or(format!("no member `{path}.{}`", interface.member()))?;
+        let ty = member.signature.type_info();
+        assert!(matches!(ty, Type::Proc(_)), "`{path}` {ty:?}");
+        assert_eq!(roots(Some(ty)), vec![path.clone()], "`{path}`");
+        let body = member
+            .default
+            .and_then(|at| set.functions().get(at))
+            .map(|function| &function.body);
+        assert_eq!(
+            body,
+            Some(&FunctionBody::Host(HostBinding::Operation(
+                interface.operation()
+            ))),
+            "`{path}`"
+        );
+    }
+    Ok(())
+}
+
+/// The narrowing members are `fn` members whose default body is the
+/// `grant.*` row at the grant type `Self`: `limit` on all 17, `restrict` and
+/// `sub` on the six `Dir…` interfaces only (`docs/spec/03-effects.md`,
+/// "Narrowing").
+#[test]
+fn the_narrowing_members_are_pure_rows_at_self() -> Result<(), String> {
+    use vibra_ir::FunctionBody;
+    use vibra_ir::external::CompilerIntrinsic;
+    use vibra_ir::external::host::HostInterface;
+    let result = modules(&[("@app.main", &every_operation_interface())])?;
+    let set = result.module_set().ok_or("no module set")?;
+    for interface in HostInterface::ALL {
+        let owner = interface.owner().path();
+        let path = owner.trim_start_matches('@').to_owned();
+        let (_, definition) = set
+            .interfaces()
+            .iter()
+            .find(|(id, _)| id.path() == path)
+            .ok_or(format!("no interface `{path}`"))?;
+        let directory = interface.module() == "@std.fs";
+        for (name, intrinsic, present) in [
+            ("limit", CompilerIntrinsic::GrantLimit, true),
+            ("restrict", CompilerIntrinsic::GrantRestrict, directory),
+            ("sub", CompilerIntrinsic::GrantSub, directory),
+        ] {
+            let member = definition
+                .members()
+                .iter()
+                .find(|member| member.name == name);
+            assert_eq!(member.is_some(), present, "`{path}.{name}`");
+            let Some(member) = member else { continue };
+            assert!(
+                matches!(member.signature.type_info(), Type::Fn(_)),
+                "`{path}.{name}` is pure"
+            );
+            let body = member
+                .default
+                .and_then(|at| set.functions().get(at))
+                .map(|function| &function.body);
+            assert_eq!(
+                body,
+                Some(&FunctionBody::Intrinsic {
+                    intrinsic,
+                    type_arguments: vec![Type::SelfType],
+                }),
+                "`{path}.{name}`"
+            );
+        }
+    }
+    Ok(())
+}
+
+/// A package's model of `DirReadText` supplies the host-bound member and
+/// the three narrowing members; its `read` keeps the contract's row
+/// `{DirReadText}` (Q1, Q2).
+#[test]
+fn a_model_of_an_operation_interface_supplies_its_bound_members() -> Result<(), String>
+{
+    let source = "use @std.fs.DirReadText enduse\n\nuse @std.fs.FsError enduse\n\n\
+                  use @std.fs.FsPolicy enduse\n\nuse @std.fs.RelativePath enduse\n\n\
+                  use @std.policy.GrantLimits enduse\n\nuse @std.policy.ScopeError enduse\n\n\
+                  type Memory of {files: List(Str)}\n  impl DirReadText\n    \
+                  proc read takes {grant: Self at: RelativePath} \
+                  returns outcome: Result(Str FsError) do \
+                  return Result.err(error: FsError.notFound()) endproc\n    \
+                  fn restrict takes {grant: Self policy: FsPolicy} \
+                  returns narrowed: Result(Self ScopeError) do \
+                  return Result.ok(value: grant) endfn\n    \
+                  fn sub takes {grant: Self prefix: RelativePath} \
+                  returns narrowed: Result(Self ScopeError) do \
+                  return Result.ok(value: grant) endfn\n    \
+                  fn limit takes {grant: Self limits: GrantLimits} returns narrowed: Self \
+                  do return grant endfn\n  endimpl\nendtype\n";
+    let result = modules(&[("@app.main", source)])?;
+    if !result.diagnostics().is_empty() {
+        return Err(format!("{:#?}", result.diagnostics()));
+    }
+    let set = result.module_set().ok_or("no module set")?;
+    let read = set
+        .functions()
+        .iter()
+        .find(|function| {
+            function.name.contains("Memory") && function.name.ends_with(".read")
+        })
+        .map(|function| function.signature.type_info().clone());
+    assert_eq!(roots(read.as_ref()), vec!["std.fs.DirReadText".to_owned()]);
+    Ok(())
+}

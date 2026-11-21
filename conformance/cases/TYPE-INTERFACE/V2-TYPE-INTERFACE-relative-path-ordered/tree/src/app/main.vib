@@ -1,0 +1,8 @@
+use @std.fs.RelativePath enduse
+
+fn count
+  takes {files: Dict(RelativePath Str)}
+  returns n: Void
+  do
+    return void
+endfn

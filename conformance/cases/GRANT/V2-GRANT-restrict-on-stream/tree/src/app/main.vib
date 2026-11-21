@@ -1,0 +1,7 @@
+use @std.fs.FsPolicy enduse
+
+use @std.io.StdoutText enduse
+
+use @std.policy.ScopeError enduse
+
+fn f takes {out: StdoutText p: FsPolicy} returns r: Result(StdoutText ScopeError) do return StdoutText.restrict(out p) endfn

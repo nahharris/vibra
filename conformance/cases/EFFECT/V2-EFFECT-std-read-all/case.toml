@@ -1,0 +1,12 @@
+id = "V2-EFFECT-std-read-all"
+rule = "V2-EFFECT-std-read-all"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#standard-operation-inventory: io.readAllText awaited under the ceiling {StdinText} is accepted"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

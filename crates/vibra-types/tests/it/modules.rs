@@ -5,18 +5,23 @@ use vibra_syntax::parse_source_with;
 use vibra_syntax::source::SourceOptions;
 use vibra_types::StdlibInputs;
 
-const MODULES: [&str; 11] = [
+const MODULES: [&str; 16] = [
     "@std.assert",
     "@std.bool",
     "@std.builtin",
     "@std.bytes",
     "@std.core",
+    "@std.env",
+    "@std.fs",
+    "@std.io",
     "@std.iter",
     "@std.option",
     "@std.policy",
     "@std.process",
+    "@std.random",
     "@std.result",
     "@std.str",
+    "@std.time",
 ];
 
 fn library_mode() -> SourceOptions {

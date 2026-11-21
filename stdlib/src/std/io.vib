@@ -1,0 +1,167 @@
+// The standard streams: the six operation interfaces of the `io` rows of the
+// host registry, their error type, and the procedures that read standard
+// input to its end. Each interface binds its one operation with
+// `external @host` and its narrowing member `limit` with `external @compiler`;
+// both are the implementation of a sealed grant only, so an `impl` supplies
+// them. A stream read asks for a count, and the empty value is the end of
+// input.
+
+use @std.policy.GrantLimits enduse
+
+type IoError
+  case invalidText
+  case closed
+  case other
+  case denied
+  case limitExceeded
+  case unsupported
+  case outcomeUnknown
+  visibility @public
+endtype
+
+interface StdinText
+  visibility @public
+  proc read
+    takes {grant: Self max: U64}
+    returns outcome: Result(Str IoError)
+    external @host
+    symbol "io.stdinText"
+  endproc
+  fn limit
+    takes {grant: Self limits: GrantLimits}
+    returns narrowed: Self
+    external @compiler
+    symbol "grant.limit"
+  endfn
+endinterface
+
+interface StdinBytes
+  visibility @public
+  proc read
+    takes {grant: Self max: U64}
+    returns outcome: Result(Bytes IoError)
+    external @host
+    symbol "io.stdinBytes"
+  endproc
+  fn limit
+    takes {grant: Self limits: GrantLimits}
+    returns narrowed: Self
+    external @compiler
+    symbol "grant.limit"
+  endfn
+endinterface
+
+interface StdoutText
+  visibility @public
+  proc write
+    takes {grant: Self value: Str}
+    returns outcome: Result(Void IoError)
+    external @host
+    symbol "io.stdoutText"
+  endproc
+  fn limit
+    takes {grant: Self limits: GrantLimits}
+    returns narrowed: Self
+    external @compiler
+    symbol "grant.limit"
+  endfn
+endinterface
+
+interface StdoutBytes
+  visibility @public
+  proc write
+    takes {grant: Self value: Bytes}
+    returns outcome: Result(Void IoError)
+    external @host
+    symbol "io.stdoutBytes"
+  endproc
+  fn limit
+    takes {grant: Self limits: GrantLimits}
+    returns narrowed: Self
+    external @compiler
+    symbol "grant.limit"
+  endfn
+endinterface
+
+interface StderrText
+  visibility @public
+  proc write
+    takes {grant: Self value: Str}
+    returns outcome: Result(Void IoError)
+    external @host
+    symbol "io.stderrText"
+  endproc
+  fn limit
+    takes {grant: Self limits: GrantLimits}
+    returns narrowed: Self
+    external @compiler
+    symbol "grant.limit"
+  endfn
+endinterface
+
+interface StderrBytes
+  visibility @public
+  proc write
+    takes {grant: Self value: Bytes}
+    returns outcome: Result(Void IoError)
+    external @host
+    symbol "io.stderrBytes"
+  endproc
+  fn limit
+    takes {grant: Self limits: GrantLimits}
+    returns narrowed: Self
+    external @compiler
+    symbol "grant.limit"
+  endfn
+endinterface
+
+// Standard input read as text to its end: the concatenation of the reads of
+// 65,536 bytes up to the first empty one, or the first error.
+proc readAllText
+  takes {input: StdinText}
+  returns outcome: Result(Str IoError)
+  performs {StdinText}
+  visibility @public
+  do
+    return await readTextAfter(input "")
+endproc
+
+// Standard input read as bytes to its end: the concatenation of the reads of
+// 65,536 bytes up to the first empty one, or the first error.
+proc readAllBytes
+  takes {input: StdinBytes}
+  returns outcome: Result(Bytes IoError)
+  performs {StdinBytes}
+  visibility @public
+  do
+    return await readBytesAfter(input Bytes([]))
+endproc
+
+// One turn of `readAllText`: `read` is the text read so far.
+proc readTextAfter
+  takes {input: StdinText read: Str}
+  returns outcome: Result(Str IoError)
+  performs {StdinText}
+  do
+    let chunk be try await StdinText.read(input 65536u64) endlet
+    match chunk
+      case ""
+        return Result.ok(value: read)
+      case _
+        return await readTextAfter(input Str.concat(read chunk))
+    endmatch
+endproc
+
+// One turn of `readAllBytes`: `read` is the bytes read so far.
+proc readBytesAfter
+  takes {input: StdinBytes read: Bytes}
+  returns outcome: Result(Bytes IoError)
+  performs {StdinBytes}
+  do
+    let chunk be try await StdinBytes.read(input 65536u64) endlet
+    if Equatable.equal(Bytes.length(chunk) 0u64) then
+      return Result.ok(value: read)
+    else
+      return await readBytesAfter(input Bytes.concat(read chunk))
+    endif
+endproc

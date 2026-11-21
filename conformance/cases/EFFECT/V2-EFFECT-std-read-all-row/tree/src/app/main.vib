@@ -1,0 +1,7 @@
+use @std.io enduse
+
+use @std.io.IoError enduse
+
+use @std.io.StdinText enduse
+
+proc slurp takes {input: StdinText} returns r: Result(Str IoError) do return await io.readAllText(input) endproc

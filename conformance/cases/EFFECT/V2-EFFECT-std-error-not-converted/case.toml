@@ -1,0 +1,18 @@
+id = "V2-EFFECT-std-error-not-converted"
+rule = "V2-EFFECT-std-error-not-converted"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#delivery-and-typed-outcomes: try on an IoError result in a proc returning Result(Void FsError) is invalid: there is no implicit conversion between error types"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.invalidTry"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 204, end = 239 }

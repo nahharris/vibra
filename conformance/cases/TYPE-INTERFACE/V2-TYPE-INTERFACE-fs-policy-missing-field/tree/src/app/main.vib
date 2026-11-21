@@ -1,0 +1,14 @@
+use @std.fs.FileAction enduse
+
+use @std.fs.FileDepth enduse
+
+use @std.fs.FsPolicy enduse
+
+use @std.fs.RelativePath enduse
+
+fn rule
+  takes {p: RelativePath}
+  returns policy: FsPolicy
+  do
+    return FsPolicy.files(prefix: p depth: FileDepth.tree() actions: [FileAction.read()])
+endfn

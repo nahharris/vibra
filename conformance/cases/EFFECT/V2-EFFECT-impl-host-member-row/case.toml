@@ -1,0 +1,19 @@
+id = "V2-EFFECT-impl-host-member-row"
+rule = "V2-EFFECT-impl-host-member-row"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#operation-interfaces: an implementation member keeps the row of its host-bound contract member, so a wider row is a mismatch at its performs section"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.mismatch"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 383, end = 404 }
+related = [{ source = "stdlib/src/std/fs.vib", span = { start = 3372, end = 3376 } }]

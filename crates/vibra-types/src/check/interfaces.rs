@@ -452,7 +452,8 @@ impl<'a> Program<'a> {
                 }
                 let mut all_bounds = bounds.clone();
                 all_bounds.extend(own_bounds.into_iter().skip(params.len()));
-                let default = member.body().map(|_| {
+                let bound = effects::members::bound(&member);
+                let default = (member.body().is_some() || bound).then(|| {
                     self.default_function(
                         index,
                         &member,
@@ -529,7 +530,7 @@ impl<'a> Program<'a> {
             self_type: Some(Type::SelfType),
             associated,
             signature: Some(signature),
-            external: None,
+            external: effects::members::bound_intrinsic(member),
         });
         fn_index
     }
@@ -1017,7 +1018,10 @@ impl<'a> Program<'a> {
                 usable = false;
                 continue;
             };
-            if let Some(default) = declared.default {
+            if let Some(default) = declared
+                .default
+                .filter(|_| !effects::members::sealed(self, declared.default))
+            {
                 let span = self
                     .functions
                     .get(default)
@@ -1201,7 +1205,8 @@ impl<'a> Program<'a> {
             members.push((name.text().to_owned(), fn_index));
         }
         for declared in &declared_members {
-            if declared.default.is_none()
+            if (declared.default.is_none()
+                || effects::members::sealed(self, declared.default))
                 && !members.iter().any(|(name, _)| *name == declared.name)
             {
                 if seen.iter().any(|(name, _)| *name == declared.name) {

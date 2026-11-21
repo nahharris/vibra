@@ -1,9 +1,10 @@
-//! External declarations against the `@compiler` registry: every bound
-//! symbol is a row with the declaration's owner and signature, and each of
-//! the three faults has its code and its span.
+//! External declarations against the `@compiler` and `@host` registries:
+//! every bound symbol is a row with the declaration's owner and signature,
+//! and each of the three faults has its code and its span.
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 use vibra_ir::external::CompilerIntrinsic;
+use vibra_ir::external::host::host_row;
 use vibra_syntax::parse_source_with;
 use vibra_syntax::source::{SourceOptions, module};
 use vibra_types::{check_externals, load_stdlib};
@@ -61,24 +62,40 @@ fn every_embedded_external_is_a_registry_row_of_its_owner() {
             "`{symbol}` is not a registry row"
         );
     }
-    assert!(stdlib.host_symbols().is_empty());
+    for symbol in stdlib.host_symbols() {
+        assert!(host_row(symbol).is_some(), "`{symbol}` is not a host row");
+    }
     assert!(stdlib.native_symbols().is_empty());
 }
 
 #[test]
-fn the_bound_symbols_are_the_manifest_s_compiler_list() {
+fn the_bound_symbols_are_the_manifest_s_lists() {
     let stdlib = load_stdlib().expect("the embedded standard library loads");
-    let mut bound = Vec::new();
+    let mut compiler = Vec::new();
+    let mut host = Vec::new();
     for module in stdlib.modules() {
         let source = String::from_utf8_lossy(module.bytes()).into_owned();
+        let mut on_host = false;
         for line in source.lines() {
+            if let Some(provider) = line.trim().strip_prefix("external ") {
+                on_host = provider == "@host";
+            }
             if let Some(symbol) = line.trim().strip_prefix("symbol \"") {
-                bound.push(symbol.trim_end_matches('"').to_owned());
+                let symbol = symbol.trim_end_matches('"').to_owned();
+                if on_host {
+                    host.push(symbol);
+                } else {
+                    compiler.push(symbol);
+                }
             }
         }
     }
-    bound.sort();
-    assert_eq!(bound, stdlib.compiler_symbols());
+    compiler.sort();
+    compiler.dedup();
+    host.sort();
+    assert_eq!(compiler, stdlib.compiler_symbols());
+    assert_eq!(host, stdlib.host_symbols());
+    assert_eq!(host.len(), 17, "each host row is bound exactly once");
 }
 
 #[test]
@@ -282,4 +299,84 @@ fn the_manifest_lists_the_assertion_module_and_its_three_symbols() {
         let row = CompilerIntrinsic::from_symbol(symbol).expect("a registry row");
         assert_eq!(row.owner(), "assert");
     }
+}
+
+/// The load of the library with `@std.fs` changed by replacing `from` with
+/// `to` once: the codes in the notes of its defect.
+fn fs_changed(from: &str, to: &str) -> String {
+    let fs = embedded_source("@std.fs");
+    let changed = replace_once(&fs, from, to);
+    let error = load_with_module("@std.fs", &changed);
+    assert_eq!(
+        error.as_ref().map(|error| error.diagnostic().code()),
+        Some(DiagnosticCode::RuntimeInvalidCheckedProgram)
+    );
+    notes(error.as_ref())
+}
+
+#[test]
+fn atk_stdlib_host_signature_a_host_member_with_another_parameter_type_is_a_defect() {
+    let notes = fs_changed(
+        "    takes {grant: Self at: RelativePath}\n    returns outcome: Result(Str FsError)\n",
+        "    takes {grant: Self at: Str}\n    returns outcome: Result(Str FsError)\n",
+    );
+    assert!(notes.contains("@external.signatureMismatch"), "{notes}");
+    assert!(notes.contains("fs.readText"), "{notes}");
+}
+
+#[test]
+fn a_host_member_with_another_result_or_error_type_is_a_defect() {
+    let notes = fs_changed(
+        "    returns outcome: Result(Str FsError)\n",
+        "    returns outcome: Result(Bytes FsError)\n",
+    );
+    assert!(notes.contains("@external.signatureMismatch"), "{notes}");
+    let notes = fs_changed(
+        "    returns outcome: Result(Str FsError)\n",
+        "    returns outcome: Result(Str ScopeError)\n",
+    );
+    assert!(notes.contains("@external.signatureMismatch"), "{notes}");
+}
+
+#[test]
+fn a_host_row_bound_on_another_interface_is_a_defect() {
+    let notes = fs_changed("symbol \"fs.readEntries\"\n", "symbol \"fs.readText\"\n");
+    assert!(notes.contains("@external.ownerMismatch"), "{notes}");
+}
+
+#[test]
+fn an_unknown_host_symbol_in_the_library_is_a_defect() {
+    let notes = fs_changed("symbol \"fs.readEntries\"\n", "symbol \"fs.remove\"\n");
+    assert!(notes.contains("@external.unknownSymbol"), "{notes}");
+}
+
+#[test]
+fn performs_on_a_host_bound_member_is_a_defect() {
+    let notes = fs_changed(
+        "    returns outcome: Result(List(Str) FsError)\n    external @host\n",
+        "    returns outcome: Result(List(Str) FsError)\n    performs {DirList}\n    \
+         external @host\n",
+    );
+    assert!(notes.contains("@external.signatureMismatch"), "{notes}");
+}
+
+#[test]
+fn a_listed_host_symbol_the_library_does_not_bind_is_a_defect() {
+    let fs = embedded_source("@std.fs");
+    let start = fs.find("interface DirStat\n").unwrap_or(0);
+    let end = fs[start..]
+        .find("endinterface\n")
+        .map_or(start, |at| start + at + "endinterface\n".len());
+    let without = fs.get(start..end).unwrap_or_default();
+    assert!(
+        without.contains("fs.metadataStat"),
+        "the fixture cuts `DirStat`"
+    );
+    let changed = replace_once(&fs, without, "");
+    let error = load_with_module("@std.fs", &changed);
+    let notes = notes(error.as_ref());
+    assert!(
+        notes.contains("the host symbol `fs.metadataStat` is bound by no declaration"),
+        "{notes}"
+    );
 }

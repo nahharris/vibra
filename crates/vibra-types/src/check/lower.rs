@@ -1343,9 +1343,17 @@ fn assemble(
                 data.qualified.clone(),
                 record,
                 intrinsic,
-                (0..data.binders.len()).map(Type::Binder).collect(),
+                effects::members::type_arguments(data, intrinsic),
                 origin,
             ),
+            None if let Some(host) = effects::members::host_function(
+                data,
+                record.clone(),
+                origin.clone(),
+            ) =>
+            {
+                host
+            }
             None => match pass
                 .functions
                 .get(&index)
@@ -1507,6 +1515,7 @@ fn assemble(
             library = library.with(*binding, id);
         }
     }
+    let library = effects::members::bind_narrowing(program, library, &in_scope);
     let set = CheckedModuleSet::try_new(ModuleSetParts {
         library,
         types,

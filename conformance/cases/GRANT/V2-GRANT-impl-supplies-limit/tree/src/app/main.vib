@@ -1,0 +1,54 @@
+use @std.fs.DirReadText enduse
+
+use @std.fs.FsError enduse
+
+use @std.fs.FsPolicy enduse
+
+use @std.fs.RelativePath enduse
+
+use @std.policy.GrantLimits enduse
+
+use @std.policy.ScopeError enduse
+
+type Memory of {files: List(Str)}
+  impl DirReadText
+    proc read
+      takes {grant: Self at: RelativePath}
+      returns outcome: Result(Str FsError)
+      do
+        return Result.err(error: FsError.notFound())
+    endproc
+    fn restrict
+      takes {grant: Self policy: FsPolicy}
+      returns narrowed: Result(Self ScopeError)
+      do
+        return Result.ok(value: grant)
+    endfn
+    fn sub
+      takes {grant: Self prefix: RelativePath}
+      returns narrowed: Result(Self ScopeError)
+      do
+        return Result.ok(value: grant)
+    endfn
+    fn limit
+      takes {grant: Self limits: GrantLimits}
+      returns narrowed: Self
+      do
+        return grant
+    endfn
+  endimpl
+endtype
+
+fn narrow
+  takes {grant: DirReadText limits: GrantLimits}
+  returns narrowed: DirReadText
+  do
+    return DirReadText.limit(grant limits)
+endfn
+
+fn view
+  takes {memory: Memory limits: GrantLimits}
+  returns narrowed: DirReadText
+  do
+    return narrow(memory limits)
+endfn

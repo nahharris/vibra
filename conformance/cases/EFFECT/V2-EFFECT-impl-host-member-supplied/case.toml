@@ -1,0 +1,12 @@
+id = "V2-EFFECT-impl-host-member-supplied"
+rule = "V2-EFFECT-impl-host-member-supplied"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#operation-interfaces: a package model of DirReadText supplies its host-bound member and its three narrowing members"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

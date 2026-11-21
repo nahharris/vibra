@@ -1,0 +1,32 @@
+// The random source: the operation interface of the `random` row of the host
+// registry and its error type. The interface binds its one operation with
+// `external @host` and its narrowing member `limit` with `external @compiler`;
+// both are the implementation of a sealed grant only, so an `impl` supplies
+// them.
+
+use @std.policy.GrantLimits enduse
+
+type RandomError
+  case unavailable
+  case denied
+  case limitExceeded
+  case unsupported
+  case outcomeUnknown
+  visibility @public
+endtype
+
+interface RandomBytes
+  visibility @public
+  proc generate
+    takes {grant: Self count: U64}
+    returns outcome: Result(Bytes RandomError)
+    external @host
+    symbol "random.generateBytes"
+  endproc
+  fn limit
+    takes {grant: Self limits: GrantLimits}
+    returns narrowed: Self
+    external @compiler
+    symbol "grant.limit"
+  endfn
+endinterface

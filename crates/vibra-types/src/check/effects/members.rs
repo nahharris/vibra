@@ -17,8 +17,18 @@
 //! performed rows": "A plan's type always carries its complete row,
 //! including through an interface value").
 //!
-//! Step 19 adds the rule of a host-bound member: until then a `proc` member
-//! bound with `external` is `@tool.unavailable` over the member.
+//! A member bound with `external` exists only in the embedded library, whose
+//! loader checks each binding against its registry row
+//! (`crate::stdlib::check_externals`): a `proc` member bound with
+//! `external @host` has no body and no `performs`, so its complete row is
+//! `{owner}`, and it lowers to `FunctionBody::Host`; the narrowing members
+//! `restrict`, `sub`, and `limit` are bound with `external @compiler` to the
+//! rows `grant.*` at the grant type `Self`. Both bindings are the
+//! implementation of a sealed grant only (`docs/spec/03-effects.md`,
+//! "Operation interfaces"): each is the default function of its member, which
+//! dispatch on an interface value selects, and for an `impl` the member is
+//! abstract, so an implementation supplies it (`@type.missingAbstractMember`
+//! otherwise) and supplying it is no `@type.defaultOverride`.
 //!
 //! A contract `proc` member named as a value has its `Proc` type at the
 //! substitution its receiver selects; the closure it becomes awaits the
@@ -26,11 +36,16 @@
 //! same row.
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
-use vibra_ir::{Expr as IrExpr, FnType, IntentType, Node, ProcType, Row, Type};
+use vibra_ir::external::CompilerIntrinsic;
+use vibra_ir::external::host::{host_row, test_world_row};
+use vibra_ir::{
+    BodyContext, CheckedFunction, Expr as IrExpr, FnType, FunctionBody, HostBinding,
+    IntentType, LibraryTypes, Node, ProcType, Row, SignatureRecord, SourceOrigin, Type,
+};
 use vibra_syntax::source::{Callable, CallableKind};
 
 use super::{Hook, rows};
-use crate::check::declare::{InterfaceMemberData, Program};
+use crate::check::declare::{FnData, InterfaceMemberData, Program};
 use crate::check::expr::BodyChecker;
 
 /// Reads the member `member` of the interface `interface` of `module`,
@@ -46,10 +61,6 @@ pub(crate) fn contract_member(
     match member.kind() {
         CallableKind::Fn if member.performs().is_none() => Hook::Continue,
         CallableKind::Fn => {
-            program.unsupported(module, member.construct().span(), what);
-            Hook::Reported
-        }
-        CallableKind::Proc if member.external().is_some() => {
             program.unsupported(module, member.construct().span(), what);
             Hook::Reported
         }
@@ -127,10 +138,6 @@ pub(crate) fn impl_member(
                 "`{qualified}` is a `fn`, so the member that implements it is a pure `fn`, not a `proc`"
             ),
         ),
-        (CallableKind::Proc, Some(_)) if member.external().is_some() => {
-            program.unsupported(module, member.construct().span(), what);
-            return Hook::Reported;
-        }
         (CallableKind::Proc, Some(row)) => {
             match rows::resolve(program, module, member.performs(), Some(interface)) {
                 Err(why) => {
@@ -268,4 +275,104 @@ fn proc_type(signature: FnType, effects: Row) -> Type {
         result: signature.result,
         effects,
     }))
+}
+
+/// Whether the interface member `member` is bound with `external`, so that
+/// it has a function holding its binding although it has no body.
+pub(crate) fn bound(member: &Callable<'_>) -> bool {
+    member.external().is_some()
+}
+
+/// The `@compiler` row the interface member `member` binds, if any.
+pub(crate) fn bound_intrinsic(member: &Callable<'_>) -> Option<CompilerIntrinsic> {
+    let provider = member.external()?.tag()?;
+    if provider.text() != "@compiler" {
+        return None;
+    }
+    CompilerIntrinsic::from_symbol(&member.symbol()?.value()?)
+}
+
+/// Whether the default function `default` of an interface member is a
+/// binding, the implementation of a sealed grant only: for an `impl` such a
+/// member is abstract.
+pub(crate) fn sealed(program: &Program<'_>, default: Option<usize>) -> bool {
+    default
+        .and_then(|function| program.functions.get(function))
+        .is_some_and(|data| data.contract.is_some() && bound(&data.view))
+}
+
+/// The type arguments of the `@compiler` row `intrinsic` that the function
+/// `data` binds: its binders, and for a narrowing row bound in an interface
+/// the grant type, `Self`.
+pub(crate) fn type_arguments(
+    data: &FnData<'_>,
+    intrinsic: CompilerIntrinsic,
+) -> Vec<Type> {
+    let narrowing = matches!(
+        intrinsic,
+        CompilerIntrinsic::GrantRestrict
+            | CompilerIntrinsic::GrantSub
+            | CompilerIntrinsic::GrantLimit
+    );
+    if narrowing && data.contract.is_some() {
+        return vec![Type::SelfType];
+    }
+    (0..data.binders.len()).map(Type::Binder).collect()
+}
+
+/// The function `data` lowered when it is the default function of an
+/// interface member bound with `external @host`: its body is the binding,
+/// its signature record `record`, and its context the one of its `Proc`
+/// type. `None` for any other function.
+pub(crate) fn host_function(
+    data: &FnData<'_>,
+    record: SignatureRecord,
+    origin: SourceOrigin,
+) -> Option<CheckedFunction> {
+    if data.contract.is_none() || data.view.external()?.tag()?.text() != "@host" {
+        return None;
+    }
+    let symbol = data.view.symbol()?.value()?;
+    let binding = match (host_row(&symbol), test_world_row(&symbol)) {
+        (Some(row), _) => HostBinding::Operation(row.op),
+        (None, Some(row)) => HostBinding::TestWorld(row.op),
+        (None, None) => return None,
+    };
+    let slot_count = data.signature.as_ref().map_or(0, FnType::slot_count);
+    Some(CheckedFunction {
+        name: data.qualified.clone(),
+        signature: record,
+        defaults: Vec::new(),
+        body: FunctionBody::Host(binding),
+        entry_guard: None,
+        exit_guard: None,
+        slot_count,
+        origin,
+        context: BodyContext::Pure,
+    })
+}
+/// `library` with each narrowing type the grant rows name bound to the
+/// declaration of that name in its module, where that module is in scope
+/// (`docs/spec/03-effects.md`, "Narrowing").
+pub(crate) fn bind_narrowing(
+    program: &Program<'_>,
+    mut library: LibraryTypes,
+    in_scope: &dyn Fn(usize) -> bool,
+) -> LibraryTypes {
+    for narrowing in crate::stdlib::NARROWING_TYPES {
+        let id = program
+            .types
+            .iter()
+            .filter(|data| in_scope(data.module) && data.name == narrowing.name())
+            .find(|data| {
+                program.modules.get(data.module).is_some_and(|module| {
+                    module.embedded && module.path == narrowing.module()
+                })
+            })
+            .and_then(|data| data.id.clone());
+        if let Some(id) = id {
+            library = library.with_narrowing(narrowing, id);
+        }
+    }
+    library
 }

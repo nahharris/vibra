@@ -1,0 +1,12 @@
+id = "V2-TYPE-INTERFACE-relative-path-ordered"
+rule = "V2-TYPE-INTERFACE-relative-path-ordered"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "04-programs-and-packages.md#test-worlds-and-grants: RelativePath is Ordered, so it is a key type of Dict"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

@@ -1,0 +1,498 @@
+// The scoped filesystem: the six operation interfaces of the `fs` rows of the
+// host registry, their error and metadata types, `RelativePath`, and the
+// source form of a filesystem policy. Each interface binds its one operation
+// with `external @host` and its three narrowing members with
+// `external @compiler`; both are the implementation of a sealed grant only,
+// so an `impl` supplies them.
+
+use @std.policy.GrantLimits enduse
+
+use @std.policy.ScopeError enduse
+
+use @std.iter.compareLexicographic enduse
+
+type FsError
+  case notFound
+  case permissionDenied
+  case notAFile
+  case notADirectory
+  case invalidPath
+  case invalidText
+  case other
+  case denied
+  case limitExceeded
+  case unsupported
+  case outcomeUnknown
+  visibility @public
+endtype
+
+type FsKind
+  case file
+  case directory
+  case other
+  visibility @public
+endtype
+
+type FsMetadata of {kind: FsKind size: U64}
+  visibility @public
+endtype
+
+// A path below the directory a grant holds: a list of names, each under the
+// name profile of the scope policies. The empty path names that directory.
+// Two paths compare their names in order, each name as a `Str`.
+type RelativePath of List(Str)
+  where validNames else ScopeError.invalidPolicy()
+  visibility @public
+  impl Equatable
+    fn equal
+      takes {left: Self right: Self}
+      returns same: Bool
+      do
+        match Ordered.compare(left right)
+          case Ordering.equal()
+            return true
+          case _
+            return false
+        endmatch
+    endfn
+  endimpl
+  impl Ordered
+    fn compare
+      takes {left: Self right: Self}
+      returns order: Ordering
+      do
+        let RelativePath(leftNames) be left endlet
+        let RelativePath(rightNames) be right endlet
+        return compareLexicographic(leftNames rightNames)
+    endfn
+  endimpl
+endtype
+
+type FileDepth
+  case children
+  case tree
+  visibility @public
+endtype
+
+type DirDepth
+  case self
+  case children
+  case tree
+  visibility @public
+endtype
+
+type FileAction
+  case read
+  case replace
+  case create
+  case stat
+  visibility @public
+endtype
+
+type DirAction
+  case list
+  case stat
+  visibility @public
+endtype
+
+type FsPolicy
+  case none
+  case allOf {items: List(FsPolicy)}
+  case anyOf {items: List(FsPolicy)}
+  case files {
+    prefix: RelativePath
+    depth: FileDepth
+    actions: List(FileAction)
+    names: NameTest
+  }
+  case directories {prefix: RelativePath depth: DirDepth actions: List(DirAction)}
+  visibility @public
+endtype
+
+type NameTest
+  case anyName
+  case exact {names: List(Str)}
+  case suffix {value: Str}
+  case allOf {items: List(NameTest)}
+  case anyOf {items: List(NameTest)}
+  visibility @public
+endtype
+
+interface DirReadBytes
+  visibility @public
+  proc read
+    takes {grant: Self at: RelativePath}
+    returns outcome: Result(Bytes FsError)
+    external @host
+    symbol "fs.readFile"
+  endproc
+  fn restrict
+    takes {grant: Self policy: FsPolicy}
+    returns narrowed: Result(Self ScopeError)
+    external @compiler
+    symbol "grant.restrict"
+  endfn
+  fn sub
+    takes {grant: Self prefix: RelativePath}
+    returns narrowed: Result(Self ScopeError)
+    external @compiler
+    symbol "grant.sub"
+  endfn
+  fn limit
+    takes {grant: Self limits: GrantLimits}
+    returns narrowed: Self
+    external @compiler
+    symbol "grant.limit"
+  endfn
+endinterface
+
+interface DirReadText
+  visibility @public
+  proc read
+    takes {grant: Self at: RelativePath}
+    returns outcome: Result(Str FsError)
+    external @host
+    symbol "fs.readText"
+  endproc
+  fn restrict
+    takes {grant: Self policy: FsPolicy}
+    returns narrowed: Result(Self ScopeError)
+    external @compiler
+    symbol "grant.restrict"
+  endfn
+  fn sub
+    takes {grant: Self prefix: RelativePath}
+    returns narrowed: Result(Self ScopeError)
+    external @compiler
+    symbol "grant.sub"
+  endfn
+  fn limit
+    takes {grant: Self limits: GrantLimits}
+    returns narrowed: Self
+    external @compiler
+    symbol "grant.limit"
+  endfn
+endinterface
+
+interface DirList
+  visibility @public
+  proc entries
+    takes {grant: Self at: RelativePath}
+    returns outcome: Result(List(Str) FsError)
+    external @host
+    symbol "fs.readEntries"
+  endproc
+  fn restrict
+    takes {grant: Self policy: FsPolicy}
+    returns narrowed: Result(Self ScopeError)
+    external @compiler
+    symbol "grant.restrict"
+  endfn
+  fn sub
+    takes {grant: Self prefix: RelativePath}
+    returns narrowed: Result(Self ScopeError)
+    external @compiler
+    symbol "grant.sub"
+  endfn
+  fn limit
+    takes {grant: Self limits: GrantLimits}
+    returns narrowed: Self
+    external @compiler
+    symbol "grant.limit"
+  endfn
+endinterface
+
+interface DirWriteBytes
+  visibility @public
+  proc write
+    takes {grant: Self at: RelativePath contents: Bytes}
+    returns outcome: Result(Void FsError)
+    external @host
+    symbol "fs.writeFile"
+  endproc
+  fn restrict
+    takes {grant: Self policy: FsPolicy}
+    returns narrowed: Result(Self ScopeError)
+    external @compiler
+    symbol "grant.restrict"
+  endfn
+  fn sub
+    takes {grant: Self prefix: RelativePath}
+    returns narrowed: Result(Self ScopeError)
+    external @compiler
+    symbol "grant.sub"
+  endfn
+  fn limit
+    takes {grant: Self limits: GrantLimits}
+    returns narrowed: Self
+    external @compiler
+    symbol "grant.limit"
+  endfn
+endinterface
+
+interface DirWriteText
+  visibility @public
+  proc write
+    takes {grant: Self at: RelativePath contents: Str}
+    returns outcome: Result(Void FsError)
+    external @host
+    symbol "fs.writeText"
+  endproc
+  fn restrict
+    takes {grant: Self policy: FsPolicy}
+    returns narrowed: Result(Self ScopeError)
+    external @compiler
+    symbol "grant.restrict"
+  endfn
+  fn sub
+    takes {grant: Self prefix: RelativePath}
+    returns narrowed: Result(Self ScopeError)
+    external @compiler
+    symbol "grant.sub"
+  endfn
+  fn limit
+    takes {grant: Self limits: GrantLimits}
+    returns narrowed: Self
+    external @compiler
+    symbol "grant.limit"
+  endfn
+endinterface
+
+interface DirStat
+  visibility @public
+  proc stat
+    takes {grant: Self at: RelativePath}
+    returns outcome: Result(FsMetadata FsError)
+    external @host
+    symbol "fs.metadataStat"
+  endproc
+  fn restrict
+    takes {grant: Self policy: FsPolicy}
+    returns narrowed: Result(Self ScopeError)
+    external @compiler
+    symbol "grant.restrict"
+  endfn
+  fn sub
+    takes {grant: Self prefix: RelativePath}
+    returns narrowed: Result(Self ScopeError)
+    external @compiler
+    symbol "grant.sub"
+  endfn
+  fn limit
+    takes {grant: Self limits: GrantLimits}
+    returns narrowed: Self
+    external @compiler
+    symbol "grant.limit"
+  endfn
+endinterface
+
+// The name profile of the scope policies, one name after another.
+fn validNames
+  takes {names: List(Str)}
+  returns valid: Bool
+  do
+    let Option.some(value: {name rest}) be Iter.next(names) else return true endlet
+    if validName(name) then return validNames(rest) else return false endif
+endfn
+
+// A name is non-empty and is not `.` or `..`; it contains no `/`, `\`, `:`,
+// or control character, NUL among them; it does not end in a dot or a space;
+// and it is no reserved device name.
+fn validName
+  takes {name: Str}
+  returns valid: Bool
+  do
+    match name
+      case "."
+        return false
+      case ".."
+        return false
+      case _
+        let Option.some(value: {first rest}) be Iter.next(name) else return false endlet
+        if allowedScalars(first rest) then
+          return Bool.not(reservedDevice(name))
+        else
+          return false
+        endif
+    endmatch
+endfn
+
+// Whether `last` and every scalar of `rest` after it are allowed in a name,
+// and the name's final scalar is neither a dot nor a space.
+fn allowedScalars
+  takes {last: Char rest: Str}
+  returns allowed: Bool
+  do
+    if forbiddenScalar(last) then
+      return false
+    else
+      let Option.some(value: {next more}) be Iter.next(rest) else
+        return Bool.not(Bool.or(Equatable.equal(last '.') Equatable.equal(last ' ')))
+      endlet
+      return allowedScalars(next more)
+    endif
+endfn
+
+// `/`, `\`, `:`, and the control characters U+0000 to U+001F and U+007F to
+// U+009F.
+fn forbiddenScalar
+  takes {scalar: Char}
+  returns forbidden: Bool
+  do
+    let code be Char.toU32(scalar) endlet
+    return Bool.or(
+      Bool.or(Equatable.equal(scalar '/') Equatable.equal(scalar '\\'))
+      Bool.or(
+        Equatable.equal(scalar ':')
+        Bool.or(Ordered.lessOrEqual(code 31u32) Ordered.inRange(code 127u32 159u32))
+      )
+    )
+endfn
+
+// Whether the stem of `name`, the part before its first dot with trailing
+// spaces removed, is a reserved device stem once each scalar is mapped to its
+// Unicode simple uppercase.
+fn reservedDevice
+  takes {name: Str}
+  returns reserved: Bool
+  do
+    let stem be upperStem(name []) endlet
+    let {_ end} be Iter.fold(stem {0u64 0u64} throughLastNonSpace) endlet
+    let Option.some(value: trimmed) be List.slice(stem 0u64 end) else
+      return false
+    endlet
+    return amongStems(trimmed reservedStems)
+endfn
+
+// The scalars of `rest` up to its first dot, each mapped by `simpleUpper`,
+// after `gathered`.
+fn upperStem
+  takes {rest: Str gathered: List(Char)}
+  returns stem: List(Char)
+  do
+    let Option.some(value: {scalar more}) be Iter.next(rest) else return gathered endlet
+    if Equatable.equal(scalar '.') then
+      return gathered
+    else
+      return upperStem(more List.append(gathered simpleUpper(scalar)))
+    endif
+endfn
+
+// The Unicode simple uppercase of `scalar` where it is an ASCII letter: the
+// ASCII lowercase letters, U+0131 (to `I`), and U+017F (to `S`). Every other
+// scalar is kept; none of them maps to a scalar of a device stem, whose
+// scalars are ASCII capitals, ASCII digits, `$`, and the superscripts one to
+// three, so the verdict is that of the full mapping.
+fn simpleUpper
+  takes {scalar: Char}
+  returns upper: Char
+  do
+    if Ordered.inRange(scalar 'a' 'z') then
+      let Option.some(value: shifted) be
+        Char.fromU32(U32.sub(Char.toU32(scalar) 32u32)) else
+        return scalar
+      endlet
+      return shifted
+    else
+      match scalar
+        case '\u{131}'
+          return 'I'
+        case '\u{17F}'
+          return 'S'
+        case _
+          return scalar
+      endmatch
+    endif
+endfn
+
+// One step of the walk that finds where the trailing spaces of a stem start:
+// the count of scalars seen, and the count up to the last one that is not a
+// space.
+fn throughLastNonSpace
+  takes {seen: {U64 U64} scalar: Char}
+  returns next: {U64 U64}
+  do
+    let {count end} be seen endlet
+    let counted be U64.add(count 1u64) endlet
+    if Equatable.equal(scalar ' ') then
+      return {counted end}
+    else
+      return {counted counted}
+    endif
+endfn
+
+// Whether `stem` has the scalars of one of `stems`.
+fn amongStems
+  takes {stem: List(Char) stems: List(Str)}
+  returns among: Bool
+  do
+    let Option.some(value: {candidate rest}) be Iter.next(stems) else
+      return false
+    endlet
+    if sameScalars(stem candidate) then
+      return true
+    else
+      return amongStems(stem rest)
+    endif
+endfn
+
+// Whether `scalars` are, in order, the scalars of `text`.
+fn sameScalars
+  takes {scalars: List(Char) text: Str}
+  returns same: Bool
+  do
+    match Iter.next(scalars)
+      case Option.none()
+        match Iter.next(text)
+          case Option.none()
+            return true
+          case Option.some(value: _)
+            return false
+        endmatch
+      case Option.some(value: {scalar rest})
+        let Option.some(value: {other more}) be Iter.next(text) else return false endlet
+        if Equatable.equal(scalar other) then
+          return sameScalars(rest more)
+        else
+          return false
+        endif
+    endmatch
+endfn
+
+// The reserved device stems, in upper case.
+let reservedStems: List(Str) be
+  [
+    "CON"
+    "PRN"
+    "AUX"
+    "NUL"
+    "CONIN$"
+    "CONOUT$"
+    "COM0"
+    "COM1"
+    "COM2"
+    "COM3"
+    "COM4"
+    "COM5"
+    "COM6"
+    "COM7"
+    "COM8"
+    "COM9"
+    "COM\u{B9}"
+    "COM\u{B2}"
+    "COM\u{B3}"
+    "LPT0"
+    "LPT1"
+    "LPT2"
+    "LPT3"
+    "LPT4"
+    "LPT5"
+    "LPT6"
+    "LPT7"
+    "LPT8"
+    "LPT9"
+    "LPT\u{B9}"
+    "LPT\u{B2}"
+    "LPT\u{B3}"
+  ]
+endlet
