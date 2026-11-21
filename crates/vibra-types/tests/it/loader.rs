@@ -15,7 +15,7 @@ fn the_embedded_library_loads() {
         stdlib.modules().len(),
         stdlib.roles().len()
     );
-    assert_eq!(stdlib.modules().len(), 9);
+    assert_eq!(stdlib.modules().len(), 11);
     assert_eq!(stdlib.roles().len(), 9);
     assert_eq!(stdlib.package_name(), "std");
     assert_eq!(stdlib.package_version(), "0.0.2");
@@ -147,6 +147,16 @@ fn the_overlay_is_the_unit_std() {
                 "stdlib/src/std/option.vib"
             ),
             (
+                "@std.policy",
+                "policy".to_owned(),
+                "stdlib/src/std/policy.vib"
+            ),
+            (
+                "@std.process",
+                "process".to_owned(),
+                "stdlib/src/std/process.vib"
+            ),
+            (
                 "@std.result",
                 "result".to_owned(),
                 "stdlib/src/std/result.vib"
@@ -184,6 +194,8 @@ fn the_overlay_is_resolution_s_embedded_unit() {
             ("@std.core", "stdlib/src/std/core.vib"),
             ("@std.iter", "stdlib/src/std/iter.vib"),
             ("@std.option", "stdlib/src/std/option.vib"),
+            ("@std.policy", "stdlib/src/std/policy.vib"),
+            ("@std.process", "stdlib/src/std/process.vib"),
             ("@std.result", "stdlib/src/std/result.vib"),
             ("@std.str", "stdlib/src/std/str.vib"),
         ]

@@ -5,7 +5,7 @@ use vibra_syntax::parse_source_with;
 use vibra_syntax::source::SourceOptions;
 use vibra_types::StdlibInputs;
 
-const MODULES: [&str; 9] = [
+const MODULES: [&str; 11] = [
     "@std.assert",
     "@std.bool",
     "@std.builtin",
@@ -13,6 +13,8 @@ const MODULES: [&str; 9] = [
     "@std.core",
     "@std.iter",
     "@std.option",
+    "@std.policy",
+    "@std.process",
     "@std.result",
     "@std.str",
 ];

@@ -1,0 +1,3 @@
+use @std.policy enduse
+
+fn f returns e: policy.ScopeError do return policy.ScopeError.denied() endfn
