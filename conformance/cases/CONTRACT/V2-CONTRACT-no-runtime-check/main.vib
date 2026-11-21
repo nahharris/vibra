@@ -1,0 +1,2 @@
+fn pick takes {n: I32} returns r: I32 requires Ordered.greater(n 0i32) do return n endfn
+fn main returns r: I32 do return pick(5i32) endfn

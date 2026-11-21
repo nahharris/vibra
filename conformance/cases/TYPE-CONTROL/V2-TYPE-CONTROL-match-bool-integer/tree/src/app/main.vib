@@ -1,0 +1,1 @@
+fn f takes {b: Bool} returns r: I32 do return match b case true 1i32 case 0i32 2i32 case _ 3i32 endmatch endfn

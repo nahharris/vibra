@@ -1,0 +1,1 @@
+{format: @sourceGraph.v1 units: [{name: @app kind: @lib modules: [{path: @app.text sourceId: "src/app/text.vib" bytesHex: "61"} {path: @app.texts.inner sourceId: "src/app/texts/inner.vib" bytesHex: "62"}]} {name: @tests kind: @tests modules: []}] dependencies: []}

@@ -1,0 +1,32 @@
+use @std.assert enduse
+
+use @pilot.packet enduse
+
+test "an item scores its two points and its code"
+  do
+    assert.equal(
+      Option.some(value: 12i32)
+      packet.packetScore(packet.Packet.item(points: [2i32 3i32] code: 7i32))
+    )
+endtest
+
+test "the stop code scores nothing"
+  do
+    assert.equal(
+      Option.none()
+      packet.packetScore(packet.Packet.item(points: [2i32 3i32] code: 99i32))
+    )
+endtest
+
+test "the wrong number of points scores nothing"
+  do
+    assert.equal(
+      Option.none()
+      packet.packetScore(packet.Packet.item(points: [2i32] code: 7i32))
+    )
+endtest
+
+test "an empty packet scores nothing"
+  do
+    assert.equal(Option.none() packet.packetScore(packet.Packet.empty()))
+endtest

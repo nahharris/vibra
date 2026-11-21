@@ -1,0 +1,21 @@
+type GateError
+  case noNotes
+  case notANote {name: Str}
+  case emptyName
+  visibility @public
+endtype
+
+fn describe
+  takes {error: GateError}
+  returns text: Str
+  visibility @public
+  do
+    return match error
+      case GateError.noNotes()
+        "no notes"
+      case GateError.notANote(name: name)
+        Str.concat("not a note: " name)
+      case GateError.emptyName()
+        "a note has an empty name"
+    endmatch
+endfn

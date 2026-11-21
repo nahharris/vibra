@@ -1,0 +1,6 @@
+type Positive of I32 where isPositive endtype
+fn isPositive takes {v: I32} returns r: Bool do return Ordered.greater(v 0i32) endfn
+interface Holder fn held takes {value: Self} returns r: Positive endfn endinterface
+type Box of Positive impl Holder fn held takes {value: Self} returns r: Positive do let Box(p) be value endlet return p endfn endimpl endtype
+fn pass takes {h: Holder} returns r: Holder do return h endfn
+fn main returns r: Positive do return Holder.held(pass(Box(Positive(5i32)))) endfn

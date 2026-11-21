@@ -1,0 +1,6 @@
+{
+  format: @project.v2
+  package: {name: "gatePure" version: "0.1.0"}
+  targets: [{name: @gatePure kind: @lib root: "src/gatePure"}]
+  dependencies: [:]
+}

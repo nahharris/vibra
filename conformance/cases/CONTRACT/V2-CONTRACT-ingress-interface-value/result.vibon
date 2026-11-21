@@ -1,0 +1,1 @@
+{format: @value.v2 typeInfo: {kind: @declared path: @app.main.Positive seed: "sha256:328cfc15c7e7b8ee639d64726b1f46b853680572a87c128d4400c94de8045ffe" arguments: []} value: {kind: @wrapper typeInfo: {kind: @declared path: @app.main.Positive seed: "sha256:328cfc15c7e7b8ee639d64726b1f46b853680572a87c128d4400c94de8045ffe" arguments: []} value: 5i32}}

@@ -1,0 +1,13 @@
+id = "V2-PROJECT-graph-duplicate-target-distinct"
+rule = "V2-PROJECT-graph-duplicate-target-distinct"
+profile = "staticV2"
+operation = "sourceGraph"
+description = "04-programs-and-packages.md#packages-units-and-targets: two targets with distinct names are two units"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+graph = "graph.vibon"

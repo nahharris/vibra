@@ -562,6 +562,8 @@ search, directory index modules, and re-exports do not exist.
 
 Apart from the prelude, the standard library is imported like any other
 package. The modules that declare the prelude are in every checked graph.
+A module path that the embedded library does not ship is `@module.unknownPath`,
+as for any other missing module.
 
 ## Dependencies and lock
 

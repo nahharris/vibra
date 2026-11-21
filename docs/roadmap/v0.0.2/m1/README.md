@@ -1,11 +1,11 @@
 # v0.0.2 M1: pure language
 
-**Planned.** The pure part of the language, checked and run on the reference
-interpreter.
+**Exited.** The pure part of the language, checked and run on the reference
+interpreter. The exit record is [exit.md](exit.md).
 
 Design record: [architecture.md](architecture.md). Owner table for M0:
 [../m0/owners.md](../m0/owners.md). Step guides: [steps/](steps/).
-Integration branch: `v0.0.2/m1`, created from `main` after M0 exits.
+Integration branch: `v0.0.2/m1-lang`.
 
 ## Scope, in slices
 
@@ -80,7 +80,7 @@ the vertical-slice rule.
 
 | Id | Name | Kind | Depends on | Can run in parallel with | Crates touched | Status |
 | --- | --- | --- | --- | --- | --- | --- |
-| 01 | [rename-v1](steps/01-rename-v1.md) | infrastructure | — | — | every existing crate, `Cargo.toml`, CI, `stdlib-v1/`, `examples-v1/`, `fuzz-v1/`, `conformance/v1/` | planned |
+| 01 | [rename-v1](steps/01-rename-v1.md) | infrastructure | — | — | every existing crate, `Cargo.toml`, CI, `stdlib-v1/`, `examples-v1/`, `fuzz-v1/`, `conformance/v1/` | landed |
 | 02 | [diagnostics-and-harness](steps/02-diagnostics-and-harness.md) | infrastructure, specification prerequisite | 01 | — | `vibra-diagnostics`, `vibra-conformance` (new) | landed |
 | 03 | [lexer-and-vibon](steps/03-lexer-and-vibon.md) | vertical | 02 | 12, 13, 24 | `vibra-syntax`, `vibra-fmt` (new), `vibra-conformance`, `conformance/cases`, CI | landed |
 | 04 | [source-skeleton](steps/04-source-skeleton.md) | vertical | 03 | 09, 12, 13, 24, 27 | `vibra-syntax`, `vibra-fmt`, `conformance/cases` | landed |
@@ -100,20 +100,38 @@ the vertical-slice rule.
 | 18 | [check-callables](steps/18-check-callables.md) | vertical | 17 | 08, 23, 24, 25, 27 | `vibra-types`, `vibra-interp`, `conformance/cases` | landed |
 | 19 | [check-interfaces](steps/19-check-interfaces.md) | vertical | 18 | 08, 23, 24, 25, 26, 27 | `vibra-types`, `vibra-ir`, `vibra-cli`, `stdlib/`, `conformance/cases` | landed |
 | 20 | [stdlib-pure](steps/20-stdlib-pure.md) | vertical | 19 | 08, 23, 24, 25, 26, 27 | `stdlib/`, `vibra-types`, `vibra-resolve`, `conformance/cases` | landed |
-| 21 | [guards-with-else](steps/21-guards-with-else.md) | vertical | 20 | 08, 23, 24, 25, 26, 27 | `vibra-types`, `vibra-interp`, `vibra-conformance`, `conformance/cases` | in progress |
-| 22 | [discharge](steps/22-discharge.md) | vertical | 21 | 08, 23, 24, 25, 26, 27 | `vibra-types`, `conformance/cases` | in progress |
+| 21 | [guards-with-else](steps/21-guards-with-else.md) | vertical | 20 | 08, 23, 24, 25, 26, 27 | `vibra-types`, `vibra-interp`, `vibra-conformance`, `conformance/cases` | landed |
+| 22 | [discharge](steps/22-discharge.md) | vertical | 21 | 08, 23, 24, 25, 26, 27 | `vibra-types`, `conformance/cases` | landed |
 | 23 | [tests-and-assertions](steps/23-tests-and-assertions.md) | vertical | 17 | 18 to 22, 24, 25, 27 | `vibra-workspace`, `vibra-types`, `vibra-interp`, `vibra-conformance`, `stdlib/`, `conformance/cases` | landed |
 | 24 | [cli-skeleton](steps/24-cli-skeleton.md) | vertical | 02 | 03 to 23, 27 | `vibra-schema`, `vibra-cli` (new) | landed |
 | 25 | [cli-fmt-check](steps/25-cli-fmt-check.md) | vertical | 08, 15, 24 | 16 to 23, 27 | `vibra-cli`, `vibra-schema`, `vibra-workspace`, `vibra-conformance`, `conformance/cases` | landed |
 | 26 | [cli-test](steps/26-cli-test.md) | vertical | 23, 25 | 18 to 22, 27 | `vibra-cli`, `vibra-schema`, `vibra-workspace` | landed |
 | 27 | [runtime-crate-port](steps/27-runtime-crate-port.md) | infrastructure | 03, 13 | 04 to 11, 14 to 26 | `vibra-host`, `vibra-native` (new), `vibra-ir` | landed |
 | 28 | [cutover](steps/28-cutover.md) | infrastructure | 08, 20, 22, 23, 26, 27; X2-01 (Nexus plan) | — | eight `-v1` crates and the four v0.0.1 trees (deleted), `Cargo.toml`, CI, `vibra-conformance`, `vibra-cli` (tests), `README.md`, `examples/`, `plugins/`, `docs/roadmap` | landed |
-| 29 | [m1-exit](steps/29-m1-exit.md) | evidence | 28 | — | `examples/`, `conformance/cases`, this directory | planned |
+| 29 | [m1-exit](steps/29-m1-exit.md) | evidence | 28 | — | `examples/`, `conformance/cases`, `vibra-conformance`, `vibra-cli` (tests), `docs/spec`, this directory | landed |
 
 After 01 and 02 land, steps 03, 12, and 24 are in flight at once; after 03,
 steps 04, 09, 12, 13, and 24 are. The widest front is during the checker
 chain, when 08, 23, 24 to 27 run beside it.
 
+## Packages
+
+Packages are not steps of the plan. Each closed findings or questions that
+the steps left, and each landed on the integration branch.
+
+| Package | Kind | Closes | Status |
+| --- | --- | --- | --- |
+| `m1/ir-fixes` | review fixes | the review findings on the checked IR and the interpreter | landed |
+| `m1/reader-fixes` | review fixes | the review findings on the reader and the formatter | landed |
+| `m1/checker-fixes` | review fixes | the review findings on the checker | landed |
+| `m1/guard-fixes` | review fixes | the review findings on static discharge | landed |
+| `m1/member-access` | vertical | the access of members, and the comment padding rule | landed |
+| `m1/callable-rulings` | vertical | bound checks at every position, the callable rulings, and library follow-ups | landed |
+| `m1/checker-gaps` | vertical | the checker's remaining gaps | landed |
+| `m1/checker-gaps-2` | vertical | the last checker gaps of M1 | landed |
+| `m1/spec-batch-1` | specification prerequisite | the specification questions of steps 02 to 12 | landed |
+| `m1/spec-batch-2` | specification prerequisite | the open specification questions of the later steps | landed |
+| `m1/drop-wasm` | infrastructure | the removal of the WebAssembly backend | landed |
 ## Slices and steps
 
 | Slice | Steps that implement it | Step | Slices it serves |

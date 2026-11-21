@@ -184,7 +184,8 @@ use offsets.
 - Diagnostics sort by source, then primary start and end, then registry
   order.
 - One fault is reported once. A later phase does not report the same
-  introduction again.
+  introduction again, and a form already reported is not reported again for
+  the same operand.
 - Tests assert codes, levels, spans, related identities, defined notes, and
   fixes. They do not assert message punctuation.
 
@@ -233,7 +234,7 @@ command-line context.
 | two members of one owner with one name, an associated type and another member of its interface included; a callable member supplied twice in one `impl` | `@name.memberCollision`, the later name, related to the first |
 | a repeated type parameter; an associated type with the name of a visible type parameter | `@name.genericRedeclaration`, the later parameter, the associated type, or the `impl` head |
 | a reserved word in a label position | `@name.reservedLabel`, the word |
-| a test module without an import that resolves to `@std.assert` | `@module.missingRequiredImport`, at its first test's name |
+| a module of the `@tests` unit that declares a `test` and has no import that resolves to `@std.assert` | `@module.missingRequiredImport`, at its first test's name |
 | a test outside `@tests`; outside `@tests`, a use of a declaration bound to an [assertion row](06-runtime.md#assertion-operations) | `@module.testOutsideTests`, the whole `test` declaration; `@module.assertionOutsideTests`, the use |
 
 Resolution reads only the captured source graph.
@@ -278,7 +279,7 @@ Resolution reads only the captured source graph.
 | a declared type whose expansion repeats | `@type.infiniteSize`, the whole declaration whose expansion first repeats, `type` to `endtype` |
 | a type nested more than 64 levels, a declared callable's own type included | `@type.depthExceeded`, the written type, the expression whose type it is, or a callable's deepest written parameter or result type |
 | a generic callable that reaches itself at a type built around one of its own type parameters | `@type.expandingInstantiation`, the call or callable reference with the expanding type argument, related along the cycle |
-| an inadmissible dict key type | `@type.invalidDictKey`, the key type |
+| an inadmissible dict key type | `@type.invalidDictKey`, the key type, or the first key when none is written |
 | a callable as a dict key, or an `assert.equal` operand whose type contains a callable, plan, or grant | `@type.functionNotEquatable`, the type, or each such operand |
 | `try` on a wrong carrier, in a callable with another carrier, or directly in a test | `@type.invalidTry`, the `try` |
 | a fallible value left unused as a statement | `@type.unhandledFallible`, the statement |
@@ -321,7 +322,7 @@ Every row is an error with no automatic fix.
 | an arm that is repeated, already covered, or uninhabited | `@pattern.unreachableArm`, the arm's pattern |
 | a type argument the call does not determine, including one still undetermined when no bound is resolvable | `@type.ambiguousInference`, the application |
 | a type argument that does not meet its bound, written, inferred, or an `impl` target's argument; an argument of an interface at a call that does not meet its parameter's bound | `@type.unsatisfiedBound`, the actual type as written, or the operand or expected type that fixes it, related to the bound |
-| an `impl` for `Never` or for an anonymous type | `@name.wrongEntityKind`, the `impl` |
+| an `impl` for `Never` or for an anonymous type | `@name.wrongEntityKind`, the whole `impl` |
 
 - An explicit `return` in tail position is the normal spelling and is never
   reported as redundant.
@@ -727,23 +728,22 @@ of its path.
 There is one obligation for each site where a bare guard must be
 discharged: each call of a callable with a bare `requires`, each
 construction of a type with a bare `where`, and the bare `ensures` of each
-callable, one for its predicate. An obligation record has `declaration`
-(`Str`, the identity of the declaration that contains the site: the caller,
-the constructing declaration, or, for an `ensures`, the callable itself);
-`predicate` (`Str`, the identity of the guarded declaration); `kind`
-(`@requires`, `@ensures`, or `@where`); `span` (the span record of the
-site: the call or the construction, and for an `ensures` its predicate);
-`status` (`@passed`, `@refuted`, `@unknown`, or `@unsupported`); `rules`
-(list of `Str`, the identifiers of the discharge rules used, in order:
-`GUARD-1` to `GUARD-7` of [Bare guards](02-type-system.md#bare-guards), and
-after a `GUARD-6` the `INT` identifiers of the
-[integer facts](#integer-facts) it used); `dependencies` (list of `Str`,
-sorted: the identity of the guarded declaration and of every declaration
-whose checked body or value the discharge read, without `declaration`
-itself); and `counterexample` (optional `Str`, the canonical VIBON text of
-the refuting values). `declaration` then `span` orders the obligations
-totally.
+callable, one for its predicate. An obligation record has the fields of this
+table. The [`check` payload](05-tooling.md#command-payloads) carries the same
+record as JSON, field for field, under the JSON name.
 
+| Field | JSON name | Type | Content |
+| --- | --- | --- | --- |
+| `declaration` | `declaration` | `Str` | the identity of the declaration that contains the site: the caller, the constructing declaration, or, for an `ensures`, the callable itself |
+| `predicate` | `predicateIdentity` | `Str` | the identity of the guarded declaration |
+| `kind` | `kind` | `@requires`, `@ensures`, or `@where`; in JSON the string without `@` | the guard |
+| `span` | `source` | the span record; in JSON a `SpanDocument` | the site: the call or the construction, and for an `ensures` its predicate |
+| `status` | `status` | `@passed`, `@refuted`, `@unknown`, or `@unsupported`; in JSON the string without `@` | the outcome of the discharge |
+| `rules` | `ruleIds` | list of `Str` | the identifiers of the discharge rules used, in order: `GUARD-1` to `GUARD-7` of [Bare guards](02-type-system.md#bare-guards), and after a `GUARD-6` the `INT` identifiers of the [integer facts](#integer-facts) it used |
+| `dependencies` | `dependencies` | sorted list of `Str` | the identity of the guarded declaration and of every declaration whose checked body or value the discharge read, without `declaration` itself |
+| `counterexample` | `counterexample` | optional `Str`; in JSON a string or `null` | the canonical VIBON text of the refuting values |
+
+`declaration` then `span` orders the obligations totally.
 A refuted obligation is refuted by evaluation, so its `rules` are `["GUARD-1"]`.
 Its counterexample is the [value encoding](06-runtime.md#values) of a record
 keyed by the names the predicate reads, the guarded declaration's parameters or,
@@ -803,8 +803,9 @@ A test record has `name` (`Str`, the selector); `result` (a `@test.*` atom);
 `failure` (optional record `kind: @assertion` or `@observation`,
 `assertion: Str`, `expected: Str` optional, `actual: Str` optional,
 `primarySpan`: span record, `observationError` optional record
-`code: Atom`, `typeInfo: T` optional, the static type of the operand that
-could not be shown); `trap` (optional record
+`code: Atom`, the observation error `@tool.unsupportedValue`, and
+`typeInfo: T` optional, the static type of the operand that could not be
+shown); `trap` (optional record
 `trapCode: Atom`, `origin: U64` optional); and `auditTrace` (the test's
 [`@auditTrace.v2`](06-runtime.md#audit-trace) document).
 

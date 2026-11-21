@@ -11,6 +11,7 @@
 mod support;
 
 mod check;
+mod examples;
 mod exit;
 mod fmt;
 mod help;

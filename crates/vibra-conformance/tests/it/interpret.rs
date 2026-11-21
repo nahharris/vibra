@@ -106,3 +106,42 @@ fn the_non_tail_recursion_keeps_one_activation_per_call() {
     assert_eq!(run.instrumentation.max_activation_depth, 100_001);
     assert_eq!(run.instrumentation.tail_transfer_count, 1);
 }
+
+/// The ten-million-step twin of `V2-RUNTIME-tail-loop` also runs at depth
+/// one: each step is one tail transfer.
+#[test]
+fn the_long_tail_loop_runs_at_depth_one() {
+    let run = execution("V2-RUNTIME-tail-loop-long");
+    assert_eq!(run.instrumentation.max_activation_depth, 1);
+    assert_eq!(run.instrumentation.tail_transfer_count, 10_000_001);
+}
+
+/// `docs/spec/02-type-system.md`, "Bare guards": a bare `where` is an
+/// obligation discharged where the value is made, with no run-time check. A
+/// value that crosses an interface value is not checked again: the run of
+/// `V2-CONTRACT-ingress-interface-value` takes the same reductions as the same
+/// source with its `where` section written as spaces.
+#[test]
+fn a_value_through_an_interface_value_is_not_checked_again() {
+    let id = "V2-CONTRACT-ingress-interface-value";
+    let cases = interpret_cases();
+    let case = cases
+        .iter()
+        .find(|case| case.manifest().id == id)
+        .expect("the corpus has the case");
+    let source = case.read_file("main.vib").expect("the source reads");
+    let section = "where isPositive ";
+    let plain = source.replacen(section, &" ".repeat(section.len()), 1);
+    assert_ne!(source, plain);
+    let run = |text: &str| match interpret("main.vib", text, INTERPRET_BUDGET).run {
+        Some(Ok(execution)) => execution,
+        other => panic!("the source did not run to a result: {other:?}"),
+    };
+    let guarded = run(&source);
+    let unguarded = run(&plain);
+    assert_eq!(
+        guarded.instrumentation.reduction_count,
+        unguarded.instrumentation.reduction_count
+    );
+    assert_eq!(guarded.canonical, unguarded.canonical);
+}

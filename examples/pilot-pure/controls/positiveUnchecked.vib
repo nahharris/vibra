@@ -1,0 +1,17 @@
+type Positive of I32
+  where isPositive
+endtype
+
+fn isPositive
+  takes {value: I32}
+  returns ok: Bool
+  do
+    return Ordered.greater(value 0i32)
+endfn
+
+fn unchecked
+  takes {raw: I32}
+  returns made: Positive
+  do
+    return Positive(raw)
+endfn
