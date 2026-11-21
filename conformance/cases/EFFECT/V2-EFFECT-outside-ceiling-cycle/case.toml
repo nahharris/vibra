@@ -1,0 +1,22 @@
+id = "V2-EFFECT-outside-ceiling-cycle"
+rule = "V2-EFFECT-outside-ceiling-cycle"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#effect-ceilings: an outsideCeiling reaches a cycle and keeps the chain of calls up to the repeated hop as related spans"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@effect.outsideCeiling"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 192, end = 204 }
+related = [
+  { source = "src/app/main.vib", span = { start = 198, end = 204 } },
+  { source = "src/app/main.vib", span = { start = 139, end = 145 } },
+]

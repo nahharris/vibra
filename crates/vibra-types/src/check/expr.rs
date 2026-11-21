@@ -391,9 +391,9 @@ pub(crate) enum Task<'a> {
     Return(ByteSpan),
     /// A `try`, and its operand's span.
     Try(ByteSpan, ByteSpan),
-    /// An `await` at its span, whose operand
+    /// An `await` at its span, and its operand's span, whose operand
     /// [`effects::procs::await_expr`] started.
-    Await(ByteSpan),
+    Await(ByteSpan, ByteSpan),
     Postfix(Box<PostfixState<'a>>),
     Call(Box<CallState<'a>>),
     Product(Box<ProductState<'a>>),
@@ -1373,8 +1373,8 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                 Task::Try(span, operand) => {
                     self.finish_try(span, operand, input.take())
                 }
-                Task::Await(span) => {
-                    effects::procs::finish_await(self, span, input.take())
+                Task::Await(span, operand) => {
+                    effects::procs::finish_await(self, span, operand, input.take())
                 }
                 Task::Postfix(state) => self.step_postfix(state, input.take()),
                 Task::Call(state) => self.step_call(state, input.take()),
@@ -4861,12 +4861,20 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                     None
                 }
                 BodyMode::Fallback => {
-                    self.report(
-                        DiagnosticCode::TypeMismatch,
-                        state.span,
-                        "expected `Never`: the `else` of a `let … else` can run off \
-                         its end, but every path of it must leave",
-                    );
+                    // A fallback whose one statement has a value was reported
+                    // at that statement, which is the whole fallback.
+                    let reported = self.diagnostics.iter().any(|diagnostic| {
+                        diagnostic.code() == DiagnosticCode::TypeMismatch
+                            && diagnostic.primary_span() == state.span
+                    });
+                    if !reported {
+                        self.report(
+                            DiagnosticCode::TypeMismatch,
+                            state.span,
+                            "expected `Never`: the `else` of a `let … else` can run off \
+                             its end, but every path of it must leave",
+                        );
+                    }
                     failed = true;
                     None
                 }

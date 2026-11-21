@@ -1,0 +1,11 @@
+interface Log
+  proc emit takes {m: Self} returns d: Void endproc
+endinterface
+
+proc loop returns d: Void performs {Log} do
+  return await loop()
+endproc
+
+proc run returns d: Void do
+  return await loop()
+endproc

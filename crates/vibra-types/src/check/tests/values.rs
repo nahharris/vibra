@@ -866,10 +866,29 @@ fn the_last_statement_of_a_let_fallback_is_a_statement() {
         "{COUNT}fn run takes {{o: Option(I32)}} returns r: I32 do \
          let Option.some(value: v) be o else count() endlet return v endfn\n"
     );
+    // One fault at the statement, which is the whole fallback: the fallback
+    // that runs off its end is not reported again at the same span.
+    assert_eq!(
+        of(&source),
+        [error(
+            DiagnosticCode::TypeMismatch,
+            at(&source, "count()", 0)
+        )]
+    );
+    // With two statements the fallback is a span of its own, and both are
+    // reported.
+    let source = format!(
+        "{COUNT}fn run takes {{o: Option(I32)}} returns r: I32 do \
+         let Option.some(value: v) be o else let _ be 0i32 endlet count() endlet \
+         return v endfn\n"
+    );
     assert_eq!(
         of(&source),
         [
-            error(DiagnosticCode::TypeMismatch, at(&source, "count()", 0)),
+            error(
+                DiagnosticCode::TypeMismatch,
+                at(&source, "let _ be 0i32 endlet count()", 0)
+            ),
             error(DiagnosticCode::TypeMismatch, at(&source, "count()", 0)),
         ]
     );

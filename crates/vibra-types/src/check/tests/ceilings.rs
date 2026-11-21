@@ -5,13 +5,18 @@
 //! and `@contract.unusedEffect` and the paragraph on their related spans,
 //! and question Q5 of the M2 plan.
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode, Level};
-use vibra_ir::{CheckedModuleSet, EffectFault, IrError, ModuleSetParts};
+use vibra_ir::{
+    Callable, CheckedModuleSet, EffectFault, EntityRef, IrError, ModuleSetParts, Row,
+    Type,
+};
 use vibra_resolve::{PackageId, ResolveInput, SourceModule, SourceUnit, UnitKind};
 
 use super::{SOURCE, at};
+use crate::check::effects::analysis::observed;
 use crate::check::{CheckResult, check_source, check_workspace};
 
 /// The interfaces of step 08, a type that implements two of them, and a
@@ -583,6 +588,370 @@ fn a_body_with_an_error_reports_no_unused_root() {
             .collect::<Vec<_>>(),
         [DiagnosticCode::TypeMismatch]
     );
+}
+
+/// The row prefix of the review of step 11: two operation interfaces, a
+/// `proc` that performs `Log`, and one with the empty row.
+const ROW_PREFIX: &str = "interface Log proc emit takes {m: Self} returns d: Void endproc \
+                          endinterface\n\
+                          interface Tick proc tick takes {m: Self} returns d: Void endproc \
+                          endinterface\n\
+                          proc loud takes {m: Log} returns d: Void performs {Log} do \
+                          return await Log.emit(m) endproc\n\
+                          proc quiet takes {m: Log} returns d: Void do return void endproc\n";
+
+/// A witness chain that meets a cycle keeps its prefix up to the first
+/// repeated hop: an `@effect.outsideCeiling` always has "the chain of calls
+/// as related spans" (probe `cycleNotes`).
+#[test]
+fn a_witness_cycle_keeps_the_chain_up_to_the_repeated_hop() {
+    let source = "interface Log proc emit takes {m: Self} returns d: Void endproc \
+                  endinterface\n\
+                  proc loop returns d: Void performs {Log} do return await loop() endproc\n\
+                  proc run returns d: Void do return await loop() endproc\n";
+    assert_eq!(
+        check(source),
+        [outside(
+            at(source, "await loop()", 1),
+            &[
+                (at(source, "loop()", 1), "performs Log via loop"),
+                (at(source, "loop()", 0), "performs Log via loop"),
+            ]
+        )]
+    );
+}
+
+/// An awaited operand with an error of its own still starts the chain: the
+/// call it runs is not known, so it is one indirect hop and the chain ends
+/// there.
+#[test]
+fn an_awaited_operand_with_an_error_starts_the_chain() {
+    let source = with_l(
+        "proc bad takes {m: Memory} returns d: Void do \
+         return await Log.append(m 1i32) endproc",
+    );
+    assert_eq!(
+        check(&source),
+        [
+            outside(
+                at(&source, "await Log.append(m 1i32)", 0),
+                &[(
+                    at(&source, "Log.append(m 1i32)", 0),
+                    "performs Log via Log.append(m 1i32) (indirect)"
+                )]
+            ),
+            (
+                DiagnosticCode::TypeArgumentMismatch,
+                Level::Error,
+                at(&source, "1i32", 0),
+                Vec::new()
+            ),
+        ]
+    );
+}
+
+/// A member applied at a closed receiver is statically resolved, so its hop
+/// is not marked indirect (probe `closedNotes`, ruling F2 of the review of
+/// step 11).
+#[test]
+fn a_member_at_a_closed_receiver_is_not_indirect() {
+    let source = format!(
+        "{ROW_PREFIX}type Model of I32 impl Log proc emit takes {{m: Self}} returns d: Void \
+         do return void endproc endimpl endtype\n\
+         proc run takes {{m: Model}} returns d: Void do return await Log.emit(m) endproc\n"
+    );
+    assert_eq!(
+        check(&source),
+        [outside(
+            at(&source, "await Log.emit(m)", 1),
+            &[(at(&source, "Log.emit(m)", 1), "performs Log via Log.emit")]
+        )]
+    );
+}
+
+/// A declaration that holds an anonymous `proc` with an error has an error,
+/// so its unused roots are not reported (probe `anonWarning`): with a type
+/// error, and with an anonymous `proc` whose only error is
+/// `@effect.outsideCeiling`.
+#[test]
+fn an_anonymous_proc_with_an_error_hides_the_unused_roots_of_its_declaration() {
+    let codes = |source: &str| {
+        check(source)
+            .into_iter()
+            .map(|(code, ..)| code)
+            .collect::<Vec<_>>()
+    };
+    let source = format!(
+        "{ROW_PREFIX}proc outer returns d: Void performs {{Log}} do let f be proc returns \
+         d: Void do let x: I32 be \"x\" endlet return void endproc endlet return void endproc\n"
+    );
+    assert_eq!(codes(&source), [DiagnosticCode::TypeMismatch]);
+    let source = format!(
+        "{ROW_PREFIX}proc outer returns d: Void performs {{Log}} do let f be proc takes \
+         {{m: Log}} returns d: Void do return await Log.emit(m) endproc endlet return void \
+         endproc\n"
+    );
+    assert_eq!(codes(&source), [DiagnosticCode::EffectOutsideCeiling]);
+}
+
+/// The roots of `rows`.
+fn union(rows: &[Row]) -> BTreeSet<EntityRef> {
+    rows.iter()
+        .flat_map(|row| row.roots().iter().cloned())
+        .collect()
+}
+
+/// The rows the checked IR recomputes: for each declaration, by the name it
+/// records, the roots its own body awaits and those of each `Proc` closure
+/// it creates, directly or through other closures; and the row of each
+/// `Proc` closure's type.
+type IrRows = BTreeMap<
+    String,
+    (
+        BTreeSet<EntityRef>,
+        Vec<(BTreeSet<EntityRef>, BTreeSet<EntityRef>)>,
+    ),
+>;
+
+fn ir_rows(set: &CheckedModuleSet, rows: &mut IrRows) -> Result<(), String> {
+    let flow = set.flow();
+    let named = set
+        .globals()
+        .iter()
+        .map(|global| global.name.clone())
+        .zip(&flow.globals)
+        .chain(
+            set.functions()
+                .iter()
+                .map(|function| function.name.clone())
+                .zip(&flow.functions),
+        );
+    for (name, facts) in named {
+        let mut closures = Vec::new();
+        let mut pending = vec![facts];
+        while let Some(facts) = pending.pop() {
+            for (callable, _) in &facts.values {
+                let Callable::Closure(index) = callable else {
+                    continue;
+                };
+                let (ty, inner) = flow
+                    .closures
+                    .get(*index)
+                    .ok_or_else(|| format!("no closure {index}"))?;
+                if let Type::Proc(signature) = ty {
+                    closures.push((
+                        union(&inner.awaited),
+                        signature.effects.roots().iter().cloned().collect(),
+                    ));
+                } else if !inner.awaited.is_empty() {
+                    return Err(format!("a `Fn` closure of {name} awaits"));
+                }
+                pending.push(inner);
+            }
+        }
+        closures.sort();
+        let found = (union(&facts.awaited), closures);
+        if let Some(before) = rows.get(&name)
+            && *before != found
+        {
+            return Err(format!("{name} has two rows in the module sets"));
+        }
+        rows.insert(name, found);
+    }
+    Ok(())
+}
+
+/// One module of a corpus case: its unit, its module path, its source
+/// identity, and its text.
+type CaseModule = (&'static str, &'static str, &'static str, &'static str);
+
+/// One module of the corpus case `$id`, of prefix `EFFECT`: `app` for
+/// `src/app/$stem.vib`, `tests` for `tests/$stem.vib`.
+macro_rules! case_module {
+    (app $id:literal $stem:literal) => {
+        (
+            "@app",
+            concat!("@app.", $stem),
+            concat!("src/app/", $stem, ".vib"),
+            include_str!(concat!(
+                "../../../../../conformance/cases/EFFECT/",
+                $id,
+                "/tree/src/app/",
+                $stem,
+                ".vib"
+            )),
+        )
+    };
+    (tests $id:literal $stem:literal) => {
+        (
+            "@tests",
+            concat!("@tests.", $stem),
+            concat!("tests/", $stem, ".vib"),
+            include_str!(concat!(
+                "../../../../../conformance/cases/EFFECT/",
+                $id,
+                "/tree/tests/",
+                $stem,
+                ".vib"
+            )),
+        )
+    };
+}
+
+/// The corpus case `$id` and its modules.
+macro_rules! case {
+    ($id:literal: $($unit:ident $stem:literal),+) => {
+        ($id, &[$(case_module!($unit $id $stem)),+])
+    };
+}
+
+/// Every corpus case of prefix `EFFECT` whose expected verdict is
+/// `accepted`, with its modules. A semantic crate reads no file, so the
+/// sources are embedded; `vibra-conformance`'s test `effect_rows` keeps this
+/// list equal to the accepted cases of the corpus.
+const ACCEPTED_EFFECT_CASES: &[(&str, &[CaseModule])] = &[
+    case!("V2-EFFECT-await-in-if": app "main"),
+    case!("V2-EFFECT-await-in-match-and-do": app "main"),
+    case!("V2-EFFECT-await-in-test": app "main", tests "run"),
+    case!("V2-EFFECT-callback-row-exact": app "main"),
+    case!("V2-EFFECT-callback-row-wrapped": app "main"),
+    case!("V2-EFFECT-ceiling-exact": app "main"),
+    case!("V2-EFFECT-ceiling-transitive": app "main"),
+    case!("V2-EFFECT-default-proc-member": app "main"),
+    case!("V2-EFFECT-fn-member-pure": app "main"),
+    case!("V2-EFFECT-generic-operation-interface": app "main"),
+    case!("V2-EFFECT-impl-in-interface": app "main", app "note"),
+    case!("V2-EFFECT-impl-keeps-row": app "main"),
+    case!("V2-EFFECT-intent-type-result": app "main"),
+    case!("V2-EFFECT-member-additive-row": app "main"),
+    case!("V2-EFFECT-member-plan-closed-receiver": app "main"),
+    case!("V2-EFFECT-member-plan-interface-value": app "main"),
+    case!("V2-EFFECT-member-plan-type-parameter": app "main"),
+    case!("V2-EFFECT-module-value-plan": app "main"),
+    case!("V2-EFFECT-named-proc-value": app "main"),
+    case!("V2-EFFECT-operation-interface": app "main"),
+    case!("V2-EFFECT-plan-discarded": app "main"),
+    case!("V2-EFFECT-proc-await-direct": app "main"),
+    case!("V2-EFFECT-proc-await-twice": app "main"),
+    case!("V2-EFFECT-proc-generic": app "main"),
+    case!("V2-EFFECT-proc-labelled": app "main"),
+    case!("V2-EFFECT-proc-member-of-type": app "main"),
+    case!("V2-EFFECT-proc-plan-bound": app "main"),
+    case!("V2-EFFECT-proc-recursive": app "main"),
+    case!("V2-EFFECT-proc-type-empty-row": app "main"),
+    case!("V2-EFFECT-proc-type-field": app "main"),
+    case!("V2-EFFECT-proc-type-parameter": app "main"),
+    case!("V2-EFFECT-proc-type-result": app "main"),
+    case!("V2-EFFECT-recursion-closes": app "main"),
+    case!("V2-EFFECT-row-on-proc": app "main"),
+    case!("V2-EFFECT-row-on-test": app "main", tests "run"),
+    case!("V2-EFFECT-row-two-roots": app "main"),
+    case!("V2-EFFECT-test-row-empty-written": app "main", tests "run"),
+];
+
+/// For every accepted corpus case of prefix `EFFECT`, the performed row the
+/// checker computes for each body (`Performed::of`) equals the row the
+/// checked IR recomputes from the `Intent` types of the same body's awaits
+/// (`Facts::awaited`), in both directions (architecture, risk 1; F7 of the
+/// review of step 11). An anonymous `proc` is a `Proc` closure of its
+/// declaration; a `Proc` closure with no anonymous `proc`, which a contract
+/// member named as a value becomes, awaits exactly its type's row.
+#[test]
+fn checker_rows_equal_the_checked_ir_rows_on_every_accepted_effect_case()
+-> Result<(), String> {
+    let stdlib = crate::stdlib::load_stdlib().map_err(|error| error.to_string())?;
+    for (name, modules) in ACCEPTED_EFFECT_CASES {
+        let mut units: Vec<(&str, UnitKind, Vec<SourceModule>)> = Vec::new();
+        for (unit, path, source_id, text) in *modules {
+            let module = SourceModule::new(*path, *source_id, text.as_bytes().to_vec());
+            match units.iter_mut().find(|(known, ..)| known == unit) {
+                Some((.., found)) => found.push(module),
+                None => {
+                    let kind = if *unit == "@tests" {
+                        UnitKind::Tests
+                    } else {
+                        UnitKind::Lib
+                    };
+                    units.push((unit, kind, vec![module]));
+                }
+            }
+        }
+        let names = units
+            .iter()
+            .map(|(unit, ..)| (*unit).to_owned())
+            .collect::<Vec<_>>();
+        let input = ResolveInput::new(
+            PackageId::new("hello", "0.1.0"),
+            units
+                .into_iter()
+                .map(|(unit, kind, modules)| SourceUnit::new(unit, kind, modules))
+                .collect(),
+            stdlib.overlay().embedded_unit(),
+        );
+        observed::take();
+        let result = check_workspace(&input, &names);
+        let checker = observed::take();
+        if result.has_errors() {
+            return Err(format!("{name}: {:#?}", result.diagnostics()));
+        }
+        let mut ir = IrRows::new();
+        for set in [result.module_set(), result.test_set()]
+            .into_iter()
+            .flatten()
+        {
+            ir_rows(set, &mut ir).map_err(|error| format!("{name}: {error}"))?;
+        }
+        let mut own = BTreeMap::new();
+        let mut anonymous = BTreeMap::<String, Vec<BTreeSet<EntityRef>>>::new();
+        for row in checker {
+            if row.anonymous {
+                anonymous
+                    .entry(row.declaration)
+                    .or_default()
+                    .push(row.roots);
+            } else if own.insert(row.declaration.clone(), row.roots).is_some() {
+                return Err(format!("{name}: {} has two rows", row.declaration));
+            }
+        }
+        // From the checker to the IR: every body the checker analysed.
+        for (declaration, roots) in &own {
+            let (awaited, _) = ir
+                .get(declaration)
+                .ok_or_else(|| format!("{name}: the IR has no {declaration}"))?;
+            assert_eq!(awaited, roots, "{name}: {declaration}");
+        }
+        // From the IR to the checker: every body of the IR, and every
+        // `Proc` closure.
+        for (declaration, (awaited, closures)) in &ir {
+            match own.get(declaration) {
+                Some(roots) => assert_eq!(roots, awaited, "{name}: {declaration}"),
+                None => assert!(
+                    awaited.is_empty(),
+                    "{name}: {declaration} awaits and the checker has no row"
+                ),
+            }
+            let mut left = closures.clone();
+            for roots in anonymous.get(declaration).into_iter().flatten() {
+                let at = left
+                    .iter()
+                    .position(|(awaited, _)| awaited == roots)
+                    .ok_or_else(|| {
+                        format!("{name}: {declaration}: no closure performs {roots:?}")
+                    })?;
+                left.remove(at);
+            }
+            for (awaited, row) in left {
+                assert_eq!(awaited, row, "{name}: {declaration}: a member value");
+            }
+        }
+        for declaration in anonymous.keys() {
+            assert!(
+                ir.contains_key(declaration),
+                "{name}: the IR has no {declaration}"
+            );
+        }
+    }
+    Ok(())
 }
 
 /// A chain of `count` procedures, each awaiting the next, the last awaiting

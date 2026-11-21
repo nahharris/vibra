@@ -23,13 +23,16 @@
 //!   value bound to a name, which the note names), or through a plan value,
 //!   is marked indirect. The chain is searched breadth first over an explicit
 //!   queue, never on the host stack. A chain that reaches no operation
-//!   member of the root ends at the first call it cannot follow.
+//!   member of the root ends at the first call it cannot follow, and one
+//!   that meets only cycles keeps its prefix up to the first repeated call.
 //! - A root of a row written on a `proc`, an anonymous `proc`, a test, or the
 //!   additive `performs` of a default member that the body does not perform
 //!   is the warning `@contract.unusedEffect` at its entry. It is never
 //!   reported for an `impl` member, whose contract fixes its row, nor for the
-//!   owner of a member, which is not written (Q5), nor for a body that has an
-//!   error, whose `await` nodes may not all be known.
+//!   owner of a member, which is not written (Q5), nor for a body whose
+//!   declaration has an error other than that body's own
+//!   `@effect.outsideCeiling`. The faults of an anonymous `proc` join the
+//!   declaration that holds it.
 //!
 //! A body with `@effect.outsideCeiling` is not lowered: the checked IR
 //! rejects it (`vibra-ir::effects`).
@@ -56,7 +59,7 @@ pub(crate) struct Await {
     /// The type of the awaited plan, whose row the `await` contributes.
     pub(crate) plan: IntentType,
     /// The call the plan runs.
-    pub(crate) hop: Option<Hop>,
+    pub(crate) hop: Hop,
 }
 
 /// One call of a witness chain: the awaited operand and what it calls.
@@ -113,7 +116,7 @@ pub(crate) struct Witness {
     /// The earliest `await` that contributes the root.
     pub(crate) first_await: ByteSpan,
     /// The call it runs.
-    pub(crate) via: Option<Hop>,
+    pub(crate) via: Hop,
 }
 
 impl Performed {
@@ -218,6 +221,9 @@ struct Body<'c> {
     written: Vec<(ByteSpan, usize, String)>,
     /// Its own `await` nodes.
     awaits: &'c [Await],
+    /// Whether it is an anonymous `proc`.
+    #[cfg_attr(not(test), expect(dead_code, reason = "read by `observed`"))]
+    anonymous: bool,
 }
 
 /// Checks the rows of the bodies of `pass`, once per checked program, after
@@ -228,24 +234,38 @@ struct Body<'c> {
 pub(crate) fn check_bodies(program: &Program<'_>, pass: &mut Pass) -> Vec<Diagnostic> {
     let mut faults = Vec::new();
     let mut warnings = Vec::new();
-    for body in bodies(program, pass) {
+    let bodies = bodies(program, pass);
+    let mut rows = Vec::with_capacity(bodies.len());
+    for (at, body) in bodies.iter().enumerate() {
+        let performed = Performed::of(body.awaits);
+        #[cfg(test)]
+        observed::record(program, body, &performed);
+        if let Some(module) = program.modules.get(body.module) {
+            for (root, witness) in &performed.roots {
+                if body.ceiling.roots().contains(root) {
+                    continue;
+                }
+                let diagnostic = outside(program, pass, body, root, witness)
+                    .with_source_id(module.source_id.as_ref());
+                faults.push((body.target, at, diagnostic));
+            }
+        }
+        rows.push(performed);
+    }
+    for (at, (body, performed)) in bodies.iter().zip(&rows).enumerate() {
         let Some(module) = program.modules.get(body.module) else {
             continue;
         };
-        let performed = Performed::of(body.awaits);
-        for (root, witness) in &performed.roots {
-            if body.ceiling.roots().contains(root) {
-                continue;
-            }
-            let diagnostic = outside(program, pass, &body, root, witness)
-                .with_source_id(module.source_id.as_ref());
-            faults.push((body.target, diagnostic));
-        }
+        // A body's own `@effect.outsideCeiling` leaves its `await` nodes
+        // known; any other error of its declaration, one of an anonymous
+        // `proc` it holds included, means it has an error.
         let faulty = pass.faults.get(&body.target).is_some_and(|found| {
             found
                 .iter()
                 .any(|diagnostic| diagnostic.level() == Level::Error)
-        });
+        }) || faults
+            .iter()
+            .any(|(target, from, _)| *target == body.target && *from != at);
         if module.embedded || faulty {
             continue;
         }
@@ -273,7 +293,7 @@ pub(crate) fn check_bodies(program: &Program<'_>, pass: &mut Pass) -> Vec<Diagno
             );
         }
     }
-    for (target, diagnostic) in faults {
+    for (target, _, diagnostic) in faults {
         match target {
             Target::Function(index) => {
                 if let Some(checked) = pass.functions.get_mut(&index) {
@@ -317,6 +337,7 @@ fn bodies<'c>(program: &'c Program<'_>, pass: &'c Pass) -> Vec<Body<'c>> {
             what: procs::describe(data),
             written: entries(program, data.module, written),
             awaits: &checked.awaits.own,
+            anonymous: false,
         });
     }
     for (index, checked) in &pass.values {
@@ -340,6 +361,7 @@ fn bodies<'c>(program: &'c Program<'_>, pass: &'c Pass) -> Vec<Body<'c>> {
             what: format!("the test \"{}\"", test.name),
             written: entries(program, test.module, test.view.performs()),
             awaits: &checked.awaits.own,
+            anonymous: false,
         });
     }
     found
@@ -362,6 +384,7 @@ fn anonymous<'c>(
             what: "this anonymous `proc`".to_owned(),
             written: open.written.clone(),
             awaits: &open.awaits,
+            anonymous: true,
         });
     }
 }
@@ -403,10 +426,7 @@ fn outside(
             body.ceiling, body.what
         ),
     );
-    let Some(first) = &witness.via else {
-        return diagnostic;
-    };
-    for (module, hop) in chain(program, pass, body.module, first, root) {
+    for (module, hop) in chain(program, pass, body.module, &witness.via, root) {
         let mut note = format!("performs {name} via {}", callee(program, module, &hop));
         if hop.via.indirect() {
             note.push_str(" (indirect)");
@@ -428,7 +448,9 @@ struct Step {
 /// operation member of `root`, ties in source order, each with the module it
 /// is written in. A chain that reaches none is the shortest that ends at a
 /// call it cannot follow: a plan value, a member of another interface, or a
-/// `proc` whose body performs `root` nowhere.
+/// `proc` whose body performs `root` nowhere. A chain that reaches neither
+/// only meets cycles, and ends at the first call of a `proc` it already
+/// followed, so the chain is never empty.
 pub(crate) fn chain(
     program: &Program<'_>,
     pass: &Pass,
@@ -444,6 +466,7 @@ pub(crate) fn chain(
     let mut queue = VecDeque::from([0]);
     let mut seen = BTreeSet::new();
     let mut dead_end = None;
+    let mut repeated = None;
     let mut reached = None;
     while let Some(at) = queue.pop_front() {
         let Some(step) = steps.get(at) else { break };
@@ -456,6 +479,7 @@ pub(crate) fn chain(
             }
             Via::Direct(function) => {
                 if !seen.insert(*function) {
+                    repeated.get_or_insert(at);
                     continue;
                 }
                 let next = calls(program, pass, *function, root);
@@ -477,7 +501,7 @@ pub(crate) fn chain(
         }
     }
     let mut path = Vec::new();
-    let mut at = reached.or(dead_end);
+    let mut at = reached.or(dead_end).or(repeated);
     while let Some(index) = at {
         let Some(step) = steps.get(index) else { break };
         path.push((step.module, step.hop.clone()));
@@ -504,7 +528,7 @@ fn calls(
     in_source_order(&checked.awaits.own)
         .into_iter()
         .filter(|awaited| awaited.plan.effects.roots().contains(root))
-        .filter_map(|awaited| awaited.hop.clone())
+        .map(|awaited| awaited.hop.clone())
         .map(|hop| (data.module, hop))
         .collect()
 }
@@ -573,4 +597,66 @@ fn text(program: &Program<'_>, module: usize, span: ByteSpan) -> String {
         .map_or_else(String::new, |text| {
             text.split_whitespace().collect::<Vec<_>>().join(" ")
         })
+}
+
+/// The performed rows the checker computed, kept for the host test that
+/// compares them with the rows the checked IR recomputes (architecture,
+/// risk 1).
+#[cfg(test)]
+pub(crate) mod observed {
+    use std::cell::RefCell;
+    use std::collections::BTreeSet;
+
+    use vibra_ir::EntityRef;
+
+    use super::{Body, Performed};
+    use crate::check::declare::Program;
+    use crate::check::expr::Target;
+
+    /// The performed row of one body.
+    #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+    pub(crate) struct Observed {
+        /// The qualified name of the declaration whose body it is or holds
+        /// it, as the checked IR records it.
+        pub(crate) declaration: String,
+        /// Whether it is an anonymous `proc` of that declaration.
+        pub(crate) anonymous: bool,
+        /// The roots it performs.
+        pub(crate) roots: BTreeSet<EntityRef>,
+    }
+
+    thread_local! {
+        static ROWS: RefCell<Vec<Observed>> = const { RefCell::new(Vec::new()) };
+    }
+
+    /// Keeps the row `performed` of `body`.
+    pub(super) fn record(
+        program: &Program<'_>,
+        body: &Body<'_>,
+        performed: &Performed,
+    ) {
+        let declaration = match body.target {
+            Target::Function(index) => program
+                .functions
+                .get(index)
+                .map(|data| data.qualified.clone()),
+            Target::Test(index) => {
+                program.tests.get(index).map(|data| data.qualified.clone())
+            }
+            Target::Value(index) => {
+                program.values.get(index).map(|data| data.qualified.clone())
+            }
+        };
+        let observed = Observed {
+            declaration: declaration.unwrap_or_default(),
+            anonymous: body.anonymous,
+            roots: performed.roots.keys().cloned().collect(),
+        };
+        ROWS.with(|rows| rows.borrow_mut().push(observed));
+    }
+
+    /// Every row kept on this thread since the last call.
+    pub(crate) fn take() -> Vec<Observed> {
+        ROWS.with(|rows| std::mem::take(&mut *rows.borrow_mut()))
+    }
 }

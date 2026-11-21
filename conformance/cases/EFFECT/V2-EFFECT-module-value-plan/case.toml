@@ -1,0 +1,12 @@
+id = "V2-EFFECT-module-value-plan"
+rule = "V2-EFFECT-module-value-plan"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#effect-ceilings: a module value of an Intent type is accepted, since building a plan is pure and a module value needs no encoding"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

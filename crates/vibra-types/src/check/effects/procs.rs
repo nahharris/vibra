@@ -48,7 +48,7 @@ use super::rows;
 use crate::check::declare::{
     BoundData, Entity, FnData, NoType, Program, Scope, TestData,
 };
-use crate::check::expr::{BodyChecker, Callee, Ctx, Out, Step, Task};
+use crate::check::expr::{BodyChecker, Callee, Ctx, Out, Step, Task, expr_span};
 
 /// The header of a callable: its signature and the bound of each of its
 /// binders.
@@ -278,17 +278,22 @@ pub(crate) fn await_expr<'a>(
         );
         return Step::Done(Out::error());
     }
-    Step::Child(Task::Await(span), Task::Expr(operand, Ctx::Value(None)))
+    let operand_span = expr_span(&operand);
+    Step::Child(
+        Task::Await(span, operand_span),
+        Task::Expr(operand, Ctx::Value(None)),
+    )
 }
 
-/// The `await` at `span` whose operand arrived as `input`: a plan yields
-/// its result, and the `await` is recorded with the plan's type and the
-/// call it runs ([`super::analysis::hop`]); any other
-/// operand is `@effect.invalidAwait` at the `await`, never
-/// `@type.mismatch` (Q4).
+/// The `await` at `span` whose operand, written at `operand`, arrived as
+/// `input`: a plan yields its result, and the `await` is recorded with the
+/// plan's type and the call it runs ([`super::analysis::hop`]), a plan
+/// value when the operand has no lowered node; any other operand is
+/// `@effect.invalidAwait` at the `await`, never `@type.mismatch` (Q4).
 pub(crate) fn finish_await<'a>(
     checker: &mut BodyChecker<'_, 'a>,
     span: ByteSpan,
+    operand: ByteSpan,
     input: Option<Out>,
 ) -> Step<'a> {
     let Out { ty, node } = input.unwrap_or_else(Out::error);
@@ -306,9 +311,13 @@ pub(crate) fn finish_await<'a>(
         }
         None => return Step::Done(Out::error()),
     };
-    let hop = node
-        .as_ref()
-        .map(|operand| super::analysis::hop(checker, operand));
+    let hop = node.as_ref().map_or(
+        super::analysis::Hop {
+            span: operand,
+            via: super::analysis::Via::Value,
+        },
+        |operand| super::analysis::hop(checker, operand),
+    );
     super::values::record(
         checker,
         super::analysis::Await {
