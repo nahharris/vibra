@@ -131,7 +131,7 @@ interfaces. `O` is the plan with leaves `@a` (`after: [@b]`), `@b`, and
 | admission without a driver | negative | a driver whose `identity(@host.fs.directory)` is `None` | "unavailable"; nothing acquired | 04: "rejected at admission, as `@tool.unavailable`, before any leaf is processed" |
 | `V2-GRANT-release-order` | positive | `O` started, then `release` | acquired `@b`, `@a`, `@z`; `Driver::release` called for `@z`, `@a`, `@b`: neither the order of spelling nor its reverse | 06: "in reverse acquisition order" |
 | release after a failed startup | positive | two acquired, the third fails | the two are released, in reverse | 06: "On every ending of the process (… or a failed startup)" |
-| `V2-GRANT-release-status` | positive | a finished start and release | every acquired binding's status is `released` (Q21) | 05: "or `released` for an acquired leaf after its release" |
+| `V2-GRANT-release-status` | positive | a finished start and release | every acquired binding's status is `released` (Q21) | 05: "every acquired binding of a finished command is released" |
 | `ATK-released-grant` | negative | a token kept after `release`, used on the same context | `InvalidHostValue` | 03: "or one released at shutdown, is unusable" |
 | `ATK-released-derived-grant` | negative | the `@notes` token of `M` narrowed by `restrict`, `sub`, and `limit` before `release`; each of the three results used after it | `InvalidHostValue` each time; the scripted driver saw no call after its `release` | the same |
 | release invalidates first | positive | the scripted driver's `release` calls back into a test hook that uses the leaf's token | the hook sees `InvalidHostValue`: the lineage was dead before the driver was called | the same |
@@ -161,7 +161,7 @@ cargo doc --locked --offline --workspace --no-deps --all-features
 ```
 
 Read: all exit 0. The rows with a `V2-` id are host tests here; step 29
-adds each as a `workspaceRun` case when Q17 names the document.
+adds each as a `workspaceRun` case with a `@targetRun.v2` document.
 
 ## Stays unavailable
 

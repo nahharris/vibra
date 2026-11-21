@@ -1,7 +1,10 @@
 # v0.0.2 M0: specification and transition
 
-**Planned.** Make the written contracts complete and consistent before any
-implementation relies on them.
+**Exited.** The written contracts were made complete and consistent before
+any implementation relied on them. Its records are the
+[owner table](owners.md), the [native contract comparison](native-contract.md),
+and the [file-scope feasibility record](file-scope-feasibility.md), whose
+verdict is that the Windows adapter meets the contract.
 
 ## Scope
 

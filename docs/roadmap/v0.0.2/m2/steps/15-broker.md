@@ -75,8 +75,12 @@ Measured, Acquire, Action, ResourceId, DriverIdentity}`.
    the ancestry, where a size over a bound is `limitExceeded` and a size
    above `request.room` is `HostFault::MemoryExhausted`. For a stream
    read the reserved bytes are the smaller of the request's `max` and
-   `Found::size`, or `max` when the size is `None` (Q10). The broker keeps
-   the gate's reason. Invariant: the gate has answered before the driver
+   `Found::size`; when the size is `None`, the smaller of `max` and what
+   remains of the `inputBytes` bound on the slot and on every ancestor,
+   which is `limitExceeded` only when `max` is positive and nothing
+   remains (Q10). The gate returns the reserved count as `Reserved`, and
+   the driver reads at most that many bytes. The broker keeps the gate's
+   reason. Invariant: the gate has answered before the driver
    reads, creates, or changes anything, and a driver whose gate refused
    returns `Completion::Refused`; any other completion after a refusal is
    `InvalidHostValue`.
@@ -97,7 +101,9 @@ Measured, Acquire, Action, ResourceId, DriverIdentity}`.
 9. `narrow`: `Restrict` decodes the source policy value, counts it with
    the ancestry (`policyTooComplex`), rejects only an empty suffix as
    `invalidPolicy` (Q8), and adds a slot with that constraint; `Sub` adds
-   a prefix (Q7); `Limit` adds counters holding the smaller of each bound
+   a prefix (Q7), counted with the ancestry as one more level of depth,
+   so its only refusal is `policyTooComplex` (Q8, Q9); `Limit` adds
+   counters holding the smaller of each bound
    (Q11). Each new slot has the parent's lineage. Invariant: no operation
    edits or removes a constraint, and none makes a lineage.
 10. `release(resource)`: marks every lineage on that resource dead and
@@ -133,6 +139,7 @@ means no event is due.
 | `sub` of a missing directory | positive | `sub(["nope"])` | `Narrowed::Grant` | 03: "It does not check that the directory exists" |
 | `restrict`: empty suffix | negative | a source policy with `suffix("")` | `Refused(invalidPolicy)` | 03 Names: "An empty suffix is invalid" |
 | `restrict`: too complex | negative | an ancestry at depth 64 and one more `restrict` | `Refused(policyTooComplex)` | 03: "counting ancestors acquired by restriction" |
+| `sub`: too complex | negative | an ancestry at depth 64 and one more `sub` | `Refused(policyTooComplex)` (Q9) | 03: "plus one for each `restrict` and each `sub` in the grant's ancestry" |
 | `limit` keeps the smaller | positive | `limit(invocations: 5)` then `limit(invocations: 9)`; six calls | the sixth is `limitExceeded` | 03 Narrowing: "`limit` keeps the smaller of each bound" |
 | `limit` with `none` | positive | `limit(invocations: none)` on a grant bounded at 2; three calls | the third is `limitExceeded` | 03: "`Option.none()` leaves that bound as it was" |
 | siblings share the parent | negative | parent bounded at 3 invocations; two children; two calls each | the fourth call is `limitExceeded` | 03 Limits: "every copy and descendant of a grant draws on the same ancestor counters" |
@@ -151,7 +158,7 @@ means no event is due.
 | settlement reaches every ancestor | positive | parent `outputBytes: 10`; child `limit(outputBytes: 8)`; through the child, the write of 6 completed with `Known(2)`; then a write of 8 through the parent | `Ok`: the parent's counter held 2, as the child's did | 03 Limits: "every copy and descendant of a grant draws on the same ancestor counters" |
 | progress above the reservation | negative | a write of 6 completed with `output: Known(7)` | `InvalidHostValue`; 6 stay charged | 06 Traps: "a malformed trusted result" |
 | `ATK-counter-invalid-text-charged` | negative | `inputBytes: 5`; a text read the driver completes with `Err(invalidText)` and `input: Known(5)`; then a read of 1 byte | `Err(invalidText)`, then `Err(limitExceeded)` (Q28) | 03 Limits: "charges actual progress" |
-| `ATK-counter-reservation-all-or-none` | negative | `invocations: 2`, `outputBytes: 3`; a write of `hello`; then writes of `ab` and `c` | `Err(limitExceeded)`, then `Ok`, `Ok`: the refused call took no invocation | 06 step 3: "Reserve all shared count and byte limits atomically" |
+| `ATK-counter-reservation-all-or-none` | negative | `invocations: 2`, `outputBytes: 3`; a write of `hello`; then writes of `ab` and `c` | `Err(limitExceeded)`, then `Ok`, `Ok`: the refused call took no invocation | 06 step 3: "Reserve atomically the shared count limits and the byte limits the operands decide" |
 | refund when known unused | positive | `inputBytes: 5`; the driver answers `notFound` with `input: Known(0)` to a read whose size was never learned; then a read of 5 | `Ok` | 06: "released or refunded only when the capacity is known to be unused" |
 | gate: real name fails | negative | policy `suffix(".txt")`; request `a.txt`; the driver reports the real name `A.TXT` | `Err(denied)`, completed; the driver returns `Refused` and its `read` step is not reached | 06 step 4: "the name test against the name the filesystem reports" |
 | `ATK-driver-ignores-gate` | negative | the same request; the scripted driver returns `Completed` with `Ok("x")` after its gate refused | `InvalidHostValue`; no receipt | 03 `denied`: "no file content was read, created, or changed" |
@@ -164,13 +171,15 @@ means no event is due.
 | read of a hard link | positive | a read; `links: Some(2)` | `Ok` | 03: "Reading such a file is allowed" |
 | env name inside the set | positive | `names: ["HOME"]`; `env.readVar("HOME")` | the driver's value | 06 Environment: "reads one permitted name" |
 | env name outside the set | negative | `env.readVar("PATH")` | `Err(denied)`; no driver call (Q12) | 06: "Neither grant exposes anything outside its reviewed scope" |
-| stdin, known size, within | boundary | `inputBytes: 3`; `io.stdinBytes` with `max: 3`; the driver reports `size: Some(3)` and holds `abc` | `Ok` of the bytes `abc`; 3 charged | 06: "A read first learns the size of the opened object, reserves it" |
+| stdin, known size, within | boundary | `inputBytes: 3`; `io.stdinBytes` with `max: 3`; the driver reports `size: Some(3)` and holds `abc` | `Ok` of the bytes `abc`; 3 charged | 06 Standard input: "the reservation is the smaller of `max` and that size" |
 | stdin, known size, over | negative | `inputBytes: 2`; `max: 3`; `size: Some(3)` | `Err(limitExceeded)`; the driver's `read` step is not reached; no receipt; a later unbounded read returns `abc` | 06 Standard input: "A rejection before dispatch" |
-| stdin, known size below the count | boundary | `inputBytes: 3`; `max: 10`; `size: Some(3)` | `Ok` of `abc`: the smaller of the two was reserved (Q10) | 06: "A read first learns the size of the opened object, reserves it" |
+| stdin, known size below the count | boundary | `inputBytes: 3`; `max: 10`; `size: Some(3)` | `Ok` of `abc`: the smaller of the two was reserved (Q10) | 06 Standard input: "the reservation is the smaller of `max` and that size" |
 | stdin, known size, empty at zero | boundary | `inputBytes: 0`; `max: 1`; `size: Some(0)` | `Ok` of no bytes (Q10) | the same |
 | stdin, unsized, within the count | boundary | `inputBytes: 10`; `max: 10`; `size: None`; the driver holds `abc` and completes with `input: Known(3)` | `Ok` of `abc`; 10 reserved at the gate, 3 charged, 7 refunded: a later read with `max: 7` is `Ok` | 06: "A limit MUST be reserved before an operation could exceed its count or byte bound" |
 | stdin, unsized, a short count | boundary | `inputBytes: 2`; `max: 2`; `size: None`; the driver holds `abc` | `Ok` of `ab`; 2 charged; the driver still holds `c` (Q10) | the same |
-| stdin, unsized, over the bound | negative | `inputBytes: 2`; `max: 3`; `size: None` | `Err(limitExceeded)`; the driver's `read` step is not reached; no receipt; a later unbounded read returns `abc` | 06 Standard input: "A rejection before dispatch" |
+| stdin, unsized, a count above the bound | boundary | `inputBytes: 2`; `max: 3`; `size: None`; the driver holds `abc` | `Ok` of `ab`: the gate reserved 2, the smaller of `max` and the remaining bound; 2 charged; the driver still holds `c` (Q10) | 06 Standard input: "the reservation is the smaller of `max` and what remains of the `inputBytes` bound of the grant and of every ancestor" |
+| stdin, unsized, nothing remains | negative | the grant of the row above after its read; `max: 3` | `Err(limitExceeded)`; the driver's `read` step is not reached; no receipt; a later read through an unbounded grant on the same resource returns `c` (Q10) | 06 Standard input: "The call is `limitExceeded` before dispatch only when `max` is positive and nothing remains" |
+| stdin, unsized, a remaining bound below the count | boundary | a parent with `inputBytes: 5` that has 3 charged; a child of it with no bound of its own; through the child, `max: 10`; `size: None`; the driver holds `abcd` | `Ok` of `ab`: the gate reserved 2, what remains of the parent's bound (Q10) | the same |
 | deep ancestry | boundary | 10,000 chained `limit` calls, then a read, on a 256 KiB thread | `Ok`, no overflow | architecture, risk 5 |
 | a call while an event is pending | negative | a completed call whose receipt is not committed, then a second call | `InvalidHostValue` for the second | 06 step 5: "Advance the continuation consistently with the completion, and then append the completed event" |
 | a receipt of another context | negative | `commit` with a receipt a second `Context` returned | `InvalidHostValue` | 06 Traps: "a boundary value that is invalid, stale, foreign, or of the wrong kind" |
@@ -206,7 +215,7 @@ The fake world (16); events (17); startup (28); real drivers (30, 31).
 
 ## Completion evidence
 
-- [ ] Each of the 58 rows is a test, named in the report.
+- [ ] Each of the 61 rows is a test, named in the report.
 - [ ] `Context::issue` is `pub(crate)`; `git grep -n "fn issue"
       crates/vibra-host/src` shows one definition.
 - [ ] No function of `broker.rs` caches a decision between calls, and a

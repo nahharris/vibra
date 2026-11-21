@@ -107,8 +107,8 @@ among the requests.
 | parent across a tail await | positive | the body (1) awaits `p` (2); `p` returns `await` of a host member in tail position (3); then the body awaits a host member (4) | requests `invocation: 3, parent: 2` and `invocation: 4, parent: 1` | the same |
 | the first invocation of an entry | positive | `run_entry` with `first_invocation: 3`; the entry's body awaits a host member | the request has `invocation: 4`, `parent: 3` | 06 Invocations: "Every `await` is an invocation" |
 | origin ordinal | positive | two awaits at different origins | the ordinals of the program's origin table | 06 Origins |
-| model receiver | positive | a type implementing `R`, widened to the interface, awaited | the `impl` body's result; no request | 03: "dispatch on any other held value … selects that type's `impl`" |
-| grant receiver through an interface value | positive | a `Grant` passed where `R` is expected, awaited in a callee | one request | 03: "dispatch on a sealed receiver selects the host-bound member" |
+| model receiver | positive | a type implementing `R`, widened to the interface, awaited | the `impl` body's result; no request | 03: "Dispatch on any other held value … selects that type's member" |
+| grant receiver through an interface value | positive | a `Grant` passed where `R` is expected, awaited in a callee | one request | 03: "dispatch on a sealed receiver selects them" |
 | host body with a model receiver | negative | an unchecked set that calls the `Host` body directly with a record | the trap `@runtime.invalidCheckedProgram` | 06 Host registry: "a record with similar fields is not a grant" |
 | reply of the wrong shape | negative | the context answers `Ok(U64(1))` with a receipt to `fs.readText` | the trap `@runtime.invalidHostValue`; the context logged no `commit` | 06 Traps: "a malformed trusted result" |
 | fault from the context | negative | the context returns `HostFault::InvalidHostValue` | the trap `@runtime.invalidHostValue` (Q14) | 06 Host calls, step 1 |
@@ -116,7 +116,7 @@ among the requests.
 | `restrict` on a grant | positive | `grant.restrict(g, policy)`; the context answers `Grant(t2)` | `Result.ok` holding `t2`; a `Restrict` request with the policy's canonical value | 03 Narrowing |
 | `restrict` refused | positive | the context answers `Refused(policyTooComplex)` | `Result.err(ScopeError.policyTooComplex)` | 03: "A larger one is `ScopeError.policyTooComplex`" |
 | `limit` on a grant | positive | `grant.limit(g, {invocations: some(3) …})` | the returned token; `GrantLimits { invocations: Some(3), .. }` | 03 Narrowing |
-| narrowing on a model | positive | a type whose `impl` of `R` supplies `limit` returning the receiver; `R.limit` on it through an interface value | the `impl` member's result; the context logged no `narrow` (Q1) | 03: "dispatch on any other held value … selects that type's `impl`" |
+| narrowing on a model | positive | a type whose `impl` of `R` supplies `limit` returning the receiver; `R.limit` on it through an interface value | the `impl` member's result; the context logged no `narrow` (Q1) | 03: "Dispatch on any other held value … selects that type's member" |
 | a forwarding model narrows its grant | positive | a type holding a `Grant` whose `limit` calls `R.limit` on it; `R.limit` on the model | one `Limit` request for the held token; the result is a model holding the returned token (Q1) | the same |
 | a narrowing intrinsic with a model receiver | negative | an unchecked set that calls `grant.limit` directly with a record | the trap `@runtime.invalidCheckedProgram` | 06 Host registry: "a record with similar fields is not a grant" |
 | narrowing is no invocation | positive | `limit` then one host call | the call's invocation is the next ordinal | 06 Invocations: "Every `await` is an invocation" |

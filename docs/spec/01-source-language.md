@@ -323,8 +323,11 @@ Notes on the grammar:
 - In `Proc({Str} Void {DirWrite})` the row is the last operand and is
   optional. `Proc({Str} {DirWrite})` therefore declares a `proc` that
   returns the one-component tuple type `{DirWrite}` with an empty row; the
-  checker reports `@type.suspiciousRow` when a result type is a tuple
-  whose every component resolves to an operation interface.
+  checker reports `@type.suspiciousRow` when the result operand of a
+  written `Proc` or `Intent` type whose row is omitted is a tuple of at
+  least one component, every one of which resolves to an operation
+  interface. A `returns` type is never reported: there a tuple of grants is
+  an ordinary value.
 - The grammar admits an empty brace or bracket form wherever a repetition
   can be empty: `{}` is the empty tuple (type, value, and pattern) and `[]`
   the empty list. An empty `takes {}`, `labelled {}`, `given {}`, or
@@ -580,7 +583,11 @@ initializer runs. There is no separate constant form.
 
 `test "name" takes {world: TestWorld} performs {…} do … endtest` declares a
 test. `takes` is optional and admits exactly one parameter, of the standard
-type `TestWorld`; any other parameter list is `@syntax.invalidForm`. Its
+type `TestWorld`; any other parameter list is `@syntax.invalidForm` at the
+`takes` section. The reader reports it for anything but one bare-name
+parameter, and the checker reports the same code at the same span when
+that one type does not resolve to `@std.test.TestWorld`. The parameter's
+name is free. Its
 body has type `Void`, MUST NOT contain a `return` or `try` outside an
 anonymous callable, and may `await`. The
 [programs chapter](04-programs-and-packages.md#tests) defines discovery and
@@ -718,9 +725,12 @@ Each of an `if` branch, a `match` arm, a `do` block, and a `let` fallback is
 its own scope: a binding made in it ends with it. A callable body is one
 scope together with its parameters.
 
-An expression statement whose value is fallible, as the type chapter defines
-(a `Result` that can hold an error), is `@type.unhandledFallible`.
-`let _ be risky() endlet` discards one explicitly.
+An expression statement has type `Void` or `Never`. One whose value is
+fallible, as the type chapter defines (a `Result` that can hold an error),
+is `@type.unhandledFallible`. Any other value is `@type.mismatch` at the
+statement, such as a plan whose `await` was forgotten: applying a `proc`
+only builds the plan. `let _ be risky() endlet` discards a value
+explicitly.
 
 ### `let`
 

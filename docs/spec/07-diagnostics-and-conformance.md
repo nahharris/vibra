@@ -260,6 +260,7 @@ Resolution reads only the captured source graph.
 | a VIBON field or entry with no value | `@syntax.invalidForm`, the name or key and its `:` |
 | a VIBON document that holds no value | `@syntax.invalidForm`, the whole document |
 | a section before the declaration's name, or after `do` | `@syntax.invalidForm`, that section |
+| a test's `takes` that is not one bare-name parameter, reported by the reader; one whose type does not resolve to `@std.test.TestWorld`, reported by the checker | `@syntax.invalidForm`, the `takes` section |
 | a reserved word in a declaration or binder position; a prelude name declared as a type, interface, type parameter, or binder; a reserved type head declared | `@name.reservedDeclaration`, the name |
 | a repeated record field in VIBON | `@data.duplicateField`, the later field |
 | a repeated dict key in VIBON, after decoding | `@data.duplicateKey`, the later key |
@@ -307,6 +308,7 @@ Every row is an error with no automatic fix.
 | a `let` or parameter pattern that can fail, with no `else` | `@pattern.refutableBinding`, the pattern |
 | a `let … else` whose pattern cannot fail | `@pattern.irrefutableLetElse`, the pattern |
 | an `else` of a `let` that can complete normally | `@type.mismatch`, the `else` body |
+| an expression statement whose type is neither `Void` nor `Never` and is not fallible, such as a plan whose `await` was forgotten | `@type.mismatch`, the statement |
 | a callable body that can run off its end | `@type.missingReturn`, the body; an empty body is the zero-width span right after `do` |
 | a `return` operand of the wrong type | `@type.mismatch`, the operand |
 | a `return` outside a callable, in a module value, or directly in a test | `@type.invalidReturn`, the `return` |
@@ -341,12 +343,12 @@ Every row is an error with no automatic fix.
 | a consequence of the wrong type, not constant where required, or not pure | `@contract.invalidConsequence`, the consequence |
 | a conversion to a plain callable type that would hide a bare `requires` | `@contract.obligationLost`, the conversion, related to the guard |
 | a type invariant that is not a predicate over the representation | `@type.invalidInvariant`, the `where` |
-| a row names one interface twice, under any spelling | `@effect.duplicateRoot`, the second entry, related to the first |
-| a row entry that is not an operation interface | `@effect.invalidReference`, the entry |
+| a row, or a target's `effects` list, names one interface twice, under any spelling | `@effect.duplicateRoot`, the second entry, related to the first |
+| a row entry or an `effects` entry that is not an operation interface, one that resolves to nothing included | `@effect.invalidReference`, the entry |
 | a body performs an interface outside its ceiling | `@effect.outsideCeiling`, the first `await` that contributes it |
-| `await` outside a `proc` or test, or of a value that is not a plan | `@effect.invalidAwait`, the `await` |
-| a ceiling names an interface the body cannot perform | `@contract.unusedEffect` (warning), the entry |
-| a result type that is a tuple of operation interfaces | `@type.suspiciousRow` (warning), the type |
+| `await` outside a `proc` or test, or of a value that is not a plan; an `await` that is both is reported once, and its operand never as `@type.mismatch` | `@effect.invalidAwait`, the `await` |
+| a ceiling written on a body (a `proc`, an anonymous `proc`, a `test`, or the additive `performs` of a default member) names an interface the body cannot perform | `@contract.unusedEffect` (warning), the entry |
+| the result operand of a written `Proc` or `Intent` type whose row is omitted is a tuple of at least one component, each an operation interface | `@type.suspiciousRow` (warning), the type |
 | an `external` section outside the embedded library | `@syntax.invalidSection`, the section |
 | an external symbol not in the registry | `@external.unknownSymbol`, the symbol |
 | an external member on the wrong interface | `@external.ownerMismatch`, the symbol, related to the owner |
@@ -485,7 +487,7 @@ this specification. They are never regenerated from an engine's output.
 | `format` | the same, plus one document | the formatted text and diagnostics |
 | `query` | a captured workspace, a subject, an offset, options | the versioned query result |
 | `interpret` | one pure module, checked as a one-module workspace; its first function with no parameters is called | the canonical result or an observation failure; no host world |
-| `workspaceRun` | the same tree, one binary target | startup, the entry's result, and the ordered audit trace in the supplied world |
+| `workspaceRun` | the same tree, one binary target | one `@targetRun.v2` document: startup, the entry's result, and the ordered audit trace in the supplied world |
 | `workspaceTest` | the same tree | one suite result with each test's trace, each test in a fresh world |
 
 - A case with several kinds of input states its operation.
@@ -533,7 +535,7 @@ are omitted, lists are in the order stated, and a **span record** is
 
 | Format | Defined in |
 | --- | --- |
-| `@tree.v2`, `@sourceGraph.v1`, `@resolved.v2`, `@types.v2`, `@testRun.v2` | below |
+| `@tree.v2`, `@sourceGraph.v1`, `@resolved.v2`, `@types.v2`, `@testRun.v2`, `@targetRun.v2` | below |
 | `@index.v2` | the [index](05-tooling.md#index-records) |
 | `@type.v2`, `@value.v2` | the [canonical value encoding](06-runtime.md#canonical-value-encoding) |
 | `@auditTrace.v2` | the [audit trace](06-runtime.md#audit-trace) |
@@ -842,6 +844,51 @@ shown); `trap` (optional record
   completed events are kept. The absence of an event is never evidence that
   nothing external happened.
 
+**`@targetRun.v2`** holds one run of a binary target, the observation of a
+`workspaceRun` case. A case expects one with the key `expect.targetRun`, as
+it expects a `@testRun.v2` document with `expect.testRun`.
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `format` | `@targetRun.v2` | required |
+| `result` | atom | the run's `@command.*` result |
+| `applicationCode` | optional `U8` | the code the entry returned; absent when it did not return |
+| `stdout` | [bytes record](06-runtime.md#values) | every byte the program wrote to standard output |
+| `stderr` | bytes record | every byte the program wrote to standard error |
+| `startup` | list of startup records in processing order | one per processed leaf |
+| `trap` | optional record `trapCode: Atom`, `origin: U64` optional | the defect trap that ended the run |
+| `auditTrace` | an [`@auditTrace.v2`](06-runtime.md#audit-trace) document | the run's whole trace, its startup events first |
+
+A startup record has `binding` (the leaf's atom); `status` (`@released` for
+a leaf that was acquired, since every acquired leaf of a finished run is
+released, `@refused`, or `@failed`); and `failure` (optional atom, the code
+of the startup diagnostic, present exactly when this leaf stopped startup).
+A run that ends before startup, for a static error, has an empty `startup`
+and a trace without events.
+
+The example is shape only: its identities are placeholders, and the
+events of its trace are left out.
+
+```vibon
+{
+  format: @targetRun.v2
+  result: @command.ok
+  applicationCode: 0u8
+  stdout: {kind: @bytes values: [104u8 101u8 108u8 108u8 111u8 10u8]}
+  stderr: {kind: @bytes values: []}
+  startup: [{binding: @out status: @released}]
+  auditTrace: {
+    format: @auditTrace.v2
+    revision: "sha256:5fdc01744c45544c5765d4ec386b7a45bb990bc4b4c0ca415493546c7f36c8ec"
+    target: @hello
+    drivers: [{provider: @hostWorld.v2 version: "0.0.2"}]
+    policies: [:]
+    redaction: @none
+    events: []
+  }
+}
+```
+
 ### Rule identities and example coverage
 
 A rule identity is a section prefix and a descriptive suffix in lower case
@@ -991,15 +1038,20 @@ dialect and not a release number. A valid feature outside a profile is
 reported unavailable; the same source never means something else under a
 smaller profile.
 
-| Profile | Covers |
-| --- | --- |
-| `readerV2` | the source and VIBON readers, recovery, canonical format, syntax diagnostics |
-| `staticV2` | `readerV2` plus names, types, guards, effect rows, project and binding validation |
-| `interpreterV2` | `staticV2` plus reference execution, the operation registry, fake and system worlds |
-| `toolingV2` | `staticV2` plus the query, edit, schema, CLI, and MCP contracts in the reported inventory |
-| `nativeV1` | `staticV2` plus verified execution IR, the native runtime, code generation, linking, launch, and native observations |
+| Profile | Covers | Case operations |
+| --- | --- | --- |
+| `readerV2` | the source and VIBON readers, recovery, canonical format, syntax diagnostics | `reader` |
+| `staticV2` | `readerV2` plus names, types, guards, effect rows, project and binding validation | `projectDecode`, `sourceGraph`, `resolve`, `workspaceCheck` |
+| `interpreterV2` | `staticV2` plus reference execution, the operation registry, fake and system worlds | `interpret`, `workspaceRun`, `workspaceTest` |
+| `toolingV2` | `staticV2` plus the query, edit, schema, CLI, and MCP contracts in the reported inventory | `format`, `query` |
+| `nativeV1` | `staticV2` plus verified execution IR, the native runtime, code generation, linking, launch, and native observations | none of its own: it runs the executable cases of `interpreterV2` on native code |
+| `fullV2` | everything a release requires: language, library, projects, tooling, interpreter, and native targets | none of its own: it includes every profile |
 
-| `fullV2` | everything a release requires: language, library, projects, tooling, interpreter, and native targets |
+Each [case operation](#case-operations-and-inputs) is the own operation of
+exactly one profile. A profile that includes another covers that profile's
+operations as well. The
+[`help` inventory](05-tooling.md#command-payloads) is derived from this
+table: a command's `profiles` are the profiles of the operations it offers.
 
 `nativeV1` does not include `interpreterV2`; a differential gate needs
 both. The interpreter serves `run`, `test`, `eval`, and compile-time

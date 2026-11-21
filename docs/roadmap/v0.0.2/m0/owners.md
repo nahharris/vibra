@@ -17,7 +17,6 @@ Forms that the release names and no M1 or M2 step can own.
 | Commands `project init`, `inspect`, `add`, `remove`, `sync` | No milestone of the release names them. They stay `@tool.unavailable`; an owner is needed before the release gate is read as complete. |
 | `@project.staleLock`, `@git` dependencies, the lock | Not in this release. M2 step 27 reports a `@git` dependency as `@tool.unavailable` (`V2-PROJECT-git-dependency-unavailable`). |
 | The `effectWitnesses` query expansion | The witness of `@effect.outsideCeiling` is carried by the diagnostic from M2 step 09. The expansion belongs to `query`, which is M3. |
-| The observation of a `workspaceRun` case | The diagnostics chapter names the operation and no document for its result. The cases of M2 step 29 are host tests until the document is named ([question 17](../m2/spec-questions.md#q17-the-observation-of-a-workspacerun-case)). |
 | Reserved HTTP items of required coverage 11 | No network operation exists in this release; no step owns them. |
 
 How to read a row:
@@ -269,6 +268,9 @@ intrinsic registry".
 | Audit trace | M2 17 / M2 21, 29 | host tests of M2 step 17; `V2-RUNTIME-trace-*`, `V2-RUNTIME-invocation-gaps`, `V2-RUNTIME-root-ordinals`, `V2-RUNTIME-await-twice-two-events`; `ATK-trace-decode-grants-nothing`, `ATK-trace-uncommitted-no-event`, `ATK-trace-commit-once` | none | `@auditTrace.v2` |
 | Real drivers and the file scope on Windows | M2 13, 30, 31 / M2 33 | the host tests `ATK-fs-*`, `ATK-run-*`, `ATK-driver-absent-at-admission`, `ATK-no-process-exit` | `@grant.acquisitionFailed`, `@tool.unavailable` | `@auditTrace.v2` |
 | Command `run` | M2 32 / M2 29 | host tests of M2 step 32 over the `V2-RUNTIME-run-*` projects; `V2-GRANT-release-optional-absent` | `@grant.requiredUnavailable`, `@grant.acquisitionFailed`, `@runtime.memoryExhausted`, `@tool.unavailable` | `urn:vibra:schema:v2:command-result` |
+| The run observation of a `workspaceRun` case | M2 29 | the `V2-RUNTIME-run-*` cases of M2 step 29 | none | `@targetRun.v2` |
+| The toolchain record of the workspace revision | M2 21 | the host tests "the toolchain record" and "the revision follows the library" of M2 step 21 | none | `@toolchain.v2` |
+| Case operations of each conformance profile; the `help` inventory derived from them | M2 32 | the host tests "inventory" and "inventory derived from the profiles" of M2 step 32 | none | `urn:vibra:schema:v2:command-result` |
 | Command `eval` | M3 | | | |
 | `project` commands | no owner; see the findings | | | |
 | `query`, `edit`, `lint`, the index, snapshot and claim identity | M3 | | | |

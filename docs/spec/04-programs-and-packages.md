@@ -385,7 +385,12 @@ operation interface, and the program calls that module to wrap it. A tuple
 of grants is not one either, because a binding names what it binds.
 
 `effects` is the target's **static admission ceiling**: a list of entity
-references to operation interfaces, without repeats. The entry's written
+references to operation interfaces, without repeats. The list is a row in
+data form, checked as a [row](03-effects.md#effect-ceilings) is: an entry
+that is not an operation interface, one that resolves to nothing included,
+is `@effect.invalidReference` at that entry, and a later repeat of an
+interface is `@effect.duplicateRoot` at the repeat, related to the first.
+The entry's written
 `performs` row, and the row of every startup step, MUST be contained in it,
 or the project is `@effect.outsideCeiling` at the `effects` field, related
 to the entry's `performs` entry or to the recipe. An interface in the list
@@ -447,7 +452,12 @@ A `@fixedPath` is absolute, or relative to the process's working directory
 at startup. A path taken from an argument or variable is read once, at
 startup, through the `source` leaf's grant; the read is a startup step whose
 row is that grant's interface, and it is recorded in the
-[audit trace](06-runtime.md#audit-trace). In each case the issuer opens the
+[audit trace](06-runtime.md#audit-trace). The read is an invocation of the
+`source` grant: it reserves on that grant's counters, so it counts against
+the `source` leaf's `limits` and leaves less to the entry. A typed error of
+the read that the issuer's row below does not list as a refusal, such as
+`limitExceeded` or `outcomeUnknown`, is a failure of the leaf that needed
+it. In each case the issuer opens the
 directory once and the grant holds that directory object; a path string is
 never authority. The table is closed; a project cannot add a provider.
 
@@ -577,7 +587,9 @@ target.
 `vibra project sync` exports each Git revision into `dep/<name>/` without
 repository metadata and writes `project-lock.vibon`, one `@projectLock.v2`
 record. Check, test, run, and build work offline from the project tree and
-the lock. Local dependencies are not copied and are fingerprinted in every
+the lock. A lock is required exactly when a Git dependency is declared:
+while every dependency is `@path`, `project-lock.vibon` is neither read nor
+required. Local dependencies are not copied and are fingerprinted in every
 snapshot.
 
 | Field | Type | Meaning |
@@ -614,11 +626,12 @@ vector of [Content hash](#content-hash).
 }
 ```
 
-The four commands reject, at the project-data span named: a lock whose
-`project` digest differs from the project file, or a dependency set that
-differs from the project's, `@project.staleLock` at the lock's `format`
-field; a missing vendor directory or vendored content whose content hash
-differs from the lock, `@project.staleLock` at that lock entry; a path
+The four commands reject, at the project-data span named: where a lock is
+required, a lock whose `project` digest differs from the project file, or a
+dependency set that differs from the project's, `@project.staleLock` at the
+lock's `format` field, and a missing vendor directory or vendored content
+whose content hash differs from the lock, `@project.staleLock` at that lock
+entry; a path
 dependency outside the project root, `@module.pathEscape` at its `path`;
 and an import of an undeclared unit, `@module.unknownPath` at the import as
 [Packages, units, and targets](#packages-units-and-targets) states.
@@ -707,8 +720,22 @@ The package enters resolution as unit `@std`. Its modules are:
 | `@std.assert` | assertions, usable only from `@tests` |
 | `@std.test` | `TestWorld` |
 | `@std.process` | `ExitCode` |
-| `@std.policy` | `ScopeError`, and the policy, selector, and limit types of the [scope policies](03-effects.md#scope-policies) |
-| `@std.io`, `@std.fs`, `@std.env`, `@std.time`, `@std.random` | the operation interfaces and error types of the host registry |
+| `@std.policy` | `ScopeError` and `GrantLimits`; it imports nothing, so every operation module can import it |
+| `@std.io` | the operation interfaces and error type of its host registry rows, and the procedures `readAllText` and `readAllBytes` |
+| `@std.fs` | the operation interfaces and error types of its host registry rows, `RelativePath`, and the policy and selector types of the [scope policies](03-effects.md#scope-policies): `FsPolicy`, `NameTest`, `FileDepth`, `DirDepth`, `FileAction`, `DirAction` |
+| `@std.env`, `@std.time`, `@std.random` | the operation interfaces and error types of the host registry |
+
+`readAllText` and `readAllBytes` read standard input to its end in source.
+Each takes the grant of `StdinText` or `StdinBytes`, has that interface as
+its row, and awaits the interface's `read` with a count of 65,536 until it
+returns the empty value; it returns the concatenation, or the first error.
+Each turn of the loop is an invocation, and the
+[runtime chapter](06-runtime.md#closed-operation-semantics) says what a
+read through a bound smaller than the input returns. A program that needs
+another count calls the member itself.
+
+The embedded library gets no exemption from the rule that imports do not
+form a cycle.
 
 Adding a module or symbol is a change to this specification and to the
 runtime registry. A project module whose source identity collides with an
@@ -813,7 +840,7 @@ test's world are unusable in another. The members behave as follows:
 - `environment`, `clocks`, and `random` return grants over the world's one
   environment, one clock pair, and one random state, so two calls share
   state; `environment` sets the world's variables and arguments on each
-  call.
+  call. The `EnvReadVar` grant it returns permits every name.
 - `output` returns everything written through every stream grant the
   test's world issued, per stream, in write order.
 

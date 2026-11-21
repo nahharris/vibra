@@ -331,8 +331,10 @@ pub trait Driver {
 }
 pub enum Acquire { Acquired(ResourceId), Refused, Failed(String) }
 pub trait Gate {
-    fn admit(&mut self, found: &Found<'_>) -> Result<(), Refused>;
+    fn admit(&mut self, found: &Found<'_>) -> Result<Reserved, Refused>;
 }
+/// What the gate reserved: the most input bytes the driver may read.
+pub struct Reserved { pub input: u64 }
 /// The gate said no. The broker keeps the reason; the driver stops.
 pub struct Refused(());
 pub struct Found<'n> {
@@ -395,7 +397,11 @@ fixes (the encoded size of a write, the count of random bytes) on the
 grant's counters and on every ancestor's, all or none. The gate reserves
 the bytes of a read the same way: the size of a file; for a stream read,
 the smaller of its `max` and the remaining size when the adapter knows
-it, else `max` (Q10). When the driver returns,
+it, and otherwise the smaller of `max` and what remains of the
+`inputBytes` bound on the grant and on every ancestor, refused as
+`limitExceeded` only when `max` is positive and nothing remains (Q10).
+The gate returns the reserved count, and the driver reads at most that
+many bytes. When the driver returns,
 the broker settles each byte reservation, on the grant and on every
 ancestor, from the completion:
 
@@ -537,7 +543,7 @@ corpus. The step in brackets owns the case.
 | A13 | Narrowing a sealed grant never adds a right, a resource, a driver, or a budget; the parent stays a conjunction; narrowing another value runs that value's own member | `vibra-host::broker`: a child is its parent plus one constraint, and no operation replaces a parent | `Context::host` walks the whole ancestry on every call; nothing caches an "effective" decision; the checker requires the narrowing members of every `impl` | `ATK-narrow-broader-policy` [15], `ATK-narrow-other-resource` [15], `V2-GRANT-restrict-keeps-parent` [22], `V2-GRANT-narrow-forward-limit` [22], `V2-GRANT-impl-missing-limit` [19] | the ancestry walk stops early |
 | A14 | Copies and descendants share ancestor counters; known progress is charged and a known remainder refunded; uncertain progress and an unknown outcome are charged in full; a counter that would overflow denies | `vibra-host::broker`: reservation all or none across the ancestry, settlement from the driver's `Progress` | property test over random narrowing trees against a model; a `Known` above the reservation is `InvalidHostValue` | `ATK-counter-overflow` [15], `ATK-counter-refund-unknown` [15], `ATK-counter-partial-known` [15], `ATK-counter-partial-unknown` [15], `ATK-counter-reservation-all-or-none` [15], `V2-GRANT-limit-siblings-share` [22] | reservation is not atomic across the ancestry, or the broker settles from the reply instead of the progress record |
 | A15 | The fields of one rule stay together | `vibra-host::policy::permits`, one rule at a time | the gate evaluates the same function on the real name and the found action | `ATK-policy-rule-fields-crossed` [14], `V2-GRANT-rule-correlation` [22] | evaluation distributes over fields |
-| A16 | A policy over the size or depth limit is refused | `vibra-host::policy`, at decode and at `restrict` | `Context::host` never evaluates a policy that was not counted | `V2-GRANT-policy-4097-nodes` [26], `V2-GRANT-restrict-too-complex` [22] | the count is taken before normalization only |
+| A16 | A policy over the size or depth limit is refused | `vibra-host::policy`, at decode, at `restrict`, and at `sub` | `Context::host` never evaluates a policy that was not counted | `V2-GRANT-policy-4097-nodes` [26], `V2-GRANT-restrict-too-complex` [22] | the count is taken before normalization only |
 | A17 | An entry row and every startup row are inside the target's `effects`; a grant the entry takes and never performs needs no entry of the list | `vibra-workspace::entry` (the entry row), `vibra-workspace::binding` (the startup rows) | `vibra-host::startup::admit`, which is given the checked entry row and compares it and each startup step's row with the ceiling before any leaf is processed | `V2-EFFECT-entry-outside-ceiling` [25], `V2-EFFECT-startup-row-outside-ceiling` [26], `V2-GRANT-binding-unused-grant` [26], `ATK-admit-entry-row-outside-ceiling` [28], `ATK-admit-startup-read-outside-ceiling` [28] | both compare against a different list |
 | A18 | Every leaf has a valid recipe from a provider that issues its type; `after` is acyclic; a process read names its source leaf; a recipe's leaf has the interface of the parameter it binds | `vibra-workspace::binding` | `BindingPlan::validate` and the leaf conformance check of `vibra-host::startup::admit` | `V2-GRANT-binding-missing` [26], `V2-GRANT-binding-cycle` [26], `ATK-plan-provider-mismatch` [28], `ATK-admit-leaf-interface-mismatch` [28] | the provider table differs between the two callers; it is one table |
 | A19 | Startup follows the one order; a refused required leaf and every failure stop it; a failure is never an absence | `vibra-host::startup` | the `@startup` events and the startup record state each leaf's outcome | `V2-GRANT-startup-order-permuted` [28], `V2-GRANT-startup-failed-optional` [28], `ATK-startup-failure-not-none` [28] | an issuer's failure is mapped to `Refused` |
@@ -634,7 +640,7 @@ three platforms and CI stays green there. The architecture test allows
 | `staticV2` | `workspaceCheck` | the verdict and each diagnostic with its span; a tree with a `project.vibon` |
 | `staticV2` | `projectDecode` | the decode of one project file with `grants` |
 | `interpreterV2` | `workspaceTest` | a `@testRun.v2` snapshot: each item's result and its complete `@auditTrace.v2` |
-| `interpreterV2` | `workspaceRun` | the run observation of [Q17](spec-questions.md#q17-the-observation-of-a-workspacerun-case), with an optional `hostWorld` |
+| `interpreterV2` | `workspaceRun` | a `@targetRun.v2` document ([Q17](spec-questions.md#q17-the-observation-of-a-workspacerun-case)), with an optional `hostWorld` |
 
 - **Prefixes.** `EFFECT` (rows, plans, `await`, ceilings), `GRANT` (grant
   values, narrowing, policies, bindings, startup), `PROJECT` (entry,
@@ -666,16 +672,16 @@ three platforms and CI stays green there. The architecture test allows
    validator is written from the chapter by a different step (03) before
    the checker's analysis (09) exists, with hand-built IR; review gate 11
    reads both against the chapter.
-2. **Two rulings are ahead of the chapters.** Q1 makes the narrowing
-   members abstract and Q10 gives the two standard-input rows a count;
-   the chapters do not say either yet. Mitigation: the questions name the
-   sections each ruling changes, and step 02 freezes the registry
-   snapshots from the revised sections.
-3. **The chapter does not yet name the run observation (Q17).** Every
-   `workspaceRun` case waits on the name and the manifest key. Mitigation:
-   the run API and its host tests land first (29); the rows are written as
-   the ruled fields; the corpus cases are added when the chapter names the
-   document.
+2. **The registry snapshots follow the revised chapters.** Q1 makes the
+   narrowing members abstract and Q10 gives the two standard-input rows a
+   count, and both changed 03 and 06 after the first guides were written.
+   Mitigation: the questions name the sections each ruling changed, and
+   step 02 freezes the registry snapshots from those sections.
+3. **A run observation is a whole document.** Every `workspaceRun` case
+   states a `@targetRun.v2` document (Q17), whose trace and `revision` are
+   written by hand. Mitigation: the run API and its host tests land first
+   (29); the `revision` is computed by the case author's script with the
+   toolchain record (C12, step 21).
 4. **The Windows adapter's residual gaps become escapes once it is behind
    a policy:** an alias is opened before it is refused; only NTFS on a
    local volume was measured. Mitigation: step 13 closes the measured gaps

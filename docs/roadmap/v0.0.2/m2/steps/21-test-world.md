@@ -17,7 +17,8 @@ Crates: `stdlib`, `vibra-host`, `vibra-types`, `vibra-workspace`,
   registry paragraph, "Host world", "Audit trace"; [effects
   chapter](../../../../spec/03-effects.md#tests-and-model-profiles) "Tests
   and model profiles"; [tooling
-  chapter](../../../../spec/05-tooling.md#command-payloads) `TestItem`;
+  chapter](../../../../spec/05-tooling.md#command-payloads) `TestItem`,
+  "Snapshot, claim and witness identity" (the `toolchain` record);
   [questions](../spec-questions.md) Q12, Q13, Q15, Q16.
 
 ## Entry points
@@ -42,6 +43,8 @@ Proposed: `stdlib/src/std/test.vib`; `vibra-host::test_world`
 - `crates/vibra-types/src/check/effects/procs.rs`
 - `crates/vibra-workspace/src/test_runner.rs`
 - `crates/vibra-workspace/src/lib.rs`
+- `crates/vibra-workspace/src/snapshot.rs`
+- `crates/vibra-workspace/src/revision.rs`
 - `crates/vibra-schema/src/test_payload.rs`
 - `crates/vibra-conformance/src/manifest.rs`
 - `conformance/rules/m2-21.tsv`
@@ -73,6 +76,13 @@ Proposed: `stdlib/src/std/test.vib`; `vibra-host::test_world`
 7. `vibra-workspace` re-exports `HostWorld`, `AuditTrace`,
    `decode_world`; the case manifest validates a `hostWorld` input with
    it.
+8. Every snapshot gains the one `toolchain` record (C12): kind
+   `toolchain`, identifier `@toolchain`, the canonical bytes of the
+   `@toolchain.v2` document of the tooling chapter, with `stdlib` the
+   digest of the embedded manifest. Every expected `revision` in the
+   corpus is recomputed with it by one script, which the report shows.
+   Invariant: no snapshot has a second toolchain record, and no
+   revision is computed without one.
 
 ## Positions
 
@@ -122,6 +132,8 @@ and the complete trace. Tests import what they use; `w` is the world.
 | `ATK-test-world-op-on-leaf` | negative, host test | `Context::test_world` with a token of a directory root | `InvalidHostValue` | 04: "No binding recipe can name `TestWorld`" |
 | `ATK-test-runner-no-system-driver` | negative, host test | the architecture test over `crates/vibra-workspace/src/test_runner.rs` | no reference to `SystemDriver` or `Launch::System` | 04: "no test reaches a real host resource" |
 | foreign world's grant | negative, host test | a token issued by one test's context used in another's | `InvalidHostValue` | 04: "Grants from one test's world are unusable in another" |
+| the toolchain record | positive, host test | a snapshot of `examples/hello/` | exactly one record of kind `toolchain`, identifier `@toolchain`, whose bytes are the canonical bytes of the chapter's `@toolchain.v2` example with `stdlib` the digest of the embedded manifest (C12) | 05: "Every snapshot has exactly one `toolchain` record, whose bytes are the canonical bytes of this document" |
+| the revision follows the library | positive, host test | two snapshots of one project whose embedded manifests differ in one byte | two workspace revisions (C12) | 05: "a revision changes with the toolchain and with its embedded library even when no project byte changes" |
 
 ## Diagnostics and schema changes
 
@@ -159,7 +171,10 @@ Narrowing and limits under test (22); recipes under a world (28).
 
 - [ ] `conformance/rules/m2-21.tsv` has one `active` row per `V2-` id.
 - [ ] Each trace snapshot was written by hand; the report shows the
-      script that computed `revision` and the library `seed`.
+      script that computed `revision`, with the toolchain record, and the
+      library `seed`.
+- [ ] Every expected `revision` the corpus held before the step was
+      recomputed by that script, and the report lists the files.
 - [ ] `V2-PROJECT-test-unavailable-item` of M1 is rewritten or deleted,
       and the report says which.
 - [ ] The validation commands exit 0.

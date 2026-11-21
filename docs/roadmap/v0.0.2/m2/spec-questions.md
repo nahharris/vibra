@@ -7,9 +7,12 @@ states:
 
 - **Ruled.** Its entry carries a **Ruling**, and the rows under
   **Depends** are written against it.
-- **Open.** Q28, Q29, and Q30. Each carries a **recommended answer**; the
-  rows under **Depends** are written against it and name the question, so
-  a different ruling changes exactly those rows.
+- **Open.** Its entry carries a **recommended answer**; the rows under
+  **Depends** are written against it and name the question, so a
+  different ruling changes exactly those rows.
+
+Every question below is ruled.
+
 Chapters: [01 source](../../../spec/01-source-language.md),
 [02 types](../../../spec/02-type-system.md),
 [03 effects](../../../spec/03-effects.md),
@@ -18,8 +21,8 @@ Chapters: [01 source](../../../spec/01-source-language.md),
 [06 runtime](../../../spec/06-runtime.md),
 [07 diagnostics](../../../spec/07-diagnostics-and-conformance.md).
 
-A ruling that the chapters do not yet say names the chapter sections it
-changes; step 01 does not start before those sections say it.
+Each ruling is stated in the chapter sections its **Anchor** names.
+
 ## Rows, plans, and callables
 
 ### Q1. Narrowing members on a value that is not a sealed grant
@@ -313,21 +316,24 @@ changes; step 01 does not start before those sections say it.
     smaller of `max` and that size. An empty input reserves zero, so it
     succeeds at a zero budget.
   - **Input of unknown size** (a pipe, a console): the broker reserves
-    `max`.
+    the smaller of `max` and what remains of the `inputBytes` bound of the
+    grant and of every ancestor. The call is refused with `limitExceeded`
+    before dispatch only when `max` is positive and nothing remains, and
+    the read returns at most the reserved count.
 
-  A reservation over the remaining `inputBytes` bound is `limitExceeded`
-  with nothing consumed. So a limit is always reserved before the
-  operation could exceed it, `limitExceeded` never follows an attempt,
-  and no operation is special: this is the shape
+  For input of known size, a reservation over the remaining `inputBytes`
+  bound is `limitExceeded` with nothing consumed. So a limit is always
+  reserved before the operation could exceed it, `limitExceeded` never
+  follows an attempt, and no operation is special: this is the shape
   `RandomBytes.generate(count)` has.
 
   "Read to the end" is a library loop: `@std.io` has the procedures
   `readAllText` and `readAllBytes`, each with the row of its interface,
   which call the member with a fixed count of 65,536 until it returns the
   empty value. Each turn of the loop is an invocation. Through a grant
-  whose `inputBytes` bound is below that count, the loop over an input of
-  unknown size returns `limitExceeded`; a program with such a budget
-  calls the member with its own count.
+  whose `inputBytes` bound is below the size of an input of unknown size,
+  the loop reads up to the bound and then receives `limitExceeded`; a
+  program with such a budget may call the member with its own count.
 
   The chapters say this in 03 "Standard operation inventory", 06 "Host
   registry" (the two rows), 06 "Closed operation semantics" ("Standard
@@ -468,10 +474,12 @@ changes; step 01 does not start before those sections say it.
   `applicationCode` (`U8`); `stdout` and `stderr` (bytes records); `startup`
   (a list, one record per processed leaf in processing order, of `binding`,
   `status`, and the optional `failure`); the optional `trap`; and
-  `auditTrace` (one `@auditTrace.v2` document). The chapter names it and
-  the manifest key. Until it does, step 29 builds the handler and its host
-  tests, and every `workspaceRun` row of this plan is written as the fields
-  above and stays out of the corpus.
+  `auditTrace` (one `@auditTrace.v2` document). The chapter names it
+  `@targetRun.v2`, with the manifest key `expect.targetRun`, in 07
+  "Persistent observations"; a startup record's `status` is `@released`
+  for an acquired leaf (Q21), and its `failure` is the code atom. Every
+  `workspaceRun` row of this plan is written as these fields and is a
+  corpus case of the step that owns it.
 - **Depends.** Steps 29, 33, 36, and every row whose kind is
   `workspaceRun`.
 
@@ -486,8 +494,8 @@ changes; step 01 does not start before those sections say it.
 - **Ruling.** `startup.auditTrace` holds the `@startup` events
   and the `@host` events of phase `@startup`; the payload's `auditTrace`
   holds the events of phase `@entry`; no event is in both. The payload
-  needs the two missing fields; until the chapter adds them, a narrowed
-  grant's policy is recoverable only from a conformance trace.
+  carries the trace's `drivers` and `policies`, so every `policy` hash
+  of a projection is a key of `policies`.
 - **Depends.** Step 32. Rows of the `run` payload schema test.
 
 ### Q19. Startup reads against the `source` leaf's limits and errors
@@ -649,7 +657,7 @@ changes; step 01 does not start before those sections say it.
   the adapter made progress. Which is charged?
 - **Program.** A grant with `inputBytes: 5u64`; a file holding the byte
   `255` and four more; `DirReadText.read`, then a read of a one-byte file.
-- **Recommended answer.** Progress is what the adapter moved across the
+- **Ruling.** Progress is what the adapter moved across the
   boundary: the bytes it took from the resource for this call, whatever
   the reply. The first read charges five and the second is
   `limitExceeded`. A count the adapter does not know is `Uncertain` and
@@ -674,7 +682,7 @@ changes; step 01 does not start before those sections say it.
   every call that passed reservation": does such a call count as one?
 - **Program.** A grant with `invocations: 1u64` and `inputBytes: 4u64`; a
   read of a five-byte file, then a read of a four-byte file.
-- **Recommended answer.** Neither is traced: the error table says of both
+- **Ruling.** Neither is traced: the error table says of both
   cases that nothing was dispatched or attempted, and the format has no
   refusal kind. A call refused for its size holds no invocation, because
   its byte reservation failed and so it did not pass reservation; a call
@@ -700,7 +708,7 @@ changes; step 01 does not start before those sections say it.
 - **Program.** Standard input holding U+20AC and `a`;
   `StdinText.read(input 4u64)` twice; then the same input read with a
   count of 2.
-- **Recommended answer.** A text read returns the longest prefix of whole
+- **Ruling.** A text read returns the longest prefix of whole
   scalars that fits in `max` bytes, and consumes exactly those bytes: the
   first read returns U+20AC and `a`, the second the empty value. A text
   count below 4, the longest scalar, is `unsupported` before the stream
@@ -709,7 +717,9 @@ changes; step 01 does not start before those sections say it.
   value and consumes nothing, as a zero `count` of random bytes does.
 - **Depends.** Steps 16, 30. Rows "stdin text below a scalar" of both.
   Every other text row uses a count of at least 4.
+
 ## Where the tree contradicts the M2 chapters
+
 These are not open questions. Each is a place where the code as it stands
 differs from the specification, with the step that replaces it.
 
@@ -725,4 +735,3 @@ differs from the specification, with the step that replaces it.
 | `crates/vibra-workspace/src/semantic.rs` | a `@bin` target is `@tool.unavailable` | entry, admission ceiling, and recipes are validated | 25, 26 |
 | `crates/vibra-workspace/src/project.rs` | every dependency is unavailable | a `@path` dependency is a unit | 27 |
 | `crates/vibra-ir/registry/compiler-2.0.txt` | no `grant.*` row | three rows (Q25) | 02 |
-| `docs/spec/03-effects.md`, status lines | "the Windows file-scope adapter … has not been shown feasible" | [the feasibility record](../m0/file-scope-feasibility.md) shows it | the specification's owner; reported by step 37 |

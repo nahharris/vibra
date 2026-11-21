@@ -111,7 +111,7 @@ do the same under `try`. `in` is the `stdinBytes` grant of
 | `V2-GRANT-limit-siblings-share` | positive | `p = limit(r 2)`; `a = limit(p 5)`, `b = limit(p 5)`; read through `a`, `b`, `a` | the third is `limitExceeded` (Q11) | 07 Required coverage 11: "shared counters under siblings" |
 | `V2-GRANT-limit-child-after-use` | positive | one read through `r`, then `c = limit(r 1)`, one read through `c`, one more | `Ok`, `Ok`, `limitExceeded` (Q11) | 07 Required coverage 10: "limits never reset" |
 | `V2-GRANT-limit-projection` | positive | a read through `limit(limit(r inv 5) inputBytes 9)` | `limits: {invocations: 5u64 inputBytes: 9u64}` (Q11) | 06: "a record of the bounds that are set" |
-| `V2-GRANT-limit-input-bytes` | positive | `limit(r inputBytes: some(1))`; read `a.txt` (1 byte), then again | `Ok("A")`, then `limitExceeded`; one event (Q29) | 03 Limits: "Input bytes are the bytes the program receives" |
+| `V2-GRANT-limit-input-bytes` | positive | `limit(r inputBytes: some(1))`; read `a.txt` (1 byte), then again | `Ok("A")`, then `limitExceeded`; one event (Q29) | 03 Limits: "Input bytes are the bytes read for the program" |
 | `V2-GRANT-limit-output-bytes` | positive | `limit(dir.writeText outputBytes: some(2))`; write `"abc"` | `Err(limitExceeded)`; the file is absent | 06: "A write reserves the encoded size of its argument before it sends" |
 | `V2-GRANT-limit-stdin-exact` | boundary | `limit(in inputBytes: some(3))`; `StdinBytes.read(… 3u64)` | `Ok` of the bytes `abc` (Q10) | 06 Closed operation semantics |
 | `V2-GRANT-limit-stdin-over` | positive | `limit(in inputBytes: some(2))`; `StdinBytes.read(… 3u64)`; then `in` reads with `3u64` | `limitExceeded`, then `Ok` of `abc`; one event (Q10) | 06 Standard input: "consumes nothing" |

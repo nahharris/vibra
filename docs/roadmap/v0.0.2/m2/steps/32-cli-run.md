@@ -13,7 +13,9 @@ Crates: `vibra-cli`, `vibra-schema`.
   evaluation", "Versioned envelope and results", "Command payloads" (the
   `run` row, `StartupRecord`, `TrapRecord`); [runtime
   chapter](../../../../spec/06-runtime.md#entry-outcome) the outcome
-  table; [questions](../spec-questions.md) Q18, Q21.
+  table; [diagnostics
+  chapter](../../../../spec/07-diagnostics-and-conformance.md#conformance-profiles)
+  "Conformance profiles"; [questions](../spec-questions.md) Q18, Q21.
 
 ## Entry points
 
@@ -65,8 +67,13 @@ StartupRecordDocument, BindingRecordDocument, TrapRecordDocument}`.
    captured into the payload. Human format: the program's bytes go
    straight through and diagnostics go to standard error.
 5. Exit status from the result: 0, 1, 2, 3, 4, 5, 6 as the table gives.
-6. The inventory marks `run` supported with its schema identifiers; the
-   capability record lists the profile `interpreterV2`.
+6. The inventory marks `run` supported with its schema identifiers and
+   the operation `workspaceRun`. Every command's `profiles` are derived
+   from its `operations` through the profile table of the diagnostics
+   chapter (C13): `fmt` lists `toolingV2`, `test` and `run` list
+   `interpreterV2`, `help` lists `toolingV2`. Invariant: the inventory
+   holds one table from operation to profile, and no command names a
+   profile by hand.
 7. The envelope validates against the published schema before it is
    written.
 
@@ -97,7 +104,8 @@ print `NOT RUN` elsewhere.
 | directory target, other platforms | boundary | the same on Linux and macOS | exit 4; `@command.unavailable`; `@tool.unavailable`; nothing acquired | 04: "rejected at admission, as `@tool.unavailable`" |
 | no permission flag | negative | `vibra run --allow-all` | exit 2 | 05: "A tool permission flag never approves a program's resource policy" |
 | no world switch | negative | `vibra run --world w.vibon` | exit 2 | 06: "The shipped launcher has no user-selectable world or replay switch" |
-| inventory | positive | `vibra help --format json` | the `run` capability has `supported: true` and `profiles: ["interpreterV2"]` | 05 `CommandCapability` |
+| inventory | positive | `vibra help --format json` | the `run` capability has `supported: true`, `operations: ["workspaceRun"]`, and `profiles: ["interpreterV2"]` | 05 `CommandCapability`: "the profiles of those operations in the" |
+| inventory derived from the profiles | positive | `vibra help --format json` | `fmt` has `profiles: ["toolingV2"]`; `test` has `["interpreterV2"]`; `check` has `["staticV2"]`; `help` has `["toolingV2"]` (C13) | 07 Conformance profiles: "a command's `profiles` are the profiles of the operations it offers" |
 | only caller of the system launch | negative, architecture test | the workspace searched for `Launch::System` | constructed in `crates/vibra-cli/src/run.rs`, and in the test files `crates/vibra-workspace/tests/it/dual_run.rs` and `crates/vibra-workspace/tests/it/attacks_run.rs`, which the test allows by name whether or not they exist | architecture, row A27 |
 
 ## Diagnostics and schema changes
@@ -131,7 +139,8 @@ A world or replay switch; approval of a target's authority.
 
 ## Completion evidence
 
-- [ ] Each of the 21 rows is a test, named in the report.
+- [ ] Each of the 22 rows is a test, named in the report.
 - [ ] The report pastes the JSON envelope of the hello run.
-- [ ] `vibra help` lists `run` as supported and nothing else changed.
+- [ ] `vibra help` lists `run` as supported; the profiles of `fmt` and
+      `test` changed as the derivation gives, and nothing else changed.
 - [ ] The validation commands exit 0.

@@ -356,7 +356,7 @@ in the
 | `lint` | `accepted`: boolean; `plan`: `EditPlan` or null |
 | `query` | `subject`: string; `resolvedKind`: string or null; `identity`: `Identity` or null; `metadata`: object; `expansions`: object |
 | `eval` | `subject`: `Identity` or null; `value`: canonical VIBON text or null; `observationError`: `ObservationError` or null |
-| `run` | `target`: atom string; `programResult`: canonical value text or null; `applicationCode`: integer 0–255 or null; `stdout`: string; `stderr`: string; `auditTrace`: `AuditEvent[]`; `startup`: `StartupRecord`; `trap`: `TrapRecord` or null |
+| `run` | `target`: atom string; `programResult`: canonical value text or null; `applicationCode`: integer 0–255 or null; `stdout`: string; `stderr`: string; `auditTrace`: `AuditEvent[]`, the events of phase `@entry`; `drivers`: `{provider, version}[]`; `policies`: object from policy hash to the canonical text of the normalized `@scopePolicy.v1` document; `startup`: `StartupRecord`; `trap`: `TrapRecord` or null |
 | `test` | `selected`, `passed`, `failed`: non-negative integers; `tests`: `TestItem[]` |
 | `build` | `target`: atom string; `triple`: string; `executable`: confined path or null; `manifest`: canonical build VIBON text or null; `semanticIdentity`: digest or null; `artifactIdentity`: digest or null |
 | `project add`, `project remove`, every `edit` | `plan`: `EditPlan` or null; `applied`: boolean; `resultingRevision`: digest or null |
@@ -364,21 +364,25 @@ in the
 
 | Record | Fields |
 | --- | --- |
-| `CommandCapability` | one per line of the command surface, in its order: `command`, the command name; `operations`: string[], the operations a supported command offers, its own name for `help`; `profiles`: string[], the conformance profiles that cover it; `supported`: boolean; `schemaIds`: exact published identifiers of the documents it emits. The three lists are empty for an unsupported command |
+| `CommandCapability` | one per line of the command surface, in its order: `command`, the command name; `operations`: string[], the [case operations](07-diagnostics-and-conformance.md#case-operations-and-inputs) whose observation a supported command produces, and its own name for `help`; `profiles`: string[], the profiles of those operations in the [profile table](07-diagnostics-and-conformance.md#conformance-profiles), and `toolingV2`, whose CLI contract covers it, for `help`; `supported`: boolean; `schemaIds`: exact published identifiers of the documents it emits. The three lists are empty for an unsupported command |
 | `TargetSummary` | `name`; `kind`; `root`; `entry` (nullable); `bindingStatus`: `exact`, `recovered`, or `unavailable` |
 | `DependencySummary` | `alias`; `kind`; `source`; `target` (nullable); `status`: `captured`, `verified`, `unavailable`, or `refuted`; `identity` (nullable) |
 | `TestItem` | `name`, the selector; `result`, the `@test.*` atom; `failure` (nullable); `trap` (nullable); `auditTrace`: `AuditEvent[]`, the test's events; `diagnostics`: string[], the codes of the envelope's diagnostics attributed to the item; `status`, that of the command result the item's result corresponds to: `passed` for `@test.passed`, `refuted` for `@test.assertionFailed` and `@test.invalid`, `unknown` for `@test.trap` and `@test.exhausted`, and `unsupported` for `@test.unavailable` |
 | `TestItem.failure` | `kind`: `assertion` or `observation`; `assertion`, `expected`, `actual`: canonical text or null; `primarySpan`: `SpanDocument`; `observationError`: null for an assertion |
 | `TrapRecord` | `trapCode`; `origin` (nullable) |
 | `ObservationError` | `code`: `unsupportedValue`, the JSON spelling of the observation error `@tool.unsupportedValue`; `type`: the canonical `@type.v2` text of the operand's type, or null; `origin`: a `U64`, or null |
-| `StartupRecord` | `status`: `notStarted`, `acquired`, or `failed`; `bindings`; `auditTrace`; `failure`: null or `{binding, code, origin}`, where `code` is `@grant.requiredUnavailable` for a refused required leaf and `@grant.acquisitionFailed` for a failed acquisition |
-| `StartupRecord.bindings[]` | one per processed leaf, in processing order: `name`; `recipeIdentity`: `sha256:` and the SHA-256 of `vibraRecipeIdentityV2`, a zero byte, and the canonical bytes of the recipe with its policy normalized; `providerIdentity`: `{provider, version}`; `status`: `acquired`, `refused`, or `failed`, the three outcomes of the [startup order](04-programs-and-packages.md#startup-order), or `released` for an acquired leaf after its release; `grantProjection` (nullable) |
+| `StartupRecord` | `status`: `notStarted`, `acquired`, or `failed`; `bindings`; `auditTrace`: `AuditEvent[]`, the `@startup` events and the `@host` events of phase `@startup`; `failure`: null or `{binding, code, origin}`, where `code` is `@grant.requiredUnavailable` for a refused required leaf and `@grant.acquisitionFailed` for a failed acquisition; `null` with the status `failed` when a defect trap ended startup, which no leaf stopped |
+| `StartupRecord.bindings[]` | one per processed leaf, in processing order: `name`; `recipeIdentity`: `sha256:` and the SHA-256 of `vibraRecipeIdentityV2`, a zero byte, and the canonical bytes of the recipe with its policy normalized; `providerIdentity`: `{provider, version}`; `status`: `refused` or `failed`, two outcomes of the [startup order](04-programs-and-packages.md#startup-order), or `released` for an acquired leaf, since every acquired binding of a finished command is released; `acquired` is the status inside the `@startup` event, which is appended before release; `grantProjection` (nullable) |
 
 A summary never executes an acquisition. A grant projection is data that
 describes a grant; it cannot be turned back into one, and its schema and
 `AuditEvent` belong to the [runtime chapter](06-runtime.md#audit-trace). A
 function, a plan, or a grant is never encoded by inventing a string for it.
-A failed command keeps the startup events that completed.
+A failed command keeps the startup events that completed. The events of a
+run are split by phase, so no event is in both `startup.auditTrace` and the
+payload's `auditTrace`; `drivers` and `policies` are those of the run's
+`@auditTrace.v2` document, so every projection's `policy` hash is a key of
+`policies`.
 
 A human test report keeps selectors and result atoms, prints each item that
 did not pass with its diagnostic, failure, or trap, and ends with the
@@ -443,6 +447,15 @@ The `toolchain` record is a `@toolchain.v2` document:
   registry: {major: 2u32 minor: 0u32}
 }
 ```
+
+Every snapshot has exactly one `toolchain` record, whose bytes are the
+canonical bytes of this document, so a revision changes with the toolchain
+and with its embedded library even when no project byte changes. Every
+field but `stdlib` is a name fixed by the toolchain release: those of the
+example are the names of the release `0.0.2`, and its `stdlib` is the
+digest of the manifest it embeds. A revision written in an expected
+observation, such as the `revision` of an audit trace, is computed with
+this record.
 
 **Claim and witness.** Each declaration has two further hashes, each
 `sha256:` and 64 lower-case hexadecimal digits of the SHA-256 of a framing
