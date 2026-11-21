@@ -14,11 +14,12 @@ use crate::machine::{Halt, Machine, Mode, Resolved, Target};
 use crate::types::type_of_expr;
 use crate::value::Val;
 use crate::{
-    Evaluation, Execution, Limit, Limits, MemoryBudget, Reads, RuntimeError,
-    TestExecution,
+    Evaluation, Execution, Invocation, Limit, Limits, MemoryBudget, Reads,
+    RuntimeError, TestExecution,
 };
 
-fn runtime_error(
+/// The [`RuntimeError`] of `halt`, which stopped a run at `origin`.
+pub(crate) fn runtime_error(
     halt: Halt,
     origin: Option<&SourceOrigin>,
     budget: MemoryBudget,
@@ -40,6 +41,9 @@ fn runtime_error(
         Halt::Reductions => trap("a reduction limit outside an evaluation".to_owned()),
         Halt::Failed(failure) => {
             trap(format!("`{}` outside a test", failure.assertion))
+        }
+        Halt::NoEncoding => {
+            trap("a plan where a value encoding is required".to_owned())
         }
     }
 }
@@ -96,7 +100,8 @@ fn call_entry<'a>(
 /// # Errors
 ///
 /// A trap, the exhaustion of `budget`, a result that holds a function
-/// behind an interface value, or a form this interpreter does not run.
+/// behind an interface value or a plan, or a form this interpreter does
+/// not run.
 pub fn run(
     program: &CheckedProgram,
     budget: MemoryBudget,
@@ -127,14 +132,44 @@ pub fn run(
 /// assertion rows are defined. A false assertion ends the body and is
 /// reported as its failure.
 ///
+/// The body is invocation 1 (`docs/spec/06-runtime.md`, "Audit trace"),
+/// and it runs in the procedure context its function's context states: a
+/// test body whose context is `Procedure` may `await`, and each `await` in
+/// it is an invocation whose parent is 1.
+///
 /// # Errors
 ///
 /// A trap, the exhaustion of `budget`, an entry that does not return
-/// `Void`, or a form this interpreter does not run.
+/// `Void`, or a form this interpreter does not run, such as a host-bound
+/// member, which needs a host context.
 pub fn run_test(
     program: &CheckedProgram,
     budget: MemoryBudget,
 ) -> Result<TestExecution, RuntimeError> {
+    test_run(program, budget, None).map(|(execution, _)| execution)
+}
+
+/// [`run_test`], with the [`Invocation`] current at each entry of the
+/// function `probe` of the program's module set, in the order of the
+/// entries. A function called from a body runs in that body's invocation,
+/// so a probe called in a body reports the invocation of that body.
+///
+/// # Errors
+///
+/// As [`run_test`].
+pub fn run_test_probing(
+    program: &CheckedProgram,
+    budget: MemoryBudget,
+    probe: usize,
+) -> Result<(TestExecution, Vec<Invocation>), RuntimeError> {
+    test_run(program, budget, Some(probe))
+}
+
+fn test_run(
+    program: &CheckedProgram,
+    budget: MemoryBudget,
+    probe: Option<usize>,
+) -> Result<(TestExecution, Vec<Invocation>), RuntimeError> {
     let set: &CheckedModuleSet = program.module_set();
     let result_type = entry_result(set, program.entry())?;
     if result_type != Type::Void {
@@ -145,6 +180,7 @@ pub fn run_test(
         });
     }
     let mut machine = Machine::new(set, Mode::Test, budget.bytes, u64::MAX);
+    machine.probe = probe;
     let failure = match call_entry(&mut machine, program.entry(), budget)? {
         Ok(value) => {
             machine.stats.live_memory_bytes =
@@ -154,10 +190,11 @@ pub fn run_test(
         Err(Halt::Failed(failure)) => Some(*failure),
         Err(halt) => return Err(runtime_error(halt, machine.origin(), budget)),
     };
-    Ok(TestExecution {
+    let execution = TestExecution {
         failure,
         instrumentation: machine.stats,
-    })
+    };
+    Ok((execution, machine.probed))
 }
 
 /// Evaluates `expr` over `set`, whose variable slots `0..inputs.len()` hold

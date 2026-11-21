@@ -29,6 +29,14 @@ fn applied(callee: &Type) -> Result<Type, Halt> {
     }
 }
 
+/// The type of an `await` of a plan of type `plan`: the plan's result.
+fn awaited(plan: &Type) -> Result<Type, Halt> {
+    match plan {
+        Type::Intent(intent) => Ok(intent.result.clone()),
+        other => Err(invalid(format!("an `await` of {other}"))),
+    }
+}
+
 /// The type of a function at `type_arguments`.
 pub(crate) fn function_type(
     set: &CheckedModuleSet,
@@ -144,6 +152,8 @@ enum Pending<'n> {
     Try,
     /// The operand was the callee of a call of a value.
     Applied,
+    /// The operand was the plan of an `await`.
+    Awaited,
 }
 
 /// The static type of `node`, open in the binders of its activation.
@@ -199,6 +209,10 @@ pub(crate) fn type_of_expr(set: &CheckedModuleSet, expr: &Expr) -> Result<Type, 
                     pending.push(Pending::Applied);
                     expr = &callee.expr;
                 }
+                Expr::Await { plan } => {
+                    pending.push(Pending::Awaited);
+                    expr = &plan.expr;
+                }
                 other => break own_type(set, other)?,
             }
         };
@@ -215,6 +229,7 @@ pub(crate) fn type_of_expr(set: &CheckedModuleSet, expr: &Expr) -> Result<Type, 
                 Some(Pending::Lookup) => ty = lookup_type(set, &ty)?,
                 Some(Pending::Try) => ty = try_type(set, &ty)?,
                 Some(Pending::Applied) => ty = applied(&ty)?,
+                Some(Pending::Awaited) => ty = awaited(&ty)?,
             }
         }
     }
@@ -283,17 +298,13 @@ fn own_type(set: &CheckedModuleSet, expr: &Expr) -> Result<Type, Halt> {
         Expr::WidenToInterface { value_type, .. } => value_type.clone(),
         Expr::WidenAtom(_) => Type::Atom,
         Expr::Default(value_type) => value_type.clone(),
-        Expr::Await { .. } => {
-            return Err(Halt::Unavailable(
-                "`await` runs a plan, which this interpreter does not run".to_owned(),
-            ));
-        }
         Expr::Sequence(_)
         | Expr::Let { .. }
         | Expr::LetElse { .. }
         | Expr::Field { .. }
         | Expr::Lookup { .. }
-        | Expr::Try(_) => {
+        | Expr::Try(_)
+        | Expr::Await { .. } => {
             return Err(invalid("an unreachable node form"));
         }
     })

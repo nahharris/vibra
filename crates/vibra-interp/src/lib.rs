@@ -5,14 +5,15 @@
 //! strict written-order evaluation, frames that live on the heap, proper
 //! tail calls for every callee, lazy module values, callable contracts,
 //! dispatch by the receiver's runtime type, the pure rows of the compiler
-//! intrinsic registry, and a memory budget whose exhaustion is a host event.
+//! intrinsic registry, cold plans and `await` with their invocation
+//! ordinals, and a memory budget whose exhaustion is a host event.
 //!
 //! The interpreter consumes no host stack in proportion to the depth of
-//! Vibra calls, and it reads nothing from its surroundings: no file, no
-//! environment variable, no clock, and no standard stream.
+//! Vibra calls or awaits, and it reads nothing from its surroundings: no
+//! file, no environment variable, no clock, and no standard stream.
 //!
-//! Host operations, grants, plans, `await`, and native bindings are not
-//! here: applying a `proc` is reported as [`RuntimeError::Unavailable`].
+//! Host operations, grants, and native bindings are not here: a host-bound
+//! member that is reached is reported as [`RuntimeError::Unavailable`].
 
 mod compare;
 mod encode;
@@ -21,10 +22,12 @@ mod frame;
 mod ingress;
 mod intrinsics;
 mod machine;
+mod plan;
 mod types;
 mod value;
 
-pub use evaluate::{evaluate, evaluate_reading, run, run_test};
+pub use evaluate::{evaluate, evaluate_reading, run, run_test, run_test_probing};
+pub use plan::Invocation;
 
 use std::collections::BTreeSet;
 
@@ -147,6 +150,17 @@ pub struct Instrumentation {
     /// The bytes still reachable when the execution ended: module values
     /// and the result.
     pub live_memory_bytes: u64,
+    /// How many invocations started: the run of the entry or of the test
+    /// body, and each `await`. An evaluation starts none.
+    pub invocation_count: u64,
+    /// The greatest length the continuation stack reached.
+    pub max_continuation_depth: usize,
+    /// The greatest live footprint measured: frames, continuations, the
+    /// values reachable from them and from the module values, and the
+    /// storage being reserved. The live bytes are measured whenever the
+    /// accounted footprint passes twice the last measurement, or the
+    /// budget.
+    pub peak_live_bytes: u64,
 }
 
 /// A finished [`run`].
@@ -219,8 +233,9 @@ pub enum RuntimeError {
         /// The budget that was exceeded.
         budget: MemoryBudget,
     },
-    /// The result holds a function behind an interface value, which has no
-    /// observation: the observation error `@tool.unsupportedValue`.
+    /// The result holds a function behind an interface value, or a plan,
+    /// which has no observation: the observation error
+    /// `@tool.unsupportedValue`.
     UnsupportedValue {
         /// The static type of the value that was observed.
         value_type: Type,
@@ -286,7 +301,7 @@ impl RuntimeError {
                 self.code(),
                 at_start,
                 format!(
-                    "a value of {value_type} holds a function and has no observation"
+                    "a value of {value_type} holds a function or a plan and has no observation"
                 ),
             ),
             Self::Unavailable { message } => {

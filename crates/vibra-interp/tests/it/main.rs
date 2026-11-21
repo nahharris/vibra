@@ -19,6 +19,7 @@ mod depth;
 mod evaluation;
 mod intrinsics;
 mod observation;
+mod plans;
 mod soundness;
 mod tests_and_dispatch;
 

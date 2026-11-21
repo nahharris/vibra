@@ -22,6 +22,7 @@ use crate::compare::{DictBuild, DictFind, Structural};
 use crate::encode::{ObserveError, encoding, from_neutral};
 use crate::frame::{Frame, TypeEnv};
 use crate::ingress::{Check, Ingress, Then, checks_of, needs_checks, refused};
+use crate::plan::Invocation;
 use crate::types::{mentions_self, type_of};
 use crate::value::{ClosureVal, FunctionVal, Held, Repr, Val, neutral_storage, same};
 use crate::{FailureKind, Instrumentation, Reads, TestAssertionFailure, intrinsics};
@@ -39,10 +40,13 @@ pub(crate) enum Halt {
     Memory,
     /// The reduction limit of an evaluation is reached.
     Reductions,
-    /// A form of a later milestone, such as applying a `proc`.
+    /// A form of a later milestone, such as a host-bound member reached
+    /// with no host context.
     Unavailable(String),
     /// An assertion did not hold, which ends a test body.
     Failed(Box<TestAssertionFailure>),
+    /// The encoder reached a value that has no value encoding: a plan.
+    NoEncoding,
 }
 
 pub(crate) fn invalid<T>(message: impl Into<String>) -> Result<T, Halt> {
@@ -107,6 +111,11 @@ pub(crate) enum Work<'a> {
         tail: bool,
         origin: &'a SourceOrigin,
     },
+    /// `await plan`: the plan is its one operand.
+    Await {
+        plan: &'a Node,
+        origin: &'a SourceOrigin,
+    },
 }
 
 impl<'a> Work<'a> {
@@ -136,6 +145,7 @@ impl<'a> Work<'a> {
                 1 => Some(key),
                 _ => None,
             },
+            Self::Await { plan, .. } => (index == 0).then_some(plan),
             Self::Call {
                 target, arguments, ..
             } => {
@@ -221,6 +231,11 @@ pub(crate) enum Kont<'a> {
         result: Type,
         held_type: Type,
     },
+    /// A restoration boundary: the invocation to restore when the awaited
+    /// one returns. A non-tail `await` pushes one; a tail `await` none.
+    Await {
+        caller: Invocation,
+    },
 }
 
 impl<'a> Kont<'a> {
@@ -282,13 +297,29 @@ pub(crate) struct Machine<'a> {
     frame_bytes: u64,
     live_bytes: u64,
     allocated_bytes: u64,
+    /// The accounted footprint above which the live bytes are measured
+    /// again: twice the last measurement, and at least
+    /// [`MEASURE_FLOOR`] above it.
+    next_measure: u64,
     /// The constants already admitted, by address: each is checked once.
     admitted: HashSet<usize>,
     pub(crate) stats: Instrumentation,
     /// What an evaluation read: the functions it entered and the module
     /// values it read. Kept only in [`Mode::Evaluate`].
     pub(crate) reads: Reads,
+    /// The invocation running now. It lives here, not in a frame: a tail
+    /// `await` replaces it, and a `Kont::Await` restores it.
+    pub(crate) invocation: Invocation,
+    /// The function whose every entry records the current invocation in
+    /// `probed`, when one is set.
+    pub(crate) probe: Option<usize>,
+    /// The invocation current at each entry of `probe`, in order.
+    pub(crate) probed: Vec<Invocation>,
 }
+
+/// The least growth of the accounted footprint, above the last
+/// measurement, that measures the live bytes again.
+const MEASURE_FLOOR: u64 = 4 * 1024;
 
 const FRAME_BYTES: u64 = size_of::<Frame<'static>>() as u64;
 const SLOT_BYTES: u64 = size_of::<Option<Val<'static>>>() as u64;
@@ -324,9 +355,19 @@ impl<'a> Machine<'a> {
             frame_bytes: 0,
             live_bytes: 0,
             allocated_bytes: 0,
+            next_measure: 0,
             admitted: HashSet::new(),
-            stats: Instrumentation::default(),
+            stats: Instrumentation {
+                invocation_count: match mode {
+                    Mode::Run | Mode::Test => Invocation::ROOT.ordinal,
+                    Mode::Evaluate => 0,
+                },
+                ..Instrumentation::default()
+            },
             reads: Reads::default(),
+            invocation: Invocation::ROOT,
+            probe: None,
+            probed: Vec::new(),
         }
     }
 
@@ -363,10 +404,12 @@ impl<'a> Machine<'a> {
                     Some(kont) => self.resume(kont, value)?,
                 },
             };
+            self.stats.max_continuation_depth =
+                self.stats.max_continuation_depth.max(self.konts.len());
         }
     }
 
-    fn frame(&self) -> Result<&Frame<'a>, Halt> {
+    pub(crate) fn frame(&self) -> Result<&Frame<'a>, Halt> {
         self.frames
             .last()
             .ok_or_else(|| Halt::Invalid("no activation".to_owned()))
@@ -477,20 +520,27 @@ impl<'a> Machine<'a> {
     }
 
     /// Checks that `pending` more bytes fit the budget beside what is
-    /// accounted. When they do not at first, the live bytes are measured
-    /// again from the roots and from `in_flight`, the values built that no
-    /// root holds yet.
+    /// accounted. When they do not at first, or when the accounted
+    /// footprint has passed the point of the next measurement, the live
+    /// bytes are measured again from the roots and from `in_flight`, the
+    /// values built that no root holds yet. Each measurement is at least
+    /// twice the last one apart, so measuring costs a constant per byte
+    /// allocated.
     fn reserve(&mut self, pending: u64, in_flight: &[Val<'a>]) -> Result<(), Halt> {
         let accounted = self.accounted().saturating_add(pending);
-        if accounted <= self.budget {
+        if accounted <= self.budget && accounted <= self.next_measure {
             self.stats.peak_memory_bytes = self.stats.peak_memory_bytes.max(accounted);
             return Ok(());
         }
         self.live_bytes = self.measure(in_flight);
         self.allocated_bytes = 0;
-        let accounted = self.accounted().saturating_add(pending);
-        self.stats.peak_memory_bytes = self.stats.peak_memory_bytes.max(accounted);
-        if accounted > self.budget {
+        let live = self.accounted().saturating_add(pending);
+        self.stats.peak_memory_bytes = self.stats.peak_memory_bytes.max(live);
+        self.stats.peak_live_bytes = self.stats.peak_live_bytes.max(live);
+        self.next_measure = live
+            .saturating_mul(2)
+            .max(live.saturating_add(MEASURE_FLOOR));
+        if live > self.budget {
             return Err(Halt::Memory);
         }
         Ok(())
@@ -772,7 +822,7 @@ impl<'a> Machine<'a> {
             Expr::Default(_) => {
                 return invalid("a default outside a labelled argument");
             }
-            Expr::Await { .. } => return Err(unavailable_plan()),
+            Expr::Await { plan } => self.start_await(plan, origin)?,
         })
     }
 
@@ -822,7 +872,7 @@ impl<'a> Machine<'a> {
     }
 
     /// Evaluates the operands of `work` from the first not yet `done`.
-    fn operands(
+    pub(crate) fn operands(
         &mut self,
         work: Work<'a>,
         mut done: Vec<Val<'a>>,
@@ -892,6 +942,7 @@ impl<'a> Machine<'a> {
                 tail,
                 origin,
             } => self.call(target, arguments, tail, origin, done),
+            Work::Await { origin, .. } => self.await_plan(single(done)?, origin),
         }
     }
 
@@ -1090,6 +1141,9 @@ impl<'a> Machine<'a> {
                 args.push(value);
             }
         }
+        if self.builds_plan(&resolved.target)? {
+            return self.build_plan(resolved, args, rebox);
+        }
         let tail = tail && rebox.is_none() && self.prepare_tail();
         if let Some((result, held_type)) = rebox {
             self.konts.push(Kont::Rebox { result, held_type });
@@ -1148,7 +1202,7 @@ impl<'a> Machine<'a> {
     /// Whether the call being made may replace the current activation: no
     /// continuation remains but the activation's end, and no `ensures …
     /// else` is pending. A `return` around the call leaves nothing either.
-    fn prepare_tail(&mut self) -> bool {
+    pub(crate) fn prepare_tail(&mut self) -> bool {
         if matches!(self.konts.last(), Some(Kont::Return)) {
             let boundary = self.konts.iter().rposition(|kont| {
                 matches!(kont, Kont::Leave | Kont::End | Kont::Global(_))
@@ -1176,13 +1230,11 @@ impl<'a> Machine<'a> {
             Target::Structural { order, ty } => self.structural(order, ty, args),
             Target::Closure(closure) => {
                 let body: &'a ClosureBody = closure.body;
-                if matches!(body.value_type, Type::Proc(_)) {
-                    return Err(unavailable_plan());
-                }
                 let mut frame = self.new_frame(body.slot_count, env, &args)?;
                 for (slot, value) in args.into_iter().enumerate() {
                     frame.set(slot, value)?;
                 }
+                frame.procedure = matches!(body.value_type, Type::Proc(_));
                 frame.closure = Some(closure);
                 self.push_frame(frame, tail)?;
                 if let Some(guard) = &body.entry_guard {
@@ -1195,10 +1247,10 @@ impl<'a> Machine<'a> {
                 if matches!(self.mode, Mode::Evaluate) {
                     self.reads.functions.insert(index);
                 }
-                let function = self.function(index)?;
-                if matches!(function.signature.type_info(), Type::Proc(_)) {
-                    return Err(unavailable_plan());
+                if self.probe == Some(index) {
+                    self.probed.push(self.invocation);
                 }
+                let function = self.function(index)?;
                 if let FunctionBody::Intrinsic {
                     intrinsic,
                     type_arguments,
@@ -1214,6 +1266,7 @@ impl<'a> Machine<'a> {
                 for (slot, value) in args.into_iter().enumerate() {
                     frame.set(slot, value)?;
                 }
+                frame.procedure = self.runs_in_procedure(&Target::Function(index))?;
                 self.push_frame(frame, tail)?;
                 if let Some(guard) = &function.entry_guard {
                     self.konts.push(Kont::Requires { function, guard });
@@ -1254,7 +1307,10 @@ impl<'a> Machine<'a> {
                 let type_arguments = frame.env.apply_all(type_arguments);
                 self.intrinsic(*intrinsic, &type_arguments, args, &function.origin)
             }
-            FunctionBody::Host(_) => Err(unavailable_plan()),
+            FunctionBody::Host(binding) => Err(Halt::Unavailable(format!(
+                "the host-bound member `{}` runs only with a host context",
+                binding.symbol()
+            ))),
         }
     }
 
@@ -1418,9 +1474,12 @@ impl<'a> Machine<'a> {
                     self_type: None,
                     associated: Some(choices),
                 });
+        // A `proc` member builds a plan, and the plan's result is reboxed
+        // when it is awaited.
         let result = match &signature {
             Type::Fn(signature) => signature.result.clone(),
-            _ => return invalid(format!("`{member}` is not a function")),
+            Type::Proc(signature) => signature.result.clone(),
+            _ => return invalid(format!("`{member}` is not a callable")),
         };
         Ok((held.held_type.clone(), result))
     }
@@ -1877,6 +1936,10 @@ impl<'a> Machine<'a> {
                 self.allocated(&value)?;
                 Step::Ret(value)
             }
+            Kont::Await { caller } => {
+                self.invocation = caller;
+                Step::Ret(value)
+            }
         })
     }
 
@@ -2040,13 +2103,6 @@ pub(crate) const fn is_structural(ty: &Type) -> bool {
     matches!(
         ty,
         Type::Atom | Type::AtomSingleton(_) | Type::Tuple(_) | Type::Record(_)
-    )
-}
-
-fn unavailable_plan() -> Halt {
-    Halt::Unavailable(
-        "applying a `proc` builds a plan, which this interpreter does not run"
-            .to_owned(),
     )
 }
 
