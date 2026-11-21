@@ -1202,6 +1202,7 @@ version = "0.0.1"
 dependencies = [
  "getrandom",
  "serde_json",
+ "sha2",
  "vibra-diagnostics",
  "vibra-fs-scope",
  "vibra-ir",
