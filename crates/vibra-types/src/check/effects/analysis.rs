@@ -5,7 +5,9 @@
 //! "Contract, effect and authority diagnostics".
 //!
 //! A body runs in a procedure context when it is a `proc`, a default or
-//! `impl` `proc` member, or a test. Its performed row is the union, over its
+//! `impl` `proc` member, a test, or an anonymous `proc`, whose ceiling is its
+//! written row and whose `await` nodes are its own, not those of the body it
+//! is written in. Its performed row is the union, over its
 //! `await` nodes, of the row of each awaited plan's `Intent` type: building a
 //! plan contributes nothing, and a named `proc` contributes its written
 //! ceiling, so recursion closes without a call graph. The ceiling of a
@@ -17,16 +19,17 @@
 //!   related spans are the shortest chain of calls from that `await` to an
 //!   operation member of the root, ties in source order, each with the note
 //!   `performs <root> via <callee>`; a hop through an interface member whose
-//!   receiver is open or an interface value, or through a plan value, is
-//!   marked indirect. The chain is searched breadth first over an explicit
+//!   receiver is open or an interface value, through a callback (a procedure
+//!   value bound to a name, which the note names), or through a plan value,
+//!   is marked indirect. The chain is searched breadth first over an explicit
 //!   queue, never on the host stack. A chain that reaches no operation
 //!   member of the root ends at the first call it cannot follow.
-//! - A root of a row written on a `proc`, a test, or the additive
-//!   `performs` of a default member that the body does not perform is the
-//!   warning `@contract.unusedEffect` at its entry. It is never reported for
-//!   an `impl` member, whose contract fixes its row, nor for the owner of a
-//!   member, which is not written (Q5), nor for a body that has an error,
-//!   whose `await` nodes may not all be known.
+//! - A root of a row written on a `proc`, an anonymous `proc`, a test, or the
+//!   additive `performs` of a default member that the body does not perform
+//!   is the warning `@contract.unusedEffect` at its entry. It is never
+//!   reported for an `impl` member, whose contract fixes its row, nor for the
+//!   owner of a member, which is not written (Q5), nor for a body that has an
+//!   error, whose `await` nodes may not all be known.
 //!
 //! A body with `@effect.outsideCeiling` is not lowered: the checked IR
 //! rejects it (`vibra-ir::effects`).
@@ -81,6 +84,9 @@ pub(crate) enum Via {
     /// A plan value: a local, a parameter, a field, or a plan a `fn`
     /// returns. The hop is indirect.
     Value,
+    /// A procedure value bound to a name, a callback, applied: the span of
+    /// the name, which a note gives. The hop is indirect.
+    Callback(ByteSpan),
 }
 
 impl Via {
@@ -89,7 +95,7 @@ impl Via {
         match self {
             Self::Direct(_) => false,
             Self::Member { indirect, .. } => *indirect,
-            Self::Value => true,
+            Self::Value | Self::Callback(_) => true,
         }
     }
 }
@@ -184,6 +190,12 @@ pub(crate) fn hop(checker: &BodyChecker<'_, '_>, operand: &Node) -> Hop {
                 member: call.member.clone(),
                 indirect: call.receiver.is_interface_value() || call.receiver.is_open(),
             }),
+        IrExpr::Call {
+            target: CallTarget::Value(callee),
+            ..
+        } if matches!(callee.expr, IrExpr::Variable { .. }) => {
+            Via::Callback(callee.origin.span())
+        }
         _ => Via::Value,
     };
     Hop {
@@ -192,22 +204,27 @@ pub(crate) fn hop(checker: &BodyChecker<'_, '_>, operand: &Node) -> Hop {
     }
 }
 
-/// One body that runs in a procedure context.
+/// One body that runs in a procedure context: of a declaration, or of an
+/// anonymous `proc` written in the body of a declaration.
 struct Body<'c> {
+    /// The declaration whose body it is or holds it.
     target: Target,
     module: usize,
     ceiling: Row,
     /// How a diagnostic names it.
     what: String,
-    /// The row written on it whose unused roots are reported, if any.
-    written: Option<Written<'c>>,
-    checked: &'c Checked,
+    /// Each entry of the row written on it whose unused roots are reported:
+    /// where it is written, the interface it names, and how it is written.
+    written: Vec<(ByteSpan, usize, String)>,
+    /// Its own `await` nodes.
+    awaits: &'c [Await],
 }
 
 /// Checks the rows of the bodies of `pass`, once per checked program, after
 /// every body is typed: each `@effect.outsideCeiling` joins the faults of
 /// the declaration whose body holds the `await`, and that body is not
-/// lowered. Returns the `@contract.unusedEffect` warnings.
+/// lowered. Returns the `@contract.unusedEffect` warnings and the
+/// `@type.suspiciousRow` warnings of the written callable types.
 pub(crate) fn check_bodies(program: &Program<'_>, pass: &mut Pass) -> Vec<Diagnostic> {
     let mut faults = Vec::new();
     let mut warnings = Vec::new();
@@ -215,7 +232,7 @@ pub(crate) fn check_bodies(program: &Program<'_>, pass: &mut Pass) -> Vec<Diagno
         let Some(module) = program.modules.get(body.module) else {
             continue;
         };
-        let performed = Performed::of(&body.checked.awaits);
+        let performed = Performed::of(body.awaits);
         for (root, witness) in &performed.roots {
             if body.ceiling.roots().contains(root) {
                 continue;
@@ -232,16 +249,8 @@ pub(crate) fn check_bodies(program: &Program<'_>, pass: &mut Pass) -> Vec<Diagno
         if module.embedded || faulty {
             continue;
         }
-        let Some(written) = body.written else {
-            continue;
-        };
-        for path in written.paths() {
-            let Some(Entity::Interface(index)) =
-                program.path_entity(body.module, &path)
-            else {
-                continue;
-            };
-            let Some(data) = program.interfaces.get(index) else {
+        for (span, index, dotted) in &body.written {
+            let Some(data) = program.interfaces.get(*index) else {
                 continue;
             };
             let Some(id) = data.id.as_ref() else {
@@ -253,13 +262,11 @@ pub(crate) fn check_bodies(program: &Program<'_>, pass: &mut Pass) -> Vec<Diagno
             warnings.push(
                 Diagnostic::new(
                     DiagnosticCode::ContractUnusedEffect,
-                    path.node().span(),
+                    *span,
                     format!(
-                        "{} names `{}` in its row and performs none of it: no `await` \
-                         in its body runs a plan of `{}`",
-                        body.what,
-                        path.dotted(),
-                        data.name
+                        "{} names `{dotted}` in its row and performs none of it: no \
+                         `await` in its body runs a plan of `{}`",
+                        body.what, data.name
                     ),
                 )
                 .with_source_id(module.source_id.as_ref()),
@@ -282,17 +289,20 @@ pub(crate) fn check_bodies(program: &Program<'_>, pass: &mut Pass) -> Vec<Diagno
         }
         pass.faults.entry(target).or_default().push(diagnostic);
     }
+    warnings.extend(super::values::warnings(program));
     warnings
 }
 
 /// Every checked body of `pass` that runs in a procedure context, with its
-/// ceiling.
+/// ceiling, and every anonymous `proc` of a checked body.
 fn bodies<'c>(program: &'c Program<'_>, pass: &'c Pass) -> Vec<Body<'c>> {
     let mut found = Vec::new();
     for (index, checked) in &pass.functions {
         let Some(data) = program.functions.get(*index) else {
             continue;
         };
+        let target = Target::Function(*index);
+        anonymous(&mut found, target, data.module, checked);
         let BodyContext::Procedure(ceiling) = procs::lower(program, data) else {
             continue;
         };
@@ -301,31 +311,78 @@ fn bodies<'c>(program: &'c Program<'_>, pass: &'c Pass) -> Vec<Body<'c>> {
         .then(|| data.view.performs())
         .flatten();
         found.push(Body {
-            target: Target::Function(*index),
+            target,
             module: data.module,
             ceiling,
             what: procs::describe(data),
-            written,
-            checked,
+            written: entries(program, data.module, written),
+            awaits: &checked.awaits.own,
         });
+    }
+    for (index, checked) in &pass.values {
+        if let Some(data) = program.values.get(*index) {
+            anonymous(&mut found, Target::Value(*index), data.module, checked);
+        }
     }
     for (index, checked) in &pass.tests {
         let Some(test) = program.tests.get(*index) else {
             continue;
         };
+        let target = Target::Test(*index);
+        anonymous(&mut found, target, test.module, checked);
         let BodyContext::Procedure(ceiling) = procs::test_context(program, test) else {
             continue;
         };
         found.push(Body {
-            target: Target::Test(*index),
+            target,
             module: test.module,
             ceiling,
             what: format!("the test \"{}\"", test.name),
-            written: test.view.performs(),
-            checked,
+            written: entries(program, test.module, test.view.performs()),
+            awaits: &checked.awaits.own,
         });
     }
     found
+}
+
+/// Adds each anonymous `proc` of `checked`, the body of `target` written in
+/// `module`, to `found`. Its ceiling is its written row, every root of
+/// which it names.
+fn anonymous<'c>(
+    found: &mut Vec<Body<'c>>,
+    target: Target,
+    module: usize,
+    checked: &'c Checked,
+) {
+    for open in &checked.awaits.anonymous {
+        found.push(Body {
+            target,
+            module,
+            ceiling: open.ceiling.clone(),
+            what: "this anonymous `proc`".to_owned(),
+            written: open.written.clone(),
+            awaits: &open.awaits,
+        });
+    }
+}
+
+/// Each entry of the row `written` of `module` that names an interface:
+/// where it is written, the interface, and how it is written.
+pub(crate) fn entries(
+    program: &Program<'_>,
+    module: usize,
+    written: Option<Written<'_>>,
+) -> Vec<(ByteSpan, usize, String)> {
+    written
+        .iter()
+        .flat_map(Written::paths)
+        .filter_map(|path| match program.path_entity(module, &path) {
+            Some(Entity::Interface(index)) => {
+                Some((path.node().span(), index, path.dotted()))
+            }
+            _ => None,
+        })
+        .collect()
 }
 
 /// The `@effect.outsideCeiling` of `body`, which performs `root` first at
@@ -414,7 +471,7 @@ pub(crate) fn chain(
                     queue.push_back(steps.len() - 1);
                 }
             }
-            Via::Member { .. } | Via::Value => {
+            Via::Member { .. } | Via::Value | Via::Callback(_) => {
                 dead_end.get_or_insert(at);
             }
         }
@@ -444,7 +501,7 @@ fn calls(
     ) else {
         return Vec::new();
     };
-    in_source_order(&checked.awaits)
+    in_source_order(&checked.awaits.own)
         .into_iter()
         .filter(|awaited| awaited.plan.effects.roots().contains(root))
         .filter_map(|awaited| awaited.hop.clone())
@@ -501,13 +558,19 @@ fn callee(program: &Program<'_>, module: usize, hop: &Hop) -> String {
             .interfaces
             .get(*interface)
             .map_or_else(|| member.clone(), |data| format!("{}.{member}", data.name)),
-        Via::Value => program
-            .modules
-            .get(module)
-            .and_then(|data| data.text)
-            .and_then(|text| text.get(hop.span.start()..hop.span.end()))
-            .map_or_else(String::new, |text| {
-                text.split_whitespace().collect::<Vec<_>>().join(" ")
-            }),
+        Via::Value => text(program, module, hop.span),
+        Via::Callback(name) => text(program, module, *name),
     }
+}
+
+/// The source text of `module` at `span`, its whitespace collapsed.
+fn text(program: &Program<'_>, module: usize, span: ByteSpan) -> String {
+    program
+        .modules
+        .get(module)
+        .and_then(|data| data.text)
+        .and_then(|text| text.get(span.start()..span.end()))
+        .map_or_else(String::new, |text| {
+            text.split_whitespace().collect::<Vec<_>>().join(" ")
+        })
 }

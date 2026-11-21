@@ -64,6 +64,9 @@ pub(crate) struct ClosureContract {
     pub(crate) span: ByteSpan,
     /// Its type.
     pub(crate) signature: vibra_ir::FnType,
+    /// Whether applying it builds a plan: it is an anonymous `proc`, whose
+    /// `ensures` is never a certified result.
+    pub(crate) plan: bool,
     /// The name of each argument slot: the positional parameters, then the
     /// labels in canonical order.
     pub(crate) names: Vec<String>,

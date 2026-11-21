@@ -26,14 +26,17 @@
 //!
 //! A `proc` is not a certified function (`docs/spec/02-type-system.md`,
 //! "Predicates"): its application builds a plan, so it is never read
-//! through, and its `ensures` gives no certified result (`GUARD-7`), neither
-//! at the application nor at an `await` of the plan, which the chapter does
-//! not name a call that returns.
+//! through. Running a plan is the call (`GUARD-7`): after `await f(args)`,
+//! whose operand is directly the application of a named `proc`, the callee's
+//! proven bare `ensures` holds of the awaited result, under the conditions
+//! of a call. A plan that reaches `await` any other way gives no fact, and
+//! building a plan gives none.
 //!
-//! Each `await` is recorded with its plan's type and the call it runs, and
-//! [`super::analysis`] checks the rows they perform against the ceiling.
-//! Step 10 lifts a `proc` named as a value and the application of a
-//! procedure value; step 21 lifts a test that takes a world.
+//! A `proc` named as a value has its `Proc` type, and applying a value of a
+//! `Proc` type builds a plan of its row. Each `await` is recorded with its
+//! plan's type and the call it runs, and [`super::analysis`] checks the rows
+//! they perform against the ceiling. Step 21 lifts a test that takes a
+//! world.
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 use vibra_ir::{
@@ -183,39 +186,70 @@ pub(crate) fn applied(program: &Program<'_>, data: &FnData<'_>, result: Type) ->
 }
 
 /// The callee of an application whose callee is the value `callee` of the
-/// `Proc` type `signature`, written at `callee_span`. A procedure value is
-/// not supported until step 10, and nothing at this step makes one.
+/// `Proc` type `signature`, written at `_callee_span`: a callable value
+/// whose application builds a plan of `signature`'s row
+/// ([`applied_value`]).
 pub(crate) fn apply(
-    checker: &mut BodyChecker<'_, '_>,
-    _callee: Option<Node>,
-    _signature: &ProcType,
-    callee_span: ByteSpan,
+    _checker: &mut BodyChecker<'_, '_>,
+    callee: Option<Node>,
+    signature: &ProcType,
+    _callee_span: ByteSpan,
 ) -> Option<Callee> {
-    checker.report(
-        DiagnosticCode::ToolUnavailable,
-        callee_span,
-        "an application of a procedure value is not supported by this checker yet",
-    );
-    None
+    let function = FnType {
+        parameters: signature.parameters.clone(),
+        labels: signature.labels.clone(),
+        result: signature.result.clone(),
+    };
+    Some(Callee::Value(
+        callee.map(Box::new),
+        Box::new(function),
+        Some(signature.effects.clone()),
+    ))
 }
 
-/// Whether the callable `data`, named as a value at `span`, is a `proc`:
-/// it is then reported, since a procedure named as a value is not
-/// supported until step 10.
-pub(crate) fn named_as_value(
-    checker: &mut BodyChecker<'_, '_>,
-    data: &FnData<'_>,
-    span: ByteSpan,
-) -> bool {
-    if data.view.kind() != CallableKind::Proc {
-        return false;
+/// The type of an application of a callable value whose signature gives
+/// `result`: the plan `Intent(result {row})` when the value is a procedure
+/// of the row `row`, and `result` itself when it is a function.
+pub(crate) fn applied_value(result: Type, row: Option<&Row>) -> Type {
+    match row {
+        Some(effects) => Type::Intent(Box::new(IntentType {
+            result,
+            effects: effects.clone(),
+        })),
+        None => result,
     }
-    checker.report(
-        DiagnosticCode::ToolUnavailable,
-        span,
-        "a procedure named as a value is not supported by this checker yet",
-    );
-    true
+}
+
+/// The type of a callable value of the signature `signature`: `Proc` with
+/// the row `row` when it has one, `Fn` otherwise.
+pub(crate) fn value_type(signature: &FnType, row: Option<&Row>) -> Type {
+    match row {
+        Some(effects) => Type::Proc(Box::new(ProcType {
+            parameters: signature.parameters.clone(),
+            labels: signature.labels.clone(),
+            result: signature.result.clone(),
+            effects: effects.clone(),
+        })),
+        None => Type::function(signature.clone()),
+    }
+}
+
+/// The type of the callable `data` of `program`, whose header is
+/// `signature`, named as a value: its [`callable_type`]. Naming a `proc`
+/// builds no plan and performs nothing.
+pub(crate) fn named_as_value(
+    program: &Program<'_>,
+    data: &FnData<'_>,
+    signature: FnType,
+) -> Type {
+    callable_type(program, data, signature)
+}
+
+/// Whether a call in tail position of a callable whose result is `result`
+/// becomes a tail call: never when the call builds a plan, an `Intent`,
+/// since a tail call of a procedure would return a plan nothing runs.
+pub(crate) fn marks_tail(result: &Type) -> bool {
+    !matches!(result, Type::Intent(_))
 }
 
 /// The step of `await operand`, written at `span` where `ctx` uses its
@@ -233,7 +267,9 @@ pub(crate) fn await_expr<'a>(
     _ctx: &Ctx,
 ) -> Step<'a> {
     let procedure = matches!(checker.context, BodyContext::Procedure(_));
-    let valid = checker.in_test_body() || (procedure && checker.in_own_body());
+    let valid = checker.in_test_body()
+        || (procedure && checker.in_own_body())
+        || super::values::in_anonymous_body(checker);
     if !valid {
         checker.report(
             DiagnosticCode::EffectInvalidAwait,
@@ -273,11 +309,14 @@ pub(crate) fn finish_await<'a>(
     let hop = node
         .as_ref()
         .map(|operand| super::analysis::hop(checker, operand));
-    checker.awaits.push(super::analysis::Await {
-        span,
-        plan: plan.clone(),
-        hop,
-    });
+    super::values::record(
+        checker,
+        super::analysis::Await {
+            span,
+            plan: plan.clone(),
+            hop,
+        },
+    );
     let node = node.map(|plan| {
         checker.node(
             IrExpr::Await {

@@ -1,0 +1,13 @@
+id = "V2-RUNTIME-anon-proc-captures"
+rule = "V2-RUNTIME-anon-proc-captures"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "02-type-system.md#functions-as-values: an anonymous proc captures a local of the function that returns it, and the test awaits its plan"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

@@ -91,6 +91,10 @@ struct Guarded<'v> {
     /// Whether it is an anonymous callable, whose `identity` is the
     /// declaration it is written in.
     anonymous: bool,
+    /// Whether applying it builds a plan: it is a `proc`, named or
+    /// anonymous. Its `ensures` is a fact only of an `await` whose operand is
+    /// directly its application, and only when it is named (`GUARD-7`).
+    plan: bool,
     /// For a member of an implementation whose guards are its contract
     /// member's: the module of the interface and the contract member's name.
     contract: Option<(usize, ByteSpan)>,
@@ -461,15 +465,14 @@ pub(super) fn discharge(
             }
             let walked = prover.walk(*body, evaluator, false);
             for function in walked.started {
-                // A `proc`'s `ensures` is no certified result: applying it
-                // builds a plan, and its `await` is not a call that returns.
-                let plan = context
-                    .functions
-                    .get(function)
-                    .and_then(|index| inputs.program.functions.get(*index))
-                    .is_some_and(super::super::effects::procs::builds_plan);
+                // An anonymous `proc`'s `ensures` is never a certified
+                // result: no `await` runs it by name (`GUARD-7`).
+                let anonymous_plan = prover
+                    .guarded
+                    .get(&function)
+                    .is_some_and(|data| data.anonymous && data.plan);
                 if ensured.contains(&function)
-                    && !plan
+                    && !anonymous_plan
                     && walked
                         .exits
                         .iter()
@@ -1593,10 +1596,17 @@ impl<'v> Prover<'v> {
     }
 
     /// Assumes the proven `ensures` of the callee of `term`, when its
-    /// `requires` was discharged or is absent.
+    /// `requires` was discharged or is absent: `term` is a call of a
+    /// function, or the `await` of a plan whose operand is directly the
+    /// application of a named `proc` (`GUARD-7`). Building a plan gives no
+    /// fact.
     fn result_facts(&mut self, facts: &mut FactSet, term: Term) {
+        let (call, awaited) = match self.terms.get(term) {
+            Some(Data::Awaited(plan, _)) => (*plan, true),
+            _ => (term, false),
+        };
         let Some(Data::Call(Callee::Function(function, _), operands)) =
-            self.terms.get(term).cloned()
+            self.terms.get(call).cloned()
         else {
             return;
         };
@@ -1606,9 +1616,12 @@ impl<'v> Prover<'v> {
         let Some(data) = self.guarded.get(&function) else {
             return;
         };
+        if data.plan != awaited || (data.plan && data.anonymous) {
+            return;
+        }
         let established = match data.entry {
             Entry::None => true,
-            Entry::Bare => self.discharged.contains(&term),
+            Entry::Bare => self.discharged.contains(&call),
             Entry::Else => false,
         };
         let Some((slot, guard)) = data.ensures.filter(|_| established) else {
@@ -2574,6 +2587,7 @@ fn guarded<'v>(
                     .unwrap_or_default(),
                 result_type: signature.result.clone(),
                 anonymous: false,
+                plan: super::super::effects::procs::builds_plan(data),
                 contract: data.implements.and_then(|interface| {
                     let interface = program.interfaces.get(interface)?;
                     let member =
@@ -2661,6 +2675,7 @@ fn closures<'v>(
                     result_name: closure.result_name.clone(),
                     result_type: signature.result.clone(),
                     anonymous: true,
+                    plan: closure.plan,
                     contract: None,
                 },
             );
@@ -2736,6 +2751,7 @@ fn contracts<'v>(
                 result_name: contract.result_name.clone(),
                 result_type: signature.result.clone(),
                 anonymous: false,
+                plan: false,
                 contract: None,
             },
         );

@@ -1,0 +1,12 @@
+id = "V2-EFFECT-proc-type-parameter"
+rule = "V2-EFFECT-proc-type-parameter"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#effect-ceilings: a callback's row is visible in the signature that accepts it, and awaiting the callback performs that row"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

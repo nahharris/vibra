@@ -455,6 +455,8 @@ pub(crate) struct Program<'a> {
     /// are checked against the interface's bounds once every implementation
     /// is known.
     pub(crate) goals: RefCell<Vec<BoundGoal>>,
+    /// The `@type.suspiciousRow` warnings of the written callable types.
+    pub(crate) callable_warnings: super::effects::values::Warnings,
     local_package: PackageName,
     embedded_package: PackageName,
 }
@@ -510,6 +512,7 @@ impl<'a> Program<'a> {
             library: Vec::new(),
             ordered: Vec::new(),
             goals: RefCell::new(Vec::new()),
+            callable_warnings: super::effects::values::Warnings::default(),
             local_package: inputs.local.clone(),
             embedded_package: inputs.embedded.clone(),
         };
@@ -1214,8 +1217,8 @@ impl<'a> Program<'a> {
                     result,
                 }))
             }
-            form @ (TypeForm::Proc { .. } | TypeForm::Intent { .. }) => {
-                effects::values::written_type(self, module, form, scope)
+            TypeForm::Proc { .. } | TypeForm::Intent { .. } => {
+                effects::values::written_type(self, module, written, scope)
             }
         }
     }

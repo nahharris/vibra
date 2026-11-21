@@ -404,34 +404,35 @@ fn what_stays_unavailable() -> Result<(), String> {
          return await Log.append(m \"x\") endproc\n"
     );
     assert_eq!(faults(&source), []);
-    // A `proc` named as a value.
-    let source = with_p("proc run returns r: I32 do return await double endproc");
-    assert_eq!(
-        faults(&source),
-        [(DiagnosticCode::ToolUnavailable, at(&source, "double", 1))]
+    // A `proc` named as a value has its `Proc` type, and a contract `proc`
+    // member named as a value has its own.
+    let source = with_p(
+        "proc run returns r: I32 do let f: Proc({I32} I32) be double endlet \
+         return await f(1i32) endproc",
     );
-    // A contract `proc` member named as a value.
+    assert_eq!(faults(&source), []);
     let source = format!(
-        "{log}fn f returns r: I32 do let _: Fn({{Memory Str}} Void) be Log.append endlet \
-         return 1i32 endfn\n"
+        "{log}fn f returns r: I32 do let _: Proc({{Memory Str}} Void {{Log}}) be \
+         Log.append endlet return 1i32 endfn\n"
     );
-    assert_eq!(
-        faults(&source),
-        [(
-            DiagnosticCode::ToolUnavailable,
-            at(&source, "Log.append", 0)
-        )]
-    );
-    // A test whose body names a `proc` as a value is unavailable, and the
-    // other test still runs.
+    assert_eq!(faults(&source), []);
+    // A test that takes a world is unavailable over the test, and the other
+    // test still runs.
     let test = "use @std.assert enduse\n\
-                proc ping returns d: Void do return void endproc\n\
-                test \"value\" do let _ be ping endlet assert.true(true) endtest\n\
+                type World of I32 endtype\n\
+                test \"world\" takes {world: World} do assert.true(true) endtest\n\
                 test \"plain\" do assert.true(true) endtest\n";
     let result = in_tests("", test)?;
     assert_eq!(
         codes_at(&result),
-        [(DiagnosticCode::ToolUnavailable, at(test, "ping", 1))]
+        [(
+            DiagnosticCode::ToolUnavailable,
+            at(
+                test,
+                "test \"world\" takes {world: World} do assert.true(true) endtest",
+                0
+            )
+        )]
     );
     assert!(result.only_unavailable());
     let lowered = result
@@ -439,7 +440,7 @@ fn what_stays_unavailable() -> Result<(), String> {
         .iter()
         .map(|test| (test.name(), test.function().is_some()))
         .collect::<Vec<_>>();
-    assert_eq!(lowered, [("value", false), ("plain", true)]);
+    assert_eq!(lowered, [("world", false), ("plain", true)]);
     Ok(())
 }
 
@@ -554,55 +555,39 @@ fn single(
     }
 }
 
-// The soundness rows of step 05, owned by step 07: the static discharge
-// does not read a plan through and gives it no certified result. GUARD-7
-// (`docs/spec/02-type-system.md`, "Bare guards") gives a callee's proven
-// `ensures` "after a call returns"; applying a `proc` returns a plan, not
-// the callee's result, and the chapter does not name an `await` a call
-// that returns, so the discharge keeps the fail-closed reading.
+// The soundness rows of GUARD-7 and `await` (`docs/spec/02-type-system.md`,
+// "Bare guards", rule 7): running a plan is the call, so after `await
+// f(args)`, whose operand is directly the application of a named `proc`, the
+// callee's proven bare `ensures` holds of the awaited result. A plan that
+// reaches `await` any other way gives no fact, building a plan gives none,
+// and nothing reads through a `proc` body.
+
+/// `one`, a `proc` whose bare `ensures` states a positive result.
+const ONE: &str =
+    "proc one returns r: I32 ensures Ordered.greater(r 0i32) do return 1i32 endproc";
 
 #[test]
-fn a_proc_with_a_bare_ensures_gives_no_result_fact_when_awaited() -> Result<(), String>
-{
-    let one = "returns r: I32 ensures Ordered.greater(r 0i32) do return 1i32";
+fn a_proc_awaited_directly_gives_its_result_fact() -> Result<(), String> {
     // The control: the same `ensures` on a `fn` is a certified result.
+    accepted(&with_need(
+        "fn one returns r: I32 ensures Ordered.greater(r 0i32) do return 1i32 endfn\n\
+         fn run returns r: I32 do return need(one()) endfn",
+    ))?;
+    // The awaited result of a named `proc` applied directly has the fact.
     accepted(&with_need(&format!(
-        "fn one {one} endfn\nfn run returns r: I32 do return need(one()) endfn"
+        "{ONE}\nproc run returns r: I32 do return need(await one()) endproc"
     )))?;
-    // On a `proc`, the awaited result has no fact.
-    let source = with_need(&format!(
-        "proc one {one} endproc\nproc run returns r: I32 do return need(await one()) endproc"
-    ));
-    assert_eq!(
-        single(&source)?,
-        (
-            DiagnosticCode::ContractUnproved,
-            at(&source, "need(await one())", 0)
-        )
-    );
     // The `proc`'s own `ensures` is still proved of its body.
-    accepted(&format!("proc one {one} endproc\n"))?;
+    accepted(&format!("{ONE}\n"))?;
     Ok(())
 }
 
 #[test]
-fn a_plan_applied_and_never_awaited_states_nothing() -> Result<(), String> {
-    // Building the plan of a `proc` with a bare `ensures` is no call of it:
-    // there is no obligation and no fact.
-    accepted(
-        "proc one returns r: I32 ensures Ordered.greater(r 0i32) do return 1i32 endproc\n\
-         fn build returns r: I32 do let _ be one() endlet return 0i32 endfn\n",
-    )?;
-    Ok(())
-}
-
-#[test]
-fn a_plan_applied_twice_and_awaited_once_gives_no_result_fact() -> Result<(), String> {
-    let source = with_need(
-        "proc one returns r: I32 ensures Ordered.greater(r 0i32) do return 1i32 endproc\n\
-         proc run returns r: I32 do let p be one() endlet let _ be one() endlet \
-         return need(await p) endproc",
-    );
+fn a_plan_awaited_through_a_binding_gives_no_result_fact() -> Result<(), String> {
+    let source = with_need(&format!(
+        "{ONE}\nproc run returns r: I32 do let p be one() endlet \
+         return need(await p) endproc"
+    ));
     assert_eq!(
         single(&source)?,
         (
@@ -613,6 +598,71 @@ fn a_plan_applied_twice_and_awaited_once_gives_no_result_fact() -> Result<(), St
     Ok(())
 }
 
+#[test]
+fn a_plan_applied_and_never_awaited_states_nothing() -> Result<(), String> {
+    // Building the plan of a `proc` with a bare `ensures` is no call of it:
+    // there is no obligation and no fact.
+    accepted(&format!(
+        "{ONE}\nfn build returns r: I32 do let _ be one() endlet return 0i32 endfn\n"
+    ))?;
+    Ok(())
+}
+
+#[test]
+fn a_plan_applied_twice_and_awaited_once() -> Result<(), String> {
+    // The application that is awaited directly gives the fact; the one only
+    // built gives none, and does not stand for the other.
+    accepted(&with_need(&format!(
+        "{ONE}\nproc run returns r: I32 do let _ be one() endlet \
+         return need(await one()) endproc"
+    )))?;
+    let source = with_need(&format!(
+        "{ONE}\nproc run returns r: I32 do let p be one() endlet let _ be one() endlet \
+         return need(await p) endproc"
+    ));
+    assert_eq!(
+        single(&source)?,
+        (
+            DiagnosticCode::ContractUnproved,
+            at(&source, "need(await p)", 0)
+        )
+    );
+    Ok(())
+}
+
+#[test]
+fn each_run_of_a_plan_is_its_own() -> Result<(), String> {
+    // Two `await` nodes of the same application are two runs: what a branch
+    // learns of one result is no fact of the other, written inline or bound.
+    let plain = "proc one returns r: I32 do return 1i32 endproc";
+    let source = with_need(&format!(
+        "{plain}\nproc run returns r: I32 do \
+         if Ordered.greater(await one() 0i32) then return need(await one()) endif \
+         return 0i32 endproc"
+    ));
+    assert_eq!(
+        single(&source)?,
+        (
+            DiagnosticCode::ContractUnproved,
+            at(&source, "need(await one())", 0)
+        )
+    );
+    let source = with_need(&format!(
+        "{plain}\nproc run returns r: I32 do let a be await one() endlet \
+         let b be await one() endlet \
+         if Ordered.greater(a 0i32) then return need(b) endif return 0i32 endproc"
+    ));
+    assert_eq!(
+        single(&source)?,
+        (DiagnosticCode::ContractUnproved, at(&source, "need(b)", 0))
+    );
+    // A result bound by `let` keeps its fact (`GUARD-4`).
+    accepted(&with_need(&format!(
+        "{ONE}\nproc run returns r: I32 do let x be await one() endlet \
+         return need(x) endproc"
+    )))?;
+    Ok(())
+}
 #[test]
 fn a_proc_with_requires_else_gives_no_result_fact() -> Result<(), String> {
     // `requires C else V` skips the body and the `ensures` when `C` is
@@ -634,6 +684,25 @@ fn a_proc_with_requires_else_gives_no_result_fact() -> Result<(), String> {
     Ok(())
 }
 
+#[test]
+fn an_anonymous_proc_gives_no_result_fact() -> Result<(), String> {
+    // An anonymous `proc` is no named `proc`: its proven `ensures` is never
+    // a result fact, however its plan is awaited.
+    let source = with_need(
+        "proc run returns r: I32 do \
+         let f be proc returns r: I32 ensures Ordered.greater(r 0i32) do \
+         return 1i32 endproc endlet \
+         return need(await f()) endproc",
+    );
+    assert_eq!(
+        single(&source)?,
+        (
+            DiagnosticCode::ContractUnproved,
+            at(&source, "need(await f())", 0)
+        )
+    );
+    Ok(())
+}
 #[test]
 fn a_predicate_that_applies_a_proc_is_outside_the_fragment() -> Result<(), String> {
     // "A certified function is a `fn`" ("Predicates"): applying a `proc` in

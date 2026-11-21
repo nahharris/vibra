@@ -1,0 +1,19 @@
+id = "V2-EFFECT-proc-type-row-duplicate"
+rule = "V2-EFFECT-proc-type-row-duplicate"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#effect-ceilings: a row of a written Proc type that names one interface twice is the error at the second entry"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@effect.duplicateRoot"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 683, end = 686 }
+related = [{ source = "src/app/main.vib", span = { start = 679, end = 682 } }]

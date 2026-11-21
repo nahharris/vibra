@@ -1,0 +1,18 @@
+id = "V2-EFFECT-return-row-mismatch"
+rule = "V2-EFFECT-return-row-mismatch"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#effect-ceilings: callable types compare rows exactly, so a returned anonymous proc with another row is the wrong type"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.mismatch"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 709, end = 805 }

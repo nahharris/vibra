@@ -1,0 +1,12 @@
+id = "V2-EFFECT-proc-type-result"
+rule = "V2-EFFECT-proc-type-result"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#effect-ceilings: a function returns an anonymous proc of the written Proc type, whose row is its ceiling"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

@@ -1,0 +1,19 @@
+id = "V2-EFFECT-named-proc-value-bare-requires"
+rule = "V2-EFFECT-named-proc-value-bare-requires"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#guards-and-callable-types: a proc with a bare requires converts to a Proc type only when the parameter types establish it; otherwise the conversion is the error"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@contract.obligationLost"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 1061, end = 1069 }
+related = [{ source = "src/app/main.vib", span = { start = 902, end = 936 } }]

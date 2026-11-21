@@ -1,0 +1,13 @@
+id = "V2-RUNTIME-callback-awaited"
+rule = "V2-RUNTIME-callback-awaited"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "03-effects.md#cold-plans-and-performed-rows: a proc awaits the plan of its callback twice, and each run performs the callback's row"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

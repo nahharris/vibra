@@ -1,0 +1,30 @@
+interface Log
+  proc append
+    takes {log: Self entry: Str}
+    returns done: Void
+  endproc
+endinterface
+
+interface Clock
+  proc now takes {clock: Self} returns at: I64 endproc
+endinterface
+
+interface Shown
+  fn show takes {value: Self} returns text: Str endfn
+endinterface
+
+type Memory of {lines: List(Str)}
+  impl Log
+    proc append takes {log: Self entry: Str} returns done: Void do
+      return void
+    endproc
+  endimpl
+  impl Clock
+    proc now takes {clock: Self} returns at: I64 do return 0i64 endproc
+  endimpl
+endtype
+
+proc note takes {m: Memory} returns done: Void performs {Log} do
+  return await Log.append(m "x")
+endproc
+proc emit takes {sink: Proc({Str} Void {Log Log})} returns d: Void do return void endproc

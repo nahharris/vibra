@@ -108,23 +108,27 @@ fn check_no_project() {
 
 #[test]
 fn check_unsupported() {
-    let source = "fn answer returns r: I32 do return 42i32 endfn\n\n\
-                  proc ping returns d: Void do return void endproc\n\n\
-                  fn run returns r: I32 do let _ be ping endlet return 0i32 endfn";
-    let root = TempDir::project("check-proc", LIBRARY, &[("src/app/main.vib", source)]);
+    let source = "fn answer returns r: I32 do return 42i32 endfn\n";
+    // A test that takes a world: 51 bytes of imports and a type before it.
+    let tests = "use @std.assert enduse\n\ntype World of I32 endtype\n\n\
+                 test \"world\" takes {world: World} do endtest\n";
+    let root = TempDir::project(
+        "check-world",
+        LIBRARY,
+        &[("src/app/main.vib", source), ("tests/main.vib", tests)],
+    );
     let (code, document) = check(&root, &[]);
     assert_eq!(code, 4, "{document}");
     assert_eq!(document["result"], "@command.unavailable");
     assert_eq!(document["status"], "unsupported");
     assert_eq!(codes(&document), ["@tool.unavailable"]);
     let span = &document["diagnostics"][0]["primarySpan"];
-    assert_eq!(span["sourceId"], "src/app/main.vib");
-    // A `proc` named as a value, until step 10.
-    assert_eq!(span["start"], 132);
-    assert_eq!(span["end"], 136);
+    assert_eq!(span["sourceId"], "tests/main.vib");
+    // The whole test, until step 21.
+    assert_eq!(span["start"], 51);
+    assert_eq!(span["end"], 95);
     assert_eq!(document["payload"]["accepted"], false);
 }
-
 #[test]
 fn check_bin_target_unsupported() {
     let root = TempDir::project(

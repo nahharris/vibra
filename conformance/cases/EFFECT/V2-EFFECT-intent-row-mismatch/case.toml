@@ -1,0 +1,18 @@
+id = "V2-EFFECT-intent-row-mismatch"
+rule = "V2-EFFECT-intent-row-mismatch"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#effect-ceilings: callable types compare rows exactly, so a plan of another row does not fit a let annotation"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.mismatch"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 715, end = 732 }

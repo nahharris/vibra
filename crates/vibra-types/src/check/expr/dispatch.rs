@@ -298,7 +298,7 @@ fn self_positions(
             _ => None,
         };
         let walks = match pattern {
-            Type::Tuple(_) | Type::Record(_) | Type::List(_) => true,
+            Type::Tuple(_) | Type::Record(_) | Type::List(_) | Type::Intent(_) => true,
             Type::Declared(..) => {
                 matches!(library(pattern), Some(Library::Option | Library::Result))
             }
@@ -1539,15 +1539,13 @@ impl<'a> BodyChecker<'_, 'a> {
         span: ByteSpan,
         expected: Option<&Type>,
     ) -> Out {
-        if effects::members::named_as_value(self, interface, member, span) {
-            return Out::error();
-        }
         let Some((names, signature, mut dispatch)) =
             self.contract_signature(interface, member, span)
         else {
             return Out::error();
         };
-        let pattern = Type::function(signature);
+        let pattern =
+            effects::members::named_as_value(self, interface, member, signature);
         let var = dispatch.self_var();
         let mut assignment = vec![None; names.len()];
         let fits = expected.is_some_and(|expected| {
@@ -1696,9 +1694,8 @@ impl<'a> BodyChecker<'_, 'a> {
         ty: &Type,
         span: ByteSpan,
     ) -> Option<Node> {
-        let Type::Fn(callable) = ty else {
-            return None;
-        };
+        let callable = effects::members::value_signature(ty)?;
+        let callable = &callable;
         let call =
             self.contract_target(dispatch, &|ty| closed(ty, assignment), span, span)?;
         let defaults = self.member_defaults(dispatch, callable)?;
@@ -1719,7 +1716,7 @@ impl<'a> BodyChecker<'_, 'a> {
                 Some((name.clone(), read(self, callable.parameters.len() + at)?))
             })
             .collect::<Option<Vec<_>>>()?;
-        let mut body = self.node(
+        let call = self.node(
             IrExpr::Call {
                 target: CallTarget::Contract(Box::new(call)),
                 arguments: Arguments {
@@ -1729,7 +1726,7 @@ impl<'a> BodyChecker<'_, 'a> {
             },
             span,
         );
-        mark_tail(&mut body);
+        let body = effects::members::closure_body(ty, call, mark_tail);
         let closure = ClosureBody {
             value_type: ty.clone(),
             slot_count: slot_types.len(),

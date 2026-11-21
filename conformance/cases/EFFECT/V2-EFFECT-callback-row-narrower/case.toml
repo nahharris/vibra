@@ -1,0 +1,18 @@
+id = "V2-EFFECT-callback-row-narrower"
+rule = "V2-EFFECT-callback-row-narrower"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#effect-ceilings: there is no row subtyping, so a procedure with a narrower row is no argument of a Proc type"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.argumentMismatch"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 913, end = 974 }

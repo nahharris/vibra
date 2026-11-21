@@ -2,8 +2,8 @@ use @std.assert enduse
 
 use @app.math enduse
 
-test "value" do let _ be ping endlet assert.true(true) endtest
+type World of I32 endtype
+
+test "world" takes {world: World} do endtest
 
 test "plain" do assert.equal(3i32 math.add(1i32 2i32)) endtest
-
-proc ping returns d: Void do return void endproc

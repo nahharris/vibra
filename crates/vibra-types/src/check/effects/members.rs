@@ -18,11 +18,15 @@
 //! including through an interface value").
 //!
 //! Step 19 adds the rule of a host-bound member: until then a `proc` member
-//! bound with `external` is `@tool.unavailable` over the member. Step 10
-//! lifts a contract `proc` member named as a value.
+//! bound with `external` is `@tool.unavailable` over the member.
+//!
+//! A contract `proc` member named as a value has its `Proc` type at the
+//! substitution its receiver selects; the closure it becomes awaits the
+//! member's plan when it runs, so applying the closure builds a plan of the
+//! same row.
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
-use vibra_ir::{FnType, IntentType, ProcType, Row, Type};
+use vibra_ir::{Expr as IrExpr, FnType, IntentType, Node, ProcType, Row, Type};
 use vibra_syntax::source::{Callable, CallableKind};
 
 use super::{Hook, rows};
@@ -188,29 +192,72 @@ pub(crate) fn applied(member: &InterfaceMemberData, signature: FnType) -> FnType
     }
 }
 
-/// Whether the contract member `member` of `interface`, named as a value at
-/// `span`, is a `proc`: it is then reported, since a procedure named as a
-/// value is not supported until step 10.
+/// The type of the contract member `member` of `interface` named as a
+/// value, whose application has the signature `signature` ([`applied`]):
+/// `Proc` with the row of the plan its application builds for a `proc`,
+/// `Fn` for a `fn`. Naming it builds no plan and performs nothing.
 pub(crate) fn named_as_value(
-    checker: &mut BodyChecker<'_, '_>,
+    checker: &BodyChecker<'_, '_>,
     interface: usize,
     member: &str,
-    span: ByteSpan,
-) -> bool {
+    signature: FnType,
+) -> Type {
     let is_proc = checker
         .program()
         .interfaces
         .get(interface)
         .and_then(|data| data.member(member))
         .is_some_and(|declared| declared.row.is_some());
-    if is_proc {
-        checker.report(
-            DiagnosticCode::ToolUnavailable,
-            span,
-            "a procedure member named as a value is not supported by this checker yet",
+    match &signature.result {
+        Type::Intent(plan) if is_proc => {
+            let IntentType { result, effects } = plan.as_ref().clone();
+            proc_type(
+                FnType {
+                    result,
+                    ..signature
+                },
+                effects,
+            )
+        }
+        _ => Type::function(signature),
+    }
+}
+
+/// The body of the closure of type `ty` a contract member named as a value
+/// becomes, given `call`, the member's application to the closure's own
+/// arguments: a procedure value awaits the plan `call` builds when it runs,
+/// and a function value calls the member in tail position.
+pub(crate) fn closure_body(
+    ty: &Type,
+    call: Node,
+    tail: impl FnOnce(&mut Node),
+) -> Node {
+    if let Type::Proc(_) = ty {
+        let origin = call.origin.clone();
+        return Node::new(
+            IrExpr::Await {
+                plan: Box::new(call),
+            },
+            origin,
         );
     }
-    is_proc
+    let mut call = call;
+    tail(&mut call);
+    call
+}
+
+/// The signature of the callable value of type `ty`: its parameters, labels,
+/// and result, the result of the run for a procedure value.
+pub(crate) fn value_signature(ty: &Type) -> Option<FnType> {
+    match ty {
+        Type::Fn(callable) => Some(callable.as_ref().clone()),
+        Type::Proc(callable) => Some(FnType {
+            parameters: callable.parameters.clone(),
+            labels: callable.labels.clone(),
+            result: callable.result.clone(),
+        }),
+        _ => None,
+    }
 }
 
 /// `Proc` over `signature` with the row `effects`.

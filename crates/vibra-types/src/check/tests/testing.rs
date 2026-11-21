@@ -221,8 +221,9 @@ fn an_operand_of_assert_equal_that_holds_a_callable_is_not_equatable()
 }
 
 #[test]
-fn a_test_reaching_an_unsupported_form_is_unavailable_and_the_others_run()
--> Result<(), String> {
+fn a_test_reaching_an_anonymous_proc_through_the_library_runs() -> Result<(), String> {
+    // A library function that builds an anonymous `proc` lowers, so the test
+    // that reaches it runs beside the others.
     let app = format!(
         "{MATH}\nfn viaClosure\n  takes {{}}\n  returns r: I32\n  visibility @public\n  \
          do\n    let f be proc takes {{x: I32}} returns s: I32 \
@@ -233,19 +234,16 @@ fn a_test_reaching_an_unsupported_form_is_unavailable_and_the_others_run()
                  test \"closure\" do assert.equal(1i32 math.viaClosure()) endtest\n\n\
                  test \"plain\" do assert.equal(3i32 math.add(1i32 2i32)) endtest\n";
     let result = check(&app, &[("@tests.math", tests)], &["@tests"])?;
-    assert!(result.only_unavailable(), "{:#?}", result.diagnostics());
+    assert_eq!(faults(&result), []);
     let [closure, plain] = result.tests() else {
         return Err(format!("two tests: {:#?}", result.tests()));
     };
-    assert_eq!(closure.function(), None);
-    let reason = closure.unavailable().ok_or("a reason")?;
-    assert_eq!(reason.code(), DiagnosticCode::ToolUnavailable);
-    assert_eq!(reason.source_id(), Some("src/app/math.vib"));
+    assert_eq!(closure.unavailable(), None);
     assert_eq!(plain.unavailable(), None);
+    assert_eq!(run(&result, "closure")?.failure, None);
     assert_eq!(run(&result, "plain")?.failure, None);
     Ok(())
 }
-
 #[test]
 fn a_test_that_takes_a_world_is_unavailable_over_the_test() -> Result<(), String> {
     let tests = "use @std.assert enduse\n\n\

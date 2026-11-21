@@ -1517,6 +1517,12 @@ pub(crate) fn same_head(left: &Type, right: &Type) -> bool {
             x.parameters.len() == y.parameters.len()
                 && x.labels.names().eq(y.labels.names())
         }
+        (Type::Proc(x), Type::Proc(y)) => {
+            x.parameters.len() == y.parameters.len()
+                && x.labels.names().eq(y.labels.names())
+                && x.effects == y.effects
+        }
+        (Type::Intent(x), Type::Intent(y)) => x.effects == y.effects,
         _ => {
             left.components().is_empty()
                 && right.components().is_empty()

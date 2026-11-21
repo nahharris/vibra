@@ -1,0 +1,18 @@
+id = "V2-EFFECT-callback-row-wider"
+rule = "V2-EFFECT-callback-row-wider"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#effect-ceilings: a procedure with a wider row is no argument of a Proc type; the types differ"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.argumentMismatch"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 913, end = 1015 }

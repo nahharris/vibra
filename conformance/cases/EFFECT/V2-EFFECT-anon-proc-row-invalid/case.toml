@@ -1,0 +1,18 @@
+id = "V2-EFFECT-anon-proc-row-invalid"
+rule = "V2-EFFECT-anon-proc-row-invalid"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#effect-ceilings: a row entry of an anonymous proc that is not an operation interface is the error at the entry"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@effect.invalidReference"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 737, end = 742 }

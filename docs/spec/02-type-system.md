@@ -1278,7 +1278,13 @@ lists when the rule is used:
    used.
 7. **Certified results (`GUARD-7`).** After a call returns, the callee's
    proven `ensures` holds for the result, provided its `requires` was
-   discharged.
+   discharged. Running a plan is the call: after `await f(args)`, whose
+   operand is directly the application of a named `proc`, the callee's
+   proven `ensures` holds for the awaited result, provided its `requires`
+   was discharged where the plan is built. A plan that reaches `await` any
+   other way, through a binding, a parameter, a field, a callable value, an
+   anonymous `proc`, or a member through an interface value, gives no fact.
+   Each `await` is its own run, and building a plan gives no fact.
 
 An obligation is formed by substituting the actual arguments into the
 predicate; that substitution is not a rule use. A fact the body's own

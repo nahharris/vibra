@@ -1,0 +1,7 @@
+{
+  format: @testRun.v2
+  result: @command.ok
+  tests: [
+    {name: "@tests.run::\"callback\"" result: @test.passed auditTrace: {format: @auditTrace.v2 revision: "sha256:6549ba468d26ee38df5f6008e1407d552cc3ec2d39fe57980322fd7973104b4c" drivers: [{provider: @hostWorld.v2 version: "0.0.2"}] policies: [:] redaction: @none events: []}}
+  ]
+}

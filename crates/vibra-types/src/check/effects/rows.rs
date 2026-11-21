@@ -12,8 +12,8 @@
 //! member's own `performs` is `@effect.duplicateRoot` at that entry. A
 //! resolved row is a [`Row`], sorted by the UTF-8 bytes of the paths.
 //!
-//! The rows of `Proc` and `Intent` types are step 10's: a written callable
-//! type stays `@tool.unavailable` until then.
+//! The row of a written `Proc` or `Intent` type resolves the same way, an
+//! omitted row being the empty row ([`super::values`]).
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 use vibra_ir::Row;
