@@ -393,8 +393,8 @@ fn a_bare_requires_is_discharged_where_the_plan_is_built() -> Result<(), String>
 
 #[test]
 fn what_stays_unavailable() -> Result<(), String> {
-    // An `await` of a plan whose row is not empty, at the `await`, until
-    // step 09 checks ceilings.
+    // An `await` of a plan whose row is not empty is checked against the
+    // ceiling (step 09), and is no longer unavailable.
     let log = "interface Log proc append takes {log: Self entry: Str} returns d: Void \
                endproc endinterface\n\
                type Memory of I32 impl Log proc append takes {log: Self entry: Str} \
@@ -403,15 +403,7 @@ fn what_stays_unavailable() -> Result<(), String> {
         "{log}proc p takes {{m: Memory}} returns d: Void performs {{Log}} do \
          return await Log.append(m \"x\") endproc\n"
     );
-    let result = check_source(SOURCE, &source);
-    assert_eq!(
-        faults(&source),
-        [(
-            DiagnosticCode::ToolUnavailable,
-            at(&source, "await Log.append(m \"x\")", 0)
-        )]
-    );
-    assert!(result.only_unavailable());
+    assert_eq!(faults(&source), []);
     // A `proc` named as a value.
     let source = with_p("proc run returns r: I32 do return await double endproc");
     assert_eq!(
@@ -430,20 +422,16 @@ fn what_stays_unavailable() -> Result<(), String> {
             at(&source, "Log.append", 0)
         )]
     );
-    // A test whose body awaits a plan with a row is unavailable, and the
+    // A test whose body names a `proc` as a value is unavailable, and the
     // other test still runs.
-    let test = format!(
-        "use @std.assert enduse\n{log}\
-         test \"row\" performs {{Log}} do let _ be await Log.append(Memory(1i32) \"x\") endlet endtest\n\
-         test \"plain\" do assert.true(true) endtest\n"
-    );
-    let result = in_tests("", &test)?;
+    let test = "use @std.assert enduse\n\
+                proc ping returns d: Void do return void endproc\n\
+                test \"value\" do let _ be ping endlet assert.true(true) endtest\n\
+                test \"plain\" do assert.true(true) endtest\n";
+    let result = in_tests("", test)?;
     assert_eq!(
         codes_at(&result),
-        [(
-            DiagnosticCode::ToolUnavailable,
-            at(&test, "await Log.append(Memory(1i32) \"x\")", 0)
-        )]
+        [(DiagnosticCode::ToolUnavailable, at(test, "ping", 1))]
     );
     assert!(result.only_unavailable());
     let lowered = result
@@ -451,7 +439,7 @@ fn what_stays_unavailable() -> Result<(), String> {
         .iter()
         .map(|test| (test.name(), test.function().is_some()))
         .collect::<Vec<_>>();
-    assert_eq!(lowered, [("row", false), ("plain", true)]);
+    assert_eq!(lowered, [("value", false), ("plain", true)]);
     Ok(())
 }
 

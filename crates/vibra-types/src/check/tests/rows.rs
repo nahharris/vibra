@@ -45,6 +45,42 @@ fn accepted(source: &str) -> Result<Arc<CheckedModuleSet>, String> {
         .ok_or_else(|| format!("no module set for {source}"))
 }
 
+/// The module set of `source`, whose only diagnostics are the
+/// `@contract.unusedEffect` warnings at `unused`: entries of rows its bodies
+/// do not perform.
+fn accepted_unused(
+    source: &str,
+    unused: &[ByteSpan],
+) -> Result<Arc<CheckedModuleSet>, String> {
+    let result = check_source(SOURCE, source);
+    let found = result
+        .diagnostics()
+        .iter()
+        .map(|diagnostic| (diagnostic.code(), diagnostic.primary_span()))
+        .collect::<Vec<_>>();
+    let expected = unused
+        .iter()
+        .map(|span| (DiagnosticCode::ContractUnusedEffect, *span))
+        .collect::<Vec<_>>();
+    if found != expected {
+        return Err(format!("{source}\n{:#?}", result.diagnostics()));
+    }
+    result
+        .module_set()
+        .map(Arc::clone)
+        .ok_or_else(|| format!("no module set for {source}"))
+}
+
+/// The span of `name` in the last occurrence of the row text `row` in
+/// `source`.
+fn entry(source: &str, row: &str, name: &str) -> ByteSpan {
+    let start = source
+        .rfind(row)
+        .unwrap_or(usize::MAX)
+        .saturating_add(row.find(name).unwrap_or(usize::MAX));
+    ByteSpan::new(start, start.saturating_add(name.len()))
+}
+
 /// The type of the member `member` of the interface whose path ends with
 /// `.{interface}` in `set`.
 fn member_type(set: &CheckedModuleSet, interface: &str, member: &str) -> Option<Type> {
@@ -199,7 +235,8 @@ fn a_proc_row_resolves_and_is_its_ceiling() -> Result<(), String> {
         "{MEMORY}proc p takes {{m: Memory}} returns d: Void performs {{Log}} do \
          let _ be Log.append(m \"x\") endlet return void endproc\n"
     ));
-    let set = accepted(&source)?;
+    // The body builds a plan and performs nothing (Q5).
+    let set = accepted_unused(&source, &[entry(&source, "{Log}", "Log")])?;
     let p = function_type(&set, "main.p");
     assert_eq!(roots(p.as_ref()), ["app.main.Log"]);
     let context = set
@@ -217,7 +254,13 @@ fn a_proc_row_resolves_and_is_its_ceiling() -> Result<(), String> {
 fn two_roots_are_sorted_by_path() -> Result<(), String> {
     let source =
         with_l("proc p returns d: Void performs {Log Clock} do return void endproc\n");
-    let set = accepted(&source)?;
+    let set = accepted_unused(
+        &source,
+        &[
+            entry(&source, "{Log Clock}", "Log"),
+            entry(&source, "{Log Clock}", "Clock"),
+        ],
+    )?;
     assert_eq!(
         roots(function_type(&set, "main.p").as_ref()),
         ["app.main.Clock", "app.main.Log"]
@@ -280,10 +323,14 @@ fn an_import_name_never_identifies_a_root() -> Result<(), String> {
     let main = "use @app.log.Log as Journal enduse\n\
                 proc p returns d: Void performs {Journal} do return void endproc\n";
     let result = modules(&[("@app.log", log), ("@app.main", main)])?;
-    assert!(
-        result.diagnostics().is_empty(),
-        "{:#?}",
-        result.diagnostics()
+    // The body performs nothing of it.
+    assert_eq!(
+        located(&result),
+        [(
+            DiagnosticCode::ContractUnusedEffect,
+            "src/app/main.vib".to_owned(),
+            at(main, "Journal", 1)
+        )]
     );
     let set = result.module_set().ok_or("no module set")?;
     assert_eq!(
@@ -299,7 +346,7 @@ fn every_position_of_a_row_resolves_its_entries() -> Result<(), String> {
     let good = with_l(
         "type T of I32 proc m returns d: Void performs {Log} do return void endproc endtype\n",
     );
-    let set = accepted(&good)?;
+    let set = accepted_unused(&good, &[entry(&good, "{Log}", "Log")])?;
     assert_eq!(
         roots(function_type(&set, "main.T.m").as_ref()),
         ["app.main.Log"]
@@ -527,7 +574,7 @@ fn every_application_of_a_generic_operation_interface_is_one_root() -> Result<()
                   endinterface\n\
                   proc p takes {a: Store(Str) b: Store(I32)} returns d: Void performs {Store} do \
                   return void endproc\n";
-    let set = accepted(source)?;
+    let set = accepted_unused(source, &[entry(source, "{Store}", "Store")])?;
     assert_eq!(
         roots(function_type(&set, "main.p").as_ref()),
         ["app.main.Store"]

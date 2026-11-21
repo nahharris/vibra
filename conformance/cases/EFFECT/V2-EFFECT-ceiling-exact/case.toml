@@ -1,0 +1,12 @@
+id = "V2-EFFECT-ceiling-exact"
+rule = "V2-EFFECT-ceiling-exact"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#effect-ceilings: a body whose performed row is its ceiling is accepted with no warning"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

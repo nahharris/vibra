@@ -109,12 +109,8 @@ fn check_no_project() {
 #[test]
 fn check_unsupported() {
     let source = "fn answer returns r: I32 do return 42i32 endfn\n\n\
-                  interface Log proc append takes {log: Self entry: Str} returns d: Void \
-                  endproc endinterface\n\n\
-                  type Memory of I32 impl Log proc append takes {log: Self entry: Str} \
-                  returns d: Void do return void endproc endimpl endtype\n\n\
-                  proc run takes {m: Memory} returns r: Void performs {Log} do \
-                  return await Log.append(m \"x\") endproc";
+                  proc ping returns d: Void do return void endproc\n\n\
+                  fn run returns r: I32 do let _ be ping endlet return 0i32 endfn";
     let root = TempDir::project("check-proc", LIBRARY, &[("src/app/main.vib", source)]);
     let (code, document) = check(&root, &[]);
     assert_eq!(code, 4, "{document}");
@@ -123,9 +119,9 @@ fn check_unsupported() {
     assert_eq!(codes(&document), ["@tool.unavailable"]);
     let span = &document["diagnostics"][0]["primarySpan"];
     assert_eq!(span["sourceId"], "src/app/main.vib");
-    // The `await` of a plan whose row is not empty.
-    assert_eq!(span["start"], 334);
-    assert_eq!(span["end"], 357);
+    // A `proc` named as a value, until step 10.
+    assert_eq!(span["start"], 132);
+    assert_eq!(span["end"], 136);
     assert_eq!(document["payload"]["accepted"], false);
 }
 

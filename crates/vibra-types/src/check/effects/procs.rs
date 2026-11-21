@@ -30,10 +30,10 @@
 //! at the application nor at an `await` of the plan, which the chapter does
 //! not name a call that returns.
 //!
-//! An `await` of a plan whose row is not empty stays `@tool.unavailable`
-//! until step 09 checks ceilings. Step 10 lifts a `proc` named as a value
-//! and the application of a procedure value; step 21 lifts a test that
-//! takes a world.
+//! Each `await` is recorded with its plan's type and the call it runs, and
+//! [`super::analysis`] checks the rows they perform against the ceiling.
+//! Step 10 lifts a `proc` named as a value and the application of a
+//! procedure value; step 21 lifts a test that takes a world.
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 use vibra_ir::{
@@ -246,7 +246,8 @@ pub(crate) fn await_expr<'a>(
 }
 
 /// The `await` at `span` whose operand arrived as `input`: a plan yields
-/// its result, and the `await` is recorded with the plan's type; any other
+/// its result, and the `await` is recorded with the plan's type and the
+/// call it runs ([`super::analysis::hop`]); any other
 /// operand is `@effect.invalidAwait` at the `await`, never
 /// `@type.mismatch` (Q4).
 pub(crate) fn finish_await<'a>(
@@ -269,7 +270,14 @@ pub(crate) fn finish_await<'a>(
         }
         None => return Step::Done(Out::error()),
     };
-    checker.awaits.push((span, plan.clone()));
+    let hop = node
+        .as_ref()
+        .map(|operand| super::analysis::hop(checker, operand));
+    checker.awaits.push(super::analysis::Await {
+        span,
+        plan: plan.clone(),
+        hop,
+    });
     let node = node.map(|plan| {
         checker.node(
             IrExpr::Await {

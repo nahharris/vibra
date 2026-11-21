@@ -883,7 +883,7 @@ pub(crate) fn check_program(
     layout.errors = first.errors.clone();
     drop(first);
     let mut pass = check_bodies(&program, documents, &layout);
-    effects::analysis::check_bodies(&program, &mut pass);
+    let warnings = effects::analysis::check_bodies(&program, &mut pass);
     let inputs = Inputs {
         program: &program,
         layout: &layout,
@@ -908,6 +908,7 @@ pub(crate) fn check_program(
             diagnostics.extend(faults.iter().cloned());
         }
     }
+    diagnostics.extend(warnings);
     diagnostics.extend(pass.contract.iter().cloned());
     diagnostics.extend(reviewed.diagnostics);
     for (diagnostic, module, contract) in &pass.unchecked {

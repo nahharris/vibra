@@ -1,0 +1,13 @@
+id = "V2-RUNTIME-model-impl-interface-value"
+rule = "V2-RUNTIME-model-impl-interface-value"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "03-effects.md#cold-plans-and-performed-rows: a plan built through an interface value runs the held model's member"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

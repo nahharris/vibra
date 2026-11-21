@@ -2,7 +2,7 @@ id = "V2-EFFECT-row-two-roots"
 rule = "V2-EFFECT-row-two-roots"
 profile = "staticV2"
 operation = "workspaceCheck"
-description = "03-effects.md#effect-ceilings: a row's roots are sorted by the bytes of their path, whatever the written order"
+description = "03-effects.md#effect-ceilings: a row's roots are sorted by the bytes of their path, whatever the written order; the body performs neither, so each root is the unused-effect warning"
 
 [inputs]
 tree = "tree"
@@ -11,3 +11,15 @@ project = "tree/project.vibon"
 [expect]
 verdict = "accepted"
 types = "types.vibon"
+
+[[expect.diagnostics]]
+code = "@contract.unusedEffect"
+level = "@warning"
+source = "src/app/main.vib"
+span = { start = 309, end = 312 }
+
+[[expect.diagnostics]]
+code = "@contract.unusedEffect"
+level = "@warning"
+source = "src/app/main.vib"
+span = { start = 313, end = 318 }

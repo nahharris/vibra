@@ -1,0 +1,19 @@
+id = "V2-CONTRACT-unused-effect-test"
+rule = "V2-CONTRACT-unused-effect-test"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "03-effects.md#effect-ceilings: a test row entry the body does not perform is the warning, and the test runs"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"
+
+[[expect.diagnostics]]
+code = "@contract.unusedEffect"
+level = "@warning"
+source = "tests/run.vib"
+span = { start = 682, end = 685 }

@@ -1,0 +1,19 @@
+id = "V2-EFFECT-outside-ceiling-earliest"
+rule = "V2-EFFECT-outside-ceiling-earliest"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "07-diagnostics-and-conformance.md#contract-effect-and-authority-diagnostics: one diagnostic per body and interface, at the earliest await that contributes it"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@effect.outsideCeiling"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 694, end = 717 }
+related = [{ source = "src/app/main.vib", span = { start = 700, end = 717 } }]

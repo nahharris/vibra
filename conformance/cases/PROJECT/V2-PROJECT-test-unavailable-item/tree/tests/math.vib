@@ -2,10 +2,8 @@ use @std.assert enduse
 
 use @app.math enduse
 
-test "effects" performs {Log} do let _ be await Log.append(Memory(1i32) "x") endlet assert.true(true) endtest
+test "value" do let _ be ping endlet assert.true(true) endtest
 
 test "plain" do assert.equal(3i32 math.add(1i32 2i32)) endtest
 
-interface Log proc append takes {log: Self entry: Str} returns d: Void endproc endinterface
-
-type Memory of I32 impl Log proc append takes {log: Self entry: Str} returns d: Void do return void endproc endimpl endtype
+proc ping returns d: Void do return void endproc

@@ -23,7 +23,7 @@ use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 use vibra_ir::external::compiler::{CompilerIntrinsic, is_assertion};
 use vibra_ir::{
     Arguments, BodyContext, CallTarget, ClosureBody, Constant, Construction, ExitGuard,
-    Expr as IrExpr, FnType, IntentType, Library, MatchArm, Node, Pattern as IrPattern,
+    Expr as IrExpr, FnType, Library, MatchArm, Node, Pattern as IrPattern,
     SourceOrigin, Type, Value,
 };
 use vibra_syntax::source::{
@@ -575,9 +575,10 @@ pub(crate) struct BodyChecker<'p, 'a> {
     /// The guards of each anonymous callable checked since the body began.
     closures: Vec<ClosureContract>,
     /// Each `await` checked since the body began, at its span, with the
-    /// type of the plan it awaits: what [`effects::analysis::check_bodies`]
-    /// reads. [`effects::procs::await_expr`] records it.
-    pub(crate) awaits: Vec<(ByteSpan, IntentType)>,
+    /// type of the plan it awaits and the call it runs: what
+    /// [`effects::analysis::check_bodies`] reads.
+    /// [`effects::procs::finish_await`] records it.
+    pub(crate) awaits: Vec<effects::analysis::Await>,
     /// The context the checked callable's body runs in, as
     /// [`effects::procs::lower`] gives it.
     pub(crate) context: BodyContext,
@@ -610,8 +611,9 @@ pub(crate) struct Checked {
     pub(crate) guards: Guards,
     /// The guards of each anonymous callable in it that has one.
     pub(crate) closures: Vec<ClosureContract>,
-    /// Each `await` in it, at its span, with the type of the plan it awaits.
-    pub(crate) awaits: Vec<(ByteSpan, IntentType)>,
+    /// Each `await` in it, at its span, with the type of the plan it awaits
+    /// and the call it runs.
+    pub(crate) awaits: Vec<effects::analysis::Await>,
 }
 
 impl<'p, 'a> BodyChecker<'p, 'a> {
@@ -675,6 +677,14 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
     /// The program whose body is being checked.
     pub(crate) const fn program(&self) -> &'p Program<'a> {
         self.program
+    }
+
+    /// The program index of the function the checked IR holds at `at`.
+    pub(crate) fn function_at(&self, at: usize) -> Option<usize> {
+        self.layout
+            .functions
+            .iter()
+            .position(|lowered| *lowered == Some(at))
     }
 
     /// Checks the body of a callable of type `signature` whose parameters

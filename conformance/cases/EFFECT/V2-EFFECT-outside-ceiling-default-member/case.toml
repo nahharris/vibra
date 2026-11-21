@@ -1,0 +1,19 @@
+id = "V2-EFFECT-outside-ceiling-default-member"
+rule = "V2-EFFECT-outside-ceiling-default-member"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#operation-interfaces: the ceiling of a default member is its complete row, which holds its owner and its written performs only"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@effect.outsideCeiling"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 166, end = 188 }
+related = [{ source = "src/app/main.vib", span = { start = 172, end = 188 } }]

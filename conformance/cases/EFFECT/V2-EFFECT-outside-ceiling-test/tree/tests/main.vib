@@ -1,0 +1,5 @@
+use @std.assert enduse
+
+use @app.main enduse
+
+test "t" do let _ be await main.note(main.Memory(lines: [])) endlet endtest

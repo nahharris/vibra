@@ -1,2 +1,0 @@
-type Missing of I32 endtype
-proc p returns r: Void performs {Missing} do return void endproc

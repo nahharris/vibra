@@ -8,4 +8,4 @@ V2-RUNTIME-ensures-else-on-await	active	06-runtime.md#callable-contract-executio
 V2-RUNTIME-return-await-tail	active	07-diagnostics-and-conformance.md#required-coverage
 V2-RUNTIME-await-unbounded	active	05-tooling.md#tests-and-selection
 V2-EFFECT-test-row-empty-written	active	03-effects.md#effect-ceilings
-V2-TOOL-unavailable-test-row	active	03-effects.md#effect-ceilings
+V2-TOOL-unavailable-test-row	retired	03-effects.md#effect-ceilings
