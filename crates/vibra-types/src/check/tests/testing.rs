@@ -249,14 +249,15 @@ fn a_test_reaching_an_unsupported_form_is_unavailable_and_the_others_run()
 #[test]
 fn a_test_that_takes_or_performs_is_unavailable_over_the_test() -> Result<(), String> {
     let tests = "use @std.assert enduse\n\n\
-                 test \"effects\" performs {} do endtest\n\n\
+                 type Missing of I32 endtype\n\n\
+                 test \"effects\" performs {Missing} do endtest\n\n\
                  test \"plain\" do assert.true(true) endtest\n";
     let result = check(MATH, &[("@tests.math", tests)], &["@tests"])?;
     assert_eq!(
         faults(&result),
         [(
             DiagnosticCode::ToolUnavailable,
-            at(tests, "test \"effects\" performs {} do endtest", 0)
+            at(tests, "test \"effects\" performs {Missing} do endtest", 0)
         )]
     );
     let names = result

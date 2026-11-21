@@ -1,0 +1,13 @@
+id = "V2-RUNTIME-plan-built-not-run"
+rule = "V2-RUNTIME-plan-built-not-run"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "03-effects.md#cold-plans-and-performed-rows: building the plan of a proc that never ends does not enter its body"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

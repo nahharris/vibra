@@ -1,0 +1,7 @@
+proc spin
+  returns r: I32
+  visibility @public
+  do
+    let n be await spin() endlet
+    return n
+endproc

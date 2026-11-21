@@ -1,0 +1,13 @@
+id = "V2-EFFECT-test-row-empty-written"
+rule = "V2-EFFECT-test-row-empty-written"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "03-effects.md#effect-ceilings: a test may write the empty row"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

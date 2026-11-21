@@ -15,7 +15,10 @@
 //! item `@test.invalid`, and a test whose declaration closure reaches a form
 //! this toolchain does not implement is `@test.unavailable` while the
 //! others run. Each test runs in a new interpreter, so module values start
-//! fresh and the audit trace is empty.
+//! fresh and the audit trace is empty. A test body runs in a procedure
+//! context with the empty row and no host context: it may `await` the
+//! plans of the program's procedures, and one that reaches a host-bound
+//! member is `@test.unavailable`.
 
 use std::collections::BTreeSet;
 use std::fmt;
@@ -648,7 +651,16 @@ fn run_one(
             None,
         );
     };
-    match execute(set, function, index, budget) {
+    outcome(execute(set, function, index, budget))
+}
+
+/// How a test whose execution ended as `ended` ends. A form the
+/// interpreter does not run, such as a host-bound member reached with no
+/// host context, makes the test `@test.unavailable`.
+fn outcome(
+    ended: Result<vibra_interp::TestExecution, RuntimeError>,
+) -> (TestOutcome, Option<Instrumentation>) {
+    match ended {
         Ok(execution) => {
             let outcome = match execution.failure {
                 None => TestOutcome::Passed,
@@ -668,6 +680,12 @@ fn run_one(
 }
 
 /// One execution of the test function `function` in a new interpreter.
+///
+/// The body runs in the procedure context its checked function states,
+/// with the empty row: it may `await` plans of the program's own
+/// procedures. The runner passes no world and no host context, so a body
+/// that reaches a host-bound member is `@tool.unavailable`, and the test
+/// `@test.unavailable` (step 21 gives a test its `TestWorld`).
 fn execute(
     set: &Arc<CheckedModuleSet>,
     function: usize,

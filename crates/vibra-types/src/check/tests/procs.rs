@@ -412,27 +412,248 @@ fn what_stays_unavailable() -> Result<(), String> {
         faults(&source),
         [(DiagnosticCode::ToolUnavailable, at(&source, "double", 1))]
     );
-    // A test that awaits.
-    let app = "proc double takes {n: I32} returns twice: I32 visibility @public do \
-               return I32.add(n n) endproc\n";
-    let test = "use @std.assert enduse\nuse @app.math enduse\n\
-                test \"t\" do let _ be await math.double(1i32) endlet endtest\n";
-    let result = in_tests(app, test)?;
-    let found = result
+    // A test that writes a row that is not empty is unavailable over the
+    // test (step 08). The row names a plain type, as above, so that the
+    // name resolves.
+    let test = "use @std.assert enduse\n\
+                type Missing of I32 endtype\n\
+                test \"row\" performs {Missing} do endtest\n\
+                test \"plain\" do assert.true(true) endtest\n";
+    let result = in_tests("", test)?;
+    assert_eq!(
+        codes_at(&result),
+        [(
+            DiagnosticCode::ToolUnavailable,
+            at(test, "test \"row\" performs {Missing} do endtest", 0)
+        )]
+    );
+    assert!(result.only_unavailable());
+    let lowered = result
+        .tests()
+        .iter()
+        .map(|test| (test.name(), test.function().is_some()))
+        .collect::<Vec<_>>();
+    assert_eq!(lowered, [("row", false), ("plain", true)]);
+    Ok(())
+}
+
+/// Each diagnostic of `result`, by code and primary span.
+fn codes_at(
+    result: &crate::check::CheckResult,
+) -> Vec<(DiagnosticCode, vibra_diagnostics::ByteSpan)> {
+    result
         .diagnostics()
         .iter()
         .map(|diagnostic| (diagnostic.code(), diagnostic.primary_span()))
-        .collect::<Vec<_>>();
+        .collect()
+}
+
+/// The library module every test case imports as `math`.
+const MATH: &str = "proc double takes {n: I32} returns twice: I32 visibility @public do \
+                    return I32.add(n n) endproc\n";
+
+/// The lowered function of the test `name` of `result`.
+fn test_function<'r>(
+    result: &'r crate::check::CheckResult,
+    name: &str,
+) -> Result<&'r vibra_ir::CheckedFunction, String> {
+    let index = result
+        .tests()
+        .iter()
+        .find(|test| test.name() == name)
+        .and_then(|test| test.function())
+        .ok_or_else(|| format!("the test {name} was not lowered"))?;
+    result
+        .test_set()
+        .and_then(|set| set.functions().get(index))
+        .ok_or_else(|| format!("no function {index} for the test {name}"))
+}
+
+#[test]
+fn a_test_body_runs_in_a_procedure_context_with_the_empty_row() -> Result<(), String> {
+    let test = "use @std.assert enduse\nuse @app.math enduse\n\
+                test \"awaits\" do assert.equal(4i32 await math.double(2i32)) endtest\n\
+                test \"empty row\" performs {} do assert.true(true) endtest\n";
+    let result = in_tests(MATH, test)?;
+    assert_eq!(codes_at(&result), []);
+    for name in ["awaits", "empty row"] {
+        let function = test_function(&result, name)?;
+        // A test is not applicable: its function is a `Fn({} Void)`, never a
+        // `Proc`, and its body runs in a procedure context.
+        let Type::Fn(signature) = function.signature.type_info() else {
+            return Err(format!("{name}: {:?}", function.signature.type_info()));
+        };
+        assert!(signature.parameters.is_empty(), "{name}");
+        assert_eq!(signature.result, Type::Void, "{name}");
+        assert_eq!(
+            function.context,
+            BodyContext::Procedure(Row::empty()),
+            "{name}"
+        );
+    }
+    assert_eq!(awaits(body(test_function(&result, "awaits")?)?), 1);
+    Ok(())
+}
+
+#[test]
+fn await_at_any_depth_of_a_test_body() -> Result<(), String> {
+    let test = "use @std.assert enduse\nuse @app.math enduse\n\
+                test \"deep\" do \
+                let plan be math.double(1i32) endlet \
+                let a be do let x be await plan endlet I32.add(x 1i32) enddo endlet \
+                if Ordered.greater(a 0i32) then assert.equal(2i32 await plan) \
+                else assert.true(false) endif \
+                match true case true assert.equal(6i32 I32.add(a await plan)) \
+                case false assert.true(false) endmatch \
+                endtest\n";
+    let result = in_tests(MATH, test)?;
+    assert_eq!(codes_at(&result), []);
+    assert_eq!(awaits(body(test_function(&result, "deep")?)?), 3);
+    Ok(())
+}
+
+#[test]
+fn await_in_an_anonymous_fn_of_a_test_body() -> Result<(), String> {
+    let test = "use @std.assert enduse\nuse @app.math enduse\n\
+                test \"anon\" do \
+                let f be fn returns r: I32 do return await math.double(1i32) endfn endlet \
+                assert.equal(2i32 f()) endtest\n";
+    let result = in_tests(MATH, test)?;
     assert_eq!(
-        found,
+        codes_at(&result),
         [(
-            DiagnosticCode::ToolUnavailable,
+            DiagnosticCode::EffectInvalidAwait,
             at(test, "await math.double(1i32)", 0)
         )]
     );
     Ok(())
 }
 
+/// `need`, whose bare `requires` asks for a positive operand, and `rest`.
+fn with_need(rest: &str) -> String {
+    format!(
+        "fn need takes {{n: I32}} returns r: I32 \
+         requires Ordered.greater(n 0i32) do return n endfn\n{rest}\n"
+    )
+}
+
+/// The one diagnostic of `source`, by code and primary span.
+fn single(
+    source: &str,
+) -> Result<(DiagnosticCode, vibra_diagnostics::ByteSpan), String> {
+    let found = faults(source);
+    match found.as_slice() {
+        [one] => Ok(*one),
+        other => Err(format!("{source}\n{other:#?}")),
+    }
+}
+
+// The soundness rows of step 05, owned by step 07: the static discharge
+// does not read a plan through and gives it no certified result. GUARD-7
+// (`docs/spec/02-type-system.md`, "Bare guards") gives a callee's proven
+// `ensures` "after a call returns"; applying a `proc` returns a plan, not
+// the callee's result, and the chapter does not name an `await` a call
+// that returns, so the discharge keeps the fail-closed reading.
+
+#[test]
+fn a_proc_with_a_bare_ensures_gives_no_result_fact_when_awaited() -> Result<(), String>
+{
+    let one = "returns r: I32 ensures Ordered.greater(r 0i32) do return 1i32";
+    // The control: the same `ensures` on a `fn` is a certified result.
+    accepted(&with_need(&format!(
+        "fn one {one} endfn\nfn run returns r: I32 do return need(one()) endfn"
+    )))?;
+    // On a `proc`, the awaited result has no fact.
+    let source = with_need(&format!(
+        "proc one {one} endproc\nproc run returns r: I32 do return need(await one()) endproc"
+    ));
+    assert_eq!(
+        single(&source)?,
+        (
+            DiagnosticCode::ContractUnproved,
+            at(&source, "need(await one())", 0)
+        )
+    );
+    // The `proc`'s own `ensures` is still proved of its body.
+    accepted(&format!("proc one {one} endproc\n"))?;
+    Ok(())
+}
+
+#[test]
+fn a_plan_applied_and_never_awaited_states_nothing() -> Result<(), String> {
+    // Building the plan of a `proc` with a bare `ensures` is no call of it:
+    // there is no obligation and no fact.
+    accepted(
+        "proc one returns r: I32 ensures Ordered.greater(r 0i32) do return 1i32 endproc\n\
+         fn build returns r: I32 do let _ be one() endlet return 0i32 endfn\n",
+    )?;
+    Ok(())
+}
+
+#[test]
+fn a_plan_applied_twice_and_awaited_once_gives_no_result_fact() -> Result<(), String> {
+    let source = with_need(
+        "proc one returns r: I32 ensures Ordered.greater(r 0i32) do return 1i32 endproc\n\
+         proc run returns r: I32 do let p be one() endlet let _ be one() endlet \
+         return need(await p) endproc",
+    );
+    assert_eq!(
+        single(&source)?,
+        (
+            DiagnosticCode::ContractUnproved,
+            at(&source, "need(await p)", 0)
+        )
+    );
+    Ok(())
+}
+
+#[test]
+fn a_proc_with_requires_else_gives_no_result_fact() -> Result<(), String> {
+    // `requires C else V` skips the body and the `ensures` when `C` is
+    // false ("Guards with `else`"), so its `ensures` is no fact of the
+    // result, and the caller has no obligation.
+    let source = with_need(
+        "proc half takes {n: I32} returns r: I32 \
+         requires Ordered.greater(n 0i32) else 0i32 \
+         ensures Ordered.greater(r 0i32) do return n endproc\n\
+         proc run returns r: I32 do return need(await half(5i32)) endproc",
+    );
+    assert_eq!(
+        single(&source)?,
+        (
+            DiagnosticCode::ContractUnproved,
+            at(&source, "need(await half(5i32))", 0)
+        )
+    );
+    Ok(())
+}
+
+#[test]
+fn a_predicate_that_applies_a_proc_is_outside_the_fragment() -> Result<(), String> {
+    // "A certified function is a `fn`" ("Predicates"): applying a `proc` in
+    // a predicate is a call of a function that is not certified.
+    let yes = "fn yes(T) takes {value: T} returns b: Bool do return true endfn\n";
+    // The control: a `fn` there is certified.
+    accepted(&format!(
+        "{yes}fn same takes {{n: I32}} returns r: I32 do return n endfn\n\
+         fn guarded takes {{n: I32}} returns r: I32 requires yes(same(n)) else 0i32 \
+         do return n endfn\n"
+    ))?;
+    // The same body on a `proc` is not certified.
+    let source = format!(
+        "{yes}proc same takes {{n: I32}} returns r: I32 do return n endproc\n\
+         fn guarded takes {{n: I32}} returns r: I32 requires yes(same(n)) else 0i32 \
+         do return n endfn\n"
+    );
+    assert_eq!(
+        single(&source)?,
+        (
+            DiagnosticCode::ContractUnsupportedPredicate,
+            at(&source, "same(n)", 0)
+        )
+    );
+    Ok(())
+}
 /// Checks the library module `@app.math` with `app` and the test module
 /// `@tests.math` with `test`.
 fn in_tests(app: &str, test: &str) -> Result<crate::check::CheckResult, String> {

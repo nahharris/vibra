@@ -1,0 +1,7 @@
+use @std.assert enduse
+
+use @app.main enduse
+
+test "spins" do let _ be await main.spin() endlet endtest
+
+test "passes" do assert.true(true) endtest

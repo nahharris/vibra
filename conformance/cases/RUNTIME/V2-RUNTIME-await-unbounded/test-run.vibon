@@ -1,0 +1,8 @@
+{
+  format: @testRun.v2
+  result: @command.operationalFailure
+  tests: [
+    {name: "@tests.run::\"spins\"" result: @test.exhausted auditTrace: {format: @auditTrace.v2 revision: "sha256:d11b470a6d6bc62faab051f7df208bf47d29769c5ac60576ab16d98fd375414a" drivers: [{provider: @hostWorld.v2 version: "0.0.2"}] policies: [:] redaction: @none events: []}}
+    {name: "@tests.run::\"passes\"" result: @test.passed auditTrace: {format: @auditTrace.v2 revision: "sha256:d11b470a6d6bc62faab051f7df208bf47d29769c5ac60576ab16d98fd375414a" drivers: [{provider: @hostWorld.v2 version: "0.0.2"}] policies: [:] redaction: @none events: []}}
+  ]
+}

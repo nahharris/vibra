@@ -1,0 +1,5 @@
+use @std.assert enduse
+
+use @app.main enduse
+
+test "twice" do let plan be main.double(2i32) endlet assert.equal(8i32 I32.add(await plan await plan)) endtest

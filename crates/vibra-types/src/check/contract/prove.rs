@@ -461,7 +461,15 @@ pub(super) fn discharge(
             }
             let walked = prover.walk(*body, evaluator, false);
             for function in walked.started {
+                // A `proc`'s `ensures` is no certified result: applying it
+                // builds a plan, and its `await` is not a call that returns.
+                let plan = context
+                    .functions
+                    .get(function)
+                    .and_then(|index| inputs.program.functions.get(*index))
+                    .is_some_and(super::super::effects::procs::builds_plan);
                 if ensured.contains(&function)
+                    && !plan
                     && walked
                         .exits
                         .iter()

@@ -1,0 +1,8 @@
+proc down
+  takes {n: I32}
+  returns r: I32
+  visibility @public
+  do
+    if Ordered.greater(n 0i32) then return await down(I32.sub(n 1i32)) endif
+    return 0i32
+endproc

@@ -1,0 +1,5 @@
+use @std.assert enduse
+
+use @app.main enduse
+
+test "awaits" do assert.equal(4i32 await main.double(2i32)) endtest

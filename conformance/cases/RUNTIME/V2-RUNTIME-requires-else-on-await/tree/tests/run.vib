@@ -1,0 +1,5 @@
+use @std.assert enduse
+
+use @app.main enduse
+
+test "guarded" do assert.equal(0i32 await main.half(0i32)) assert.equal(4i32 await main.half(3i32)) endtest

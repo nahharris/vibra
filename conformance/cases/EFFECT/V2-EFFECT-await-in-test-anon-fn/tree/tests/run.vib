@@ -1,0 +1,5 @@
+use @std.assert enduse
+
+use @app.main enduse
+
+test "anon" do let f be fn returns r: I32 do return await main.double(1i32) endfn endlet assert.equal(2i32 f()) endtest

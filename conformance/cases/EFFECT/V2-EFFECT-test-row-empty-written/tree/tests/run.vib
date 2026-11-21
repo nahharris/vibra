@@ -1,0 +1,5 @@
+use @std.assert enduse
+
+use @app.main enduse
+
+test "empty row" performs {} do assert.true(true) endtest

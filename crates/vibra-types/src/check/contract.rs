@@ -557,7 +557,11 @@ pub(crate) fn review(
     let mut external = Vec::new();
     for index in &functions {
         let data = program.functions.get(*index);
-        external.push(data.is_some_and(|data| data.external.is_some()));
+        // An external function and a `proc`, whose application builds a
+        // plan, are not certified functions.
+        external.push(data.is_some_and(|data| {
+            data.external.is_some() || super::effects::procs::builds_plan(data)
+        }));
         let bodies = inputs.functions.get(index).and_then(|checked| {
             let body = checked.node.as_ref()?;
             let mut bodies = vec![body];

@@ -1,0 +1,13 @@
+id = "V2-RUNTIME-plan-awaited-twice"
+rule = "V2-RUNTIME-plan-awaited-twice"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "03-effects.md#cold-plans-and-performed-rows: each await of one plan is a fresh invocation that yields its result"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

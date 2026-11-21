@@ -7,7 +7,7 @@ use vibra_diagnostics::ByteSpan;
 use vibra_interp::MemoryBudget;
 use vibra_ir::{SourceOrigin, Trap};
 
-use super::{SuiteResult, TRAP_FIRST, TestOutcome, run_tests};
+use super::{SuiteResult, TRAP_FIRST, TestOutcome, outcome, run_tests};
 use crate::discovery::discover_project_at;
 use crate::snapshot::SourceSnapshot;
 
@@ -167,5 +167,30 @@ fn a_trap_record_writes_its_origin_when_known() -> Result<(), String> {
         ),
         "{document}"
     );
+    Ok(())
+}
+
+/// Row "a test that reaches a host body": the interpreter answers a
+/// host-bound member entered with no host context with `@tool.unavailable`
+/// (`vibra-interp`'s `a_host_body_without_a_context_is_unavailable`), and
+/// the runner, which passes none, makes that test `@test.unavailable` with
+/// the diagnostic, not a trap or a failure.
+#[test]
+fn a_test_that_reaches_a_host_body_is_unavailable() -> Result<(), String> {
+    let (ended, instrumentation) =
+        outcome(Err(vibra_interp::RuntimeError::Unavailable {
+            message: "the host-bound member `testWorld.random` needs a host context"
+                .to_owned(),
+        }));
+    assert_eq!(ended.result(), "@test.unavailable");
+    let TestOutcome::Unavailable(diagnostic) = ended else {
+        return Err(format!("not unavailable: {ended:?}"));
+    };
+    assert_eq!(
+        diagnostic.code(),
+        vibra_diagnostics::DiagnosticCode::ToolUnavailable
+    );
+    assert!(diagnostic.message().contains("testWorld.random"));
+    assert_eq!(instrumentation, None);
     Ok(())
 }

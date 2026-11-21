@@ -20,7 +20,10 @@ const ADDS: &str = "test \"adds\" do assert.equal(3i32 math.add(1i32 2i32)) endt
 const ADDS_WRONG: &str =
     "test \"adds\" do assert.equal(4i32 math.add(1i32 2i32)) endtest\n";
 
-const EFFECTS: &str = "test \"effects\" performs {} do assert.true(true) endtest\n";
+/// A test whose row is not empty, which stays unavailable until rows are
+/// read; the row names a plain type so that the name resolves.
+const EFFECTS: &str = "test \"effects\" performs {Missing} do assert.true(true) endtest\n\
+                       type Missing of I32 endtype\n";
 
 /// A library project with `src/app/math.vib` and `files`.
 fn project(label: &str, files: &[(&str, &str)]) -> TempDir {
@@ -358,11 +361,11 @@ fn test_unavailable_item() {
     assert_eq!(code, 4, "{document}");
     assert_eq!(document["result"], "@command.unavailable");
     assert_eq!(document["status"], "unsupported");
-    // The whole declaration of the first test, bytes 46..101.
+    // The whole declaration of the first test, bytes 46..108.
     assert_eq!(codes(&document), ["@tool.unavailable"]);
     let span = &document["diagnostics"][0]["primarySpan"];
     assert_eq!(span["sourceId"], "tests/math.vib");
-    assert_eq!((&span["start"], &span["end"]), (&json!(46), &json!(101)));
+    assert_eq!((&span["start"], &span["end"]), (&json!(46), &json!(108)));
     assert_eq!(counts(&document), (2, 1, 1));
     let items = &document["payload"]["tests"];
     assert_eq!(items[0]["name"], "@tests.math::\"effects\"");

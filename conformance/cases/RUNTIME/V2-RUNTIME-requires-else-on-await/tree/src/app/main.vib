@@ -1,0 +1,8 @@
+proc half
+  takes {n: I32}
+  returns r: I32
+  requires Ordered.greater(n 0i32) else 0i32
+  visibility @public
+  do
+    return I32.add(n 1i32)
+endproc

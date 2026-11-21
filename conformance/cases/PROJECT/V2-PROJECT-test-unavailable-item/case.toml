@@ -16,4 +16,4 @@ testRun = "test-run.vibon"
 code = "@tool.unavailable"
 level = "@error"
 source = "tests/math.vib"
-span = { start = 46, end = 101 }
+span = { start = 46, end = 108 }

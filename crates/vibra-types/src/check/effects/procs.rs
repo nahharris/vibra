@@ -14,14 +14,25 @@
 //! never given a `Fn` type. Applying one builds a plan of type
 //! `Intent(R {})` and enters nothing, so a bare `requires` of the callee is
 //! an obligation of the application, where the plan is built. `await plan`
-//! is valid in the body of a `proc` only, at any depth of `if`, `match`,
-//! `do`, and `let`, and not in a guard, a labelled default, or an anonymous
-//! callable written there; its operand MUST be a plan.
+//! is valid in the body of a `proc` and in the body of a test, at any depth
+//! of `if`, `match`, `do`, and `let`, and not in a guard, a labelled
+//! default, or an anonymous callable written there; its operand MUST be a
+//! plan.
+//!
+//! A test with no `takes` and an empty row, written or not, runs in a
+//! procedure context with the empty row. It is never given a `Proc` type:
+//! it is not applicable, and nothing builds a plan of it.
+//!
+//! A `proc` is not a certified function (`docs/spec/02-type-system.md`,
+//! "Predicates"): its application builds a plan, so it is never read
+//! through, and its `ensures` gives no certified result (`GUARD-7`), neither
+//! at the application nor at an `await` of the plan, which the chapter does
+//! not name a call that returns.
 //!
 //! Step 08 reads a non-empty row through [`super::rows`]; until then a
-//! `proc` with one is `@tool.unavailable` at its `performs` section. Step 10
-//! lifts a `proc` named as a value and the application of a procedure
-//! value; steps 07 and 21 fill the hooks of a test.
+//! `proc` or a test with one is `@tool.unavailable`. Step 10 lifts a `proc`
+//! named as a value and the application of a procedure value; step 21 lifts
+//! a test that takes a world.
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 use vibra_ir::{
@@ -145,6 +156,14 @@ fn row(data: &FnData<'_>) -> Option<Row> {
     (data.view.kind() == CallableKind::Proc).then(Row::empty)
 }
 
+/// Whether applying the callable `data` builds a plan: it is a `proc`. Such
+/// a callable is never certified, so no predicate reads its body, and its
+/// `ensures` is never a certified result (`GUARD-7`): the contract review
+/// asks this before it treats a callable as a certified function.
+pub(crate) fn builds_plan(data: &FnData<'_>) -> bool {
+    row(data).is_some()
+}
+
 /// The type the callable `data`, whose header is `signature`, denotes: the
 /// `Proc` type of a `proc`, the `Fn` type of a `fn`.
 pub(crate) fn callable_type(data: &FnData<'_>, signature: FnType) -> Type {
@@ -208,32 +227,24 @@ pub(crate) fn named_as_value(
 /// The step of `await operand`, written at `span` where `ctx` uses its
 /// value.
 ///
-/// The position is valid in the body of a `proc` itself: the checker's
-/// context is a procedure context, and the expression is neither in a guard
-/// or a labelled default, where nothing leaves the callable, nor in an
-/// anonymous callable. In any other position the `await` is reported and
-/// its operand is not checked (Q4). An `await` in a test's own body is
-/// valid and not supported until step 07.
+/// The position is valid in the body of a `proc` itself, and in the body of
+/// a test itself, which runs in a procedure context the test runner owns:
+/// the expression is neither in a guard or a labelled default, where
+/// nothing leaves the callable, nor in an anonymous callable. In any other
+/// position the `await` is reported and its operand is not checked (Q4).
 pub(crate) fn await_expr<'a>(
     checker: &mut BodyChecker<'_, 'a>,
     operand: Expr<'a>,
     span: ByteSpan,
     _ctx: &Ctx,
 ) -> Step<'a> {
-    if checker.in_test_body() {
-        checker.report(
-            DiagnosticCode::ToolUnavailable,
-            span,
-            "a test that awaits is not supported by this checker yet",
-        );
-        return Step::Done(Out::error());
-    }
     let procedure = matches!(checker.context, BodyContext::Procedure(_));
-    if !procedure || !checker.in_own_body() {
+    let valid = checker.in_test_body() || (procedure && checker.in_own_body());
+    if !valid {
         checker.report(
             DiagnosticCode::EffectInvalidAwait,
             span,
-            "`await` is valid only in the body of a `proc`",
+            "`await` is valid only in the body of a `proc` or of a test",
         );
         return Step::Done(Out::error());
     }
@@ -307,10 +318,14 @@ pub(crate) fn lower(_program: &Program<'_>, data: &FnData<'_>) -> BodyContext {
     row(data).map_or(BodyContext::Pure, BodyContext::Procedure)
 }
 
-/// The `@tool.unavailable` of the test `test`, with no source, when its
-/// header is not supported; `None` when its body is checked.
+/// The `@tool.unavailable` of the test `test`, over the test and with no
+/// source, when its header is not supported; `None` when its body is
+/// checked. A test with no `takes`, and with no `performs` or
+/// `performs {}`, is supported; a test that takes a world (step 21) or
+/// writes a row that is not empty (step 08) is not.
 pub(crate) fn test_header(test: &TestData<'_>) -> Option<Diagnostic> {
-    if test.view.takes().is_none() && test.view.performs().is_none() {
+    let row = test.view.performs().filter(|row| !row.paths().is_empty());
+    if test.view.takes().is_none() && row.is_none() {
         return None;
     }
     Some(Diagnostic::new(
@@ -321,7 +336,9 @@ pub(crate) fn test_header(test: &TestData<'_>) -> Option<Diagnostic> {
     ))
 }
 
-/// The context the lowered body of the test `test` runs in.
+/// The context the lowered body of the test `test` runs in: a procedure
+/// context with its row, which is empty for every test [`test_header`]
+/// supports. A test is not applicable, so it has no `Proc` type.
 pub(crate) fn test_context(_test: &TestData<'_>) -> BodyContext {
-    BodyContext::Pure
+    BodyContext::Procedure(Row::empty())
 }

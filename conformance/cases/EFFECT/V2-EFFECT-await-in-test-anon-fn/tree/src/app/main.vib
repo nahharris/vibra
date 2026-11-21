@@ -1,0 +1,7 @@
+proc double
+  takes {n: I32}
+  returns twice: I32
+  visibility @public
+  do
+    return I32.add(n n)
+endproc

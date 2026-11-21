@@ -1,0 +1,5 @@
+use @std.assert enduse
+
+use @app.main enduse
+
+test "builds" do let _ be main.spin() endlet assert.true(true) endtest
