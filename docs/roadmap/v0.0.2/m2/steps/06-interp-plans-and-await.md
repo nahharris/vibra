@@ -13,6 +13,7 @@ Crates: `vibra-interp`.
   "Cold plans and invocation identity", "Callable contract execution",
   "Tail calls", "Activations and memory", "Audit trace" (the paragraph
   "Invocations"), "What has no encoding";
+  [architecture](../architecture.md) "The interpreter";
   [questions](../spec-questions.md) Q13.
 
 ## Entry points
@@ -20,14 +21,15 @@ Crates: `vibra-interp`.
 | Existing | Symbol | Use |
 | --- | --- | --- |
 | `crates/vibra-interp/src/machine.rs:160` | `pub(crate) enum Kont` | gains `Await` |
-| `crates/vibra-interp/src/machine.rs:1159` | `pub(crate) fn invoke` | entered by an `await` exactly as by a call |
-| `crates/vibra-interp/src/machine.rs:2034` | `fn unavailable_plan` | deleted |
+| `crates/vibra-interp/src/machine.rs:1166` | `pub(crate) fn invoke` | entered by an `await` exactly as by a call |
+| `crates/vibra-interp/src/machine.rs:2044` | `fn unavailable_plan` | deleted |
 | `crates/vibra-interp/src/value.rs:26` | `pub(crate) enum Repr` | gains `Plan` |
-| `crates/vibra-interp/src/evaluate.rs:99` | `pub fn run` | unchanged; `run_test` gains the procedure context |
-| `crates/vibra-interp/src/lib.rs:186` | `pub enum RuntimeError` | `Unavailable` stays for a host body |
+| `crates/vibra-interp/src/evaluate.rs:100` | `pub fn run` | unchanged; `run_test` gains the procedure context |
+| `crates/vibra-interp/src/lib.rs:206` | `pub enum RuntimeError` | `Unavailable` stays for a host body |
 
-Proposed: `vibra-interp::plan` (`PlanVal`, building, awaiting);
-`Instrumentation::invocation_count`.
+Proposed: `vibra-interp::plan` (`PlanVal`, building, awaiting,
+`Invocation`); `Instrumentation::{invocation_count,
+max_continuation_depth, peak_live_bytes}`.
 
 ## Files owned
 
@@ -49,21 +51,29 @@ Proposed: `vibra-interp::plan` (`PlanVal`, building, awaiting);
    frame. Invariant: no guard, body, or consequence of the callee is
    evaluated by an application.
 2. `Expr::Await`: evaluate the operand to a `Plan`; take the next
-   invocation ordinal (from 1, per execution); push
-   `Kont::Await { caller_invocation }`; enter the plan's target through
-   `invoke`. On return the continuation restores the caller's ordinal.
-   Invariant: each `await` enters the callee once, with its entry and exit
-   guards.
+   invocation ordinal (from 1, per execution). The machine holds the
+   current `Invocation { ordinal, parent }` as one field, not in a frame.
+   A non-tail `await` pushes `Kont::Await { caller }` with the current
+   `Invocation`, sets the current one to the new ordinal with the
+   caller's ordinal as `parent`, and enters the plan's target through
+   `invoke`. On return the continuation restores `caller`. Invariant:
+   each `await` enters the callee once, with its entry and exit guards.
 3. An `Await` that is the operand of a `return` in tail position reuses
    the activation unless a pending `ensures … else`, widening, or cleanup
-   forbids it, as for a call.
+   forbids it, as for a call. It pushes no continuation: it replaces the
+   current `Invocation` by the new ordinal, with the ordinal it replaces
+   as `parent`. The restoration boundary of the nearest non-tail `await`
+   below it stays the only one. Invariant: a chain of tail awaits adds
+   no continuation, no frame, and no retained value per transfer.
 4. An `Await` reached in a frame whose function is `Pure` is
    `Halt::Invalid`: `@runtime.invalidCheckedProgram`.
 5. A plan is accounted against the memory budget like a closure. A plan
    reached by the encoder is `RuntimeError::UnsupportedValue`.
 6. `run_test` runs a function whose `context` is `Procedure`; the body is
    invocation 1 (Q13). `Instrumentation::invocation_count` counts started
-   invocations.
+   invocations; `max_continuation_depth` is the greatest length of the
+   continuation stack; `peak_live_bytes` is the greatest accounted live
+   memory.
 7. A `FunctionBody::Host` stays `Halt::Unavailable` (step 20).
 
 ## Test matrix
@@ -83,7 +93,9 @@ that recurses without end.
 | plan through a record | positive | a plan stored in a record field, read, and awaited | the callee's result | 06 Cold plans: "The row survives … through capture, records, returns" |
 | plan captured by a closure | positive | a `Proc` closure that awaits a captured plan | the callee's result | the same |
 | operands in written order | positive | `Call(inc2, [a, b])` where both operands are observable intrinsic calls | evaluated a then b, at application | 06 Evaluation: written order |
-| `return await` in tail position | boundary | a `Proc` that tail-awaits itself 100,000 times | completes; `max_activation_depth` does not grow with the count; `tail_transfer_count` is 100,000 | 07 Required coverage 13: "`return await` reuse their activation for at least 100,000 transfers" |
+| `return await` in tail position | boundary | a `Proc` that tail-awaits itself 1,000 times, and the same 100,000 times | both complete; `tail_transfer_count` is the count; `max_activation_depth`, `max_continuation_depth`, and `peak_live_bytes` are equal in the two runs | 07 Required coverage 13: "`return await` reuse their activation for at least 100,000 transfers" |
+| tail await under a small budget | boundary | the 100,000 run with a memory budget of twice the `peak_live_bytes` of the 1,000 run | completes | 06: "A call in tail position MUST reuse its activation" |
+| a tail await has its parent | positive | body 1 awaits `p` (not in tail position); `p` tail-awaits `q`; `q` tail-awaits `r`; a test hook reads the current `Invocation` in `r`, and again in the body after the `await` | `{ordinal: 4, parent: 3}` in `r`; `{ordinal: 1, parent: none}` after | 06 Invocations: "whose parent is the invocation whose body performed it" |
 | non-tail await depth | boundary | 100,000 nested non-tail awaits, run on a 256 KiB host thread | completes within the default budget | 07 Required coverage 13: "no native stack frame per activation" |
 | unbounded await recursion | boundary | `Await(Call(spin, []))` | `RuntimeError::MemoryExhausted` | 06 Activations and memory: "Memory exhaustion is the host event" |
 | `ATK-interp-await-in-pure-frame` | negative | an `Await` in a `Pure` function, in a set made by the test-only unchecked constructor | the trap `@runtime.invalidCheckedProgram` | 06 Cold plans: "It never runs inside a `fn`" |
@@ -122,7 +134,9 @@ Host dispatch and grants (20); the test runner (07).
 
 ## Completion evidence
 
-- [ ] Each of the 16 rows is a test, named in the report.
+- [ ] Each of the 18 rows is a test, named in the report.
+- [ ] No `Kont` is pushed on the tail path of `Expr::Await`: the report
+      quotes the arm.
 - [ ] `git grep -n "unavailable_plan" crates/vibra-interp` finds nothing.
 - [ ] `plan.rs` contains no function that calls itself: the report shows
       the review of each `fn`.

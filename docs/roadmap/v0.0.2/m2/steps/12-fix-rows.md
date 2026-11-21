@@ -17,13 +17,16 @@ Crates: `vibra-ir`, `vibra-interp`, `vibra-types`, `conformance/cases`.
 | --- | --- | --- |
 | `crates/vibra-ir/src/module_set.rs:482` | `pub fn try_new` | IR-side fixes |
 | `crates/vibra-types/src/check/lower.rs:868` | `pub(crate) fn check_program` | checker-side fixes enter through `effects::` |
-| `crates/vibra-interp/src/machine.rs:1159` | `pub(crate) fn invoke` | interpreter-side fixes |
+| `crates/vibra-interp/src/machine.rs:1166` | `pub(crate) fn invoke` | interpreter-side fixes |
 
 ## Files owned
 
 - `crates/vibra-ir/src/effects.rs`
 - `crates/vibra-ir/tests/it/effects.rs`
 - `crates/vibra-interp/src/plan.rs`
+- `crates/vibra-interp/src/machine.rs`
+- `crates/vibra-interp/src/value.rs`
+- `crates/vibra-interp/src/evaluate.rs`
 - `crates/vibra-interp/tests/it/plans.rs`
 - `crates/vibra-types/src/check/effects/rows.rs`
 - `crates/vibra-types/src/check/effects/procs.rs`
@@ -40,7 +43,8 @@ Crates: `vibra-ir`, `vibra-interp`, `vibra-types`, `conformance/cases`.
    without a case that failed before it.
 2. Fix the defect in the file that owns the rule. A defect whose fix
    needs a file outside the list above is returned to the planner, not
-   widened here.
+   widened here. The interpreter files of the list are the ones step 06
+   wrote; step 20 edits the same files and starts after this step.
 3. Rerun the review's comparison of checker rows against IR rows.
 4. A finding classed as a question is not fixed: its case stays out of the
    corpus until the question is answered.

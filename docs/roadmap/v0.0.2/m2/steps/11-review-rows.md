@@ -20,7 +20,7 @@ Crates: none.
 | --- | --- | --- |
 | `crates/vibra-ir/src/types.rs:152` | `pub struct Row` | row equality and containment |
 | `crates/vibra-ir/src/module_set.rs:482` | `pub fn try_new` | where the IR is validated |
-| `crates/vibra-interp/src/machine.rs:1159` | `pub(crate) fn invoke` | what an `await` enters |
+| `crates/vibra-interp/src/machine.rs:1166` | `pub(crate) fn invoke` | what an `await` enters |
 
 It reads `crates/vibra-ir/src/effects.rs`,
 `crates/vibra-types/src/check/effects/`, and

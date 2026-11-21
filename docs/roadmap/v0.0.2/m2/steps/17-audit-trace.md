@@ -9,8 +9,9 @@ Crates: `vibra-host`.
 
 - Read: [runtime chapter](../../../../spec/06-runtime.md#audit-trace)
   "Audit trace" whole; "Canonical value encoding" for `args` and `result`;
-  [questions](../spec-questions.md) Q7 (the projected policy), Q11 (the
-  projected limits), Q13, Q24.
+  [architecture](../architecture.md) "The completion receipt" and row
+  A30; [questions](../spec-questions.md) Q7 (the projected policy), Q11
+  (the projected limits), Q13, Q24, Q29.
 
 ## Entry points
 
@@ -19,7 +20,7 @@ Crates: `vibra-host`.
 | `crates/vibra-ir/src/value.rs:18` | `pub enum Value` | the canonical data of arguments and results |
 | `crates/vibra-ir/src/origin.rs:12` | `pub struct SourceOrigin` | origins; the ordinal comes in the request |
 
-From step 15: `broker::Context`, its step 5.
+From step 15: `broker::Context`, its pending event, and `commit`.
 
 Proposed: `vibra-host::trace::{AuditTrace, Event, StartupEvent, HostEvent,
 GrantProjection, OriginRecord, TRACE_FORMAT, encode, decode}`.
@@ -34,15 +35,20 @@ GrantProjection, OriginRecord, TRACE_FORMAT, encode, decode}`.
 
 1. The types and their canonical encoding, fields in the chapter's order;
    optional fields absent, never empty.
-2. `Context` appends one `@host` event in step 5, after the reply is
-   built: `invocation`, `parent`, `phase`, `op`, `driver`, `origin`, the
-   projection, `args` (the canonical values after the grant), `result`
-   (the complete `Result` as canonical data, with the library's seed).
-   Invariant: a refusal of steps 1 to 3 appends nothing; a completed
-   `denied` and an `outcomeUnknown` are appended.
+2. `Context::host` builds the `@host` event of a completed call and
+   keeps it pending: `invocation`, `parent`, `phase`, `op`, `driver`,
+   `origin`, the projection, `args` (the canonical values after the
+   grant), `result` (the complete `Result` as canonical data, with the
+   library's seed). `Context::commit(receipt)` appends it. Invariant:
+   `host` appends nothing; `commit` appends one event for one receipt; a
+   refusal of steps 1 to 3 and a size or `unsupported` refusal at the
+   gate have no receipt (Q29); a completed `denied` and an
+   `outcomeUnknown` have one. A pending event that is never committed is
+   dropped when the context ends, and counted by
+   `Context::uncommitted()` for the tests.
 3. The projection of a slot: `issuedBy` of its root; `policy` the hash of
    the normalized effective policy, or the empty string; `rights` the one
-   interface; `limits` the bounds that are set, as Q11 recommends; `root`
+   interface; `limits` the bounds that are set, as Q11 rules; `root`
    the root ordinal. Each projected policy is added to `policies`.
 4. `drivers`: every driver identity bound in the run, sorted by provider.
 5. `Context::startup_event(leaf, provider, status, grant, failure)` for
@@ -54,8 +60,8 @@ GrantProjection, OriginRecord, TRACE_FORMAT, encode, decode}`.
 
 ## Test matrix
 
-Host tests over the scripted driver of step 15 and the `WorldDriver` of
-step 16 where a row says so.
+Host tests over the scripted driver of step 15. Every completed call of a
+row is committed with its receipt unless the row says otherwise.
 
 | Row | Kind | Input | Expected | Specification |
 | --- | --- | --- | --- | --- |
@@ -64,6 +70,7 @@ step 16 where a row says so.
 | absent `parent` | positive | a startup read: phase `@startup`, no parent | the field is absent | 06: "absent for a startup read" |
 | denial before the adapter | negative | a policy refusal | `events` is empty | 06: "A refusal before the adapter is called … appends nothing" |
 | `limitExceeded` | negative | a grant at its bound | `events` is empty | the same |
+| size refusal at the gate | negative | `inputBytes: 4`; the driver finds 5 bytes | `Err(limitExceeded)`, no receipt; `events` is empty (Q29) | 06 Error types: "nothing was dispatched" |
 | completed denial | positive | a gate refusal on the real name | one event whose `result` is `Err(denied)` | 06: "A typed denial returned by the adapter is a completed result and is recorded" |
 | `outcomeUnknown` | positive | the scripted driver answers `outcomeUnknown` | one event with that result | 06: "That typed result is recorded" |
 | order | positive | three calls on two grants | three events in completion order | 06: "in completion order" |
@@ -74,7 +81,9 @@ step 16 where a row says so.
 | narrowing keeps the origin | positive | `restrict` and `sub` of a `@testWorld` root | `issuedBy: {kind: @testWorld}`, the same `root` | 06: "Narrowing keeps the origin record of the grant it narrows" |
 | two roots | positive | two root grants | `root: 1u64` and `root: 2u64` (Q13) | 06: "a run-local ordinal of the root grant" |
 | drivers sorted | positive | drivers `@host.io.stdout` and `@host.fs.directory` | `drivers` lists `fs` first | 06: "sorted by `provider`" |
-| fake driver identity | positive | a `WorldDriver` | `{provider: @hostWorld.v2 version: "0.0.2"}` | 06: "`provider` is `@hostWorld.v2` for a fake world's driver" |
+| the driver of an event | positive | a scripted driver whose identity is `{provider: @host.io.stdout version: "9.9.9"}` | the event's `driver` and the one entry of `drivers` are that record | 06, the host event table: `driver` |
+| `ATK-trace-uncommitted-no-event` | negative | a completed call whose receipt is dropped without `commit` | `events` is empty; `uncommitted()` is 1 | 06 step 5: "Advance the continuation consistently with the completion, and then append the completed event" |
+| `ATK-trace-commit-once` | negative | a completed call; `commit`; then `commit` of a receipt with the same context and serial, made by the test-only constructor | `InvalidHostValue` for the second; `events` has one event | 06 Audit trace: "in completion order" |
 | startup event, acquired | positive | `startup_event(@out, @host.io.stdout, acquired, grant, none)` | the `@startup` event of the example | 06, the startup event table |
 | startup event, refused optional | positive | status `@refused`, no failure | no `grant`, no `failure` | 06: "A refused optional leaf … has none" |
 | startup event, failed | positive | status `@failed`, code `@grant.acquisitionFailed` | `failure: {code message}` | 06 |
@@ -111,7 +120,9 @@ Redaction profiles other than `@none`; the trap record's origin (29).
 
 ## Completion evidence
 
-- [ ] Each of the 24 rows is a test, named in the report.
+- [ ] Each of the 27 rows is a test, named in the report.
+- [ ] `Receipt` derives neither `Clone` nor `Copy`: the report quotes
+      the type.
 - [ ] The example row compares against text copied from the chapter, not
       text produced by `encode`.
 - [ ] The validation commands exit 0.

@@ -49,6 +49,10 @@ Proposed: test-only `dual::{materialize, run_both, compare}` in
    operations removed. A difference prints both sides.
 4. The attack runs: each builds its objects in the temporary directory
    after `materialize` and runs the target under `Launch::System` only.
+   After a run that refuses a write, the test reads the temporary
+   directory with `std::fs` and compares its recursive listing and every
+   file's bytes with what they were before the run. Invariant: a refusal
+   is judged by the directory, never by the reply alone.
 5. Write `evidence/dual-run.md`: per case, the platform, the result, and
    the statement that agreement is sampled evidence over the stated
    domain.
@@ -59,7 +63,8 @@ Windows only; elsewhere every row prints `NOT RUN: no directory driver`.
 `C` is the copy program: an entry taking `args`, `source: DirReadText`
 (an `@argumentPath`, policy suffix `.txt`, read), `dest: DirWriteText`
 (a `@fixedPath`, create and replace), and `out: StdoutText`; it reads the
-file named by its second argument and writes it under `dest`.
+file named by its second argument and writes it under `dest`. "Unchanged"
+is the comparison of task 4.
 
 | Row | Kind | Input | Expected | Specification |
 | --- | --- | --- | --- | --- |
@@ -76,8 +81,9 @@ file named by its second argument and writes it under `dest`.
 | `ATK-run-junction-denied` | negative | `/in/sub` replaced by a junction outside; asking for `sub/a.txt` through a policy with depth `@tree` | `denied` | the same |
 | `ATK-run-alias-denied` | negative | `/in/longsecretname.dat`, requested by its 8.3 short name under a policy whose `exact` names hold that short name | `denied`, a completed event | 07 Required coverage 11: "the real name of an entry" |
 | `ATK-run-hard-link-read-allowed` | positive | `/in/a.txt` a hard link to a file outside | the read succeeds | 03 Hard links: "Reading such a file is allowed" |
-| `ATK-run-hard-link-replace-denied` | negative | the destination file a hard link to a file outside | `denied`; the outside file is unchanged | 03: "Replacing it MUST be refused with `denied`" |
-| `ATK-run-denied-leaves-file` | negative | the destination exists; `dest` permits `create` only | `denied`; the destination's content and size are unchanged | 03: "Never truncate or create before authorization" |
+| `ATK-run-hard-link-replace-denied` | negative | the destination file a hard link to a file outside | `denied`; the outside file and the temporary directory are unchanged | 03: "Replacing it MUST be refused with `denied`" |
+| `ATK-run-denied-leaves-file` | negative | the destination exists; `dest` permits `create` only | `denied`; the temporary directory is unchanged | 03: "Never truncate or create before authorization" |
+| `ATK-run-create-denied-leaves-directory` | negative | the destination directory is `out` on disk; `dest` has the policy prefix `["OUT"]` with `create`; the entry writes `["OUT" "n.txt"]` | `denied`, a completed event; the temporary directory is unchanged: `out` holds no entry | 03: "Never truncate or create before authorization" |
 | `ATK-run-root-replaced` | positive | after startup (a hook between startup and entry), rename the source directory and put another at its path | the entry reads from the renamed directory | 07 Required coverage 11: "renames, and a replaced root" |
 | `ATK-run-prefix-by-names` | negative | policy prefix `["reports"]`; a sibling `reportsOld/a.txt` requested | `denied` | 07 Required coverage 11: "prefix by names, not by string" |
 | `ATK-run-swapped-component` | negative | a thread swaps `/in/sub` between a directory and a junction during 1,000 runs' worth of reads in one entry | every read is the inside content or `denied` | 07 Required coverage 11: "no cached intermediate handle" |

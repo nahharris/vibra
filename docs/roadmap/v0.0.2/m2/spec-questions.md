@@ -2,10 +2,14 @@
 
 Each question is a place where the specification is silent, says two things,
 or decides an observable behaviour by a sentence that can be read two ways.
-A step guide never settles one by choosing: its rows are written against the
-**recommended answer** below and name the question, so a different ruling
-changes exactly the rows listed under **Depends**.
+A step guide never settles one by choosing. A question is in one of two
+states:
 
+- **Ruled.** Its entry carries a **Ruling**, and the rows under
+  **Depends** are written against it.
+- **Open.** Q28, Q29, and Q30. Each carries a **recommended answer**; the
+  rows under **Depends** are written against it and name the question, so
+  a different ruling changes exactly those rows.
 Chapters: [01 source](../../../spec/01-source-language.md),
 [02 types](../../../spec/02-type-system.md),
 [03 effects](../../../spec/03-effects.md),
@@ -14,10 +18,8 @@ Chapters: [01 source](../../../spec/01-source-language.md),
 [06 runtime](../../../spec/06-runtime.md),
 [07 diagnostics](../../../spec/07-diagnostics-and-conformance.md).
 
-The five questions that most need a ruling before implementation starts are
-Q7, Q13, Q1, Q10, and Q17, in that order: each decides a data type or a
-persistent format that several steps share.
-
+A ruling that the chapters do not yet say names the chapter sections it
+changes; step 01 does not start before those sections say it.
 ## Rows, plans, and callables
 
 ### Q1. Narrowing members on a value that is not a sealed grant
@@ -55,14 +57,62 @@ persistent format that several steps share.
   `narrowed(Memory(text: "x"))` type-checks. `limit` returns `Self`, so it
   has no error to return, and a trap is excluded because the program is
   supported checked source.
-- **Recommended answer.** On a held value that is not a sealed grant the
-  three rows are the identity: `limit` returns the value, and `restrict`
-  and `sub` return `Result.ok` of it. A source model holds no host
-  authority, so nothing is widened; the chapter says so in "Narrowing", and
-  says that a model which wants limits implements them itself.
-- **Depends.** Steps 15, 19, 20, 22. Rows `V2-GRANT-narrow-model-limit`,
-  `V2-GRANT-narrow-model-restrict`, `V2-GRANT-narrow-model-sub`.
 
+  A model need not be memory only. The runtime chapter allows that "a
+  source implementation may model an interface using grants it holds",
+  while the effects chapter says of a package's model that it "holds no
+  real grant". The second fixture holds one and forwards to it:
+
+  ```vibra
+  type Forward of {inner: DirReadText}
+    impl DirReadText
+      proc read
+        takes {self: Self at: RelativePath}
+        returns outcome: Result(Str FsError)
+        do
+          return await DirReadText.read(self.inner at)
+      endproc
+    endimpl
+  endtype
+  ```
+
+  A caller that narrows a `Forward`, viewed as a `DirReadText`, and hands
+  the result on expects to have handed on less.
+- **Ruling.** The three members are ordinary abstract members. They are
+  bound with `external @compiler`, and such a binding is the
+  implementation of a sealed grant only, exactly as an `external @host`
+  binding is under Q2: the broker's narrowing is the sealed grant's
+  implementation. Every `impl` of a standard operation interface supplies
+  `limit`, and `restrict` and `sub` on the six `Dir…` interfaces. Dispatch
+  on a held value that is not a sealed grant selects that type's member,
+  as for every member. A model that wraps a grant forwards the narrowing
+  to it; a memory-only model returns itself or keeps its own bounds.
+  `Forward` forwards:
+
+  ```vibra
+      fn limit
+        takes {self: Self limits: GrantLimits}
+        returns narrowed: Self
+        do
+          return Forward(inner: DirReadText.limit(self.inner limits))
+      endfn
+  ```
+
+  and its `restrict` and `sub` do the same under `try`. The type system
+  requires the members; it cannot require that a wrapping model forwards.
+  A model that returns itself keeps what it holds, and that is the
+  model's code, which the caller's package chose.
+
+  The chapters say this in 03 "Narrowing" and 03 "Operation interfaces":
+  the members are abstract for an `impl`, and the sentence that a model
+  "holds no real grant" gives way to the runtime chapter's "a source
+  implementation may model an interface using grants it holds".
+- **Depends.** Steps 19, 20, 22. Rows `V2-GRANT-impl-supplies-limit`,
+  `V2-GRANT-impl-missing-limit`, `V2-GRANT-narrow-model-limit`,
+  `V2-GRANT-narrow-model-restrict`, `V2-GRANT-narrow-model-sub`,
+  `V2-GRANT-forward-model-reads`, `V2-GRANT-narrow-forward-limit`,
+  `V2-GRANT-narrow-forward-restrict`, and "narrowing on a model" of
+  step 20.
 ### Q2. Which members of a standard operation interface an `impl` supplies
 
 - **Anchor.** [03 Operation interfaces](../../../spec/03-effects.md#operation-interfaces),
@@ -74,14 +124,14 @@ persistent format that several steps share.
   narrowing members.
 - **Program.** The `Memory` type of Q1 with and without its `read` member,
   and with an added `fn limit` member.
-- **Recommended answer.** An `external @host` member is abstract for every
-  `impl`: the binding is the implementation of sealed grants only. An
-  `external @compiler` member of an interface is a default member with a
-  toolchain body, so an `impl` that supplies `restrict`, `sub`, or `limit`
-  is `@type.defaultOverride`.
+- **Ruling.** Both are abstract for every `impl`. An `external @host`
+  binding and an `external @compiler` binding of an interface member are
+  the implementation of sealed grants only, so an `impl` supplies the
+  operation member and the narrowing members (Q1), and one that lacks any
+  of them is `@type.missingAbstractMember`.
 - **Depends.** Steps 08, 19. Rows `V2-EFFECT-impl-host-member-supplied`,
-  `V2-EFFECT-impl-host-member-missing`, `V2-GRANT-impl-supplies-limit`.
-
+  `V2-EFFECT-impl-host-member-missing`, `V2-GRANT-impl-supplies-limit`,
+  `V2-GRANT-impl-missing-limit`.
 ### Q3. An unawaited plan as a statement
 
 - **Anchor.** [01 Bodies and statements](../../../spec/01-source-language.md#bodies-and-statements),
@@ -103,7 +153,7 @@ persistent format that several steps share.
   endproc
   ```
 
-- **Recommended answer.** `@type.mismatch` at the statement: the checker
+- **Ruling.** `@type.mismatch` at the statement: the checker
   already requires an expression statement to have type `Void` or `Never`,
   and an `Intent` is neither. `let _ be plan endlet` discards one on
   purpose. The source chapter states the general rule, which it now only
@@ -117,7 +167,7 @@ persistent format that several steps share.
   test, or of a value that is not a plan". `await 1i32` in a `fn` is both.
   Is the operand checked when the position is already wrong?
 - **Program.** `fn f returns n: I32 do return await 1i32 endfn`.
-- **Recommended answer.** One `@effect.invalidAwait` at the `await`. In a
+- **Ruling.** One `@effect.invalidAwait` at the `await`. In a
   wrong position the operand is not checked; in a right position an operand
   that is not an `Intent` gives the same code, and no `@type.mismatch`.
 - **Depends.** Step 05. Rows `V2-EFFECT-await-not-plan`,
@@ -133,7 +183,7 @@ persistent format that several steps share.
   and returns them?
 - **Program.** An `impl AuditLog` whose `append` returns `Result.ok` without
   awaiting anything.
-- **Recommended answer.** The warning needs a body and a row written on the
+- **Ruling.** The warning needs a body and a row written on the
   same declaration: a `proc`, an anonymous `proc`, a `test`, and the
   additive `performs` of a default member. It is not reported for (a), (b),
   or (c). For (d) it is reported: building a plan performs nothing.
@@ -153,7 +203,7 @@ persistent format that several steps share.
   an ordinary value?
 - **Program.** `fn pair takes {a: DirReadText b: DirList} returns both:
   {DirReadText DirList}` against the type `Proc({Str} {DirWriteText})`.
-- **Recommended answer.** Only the result operand of a written `Proc` or
+- **Ruling.** Only the result operand of a written `Proc` or
   `Intent` type whose row is omitted, with at least one component. A
   `returns` type is never reported.
 - **Depends.** Step 10. Rows `V2-TYPE-NAMES-suspicious-row`,
@@ -182,7 +232,7 @@ persistent format that several steps share.
   endlet
   ```
 
-- **Recommended answer.** `sub` rebases: a request through the child is the
+- **Ruling.** `sub` rebases: a request through the child is the
   child's prefix followed by the request, and a policy given to `restrict`
   is relative to the grant it restricts. The broker keeps one effective
   policy per grant in root coordinates: the conjunction (`@allOf`) of every
@@ -208,7 +258,7 @@ persistent format that several steps share.
   `exact` list, a repeated action, a name in `exact` that no file can have?
 - **Program.** `DirReadText.restrict(notes FsPolicy.files(prefix: root
   depth: FileDepth.tree() actions: [] names: NameTest.suffix(value: "")))`.
-- **Recommended answer.** A source policy is rooted at the grant it
+- **Ruling.** A source policy is rooted at the grant it
   restricts. `foreignRoot` and `unsupportedVersion` are returned by no
   operation of this release; the chapter says they are reserved for a
   decoded policy. `invalidPolicy` is exactly an empty `suffix`. An empty
@@ -227,7 +277,7 @@ persistent format that several steps share.
   component, an action, and an `exact` name? Does a `sub` add a level? Is
   the count taken before or after normalization?
 - **Document.** A `@fileRule` whose `names` is `@exact` with 4,096 names.
-- **Recommended answer.** Counted after normalization, over the effective
+- **Ruling.** Counted after normalization, over the effective
   conjunction of Q7. A node is one expression record or one name-test
   record; an entry is one element of a `prefix`, `actions`, or `names`
   list. Depth is the nesting of expression and name-test records, plus one
@@ -249,18 +299,45 @@ persistent format that several steps share.
   rejection before dispatch consumes nothing".
 - **Program.** A test whose `streams(world stdin: "0123456789a")` grant is
   limited to `inputBytes: 10u64` and read once, then once more.
-- **Recommended answer.** For a stream the broker reserves the whole
-  remaining `inputBytes` bound, and the adapter reads at most that many
-  bytes plus one. If the stream ends within the bound, the read succeeds
-  and the unused reservation is refunded. Otherwise the call returns
-  `limitExceeded` as a completed, traced call: the bytes read are consumed
-  and charged, and the next read continues after them. The chapter states
-  this as the one case where `limitExceeded` follows an attempt. With a
-  remaining bound of zero the refusal is before dispatch and consumes
-  nothing.
-- **Depends.** Steps 15, 16, 30. Rows `V2-GRANT-limit-stdin-over`,
-  `V2-GRANT-limit-stdin-exact`, `V2-GRANT-limit-stdin-zero`.
+- **Ruling.** A stream read asks for a count. `StdinText.read` and
+  `StdinBytes.read` take `max: U64` and return at most that many bytes;
+  the empty value is the end of input. The registry rows `io.stdinText`
+  and `io.stdinBytes` have the further parameter `max: U64`.
 
+  The bytes are reserved before the stream yields one, at the gate, and
+  the settlement refunds what was not read:
+
+  - **Input of known size** (the standard input of a world, which the
+    document holds; a process's standard input that is a regular file):
+    the adapter reports the remaining size, and the broker reserves the
+    smaller of `max` and that size. An empty input reserves zero, so it
+    succeeds at a zero budget.
+  - **Input of unknown size** (a pipe, a console): the broker reserves
+    `max`.
+
+  A reservation over the remaining `inputBytes` bound is `limitExceeded`
+  with nothing consumed. So a limit is always reserved before the
+  operation could exceed it, `limitExceeded` never follows an attempt,
+  and no operation is special: this is the shape
+  `RandomBytes.generate(count)` has.
+
+  "Read to the end" is a library loop: `@std.io` has the procedures
+  `readAllText` and `readAllBytes`, each with the row of its interface,
+  which call the member with a fixed count of 65,536 until it returns the
+  empty value. Each turn of the loop is an invocation. Through a grant
+  whose `inputBytes` bound is below that count, the loop over an input of
+  unknown size returns `limitExceeded`; a program with such a budget
+  calls the member with its own count.
+
+  The chapters say this in 03 "Standard operation inventory", 06 "Host
+  registry" (the two rows), 06 "Closed operation semantics" ("Standard
+  input" and the read sentence of "All operations"), and 04 "The standard
+  library".
+- **Depends.** Steps 02, 15, 16, 19, 20, 21, 22, 29, 30, 32. Rows
+  `V2-GRANT-limit-stdin-exact`, `V2-GRANT-limit-stdin-over`,
+  `V2-GRANT-limit-stdin-zero`, `V2-GRANT-limit-stdin-count`,
+  `V2-EFFECT-std-read-all`, `V2-GRANT-test-stdin-twice`,
+  `V2-RUNTIME-run-stdin`, and the stdin rows of steps 15, 16, and 30.
 ### Q11. Own counters and ancestor counters under `limit`
 
 - **Anchor.** [03 Narrowing](../../../spec/03-effects.md#narrowing),
@@ -272,7 +349,7 @@ persistent format that several steps share.
   does the child's projection show as `limits`?
 - **Program.** Two siblings `limit(g {invocations: 5})` of a parent bounded
   at 8, awaited alternately until one is refused.
-- **Recommended answer.** Every `limit` creates a counter that starts at
+- **Ruling.** Every `limit` creates a counter that starts at
   zero with the written bound. An invocation reserves on the grant's own
   counter and on every ancestor's, atomically, and is refused if any would
   pass its bound. So the child above runs twice. The projection's `limits`
@@ -291,7 +368,7 @@ persistent format that several steps share.
   `TestWorld.environment` permit?
 - **Program.** A recipe with `names: ["HOME"]` and a read of `"PATH"`,
   which the process has.
-- **Recommended answer.** `denied`, decided in step 3 of the host call, so
+- **Ruling.** `denied`, decided in step 3 of the host call, so
   no event is appended and the process environment is not consulted. The
   grant of `TestWorld.environment` permits every name.
 - **Depends.** Steps 15, 16, 21, 30. Rows `V2-GRANT-env-name-denied`,
@@ -309,7 +386,7 @@ persistent format that several steps share.
   numbered, and is the `TestWorld` root one of them?
 - **Program.** A test that awaits `TestWorld.directory`, then a read that
   is denied by policy, then a read that succeeds.
-- **Recommended answer.** (a) Every started `await` takes the next ordinal,
+- **Ruling.** (a) Every started `await` takes the next ordinal,
   whether or not an event follows, so a trace's ordinals may have gaps. A
   startup read takes one too, in processing order. (b) The runner's run of
   a test body is invocation 1, as the launcher's run of an entry is the
@@ -334,7 +411,7 @@ persistent format that several steps share.
 - **Program.** None in source: no checked program holds a grant of another
   world or uses one after release. The input is a host test that hands the
   broker a token of another world.
-- **Recommended answer.** `@runtime.invalidHostValue`. Checked source
+- **Ruling.** `@runtime.invalidHostValue`. Checked source
   cannot reach the state, so it is a defect, and `denied` would hide one.
 - **Depends.** Steps 15, 20. Rows `ATK-foreign-grant`, `ATK-stale-grant`,
   `ATK-forged-token`.
@@ -350,7 +427,7 @@ persistent format that several steps share.
   a syntax code is reported for a type fact. Is the parameter's name free?
 - **Program.** `test "t" takes {w: TestWorld} do endtest`;
   `takes {world: Str}`; `takes {a: TestWorld b: TestWorld}`.
-- **Recommended answer.** Keep the code. The reader reports
+- **Ruling.** Keep the code. The reader reports
   `@syntax.invalidForm` at the `takes` section for anything but one
   bare-name parameter; the checker reports the same code at the same span
   when the one type does not resolve to `@std.test.TestWorld`. The name is
@@ -367,7 +444,7 @@ persistent format that several steps share.
   key needs, nor in which order two paths compare.
 - **Program.** The test of the programs chapter:
   `TestWorld.directory(world files: [path: "x\ny"])`.
-- **Recommended answer.** `RelativePath` implements `Equatable` and
+- **Ruling.** `RelativePath` implements `Equatable` and
   `Ordered` in `@std.fs`, comparing its names in order with the shared
   lexicographic helper, each name by Unicode scalar.
 - **Depends.** Steps 19, 21. Rows `V2-GRANT-test-directory-two-files`,
@@ -386,7 +463,7 @@ persistent format that several steps share.
   case state the expected startup outcomes, application code, captured
   output, and trace?
 - **Document.** A case of the release program run under a world.
-- **Recommended answer.** A closed document beside `@testRun.v2`, with
+- **Ruling.** A closed document beside `@testRun.v2`, with
   `format`; `result` (the `@command.*` atom); the optional
   `applicationCode` (`U8`); `stdout` and `stderr` (bytes records); `startup`
   (a list, one record per processed leaf in processing order, of `binding`,
@@ -406,7 +483,7 @@ persistent format that several steps share.
   they split by phase? The payload has no field for the `drivers` and
   `policies` of an `@auditTrace.v2` document, yet a projection's `policy`
   hash is a key of `policies`.
-- **Recommended answer.** `startup.auditTrace` holds the `@startup` events
+- **Ruling.** `startup.auditTrace` holds the `@startup` events
   and the `@host` events of phase `@startup`; the payload's `auditTrace`
   holds the events of phase `@entry`; no event is in both. The payload
   needs the two missing fields; until the chapter adds them, a narrowed
@@ -424,7 +501,7 @@ persistent format that several steps share.
 - **Document.** `@args` with `limits: {invocations: 1u64}`, `@notes` with
   `resource: {kind: @argumentPath index: 0u64 source: @args}`, and an entry
   that then awaits `EnvReadArgs.read(args)`.
-- **Recommended answer.** The read is an invocation of the source grant: it
+- **Ruling.** The read is an invocation of the source grant: it
   reserves on its counters, so the entry's own read above returns
   `limitExceeded`. A read error the issuer's row does not list as a refusal
   is a failure, `@grant.acquisitionFailed`, under "anything the row does
@@ -440,7 +517,7 @@ persistent format that several steps share.
   or an entry row that names `TestWorld`?
 - **Program.** An entry `proc main takes {world: TestWorld} returns code:
   ExitCode performs {TestWorld}` with `effects: [@std.test.TestWorld]`.
-- **Recommended answer.** No dedicated check. A `TestWorld` parameter is a
+- **Ruling.** No dedicated check. A `TestWorld` parameter is a
   leaf no provider issues, `@grant.invalidBinding`; without such a
   parameter nothing can perform the root, so a row or list that names it is
   the warning `@contract.unusedEffect`. The registry sentence describes the
@@ -458,7 +535,7 @@ persistent format that several steps share.
   (c) The final `status` of an acquired binding: the record says `released`
   "after its release", so is `acquired` ever the final status of a
   finished command?
-- **Recommended answer.** (a) `@command.trap`, exit 5, with the trap
+- **Ruling.** (a) `@command.trap`, exit 5, with the trap
   record; `startup.status` is `failed` with a `null` `failure`, because no
   leaf stopped startup; every leaf acquired so far is released. (b) A
   release cannot fail a run: the binding is `released` and the failure
@@ -475,7 +552,7 @@ persistent format that several steps share.
 - **Question.** The gate shows that "an unbound optional grant arrives as
   `Option.none()`", while "a missing or invalid recipe fails the build, for
   a required and an optional leaf alike".
-- **Recommended answer.** The gate means a refused optional leaf: a
+- **Ruling.** The gate means a refused optional leaf: a
   `@variablePath` whose variable is not present. The roadmap sentence is
   reworded; the specification stands.
 - **Depends.** Step 36. Row `V2-GRANT-release-optional-absent`.
@@ -489,7 +566,7 @@ persistent format that several steps share.
   table puts the lock and `@project.staleLock` outside this release, and
   `project sync` has no owner. Does a project whose dependencies are all
   `@path` need a `project-lock.vibon` in this release?
-- **Recommended answer.** No. A lock file is neither read nor required
+- **Ruling.** No. A lock file is neither read nor required
   while every dependency is `@path`; a `@git` dependency stays
   `@tool.unavailable` at its entry. The chapter says that a lock is
   required exactly when a Git dependency is declared.
@@ -501,7 +578,7 @@ persistent format that several steps share.
 - **Anchor.** [06 Audit trace](../../../spec/06-runtime.md#audit-trace).
 - **Question.** `drivers` and `providerIdentity` carry a `version: Str`. No
   chapter says what a shipped driver's version is.
-- **Recommended answer.** The toolchain release, `"0.0.2"`, for every
+- **Ruling.** The toolchain release, `"0.0.2"`, for every
   driver the toolchain ships, the fake world's included.
 - **Depends.** Steps 17, 28, 30, 31. Every `auditTrace` expectation.
 
@@ -512,7 +589,7 @@ persistent format that several steps share.
 - **Question.** The checked-in snapshot `registry/compiler-2.0.txt` has no
   `grant.restrict`, `grant.sub`, or `grant.limit`. "Adding a row increments
   the minor." Are they rows of 2.0, which the snapshot lacks, or of 2.1?
-- **Recommended answer.** Rows of 2.0 with `since` 0: the chapter lists
+- **Ruling.** Rows of 2.0 with `since` 0: the chapter lists
   them in the registry that "starts at 2.0", and nothing has been released
   against the snapshot. The snapshot is corrected.
 - **Depends.** Step 02. Row "registry snapshot" of its matrix.
@@ -531,7 +608,7 @@ persistent format that several steps share.
 - **Program.** `stdlib/src/std/fs.vib` with `use @std.policy enduse` and
   `stdlib/src/std/policy.vib` with `use @std.fs.RelativePath enduse`:
   `@module.importCycle`.
-- **Recommended answer.** `FsPolicy`, `NameTest`, `FileDepth`, `DirDepth`,
+- **Ruling.** `FsPolicy`, `NameTest`, `FileDepth`, `DirDepth`,
   `FileAction`, and `DirAction` are declared in `@std.fs`. `@std.policy`
   keeps `ScopeError` and `GrantLimits` and imports nothing, so every
   operation module imports it. The embedded library gets no exemption from
@@ -552,15 +629,87 @@ persistent format that several steps share.
   repeats?
 - **Document.** `effects: [@std.fs.DirReadText @std.fs.DirReadText]`;
   `effects: [@std.fs.FsError]`; `effects: [@std.fs.Nope]`.
-- **Recommended answer.** The list is a row in data form:
+- **Ruling.** The list is a row in data form:
   `@effect.invalidReference` at an entry that is not an operation
   interface, including one that resolves to nothing, and
   `@effect.duplicateRoot` at a later repeat, related to the first.
 - **Depends.** Step 25. Rows `V2-EFFECT-target-effects-not-interface`,
   `V2-EFFECT-target-effects-unknown`, `V2-EFFECT-target-effects-repeat`.
 
-## Where the tree contradicts the M2 chapters
+## Accounting and the trace
 
+### Q28. What a read that fails after reading charges
+
+- **Anchor.** [03 Limits](../../../spec/03-effects.md#limits),
+  [06 Host calls](../../../spec/06-runtime.md#host-calls).
+- **Question.** "Input bytes are the bytes the program receives", and
+  "the broker reserves before an action, charges actual progress". A text
+  read takes five bytes from a file or a stream and returns `invalidText`,
+  or takes three and returns `other`: the program receives no byte, and
+  the adapter made progress. Which is charged?
+- **Program.** A grant with `inputBytes: 5u64`; a file holding the byte
+  `255` and four more; `DirReadText.read`, then a read of a one-byte file.
+- **Recommended answer.** Progress is what the adapter moved across the
+  boundary: the bytes it took from the resource for this call, whatever
+  the reply. The first read charges five and the second is
+  `limitExceeded`. A count the adapter does not know is `Uncertain` and
+  charges the reservation in full. The limits sentence is reworded to
+  "the bytes read for the program".
+- **Depends.** Steps 15, 30. Rows `ATK-counter-invalid-text-charged`,
+  and "stdin read error" of step 30.
+
+### Q29. A refusal decided after the adapter opened an entry
+
+- **Anchor.** [06 Host calls](../../../spec/06-runtime.md#host-calls),
+  [06 Error types](../../../spec/06-runtime.md#error-types),
+  [06 Audit trace](../../../spec/06-runtime.md#audit-trace),
+  [03 Limits](../../../spec/03-effects.md#limits).
+- **Question.** A read "first learns the size of the opened object,
+  reserves it", so a size over the remaining limit is found in step 4,
+  after an entry was opened. The same holds for an `unsupported` that only
+  the opened object shows. The trace section lists the refusals "decided
+  in steps 1 to 3" as appending nothing, and names `denied` alone as an
+  adapter refusal that is recorded. Is a `limitExceeded` or an
+  `unsupported` of step 4 a completed, traced call? And "an invocation is
+  every call that passed reservation": does such a call count as one?
+- **Program.** A grant with `invocations: 1u64` and `inputBytes: 4u64`; a
+  read of a five-byte file, then a read of a four-byte file.
+- **Recommended answer.** Neither is traced: the error table says of both
+  cases that nothing was dispatched or attempted, and the format has no
+  refusal kind. A call refused for its size holds no invocation, because
+  its byte reservation failed and so it did not pass reservation; a call
+  refused as `unsupported` in step 4 passed reservation and holds one. So
+  the first read is `limitExceeded` with no event, and the second is
+  `Ok`. The chapter says in "Host calls" that reservation ends when the
+  size of a read is reserved, and in "Audit trace" that these two
+  refusals append nothing wherever they are decided.
+- **Depends.** Steps 15, 17, 22, 31. Rows
+  `ATK-counter-size-refusal-holds-no-invocation`,
+  `V2-GRANT-limit-input-bytes`, `ATK-fs-no-normalized-name`, and "size
+  refusal at the gate" of step 17.
+
+### Q30. A text read whose count splits a scalar
+
+- **Anchor.** [06 Closed operation semantics](../../../spec/06-runtime.md#closed-operation-semantics),
+  [Q10](#q10-reserving-a-read-whose-size-is-not-known).
+- **Question.** `StdinText.read(input max)` returns at most `max` bytes
+  of text. The input holds a scalar of three bytes and `max` is 2, or the
+  `max`-th byte falls inside a scalar. What is returned, what is
+  consumed, and what does a count of zero return, given that the empty
+  value is the end of input?
+- **Program.** Standard input holding U+20AC and `a`;
+  `StdinText.read(input 4u64)` twice; then the same input read with a
+  count of 2.
+- **Recommended answer.** A text read returns the longest prefix of whole
+  scalars that fits in `max` bytes, and consumes exactly those bytes: the
+  first read returns U+20AC and `a`, the second the empty value. A text
+  count below 4, the longest scalar, is `unsupported` before the stream
+  is touched, so a completed text read is empty only at the end of input.
+  A byte read accepts every count; a count of zero returns the empty
+  value and consumes nothing, as a zero `count` of random bytes does.
+- **Depends.** Steps 16, 30. Rows "stdin text below a scalar" of both.
+  Every other text row uses a count of at least 4.
+## Where the tree contradicts the M2 chapters
 These are not open questions. Each is a place where the code as it stands
 differs from the specification, with the step that replaces it.
 
