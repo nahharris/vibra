@@ -943,8 +943,8 @@ resource and append no `@host` event. No target can perform one of them: no
 provider issues a `TestWorld`, so no recipe can bind one.
 
 A row is a symbol, an owner, an exact signature, a `since` minor version,
-and a delivery class. Every row below has `since` 0 and delivery `@once`.
-The table gives the result of an invocation: applying the source `proc`
+and a delivery class. Every row of the host table below and of the
+test-world registry has `since` 0 and delivery `@once`. The table gives the result of an invocation: applying the source `proc`
 first builds a plan carrying the owner's row.
 
 Each operation's first parameter is the grant, of the owning interface's

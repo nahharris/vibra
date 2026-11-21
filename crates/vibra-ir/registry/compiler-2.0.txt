@@ -30,6 +30,9 @@ f64.neg		{F64}	F64
 f64.parse		{Str}	Result(F64 ConversionError)
 f64.sub		{F64 F64}	F64
 f64.toStr		{F64}	Str
+grant.limit	G	{G GrantLimits}	G
+grant.restrict	G	{G FsPolicy}	Result(G ScopeError)
+grant.sub	G	{G RelativePath}	Result(G ScopeError)
 i16.add		{I16 I16}	I16
 i16.addChecked		{I16 I16}	Result(I16 ArithmeticError)
 i16.compare		{I16 I16}	Ordering

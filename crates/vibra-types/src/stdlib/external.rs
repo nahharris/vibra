@@ -27,11 +27,16 @@
 //! conversion rows are `<s>.to<T>` (destination `T`), `<t>.toStr`
 //! (destination `Str`), and `<t>.parse` (destination `T`).
 //!
-//! An `external @host` declaration is checked here for its symbol, against the
-//! host registry, and for its kind: the host rows are `proc` operations.
+//! An `external @host` declaration binds a row of the host registry or of
+//! the test-world registry. Its symbol MUST be a row of one of them
+//! (`@external.unknownSymbol` at the symbol); the interface that encloses it,
+//! by module and name, MUST be the row's owner (`@external.ownerMismatch` at
+//! the symbol, related to the owner); its name MUST be the owner's member
+//! that the row names, and it MUST be a `proc` (each
+//! `@external.signatureMismatch` at the declaration).
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
-use vibra_ir::external::host::host_row;
+use vibra_ir::external::host::{host_row, test_world_row};
 use vibra_ir::external::{CompilerIntrinsic, FloatOp, IntegerOp};
 use vibra_syntax::SyntaxKind;
 use vibra_syntax::source::{
@@ -61,14 +66,12 @@ pub fn check_externals(
         match declaration {
             Declaration::Fn(callable) | Declaration::Proc(callable) => {
                 let scope = top.clone().with_binders(binder_names(&callable));
-                check(
-                    &callable,
-                    Some(module_owner),
-                    None,
-                    &scope,
-                    &mut found,
-                    false,
-                );
+                let site = Site {
+                    owner: Some(module_owner),
+                    owner_span: None,
+                    interface: None,
+                };
+                check(&callable, &site, &scope, &mut found, false);
             }
             Declaration::Type(decl) => {
                 let Some(name) = decl.name() else { continue };
@@ -85,10 +88,14 @@ pub fn check_externals(
                     .with_binders(parameters.iter().map(|parameter| parameter.text()));
                 let self_type = base.declared_self(name.text(), parameters.len());
                 let base = base.with_self(self_type);
-                let owner_span = Some(name.span());
+                let site = Site {
+                    owner,
+                    owner_span: Some(name.span()),
+                    interface: None,
+                };
                 for member in decl.members() {
                     let scope = base.clone().with_binders(binder_names(&member));
-                    check(&member, owner, owner_span, &scope, &mut found, false);
+                    check(&member, &site, &scope, &mut found, false);
                 }
                 for block in decl.impls() {
                     let conversion = block.target().is_some_and(|target| {
@@ -106,14 +113,18 @@ pub fn check_externals(
                     }
                     for member in block.members() {
                         let scope = inside.clone().with_binders(binder_names(&member));
-                        check(
-                            &member, owner, owner_span, &scope, &mut found, conversion,
-                        );
+                        check(&member, &site, &scope, &mut found, conversion);
                     }
                 }
             }
             Declaration::Interface(decl) => {
-                let owner_span = decl.name().map(|name| name.span());
+                let site = Site {
+                    owner: None,
+                    owner_span: decl.name().map(|name| name.span()),
+                    interface: decl
+                        .name()
+                        .map(|name| format!("{path}.{}", name.text())),
+                };
                 let base = top
                     .clone()
                     .with_binders(
@@ -129,7 +140,7 @@ pub fn check_externals(
                     );
                 for member in decl.members() {
                     let scope = base.clone().with_binders(binder_names(&member));
-                    check(&member, None, owner_span, &scope, &mut found, false);
+                    check(&member, &site, &scope, &mut found, false);
                 }
             }
             Declaration::Use(_) | Declaration::Let(_) | Declaration::Test(_) => {}
@@ -157,14 +168,26 @@ fn symbol_span(callable: &Callable<'_>) -> Option<ByteSpan> {
         .map(|child| child.span())
 }
 
+/// Where a declaration is.
+struct Site<'s> {
+    /// The owner a `@compiler` row compares: the type's tag or role, or the
+    /// last part of the module path; `None` inside an interface.
+    owner: Option<&'s str>,
+    /// The span of the owner's name, when the owner is a declaration.
+    owner_span: Option<ByteSpan>,
+    /// The path atom of the enclosing interface, such as
+    /// `@std.io.StdoutText`, which a host row compares.
+    interface: Option<String>,
+}
+
 fn check(
     callable: &Callable<'_>,
-    owner: Option<&str>,
-    owner_span: Option<ByteSpan>,
+    site: &Site<'_>,
     scope: &Scope<'_>,
     found: &mut Vec<Diagnostic>,
     conversion: bool,
 ) {
+    let (owner, owner_span) = (site.owner, site.owner_span);
     let Some(provider) = callable.external().and_then(|section| section.tag()) else {
         return;
     };
@@ -229,17 +252,38 @@ fn check(
             }
         }
         "@host" => {
-            if host_row(&symbol).is_none() {
+            let (row_owner, member) = if let Some(row) = host_row(&symbol) {
+                (row.owner.owner(), row.owner.member())
+            } else if let Some(row) = test_world_row(&symbol) {
+                (row.owner(), row.op.member())
+            } else {
                 found.push(Diagnostic::new(
                     DiagnosticCode::ExternalUnknownSymbol,
                     symbol_span,
-                    format!("`{symbol}` is not a row of the host registry"),
+                    format!(
+                        "`{symbol}` is not a row of the host registry or of the \
+                         test-world registry"
+                    ),
                 ));
                 return;
+            };
+            let row_owner = row_owner.path();
+            if site.interface.as_deref() != Some(row_owner.as_str()) {
+                let mut diagnostic = Diagnostic::new(
+                    DiagnosticCode::ExternalOwnerMismatch,
+                    symbol_span,
+                    format!(
+                        "the host row `{symbol}` is owned by the interface `{row_owner}`, \
+                         not by the owner of this declaration"
+                    ),
+                );
+                if let Some(span) = owner_span {
+                    diagnostic =
+                        diagnostic.with_related(span, "the owner of the declaration");
+                }
+                found.push(diagnostic);
+                return;
             }
-            let member = symbol
-                .split_once('.')
-                .map_or(symbol.as_str(), |(_, member)| member);
             if let Some(diagnostic) =
                 name_fault(callable, &symbol, member, declaration_span)
             {
@@ -345,5 +389,107 @@ fn expected_signature(row: CompilerIntrinsic) -> String {
         callable
     } else {
         format!("{callable} over {}", generics.join(" "))
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod tests {
+    use vibra_diagnostics::{ByteSpan, DiagnosticCode};
+    use vibra_syntax::parse_source_with;
+    use vibra_syntax::source::{SourceOptions, module};
+
+    use super::check_externals;
+    use crate::load_stdlib;
+
+    /// The codes `check_externals` gives for `source` read as the module
+    /// `path` of the standard library, each with the text of its span.
+    fn check(path: &str, source: &str) -> Vec<(DiagnosticCode, String)> {
+        let stdlib = load_stdlib().expect("the embedded standard library loads");
+        let document = parse_source_with(
+            Some("fixture.vib"),
+            source.as_bytes(),
+            SourceOptions {
+                standard_library: true,
+            },
+        );
+        assert!(
+            document.diagnostics().is_empty(),
+            "{:?}",
+            document.diagnostics()
+        );
+        let view = module(&document).expect("the fixture has a source tree");
+        let text = |span: ByteSpan| source.get(span.start()..span.end()).unwrap_or("");
+        check_externals(&view, path, stdlib.names())
+            .iter()
+            .map(|found| (found.code(), text(found.primary_span()).to_owned()))
+            .collect()
+    }
+
+    fn interface(name: &str, member: &str, symbol: &str) -> String {
+        format!(
+            "interface {name}\n  visibility @public\n  proc {member}\n    \
+             takes {{grant: Self}}\n    returns done: Void\n    external @host\n    \
+             symbol \"{symbol}\"\n  endproc\nendinterface\n"
+        )
+    }
+
+    #[test]
+    fn a_host_row_on_its_owner_is_accepted() {
+        let source = interface("StdoutText", "write", "io.stdoutText");
+        assert_eq!(check("@std.io", &source), Vec::new());
+        let source = interface("DirList", "entries", "fs.readEntries");
+        assert_eq!(check("@std.fs", &source), Vec::new());
+    }
+
+    #[test]
+    fn a_test_world_row_on_test_world_is_accepted() {
+        let source = interface("TestWorld", "directory", "testWorld.directory");
+        assert_eq!(check("@std.test", &source), Vec::new());
+    }
+
+    #[test]
+    fn another_interface_or_module_is_an_owner_mismatch_at_the_symbol() {
+        let owner = (
+            DiagnosticCode::ExternalOwnerMismatch,
+            "\"io.stdoutText\"".to_owned(),
+        );
+        let other = interface("StdoutBytes", "write", "io.stdoutText");
+        assert_eq!(check("@std.io", &other), vec![owner.clone()]);
+        let moved = interface("StdoutText", "write", "io.stdoutText");
+        assert_eq!(check("@std.fs", &moved), vec![owner.clone()]);
+        let top = "proc write\n  takes {grant: Bytes}\n  returns done: Void\n  \
+                   visibility @public\n  external @host\n  symbol \"io.stdoutText\"\nendproc\n";
+        assert_eq!(check("@std.io", top), vec![owner]);
+        let world = interface("StdoutText", "directory", "testWorld.directory");
+        assert_eq!(
+            check("@std.io", &world),
+            vec![(
+                DiagnosticCode::ExternalOwnerMismatch,
+                "\"testWorld.directory\"".to_owned()
+            )]
+        );
+    }
+
+    #[test]
+    fn the_member_must_be_the_owner_s_member() {
+        let source = interface("StdoutText", "stdoutText", "io.stdoutText");
+        let codes = check("@std.io", &source)
+            .into_iter()
+            .map(|(code, _)| code)
+            .collect::<Vec<_>>();
+        assert_eq!(codes, vec![DiagnosticCode::ExternalSignatureMismatch]);
+    }
+
+    #[test]
+    fn a_major_1_spelling_is_an_unknown_symbol() {
+        let source = interface("StdinText", "read", "io.stdin-text");
+        assert_eq!(
+            check("@std.io", &source),
+            vec![(
+                DiagnosticCode::ExternalUnknownSymbol,
+                "\"io.stdin-text\"".to_owned()
+            )]
+        );
     }
 }

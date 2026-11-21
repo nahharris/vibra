@@ -3,8 +3,13 @@
 //!
 //! Every row has a wire symbol `<owner>.<member>`, with a lower-case owner
 //! and a camelCase member, exact generic, parameter, and result types over
-//! the role-bound library types, and a purity flag. Every row is pure except
-//! the three assertion rows. Only the embedded standard library binds a row.
+//! the role-bound library types and the [narrowing types](NarrowingType),
+//! and a purity flag. Every row is pure except the three assertion rows. Only
+//! the embedded standard library binds a row.
+//!
+//! The rows `grant.restrict`, `grant.sub`, and `grant.limit` are the three
+//! narrowing members of every standard operation interface, generic over the
+//! grant type `G`. They are rows of 2.0, with `since` 0.
 //!
 //! The rows are frozen in `registry/compiler-2.0.txt`, one line per row in
 //! symbol order: the symbol, the generics, the parameters, and the result,
@@ -385,10 +390,53 @@ pub enum CompilerIntrinsic {
     AssertFalse,
     /// `assert.equal`, expected then actual.
     AssertEqual,
+    /// `grant.restrict`: a sealed grant narrowed by a policy.
+    GrantRestrict,
+    /// `grant.sub`: a sealed grant narrowed below a path prefix.
+    GrantSub,
+    /// `grant.limit`: a sealed grant narrowed by limits.
+    GrantLimit,
+}
+
+/// A declaration of the embedded library that plays no role and that the
+/// grant rows name (`docs/spec/03-effects.md`, "Narrowing").
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum NarrowingType {
+    /// `FsPolicy` of `@std.fs`.
+    FsPolicy,
+    /// `RelativePath` of `@std.fs`.
+    RelativePath,
+    /// `ScopeError` of `@std.policy`.
+    ScopeError,
+    /// `GrantLimits` of `@std.policy`.
+    GrantLimits,
+}
+
+impl NarrowingType {
+    /// The declaration's name, such as `FsPolicy`.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::FsPolicy => "FsPolicy",
+            Self::RelativePath => "RelativePath",
+            Self::ScopeError => "ScopeError",
+            Self::GrantLimits => "GrantLimits",
+        }
+    }
+
+    /// The module path atom that declares it, such as `@std.fs`.
+    #[must_use]
+    pub const fn module(self) -> &'static str {
+        match self {
+            Self::FsPolicy | Self::RelativePath => "@std.fs",
+            Self::ScopeError | Self::GrantLimits => "@std.policy",
+        }
+    }
 }
 
 /// The type language of registry signatures: compiler-owned types, the
-/// row's generics, and the library types, which a module set binds.
+/// row's generics, the library types, which a module set binds, and the
+/// narrowing types.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum RowType {
     /// A compiler-owned scalar type.
@@ -403,6 +451,8 @@ pub enum RowType {
     Fn(Vec<Self>, Box<Self>),
     /// A library type applied to its arguments.
     Library(Library, Vec<Self>),
+    /// A narrowing type, which takes no arguments.
+    Narrowing(NarrowingType),
 }
 
 impl RowType {
@@ -410,7 +460,8 @@ impl RowType {
     ///
     /// # Errors
     ///
-    /// A library type it names is not bound, or a generic has no argument.
+    /// A library type it names is not bound, a generic has no argument, or
+    /// it names a narrowing type, which no module set binds.
     pub fn instantiate(
         &self,
         library: &LibraryTypes,
@@ -437,6 +488,13 @@ impl RowType {
             )),
             Self::Library(declaration, arguments) => {
                 library.declared(*declaration, all(arguments)?)?
+            }
+            Self::Narrowing(declaration) => {
+                return Err(IrError::UnknownType(format!(
+                    "{}.{}",
+                    declaration.module(),
+                    declaration.name()
+                )));
             }
         })
     }
@@ -468,6 +526,7 @@ impl RowType {
             Self::Library(declaration, arguments) => {
                 format!("{}({})", declaration.name(), list(arguments))
             }
+            Self::Narrowing(declaration) => declaration.name().to_owned(),
         }
     }
 }
@@ -550,6 +609,18 @@ fn named(declaration: Library) -> RowType {
     library(declaration, Vec::new())
 }
 
+const fn narrowing(declaration: NarrowingType) -> RowType {
+    RowType::Narrowing(declaration)
+}
+
+/// `Result(value ScopeError)`.
+fn scoped(value: RowType) -> RowType {
+    library(
+        Library::Result,
+        vec![value, narrowing(NarrowingType::ScopeError)],
+    )
+}
+
 fn camel_case_type(owner: &str) -> String {
     let mut characters = owner.chars();
     characters.next().map_or_else(String::new, |first| {
@@ -617,6 +688,7 @@ impl CompilerIntrinsic {
             | Self::ListFold
             | Self::ListNext => "list",
             Self::AssertTrue | Self::AssertFalse | Self::AssertEqual => "assert",
+            Self::GrantRestrict | Self::GrantSub | Self::GrantLimit => "grant",
         }
     }
 
@@ -651,6 +723,9 @@ impl CompilerIntrinsic {
             Self::ListFold => "fold".to_owned(),
             Self::AssertTrue => "true".to_owned(),
             Self::AssertFalse => "false".to_owned(),
+            Self::GrantRestrict => "restrict".to_owned(),
+            Self::GrantSub => "sub".to_owned(),
+            Self::GrantLimit => "limit".to_owned(),
         }
     }
 
@@ -681,6 +756,7 @@ impl CompilerIntrinsic {
             | Self::ListSlice
             | Self::ListNext
             | Self::AssertEqual => &["T"],
+            Self::GrantRestrict | Self::GrantSub | Self::GrantLimit => &["G"],
             _ => &[],
         }
     }
@@ -801,6 +877,18 @@ impl CompilerIntrinsic {
             ),
             Self::AssertTrue | Self::AssertFalse => (vec![boolean()], core(Type::Void)),
             Self::AssertEqual => (vec![generic(0), generic(0)], core(Type::Void)),
+            Self::GrantRestrict => (
+                vec![generic(0), narrowing(NarrowingType::FsPolicy)],
+                scoped(generic(0)),
+            ),
+            Self::GrantSub => (
+                vec![generic(0), narrowing(NarrowingType::RelativePath)],
+                scoped(generic(0)),
+            ),
+            Self::GrantLimit => (
+                vec![generic(0), narrowing(NarrowingType::GrantLimits)],
+                generic(0),
+            ),
         }
     }
 
@@ -880,6 +968,9 @@ impl CompilerIntrinsic {
             Self::AssertTrue,
             Self::AssertFalse,
             Self::AssertEqual,
+            Self::GrantRestrict,
+            Self::GrantSub,
+            Self::GrantLimit,
         ]);
         all.retain(|intrinsic| intrinsic.is_row());
         all.sort_by_cached_key(|intrinsic| intrinsic.symbol());
