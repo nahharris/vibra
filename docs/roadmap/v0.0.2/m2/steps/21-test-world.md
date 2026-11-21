@@ -102,7 +102,7 @@ and the complete trace. Tests import what they use; `w` is the world.
 | `V2-GRANT-test-each-fs-operation` | positive | read bytes, read text, list, write bytes, write text, stat on one directory | each `Ok`; six events in order | 07 Required coverage 12: "Every operation, with success" |
 | `V2-GRANT-test-fs-errors` | positive | `notFound`, `notAFile`, `notADirectory`, `invalidText` (a file written as bytes `[255]` then read as text) | each the typed error, each a completed event | 07 Required coverage 12: "and each typed error" |
 | `V2-GRANT-test-create-and-replace` | positive | write a new file, then write it again, then read | the second content | 07 Required coverage 12: "create and replace" |
-| `V2-GRANT-test-stdin-twice` | positive | `streams(w stdin: "x\ny")`; read text twice | `Ok("x\ny")`, then `Ok("")` | 07 Required coverage 12: "standard input read twice" |
+| `V2-GRANT-test-stdin-twice` | positive | `streams(w stdin: "x\ny")`; `io.readAllText` twice | `Ok("x\ny")`, then `Ok("")` (Q10) | 07 Required coverage 12: "standard input read twice" |
 | `V2-GRANT-test-output-captured` | positive | write `a` to stdout text, `b` to stdout bytes, `e` to stderr; `TestWorld.output(w)` | `{stdout: "ab" stderr: "e"}` as bytes | 04: "per stream, in write order" |
 | `V2-GRANT-test-output-two-stream-sets` | positive | two `streams` calls, a write through each | `output` holds both, in write order | 04: "everything written through every stream grant the test's world issued" |
 | `V2-GRANT-test-variables` | positive | `environment(w variables: ["HOME": "/h"])`; read `HOME`, read `NOPE` | `Ok("/h")`; `Err(notPresent)` | 07 Required coverage 12: "present and absent variables" |

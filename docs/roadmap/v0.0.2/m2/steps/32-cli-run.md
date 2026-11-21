@@ -3,7 +3,7 @@
 Kind: vertical. Slice 5 at the command line: `vibra run [TARGET] [--
 ARGS…]` with the system launch, its payload, its exit status, and the
 human and JSON forms.
-Depends on: 29, 30.
+Depends on: 29, 30, 31.
 Crates: `vibra-cli`, `vibra-schema`.
 
 ## Prerequisites
@@ -91,20 +91,20 @@ print `NOT RUN` elsewhere.
 | target then `--` | positive | two binary targets; `vibra run tool -- x` | runs `tool` with `["x"]` | 05: "after its optional target" |
 | `--` on another command | negative | `vibra check -- x` | exit 2; `@command.invalidInput` | 05: "Only `run` accepts `--`" |
 | unknown target | negative | `vibra run nope` | exit 2; `@command.invalidInput` | 05, the result table |
-| stdin passes through | positive | `echo x \| vibra run` on the echoing entry | stdout `x` | 06 Standard input |
+| stdin passes through | positive | `echo x \| vibra run` on the entry of `V2-RUNTIME-run-stdin` | stdout `x` and the line ending the shell wrote (Q10) | 06 Standard input |
 | invalid UTF-8 output, JSON | boundary | an entry writing the byte 255 | `payload.stdout` holds U+FFFD; the trace's `args` hold the exact byte | 05: "bytes that are not UTF-8 show as U+FFFD there, and the audit trace keeps the exact bytes" |
 | directory target, Windows | positive | `M` with a real directory holding `a.txt`; `vibra run -- <dir>` | exit 0; stdout the file's text; `drivers` lists `@host.fs.directory` | 05 Run: "and then invokes the entry" |
 | directory target, other platforms | boundary | the same on Linux and macOS | exit 4; `@command.unavailable`; `@tool.unavailable`; nothing acquired | 04: "rejected at admission, as `@tool.unavailable`" |
 | no permission flag | negative | `vibra run --allow-all` | exit 2 | 05: "A tool permission flag never approves a program's resource policy" |
 | no world switch | negative | `vibra run --world w.vibon` | exit 2 | 06: "The shipped launcher has no user-selectable world or replay switch" |
 | inventory | positive | `vibra help --format json` | the `run` capability has `supported: true` and `profiles: ["interpreterV2"]` | 05 `CommandCapability` |
-| only caller of the system launch | negative, architecture test | the workspace searched for `Launch::System` | constructed in `crates/vibra-cli/src/run.rs` only | architecture, row A27 |
+| only caller of the system launch | negative, architecture test | the workspace searched for `Launch::System` | constructed in `crates/vibra-cli/src/run.rs`, and in the test files `crates/vibra-workspace/tests/it/dual_run.rs` and `crates/vibra-workspace/tests/it/attacks_run.rs`, which the test allows by name whether or not they exist | architecture, row A27 |
 
 ## Diagnostics and schema changes
 
 Results: every `@command.*` of the table. Schema:
 `urn:vibra:schema:v2:command-result` gains the `run` payload and its
-records; `payload.auditTrace` and `startup.auditTrace` as Q18 recommends.
+records; `payload.auditTrace` and `startup.auditTrace` as Q18 rules.
 
 ## Validation
 

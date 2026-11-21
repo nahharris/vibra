@@ -15,7 +15,7 @@ Crates: `vibra-types`, `conformance/cases`.
   values"; [diagnostics
   chapter](../../../../spec/07-diagnostics-and-conformance.md#required-coverage)
   required coverage 10 and 11; [questions](../spec-questions.md) Q1, Q7,
-  Q8, Q9, Q11.
+  Q8, Q9, Q10, Q11, Q29.
 
 ## Entry points
 
@@ -65,12 +65,19 @@ check_equatable, check_dict_key}`.
 `workspaceTest`, profile `interpreterV2`, unless stated. `dir` is the
 record `TestWorld.directory(w files: [aTxt: "A" bBin: "B" subTxt: "S"])`
 with paths `["a.txt"]`, `["b.bin"]`, `["sub" "s.txt"]`; `textOnly` is the
-chapter's policy value.
+chapter's policy value. `Memory` is the memory-only model of step 19,
+holding the text `"M"`, whose narrowing members return it. `Forward` is
+the grant-backed model of Q1: a type over `{inner: DirReadText}` whose
+`read` awaits `inner`, whose `limit` returns a `Forward` over
+`DirReadText.limit(self.inner limits)`, and whose `restrict` and `sub`
+do the same under `try`. `in` is the `stdinBytes` grant of
+`TestWorld.streams(w stdin: "abc")`.
 
 | Case id | Kind | Input | Expected | Specification |
 | --- | --- | --- | --- | --- |
 | `V2-GRANT-no-constructor` | negative, `workspaceCheck` | `await notes.countLines({root: "/"} path)` where a `DirReadText` is expected | `@type.argumentMismatch` at the argument | 03: "A path, a policy value, a wrapper type, an `impl`, and decoded data are not grants" |
-| `V2-GRANT-model-is-not-grant` | positive | a `Memory` type implementing `DirReadText`, passed to `notes.countLines` | `@test.passed`; the trace has no event | 03 Operation interfaces: "Implementing an interface makes no grant" |
+| `V2-GRANT-model-is-not-grant` | positive | a `Memory` passed to `notes.countLines` | `@test.passed`; the trace has no event | 03 Operation interfaces: "Implementing an interface makes no grant" |
+| `V2-GRANT-forward-model-reads` | positive | `Forward(inner: dir.readText)` passed where a `DirReadText` is expected; read `a.txt` | `Ok("A")`; one event, whose grant projection is that of `dir.readText` | 06: "A source implementation may model an interface using grants it holds" |
 | `V2-GRANT-assert-equal-grant` | negative, `workspaceCheck` | `assert.equal(dir.readText dir.readText)` | `@type.functionNotEquatable` at each operand | 07: "an `assert.equal` operand whose type contains a callable, plan, or grant" |
 | `V2-GRANT-assert-equal-option-grant` | negative, `workspaceCheck` | `assert.equal(Option.some(value: dir.readText) Option.none())` | `@type.functionNotEquatable` at the first operand | the same |
 | `V2-GRANT-assert-equal-result-ok` | positive | `assert.equal(Result.ok(value: "A") await DirReadText.read(dir.readText aTxt))` | `@test.passed` | 03: "ordinary typed results" |
@@ -104,14 +111,18 @@ chapter's policy value.
 | `V2-GRANT-limit-siblings-share` | positive | `p = limit(r 2)`; `a = limit(p 5)`, `b = limit(p 5)`; read through `a`, `b`, `a` | the third is `limitExceeded` (Q11) | 07 Required coverage 11: "shared counters under siblings" |
 | `V2-GRANT-limit-child-after-use` | positive | one read through `r`, then `c = limit(r 1)`, one read through `c`, one more | `Ok`, `Ok`, `limitExceeded` (Q11) | 07 Required coverage 10: "limits never reset" |
 | `V2-GRANT-limit-projection` | positive | a read through `limit(limit(r inv 5) inputBytes 9)` | `limits: {invocations: 5u64 inputBytes: 9u64}` (Q11) | 06: "a record of the bounds that are set" |
-| `V2-GRANT-limit-input-bytes` | positive | `limit(r inputBytes: some(1))`; read `a.txt` (1 byte), then again | `Ok("A")`, then `limitExceeded` | 03 Limits: "Input bytes are the bytes the program receives" |
+| `V2-GRANT-limit-input-bytes` | positive | `limit(r inputBytes: some(1))`; read `a.txt` (1 byte), then again | `Ok("A")`, then `limitExceeded`; one event (Q29) | 03 Limits: "Input bytes are the bytes the program receives" |
 | `V2-GRANT-limit-output-bytes` | positive | `limit(dir.writeText outputBytes: some(2))`; write `"abc"` | `Err(limitExceeded)`; the file is absent | 06: "A write reserves the encoded size of its argument before it sends" |
-| `V2-GRANT-limit-stdin-exact` | boundary | stdin `abc`, `inputBytes: 3` | `Ok("abc")` (Q10) | 06 Closed operation semantics |
-| `V2-GRANT-limit-stdin-over` | positive | stdin `abc`, `inputBytes: 2`; then an unlimited grant reads | `limitExceeded`, then `Ok("abc")` (Q10) | 06 Standard input: "consumes nothing" |
-| `V2-GRANT-limit-stdin-zero` | boundary | empty stdin, `inputBytes: 0` | `Ok("")` (Q10) | the same |
-| `V2-GRANT-narrow-model-limit` | positive | `DirReadText.limit(memory limits)` on the model, widened | the model's `read` still answers; no event (Q1) | 03 Narrowing |
-| `V2-GRANT-narrow-model-restrict` | positive | `DirReadText.restrict(memory textOnly)` | `Result.ok`; the model reads `b.bin` (Q1) | the same |
-| `V2-GRANT-narrow-model-sub` | positive | `DirReadText.sub(memory p)` | `Result.ok` (Q1) | the same |
+| `V2-GRANT-limit-stdin-exact` | boundary | `limit(in inputBytes: some(3))`; `StdinBytes.read(… 3u64)` | `Ok` of the bytes `abc` (Q10) | 06 Closed operation semantics |
+| `V2-GRANT-limit-stdin-over` | positive | `limit(in inputBytes: some(2))`; `StdinBytes.read(… 3u64)`; then `in` reads with `3u64` | `limitExceeded`, then `Ok` of `abc`; one event (Q10) | 06 Standard input: "consumes nothing" |
+| `V2-GRANT-limit-stdin-zero` | boundary | empty stdin; `limit(in inputBytes: some(0))`; `StdinBytes.read(… 1u64)` | `Ok` of no bytes (Q10) | the same |
+| `V2-GRANT-limit-stdin-count` | positive | `limit(in inputBytes: some(2))`; `StdinBytes.read(… 2u64)`; then `in` reads with `3u64` | `Ok` of `ab`, then `Ok` of `c` (Q10) | 06 Closed operation semantics |
+| `V2-GRANT-narrow-model-limit` | positive | `DirReadText.limit(memory limits)` with `invocations: some(1)`, on a `Memory` viewed as a `DirReadText`; two reads | `Ok("M")` twice: the model's own `limit` ran; no event (Q1) | 03 Narrowing |
+| `V2-GRANT-narrow-model-restrict` | positive | `DirReadText.restrict(memory textOnly)`; read `b.bin` | `Result.ok`; the read is `Ok("M")`; no event (Q1) | the same |
+| `V2-GRANT-narrow-model-sub` | positive | `DirReadText.sub(memory p)` | `Result.ok`; no event (Q1) | the same |
+| `V2-GRANT-narrow-forward-limit` | positive | `DirReadText.limit(forward limits)` with `invocations: some(1)`, on a `Forward` over `dir.readText` viewed as a `DirReadText`; two reads of `a.txt` | `Ok("A")`, then `Err(limitExceeded)`; one event, whose `limits` are `{invocations: 1u64}` (Q1) | 03: "never adds a right, changes the resource, or resets a limit" |
+| `V2-GRANT-narrow-forward-restrict` | positive | `DirReadText.restrict(forward textOnly)`; read `b.bin`, then `a.txt` | `Err(denied)`, then `Ok("A")` (Q1) | the same |
+| `V2-GRANT-narrow-forward-parent-stays` | positive | after the `limit` of `V2-GRANT-narrow-forward-limit`, two reads through the original `Forward` | `Ok("A")` twice | 03: "The parent stays valid" |
 | `V2-GRANT-copy-shares` | positive | `let c be limit(r 1) endlet let d be c endlet`; read through `c`, then `d` | the second is `limitExceeded` | 06 Accounting: "A copy of a sealed authority shares its … accounting identity" |
 | `V2-GRANT-closure-keeps-grant` | positive | a `proc` value capturing a grant, returned from a `fn`, awaited | `Ok` | 06: "A grant outlives the variable that introduced it" |
 

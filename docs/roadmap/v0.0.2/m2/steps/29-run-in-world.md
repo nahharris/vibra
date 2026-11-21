@@ -53,10 +53,14 @@ architecture gives them; `vibra-conformance::workspace_run`.
    `@command.diagnostics` and startup `notStarted`); select the target
    (the only binary target when none is named; an unknown or library
    target is `@command.invalidInput`); take `plan_of`; build the driver
-   for the `Launch`; `admit` (no driver: `@command.unavailable` with
-   `@tool.unavailable`); `start`; build `EntryArgument`s from the bound
-   leaves; `run_entry`; map; release; return. Invariant: one exit path,
-   which releases.
+   for the `Launch`; `admit` with the plan, the `EntryShape` of the
+   checked entry (its written row and its leaves), and the target's
+   `effects` (no driver: `@command.unavailable` with
+   `@tool.unavailable`; any other refusal is a defect of the static
+   check and ends the run as a tool failure); `start`; build
+   `EntryArgument`s from the bound leaves; `run_entry` with
+   `Started::next_invocation` as the first invocation; map; release;
+   return. Invariant: one exit path, which releases.
 2. The mapping:
 
    | Ending | `result` | Record |
@@ -102,7 +106,7 @@ writing `hello\n`, returning `ExitCode(0u8)`, with the recipe `@out` from
 | `V2-RUNTIME-run-denied-by-recipe-policy` | positive | the same entry reading `raw.bin` under the `.txt` policy, returning `ExitCode(4u8)` on `denied` | `applicationCode: 4`; no event for the read | 07: "A grant that denies a request at run time returns the operation's typed error" |
 | `V2-RUNTIME-run-recipe-limit` | positive | `@out` with `limits: {outputBytes: 3u64}`; the entry writes `hello`, returns 5 on `limitExceeded` | `applicationCode: 5`; stdout empty | 03 Limits |
 | `V2-GRANT-env-name-denied` | positive | an entry with `vars: EnvReadVar` from `@host.env.vars` with `names: ["HOME"]`; it reads `PATH` and returns 6 on `denied` | `applicationCode: 6`; no event for the read (Q12) | 06 Environment: "Neither grant exposes anything outside its reviewed scope" |
-| `V2-RUNTIME-run-stdin` | positive | world `stdin: "x\ny"`; an entry echoing stdin | stdout `x\ny` | 06: "The world's `stdin` feeds an entry run under it" |
+| `V2-RUNTIME-run-stdin` | positive | world `stdin: "x\ny"`; an entry that writes `io.readAllText` of its input to stdout | stdout `x\ny` (Q10) | 06: "The world's `stdin` feeds an entry run under it" |
 | `V2-RUNTIME-run-fresh-world` | positive | one world, the target run twice; the entry writes a file and reports whether it existed | both runs report absent | 06: "Every executor and every test gets a fresh copy of the world" |
 | `V2-RUNTIME-run-entry-requires-else` | positive | an entry with `requires false else ExitCode(9u8)` | `applicationCode: 9`; the body's write is absent | 06: "behave as on any `proc`" |
 | `V2-RUNTIME-run-target-selection` | negative | two binary targets, none named | `@command.invalidInput` | 05: "invalid command, selector, or typed input" |
