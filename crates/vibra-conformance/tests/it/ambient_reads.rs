@@ -6,7 +6,9 @@
 //! read a project, a command line, or a corpus are named below, and the provider
 //! crates `vibra-host` and `vibra-host-v1` are where the ambient reads of a
 //! running program live, so that every one of them passes through the host
-//! provider and a registry row.
+//! provider and a registry row. Inside `vibra-host` they live in one place,
+//! the system drivers under `src/system/`: the broker, the host world, the
+//! trace, and startup reach the process only through a driver.
 
 // A test asserts by panicking, and indexes fixtures it just built.
 use crate::support::{rust_sources, workspace_root};
@@ -77,6 +79,13 @@ const AMBIENT_PATTERNS: &[&str] = &[
     "eprint!(",
 ];
 
+/// The ambient APIs `vibra-host` names only under `src/system/`: those of
+/// every other crate, and the clocks of `std::time` whatever their spelling.
+const HOST_SYSTEM_PATTERNS: &[&str] = &["std::time"];
+
+/// The directory of `vibra-host/src` where its system drivers live.
+const HOST_SYSTEM_DIRECTORY: &str = "system/";
+
 fn crate_names(root: &Path) -> BTreeSet<String> {
     std::fs::read_dir(root.join("crates"))
         .expect("the workspace has a crates directory")
@@ -101,9 +110,12 @@ fn scanned_crates(root: &Path) -> BTreeSet<String> {
         .collect()
 }
 
-/// The ambient APIs `source` names outside of comments and `#[cfg(test)]`
+/// The `patterns` `source` names outside of comments and `#[cfg(test)]`
 /// modules, which are host-language test code and run no program.
-fn ambient_references(source: &str) -> Vec<(usize, &'static str)> {
+fn references<'p>(
+    source: &str,
+    patterns: impl Iterator<Item = &'p &'static str> + Clone,
+) -> Vec<(usize, &'static str)> {
     let mut found = Vec::new();
     for (index, line) in source.lines().enumerate() {
         let trimmed = line.trim_start();
@@ -115,13 +127,57 @@ fn ambient_references(source: &str) -> Vec<(usize, &'static str)> {
             continue;
         }
         let code = line.split("//").next().unwrap_or(line);
-        for pattern in AMBIENT_PATTERNS {
+        for pattern in patterns.clone() {
             if code.contains(pattern) {
                 found.push((index + 1, *pattern));
             }
         }
     }
     found
+}
+
+/// The ambient APIs `source` names outside of comments and `#[cfg(test)]`
+/// modules, which are host-language test code and run no program.
+fn ambient_references(source: &str) -> Vec<(usize, &'static str)> {
+    references(source, AMBIENT_PATTERNS.iter())
+}
+
+/// The ambient references of `vibra-host` outside its system drivers: each
+/// file is given by its path below the crate's `src`, with `/` separators.
+fn host_reads_outside_system(files: &[(String, String)]) -> Vec<String> {
+    let mut found = Vec::new();
+    for (path, source) in files {
+        if path.starts_with(HOST_SYSTEM_DIRECTORY) {
+            continue;
+        }
+        let patterns = AMBIENT_PATTERNS.iter().chain(HOST_SYSTEM_PATTERNS);
+        for (line, pattern) in references(source, patterns) {
+            found.push(format!("src/{path}:{line} names `{pattern}`"));
+        }
+    }
+    found
+}
+
+/// The sources of `vibra-host/src`, by their paths below it.
+fn host_sources(root: &Path) -> Vec<(String, String)> {
+    let source_root = root.join("crates").join("vibra-host").join("src");
+    let mut sources = Vec::new();
+    rust_sources(&source_root, &mut sources);
+    assert!(!sources.is_empty(), "vibra-host has no sources");
+    sources
+        .into_iter()
+        .map(|path| {
+            let relative = path
+                .strip_prefix(&source_root)
+                .expect("a source below src")
+                .components()
+                .map(|component| component.as_os_str().to_string_lossy().into_owned())
+                .collect::<Vec<_>>()
+                .join("/");
+            let source = std::fs::read_to_string(&path).expect("readable source");
+            (relative, source)
+        })
+        .collect()
 }
 
 fn scan(root: &Path, crate_name: &str) -> Vec<String> {
@@ -174,13 +230,6 @@ fn the_tooling_exceptions_and_the_provider_crate_exist_and_the_provider_does_rea
     for provider_crate in PROVIDER_CRATES {
         assert!(crates.contains(*provider_crate));
     }
-    // `vibra-host` has no system driver until M2 step 30, so it names no
-    // ambient API at all.
-    let host = scan(&root, "vibra-host");
-    assert!(
-        host.is_empty(),
-        "`vibra-host` reads ambient state: {host:?}"
-    );
     for provider_crate in ["vibra-host-v1"] {
         // The audit is not vacuous: the provider is where the reads are.
         let provider = scan(&root, provider_crate);
@@ -198,6 +247,45 @@ fn the_tooling_exceptions_and_the_provider_crate_exist_and_the_provider_does_rea
             );
         }
     }
+}
+
+/// The host provider is exempt from the scan above as a crate, and held to a
+/// narrower rule here: every ambient read of `vibra-host` is in its system
+/// drivers, under `src/system/`.
+#[test]
+fn the_host_reads_ambient_state_only_in_its_system_drivers() {
+    let outside = host_reads_outside_system(&host_sources(&workspace_root()));
+    assert!(
+        outside.is_empty(),
+        "`vibra-host` reads ambient state outside `src/system/`:\n{}",
+        outside.join("\n")
+    );
+}
+
+#[test]
+fn atk_ambient_read_outside_system() {
+    let file = |path: &str, source: &str| (path.to_owned(), source.to_owned());
+    let broker = [file("broker.rs", "let bytes = std::fs::read(path)?;\n")];
+    assert_eq!(
+        host_reads_outside_system(&broker),
+        [
+            "src/broker.rs:1 names `std::fs`",
+            "src/broker.rs:1 names `fs::`"
+        ]
+    );
+    let clock = [file("world.rs", "use std::time::Duration;\n")];
+    assert_eq!(
+        host_reads_outside_system(&clock),
+        ["src/world.rs:1 names `std::time`"]
+    );
+    let system = [
+        file("system/fs.rs", "let bytes = std::fs::read(path)?;\n"),
+        file(
+            "system/clock.rs",
+            "let now = std::time::SystemTime::now();\n",
+        ),
+    ];
+    assert!(host_reads_outside_system(&system).is_empty());
 }
 
 /// The build driver is exempt from the scan above as a crate, and held to a
