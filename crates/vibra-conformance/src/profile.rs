@@ -204,6 +204,24 @@ impl ConformanceOperation {
         }
     }
 
+    /// The profile this operation is the own operation of, as the "Case
+    /// operations" column of the profile table gives it. A case names exactly
+    /// this profile. `nativeV1` and `fullV2` have no operation of their own.
+    #[must_use]
+    pub const fn profile(self) -> ConformanceProfile {
+        match self {
+            Self::Reader => ConformanceProfile::ReaderV2,
+            Self::ProjectDecode
+            | Self::SourceGraph
+            | Self::Resolve
+            | Self::WorkspaceCheck => ConformanceProfile::StaticV2,
+            Self::Interpret | Self::WorkspaceRun | Self::WorkspaceTest => {
+                ConformanceProfile::InterpreterV2
+            }
+            Self::Format | Self::Query => ConformanceProfile::ToolingV2,
+        }
+    }
+
     /// Whether this operation executes a program: the operation half of an
     /// executable case ("Differential execution").
     #[must_use]

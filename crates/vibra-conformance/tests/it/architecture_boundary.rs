@@ -55,13 +55,15 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
     ("vibra-ir", &["vibra-diagnostics"]),
     // The workspace reads a project's files and hands later phases a
     // snapshot with the embedded standard library, and its test runner runs
-    // the checked tests in the reference interpreter; no language crate
-    // depends on it.
+    // the checked tests in the reference interpreter. It is the only crate
+    // that holds an interpreter and the host broker at once (M2 architecture,
+    // section 1); no language crate depends on it.
     (
         "vibra-workspace",
         &[
             "vibra-diagnostics",
             "vibra-fmt",
+            "vibra-host",
             "vibra-interp",
             "vibra-ir",
             "vibra-resolve",
@@ -79,10 +81,18 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
     // The host provider over the major-1 host rows: the provider trait, the
     // system provider, the in-memory world, and the audit event. It reads the
     // registry of `vibra-ir` and the data grammar of `vibra-syntax` for the two
-    // documents it owns. No crate of the pipeline depends on it.
+    // documents it owns, and its filesystem driver opens files through the
+    // file-scope adapter. Only `vibra-workspace` depends on it: neither the
+    // interpreter nor the checker reaches a host
+    // (`the_interpreter_and_the_checker_do_not_reach_the_host`).
     (
         "vibra-host",
-        &["vibra-diagnostics", "vibra-ir", "vibra-syntax"],
+        &[
+            "vibra-diagnostics",
+            "vibra-fs-scope",
+            "vibra-ir",
+            "vibra-syntax",
+        ],
     ),
     // The checker: the embedded standard library and its loader, the type
     // checker, and its lowering to checked IR. It reads the reader's tree,
@@ -198,8 +208,8 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
         &["vibra-codegen", "vibra-exec", "vibra-ir-v1", "vibra-lower"],
     ),
     // The Windows file-scope adapter of the v0.0.2 M0 feasibility check. It
-    // knows no language: it opens files below a held directory handle. No
-    // crate depends on it yet.
+    // knows no language: it opens files below a held directory handle. Only
+    // `vibra-host` depends on it.
     ("vibra-fs-scope", &[]),
 ];
 
@@ -489,6 +499,69 @@ fn a_forbidden_arrow_is_reported() {
     assert_eq!(found.len(), 1, "{found:?}");
     assert!(found[0].contains("vibra-diagnostics"), "{}", found[0]);
     assert!(found[0].contains("vibra-fmt"), "{}", found[0]);
+}
+
+/// The crates `crate_name` reaches through the edges of `graph`, itself
+/// excluded, found with a work list.
+fn reachable(
+    graph: &BTreeMap<String, BTreeSet<String>>,
+    crate_name: &str,
+) -> BTreeSet<String> {
+    let mut found = BTreeSet::new();
+    let mut pending = vec![crate_name.to_owned()];
+    while let Some(next) = pending.pop() {
+        for edge in graph.get(&next).into_iter().flatten() {
+            if edge != crate_name && found.insert(edge.clone()) {
+                pending.push(edge.clone());
+            }
+        }
+    }
+    found
+}
+
+/// The crates that must not reach the host: compile-time evaluation and
+/// `interpret` run with no host context (M2 architecture, section 1).
+const HOSTLESS_CRATES: &[&str] = &["vibra-interp", "vibra-types"];
+
+/// The host broker and the file-scope adapter under it.
+const HOST_CRATES: &[&str] = &["vibra-host", "vibra-fs-scope"];
+
+#[test]
+fn the_interpreter_and_the_checker_do_not_reach_the_host() {
+    let declared = declared_architecture();
+    for crate_name in HOSTLESS_CRATES {
+        let reached = reachable(&declared, crate_name);
+        for host in HOST_CRATES {
+            assert!(
+                !reached.contains(*host),
+                "the table lets `{crate_name}` reach `{host}`"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_hostless_crate_depending_on_the_host_is_reported() {
+    for crate_name in HOSTLESS_CRATES {
+        let manifest = format!(
+            "[package]\nname = \"{crate_name}\"\n\n[dependencies]\n\
+             vibra-host.workspace = true\n"
+        )
+        .parse::<toml::Table>()
+        .expect("a manifest table");
+        let mut graph = workspace_graph(&workspace_root());
+        graph
+            .entry((*crate_name).to_owned())
+            .or_default()
+            .extend(vibra_dependencies(&manifest));
+        let found = violations(&graph, &declared_architecture());
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert!(
+            found[0].contains(&format!("`{crate_name}` depends on `vibra-host`")),
+            "{}",
+            found[0]
+        );
+    }
 }
 
 #[test]

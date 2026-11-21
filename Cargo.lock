@@ -1203,6 +1203,7 @@ dependencies = [
  "getrandom",
  "serde_json",
  "vibra-diagnostics",
+ "vibra-fs-scope",
  "vibra-ir",
  "vibra-syntax",
 ]
@@ -1348,6 +1349,7 @@ dependencies = [
  "sha2",
  "vibra-diagnostics",
  "vibra-fmt",
+ "vibra-host",
  "vibra-interp",
  "vibra-ir",
  "vibra-resolve",
