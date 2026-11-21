@@ -138,6 +138,7 @@ fn check_bodies(
             result_span: data.view.result().map(|(_, written)| written.span()),
         };
         let mut checker = BodyChecker::new(program, layout, data.module, text);
+        checker.context = effects::procs::lower(program, data);
         let patterns = data
             .view
             .takes()
@@ -1591,18 +1592,21 @@ fn stub(
             (name.clone(), read(signature.parameters.len() + at, ty))
         })
         .collect();
-    let body = Node::new(
-        Expr::TailCall {
-            target: CallTarget::Direct {
-                function: at,
-                type_arguments: (0..binders).map(Type::Binder).collect(),
+    let body = effects::procs::stub(
+        data,
+        Node::new(
+            Expr::TailCall {
+                target: CallTarget::Direct {
+                    function: at,
+                    type_arguments: (0..binders).map(Type::Binder).collect(),
+                },
+                arguments: Arguments {
+                    positional,
+                    labelled,
+                },
             },
-            arguments: Arguments {
-                positional,
-                labelled,
-            },
-        },
-        origin.clone(),
+            origin.clone(),
+        ),
     );
     CheckedFunction {
         name: data.qualified.clone(),
@@ -1694,7 +1698,12 @@ fn function_record(
         .contract
         .and_then(|index| program.interfaces.get(index))
     else {
-        return signature_record(program, &data.binders, &data.bounds, signature);
+        let binders = binders_of(program, &data.binders, &data.bounds)?;
+        return SignatureRecord::new(
+            binders,
+            effects::procs::callable_type(data, signature),
+        )
+        .map_err(|error| error.to_string());
     };
     let associated = interface
         .associated

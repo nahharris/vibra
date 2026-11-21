@@ -1,0 +1,12 @@
+id = "V2-EFFECT-plan-discarded"
+rule = "V2-EFFECT-plan-discarded"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "01-source-language.md#bodies-and-statements: let _ discards a plan explicitly"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

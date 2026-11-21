@@ -1,0 +1,2 @@
+proc half takes {n: I32} returns r: I32 requires Ordered.greater(n 0i32) do return n endproc
+fn build returns r: I32 do let _ be half(0i32) endlet return 0i32 endfn

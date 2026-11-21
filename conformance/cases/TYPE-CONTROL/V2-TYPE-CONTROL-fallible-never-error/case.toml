@@ -2,11 +2,17 @@ id = "V2-TYPE-CONTROL-fallible-never-error"
 rule = "V2-TYPE-CONTROL-fallible-never-error"
 profile = "staticV2"
 operation = "workspaceCheck"
-description = "02-type-system.md#fallible-values: a Result whose error type is uninhabited is not fallible"
+description = "02-type-system.md#fallible-values: a Result whose error type is uninhabited is not fallible: unused as a statement it is @type.mismatch, not @type.unhandledFallible"
 
 [inputs]
 tree = "tree"
 project = "tree/project.vibon"
 
 [expect]
-verdict = "accepted"
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.mismatch"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 140, end = 147 }

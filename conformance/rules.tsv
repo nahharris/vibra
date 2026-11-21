@@ -282,7 +282,7 @@ V2-RUNTIME-non-tail-depth	active	06-runtime.md#activations-and-memory
 V2-RUNTIME-memory-exhausted	active	06-runtime.md#activations-and-memory
 V2-PROJECT-workspace-check-library	active	05-tooling.md#command-surface
 V2-PROJECT-workspace-check-bin-unavailable	active	05-tooling.md#command-surface
-V2-TOOL-unavailable-proc	active	07-diagnostics-and-conformance.md#runtime-and-tool-failures
+V2-TOOL-unavailable-proc	retired	07-diagnostics-and-conformance.md#runtime-and-tool-failures
 V2-TOOL-format-module	active	05-tooling.md#formatting
 V2-TOOL-format-canonical	active	05-tooling.md#formatting
 V2-TOOL-format-recovered	active	07-diagnostics-and-conformance.md#recovery

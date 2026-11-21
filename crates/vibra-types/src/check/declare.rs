@@ -7,8 +7,9 @@
 //! names here are looked up without reporting: a name that does not resolve
 //! leaves an error type that reports nothing again.
 //!
-//! The checker supports `fn` declarations with parameter patterns, labelled
-//! parameters, bounded type parameters, `requires` and `ensures`, and written
+//! The checker supports `fn` declarations, and `proc` declarations whose row
+//! is empty, with parameter patterns, labelled parameters, bounded type
+//! parameters, `requires` and `ensures`, and written
 //! types of every form but `Proc` and `Intent`; module values of those types;
 //! wrappers, declared tuples, declared records, and variant types, generic or
 //! not and with bounded parameters, with their members, a wrapper, declared
@@ -17,10 +18,11 @@
 //! abstract and default members, and their implementations in a type or in
 //! the interface;
 //! and, in the embedded standard library, the intrinsic scalar types and
-//! `List(T)` with their external members. A procedure or a member that
-//! performs operations is `@tool.unavailable`, as is any other declaration
-//! of a local module, over the declaration; one of the standard library is
-//! skipped with a note.
+//! `List(T)` with their external members. A procedure whose row is not
+//! empty is `@tool.unavailable` at its `performs` section; a member that
+//! performs operations, and any other unsupported declaration of a local
+//! module, over the declaration; one of the standard library is skipped
+//! with a note.
 //!
 //! A written type nests at most [`Type::MAX_DEPTH`] levels, measured before
 //! it is converted; an applied type supplies exactly its head's parameters,
@@ -97,8 +99,6 @@ pub(crate) enum Entity {
     Value(usize),
     /// A module, through an import.
     Module(usize),
-    /// A declaration this checker has no table for: a `proc`.
-    Other(usize, ByteSpan),
 }
 
 /// One module.
@@ -653,7 +653,11 @@ impl<'a> Program<'a> {
                             implements: None,
                             name: member_name.text().to_owned(),
                             view: member,
-                            identity: identity(&type_name, "@fn", member_name.text()),
+                            identity: identity(
+                                &type_name,
+                                effects::procs::identity_kind(&member),
+                                member_name.text(),
+                            ),
                             qualified: format!(
                                 "{dotted}.{type_name}.{}",
                                 member_name.text()
@@ -830,7 +834,6 @@ impl<'a> Program<'a> {
                     }
                     Entity::Fn(i) => self.functions.get(i).map(|data| data.module),
                     Entity::Value(i) => self.values.get(i).map(|data| data.module),
-                    Entity::Other(module, _) => Some(module),
                 };
                 if let Some(target) = target {
                     pending.push(target);
@@ -1726,7 +1729,6 @@ impl<'a> Program<'a> {
                 Err(why) => self.no_type(module, span, &what, why),
             }
         }
-        effects::procs::module_headers(self);
     }
 
     /// Reads the written type of every module value.

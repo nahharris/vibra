@@ -1,0 +1,5 @@
+proc double takes {n: I32} returns twice: I32 do
+  return I32.add(n n)
+endproc
+proc same(T) takes {value: T} returns r: T do return value endproc
+proc run returns r: I32 do return await same(1i32) endproc

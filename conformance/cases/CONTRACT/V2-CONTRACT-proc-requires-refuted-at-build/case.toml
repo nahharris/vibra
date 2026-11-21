@@ -1,0 +1,19 @@
+id = "V2-CONTRACT-proc-requires-refuted-at-build"
+rule = "V2-CONTRACT-proc-requires-refuted-at-build"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#cold-plans-and-performed-rows: a bare requires of a proc refuted where the plan is built is at the predicate, related to the argument"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@contract.refuted"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 49, end = 72 }
+related = [{ source = "src/app/main.vib", span = { start = 134, end = 138 } }]

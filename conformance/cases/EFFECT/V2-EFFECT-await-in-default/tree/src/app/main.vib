@@ -1,0 +1,4 @@
+proc double takes {n: I32} returns twice: I32 do
+  return I32.add(n n)
+endproc
+proc run takes {n: I32} labelled {by: I32 be await double(1i32)} returns r: I32 do return I32.add(n by) endproc

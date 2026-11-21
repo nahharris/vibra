@@ -1,0 +1,18 @@
+id = "V2-EFFECT-await-in-module-value"
+rule = "V2-EFFECT-await-in-module-value"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#effect-ceilings: a module-value initializer is pure, so await there is invalid"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@effect.invalidAwait"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 93, end = 111 }

@@ -22,7 +22,7 @@ use std::sync::Arc;
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 use vibra_ir::external::compiler::{CompilerIntrinsic, is_assertion};
 use vibra_ir::{
-    Arguments, CallTarget, ClosureBody, Constant, Construction, ExitGuard,
+    Arguments, BodyContext, CallTarget, ClosureBody, Constant, Construction, ExitGuard,
     Expr as IrExpr, FnType, IntentType, Library, MatchArm, Node, Pattern as IrPattern,
     SourceOrigin, Type, Value,
 };
@@ -84,8 +84,8 @@ pub(crate) struct Reference {
 /// The type and the lowered node of one checked expression.
 #[derive(Debug)]
 pub(crate) struct Out {
-    ty: Option<Type>,
-    node: Option<Node>,
+    pub(crate) ty: Option<Type>,
+    pub(crate) node: Option<Node>,
 }
 
 impl Out {
@@ -389,6 +389,9 @@ pub(crate) enum Task<'a> {
     Return(ByteSpan),
     /// A `try`, and its operand's span.
     Try(ByteSpan, ByteSpan),
+    /// An `await` at its span, whose operand
+    /// [`effects::procs::await_expr`] started.
+    Await(ByteSpan),
     Postfix(Box<PostfixState<'a>>),
     Call(Box<CallState<'a>>),
     Product(Box<ProductState<'a>>),
@@ -575,6 +578,11 @@ pub(crate) struct BodyChecker<'p, 'a> {
     /// type of the plan it awaits: what [`effects::analysis::check_bodies`]
     /// reads. [`effects::procs::await_expr`] records it.
     pub(crate) awaits: Vec<(ByteSpan, IntentType)>,
+    /// The context the checked callable's body runs in, as
+    /// [`effects::procs::lower`] gives it.
+    pub(crate) context: BodyContext,
+    /// Whether the body checked is a test's.
+    test: bool,
 }
 
 /// What a callable body sees besides its parameters: its type parameters
@@ -646,7 +654,22 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             sites: Vec::new(),
             closures: Vec::new(),
             awaits: Vec::new(),
+            context: BodyContext::Pure,
+            test: false,
         }
+    }
+
+    /// Whether the expression being checked is in the checked callable's
+    /// own body: not in a guard or a labelled default, where nothing leaves
+    /// the callable, and not in an anonymous callable written there.
+    pub(crate) fn in_own_body(&self) -> bool {
+        self.frames.is_empty() && self.result.is_some()
+    }
+
+    /// Whether the expression being checked is in a test's own body, not in
+    /// an anonymous callable written there.
+    pub(crate) fn in_test_body(&self) -> bool {
+        self.test && self.frames.is_empty()
     }
 
     /// Checks the body of a callable of type `signature` whose parameters
@@ -1081,6 +1104,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         self.self_type = None;
         self.reset_scope();
         self.result = None;
+        self.test = true;
         let out = self.run(Task::Body(Box::new(
             self.body_state(body, BodyMode::Branch(Ctx::Stmt)),
         )));
@@ -1153,7 +1177,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         self.awaits.clear();
     }
 
-    fn node(&self, expr: IrExpr, span: ByteSpan) -> Node {
+    pub(crate) fn node(&self, expr: IrExpr, span: ByteSpan) -> Node {
         Node::new(expr, self.origin(span))
     }
 
@@ -1308,6 +1332,9 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                 Task::Return(span) => self.finish_return(span, input.take()),
                 Task::Try(span, operand) => {
                     self.finish_try(span, operand, input.take())
+                }
+                Task::Await(span) => {
+                    effects::procs::finish_await(self, span, input.take())
                 }
                 Task::Postfix(state) => self.step_postfix(state, input.take()),
                 Task::Call(state) => self.step_call(state, input.take()),
@@ -1719,7 +1746,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                     };
                     return (head, consumed + 1);
                 }
-                Entity::Fn(_) | Entity::Value(_) | Entity::Other(..) => break,
+                Entity::Fn(_) | Entity::Value(_) => break,
             }
         }
         let whole = ByteSpan::new(span.start(), end);
@@ -1746,7 +1773,6 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                 let module = program.values.get(index).map(|data| data.module);
                 module.map_or(Head::Error, |module| self.skipped(module, whole))
             }
-            Entity::Other(..) => Head::Error,
         };
         (head, consumed)
     }
@@ -2634,6 +2660,9 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         let Some(signature) = data.signature.clone() else {
             return Out::error();
         };
+        if effects::procs::named_as_value(self, data, span) {
+            return Out::error();
+        }
         self.references.push(Reference {
             target: Target::Function(index),
             span,
@@ -2791,7 +2820,11 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                         binder_names.clone_from(&data.binders);
                         bounds.clone_from(&data.bounds);
                         bound_module = data.module;
-                        flatten(&signature)
+                        let (params, result) = flatten(&signature);
+                        (
+                            params,
+                            result.map(|result| effects::procs::applied(data, result)),
+                        )
                     }
                     None => (None, None),
                 }
@@ -4494,7 +4527,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         let binds = self.local_index(name.text()).is_some()
             || !matches!(
                 self.program.lookup(self.module, name.text()),
-                Some(Entity::Value(_) | Entity::Fn(_) | Entity::Other(..))
+                Some(Entity::Value(_) | Entity::Fn(_))
             );
         let value = view.value()?;
         let ExprForm::Postfix(postfix) = value.form() else {
@@ -4659,6 +4692,22 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                         format!(
                             "this statement leaves a fallible `{actual}` unused; \
                              handle it, or bind it with `let _`"
+                        ),
+                    );
+                    node = None;
+                } else if !last
+                    && let Some(actual) = &ty
+                    && !matches!(actual, Type::Void | Type::Never)
+                {
+                    // An expression statement has type `Void` or `Never`
+                    // ("Bodies and statements"), a plan whose `await` was
+                    // forgotten included.
+                    self.report(
+                        DiagnosticCode::TypeMismatch,
+                        span,
+                        format!(
+                            "a statement has type `Void` or `Never`, found `{actual}`; \
+                             bind a value to drop with `let _`"
                         ),
                     );
                     node = None;

@@ -253,21 +253,15 @@ fn an_implementation_is_bounded_only_as_its_enclosing_type() {
 }
 
 #[test]
-fn a_proc_member_is_unavailable_wherever_it_is_written() {
-    // A `proc` builds a plan when applied, so checking it as a `fn` would
-    // run its body; it is unavailable as a member of a type, an interface,
-    // or an implementation, whatever the member it supplies.
+fn a_proc_member_is_unavailable_in_an_interface_or_an_implementation() {
+    // A `proc` member of an interface or of an implementation is
+    // unavailable, whatever the member it supplies; a `proc` member of a
+    // type is checked as a procedure (`tests::procs`).
     let log = "interface Log proc append takes {log: Self entry: Str} returns r: U8 \
                endproc endinterface\n";
     let pick =
         "interface Pick fn pick takes {x: Self} returns r: U8 endfn endinterface\n";
     for (source, member) in [
-        (
-            "type Box of U8 proc run takes {b: Self} returns r: U8 do return 1u8 endproc \
-             endtype\n"
-                .to_owned(),
-            "proc run",
-        ),
         (
             format!(
                 "{log}type Mem of U8 impl Log proc append takes {{log: Self entry: Str}} \
@@ -293,8 +287,10 @@ fn a_proc_member_is_unavailable_wherever_it_is_written() {
         let found = faults(&source);
         assert_eq!(found.len(), 1, "{source}\n{found:?}");
         assert!(
-            found.iter().all(|(code, span)| *code == DiagnosticCode::ToolUnavailable
-                && span.start() == at(&source, member, 0).start()),
+            found
+                .iter()
+                .all(|(code, span)| *code == DiagnosticCode::ToolUnavailable
+                    && span.start() == at(&source, member, 0).start()),
             "{source}\n{found:?}"
         );
     }

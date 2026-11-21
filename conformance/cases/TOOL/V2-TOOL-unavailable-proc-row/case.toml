@@ -1,0 +1,18 @@
+id = "V2-TOOL-unavailable-proc-row"
+rule = "V2-TOOL-unavailable-proc-row"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "07-diagnostics-and-conformance.md#runtime-and-tool-failures: a proc that performs operations is outside this checker, at its performs section"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "unsupported"
+
+[[expect.diagnostics]]
+code = "@tool.unavailable"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 51, end = 69 }

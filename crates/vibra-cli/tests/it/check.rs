@@ -108,7 +108,9 @@ fn check_no_project() {
 
 #[test]
 fn check_unsupported() {
-    let source = "fn answer returns r: I32 do return 42i32 endfn\n\nproc run returns r: Void do return void endproc";
+    let source = "fn answer returns r: I32 do return 42i32 endfn\n\n\
+                  type Missing of I32 endtype\n\n\
+                  proc run returns r: Void performs {Missing} do return void endproc";
     let root = TempDir::project("check-proc", LIBRARY, &[("src/app/main.vib", source)]);
     let (code, document) = check(&root, &[]);
     assert_eq!(code, 4, "{document}");
@@ -117,8 +119,9 @@ fn check_unsupported() {
     assert_eq!(codes(&document), ["@tool.unavailable"]);
     let span = &document["diagnostics"][0]["primarySpan"];
     assert_eq!(span["sourceId"], "src/app/main.vib");
-    assert_eq!(span["start"], 48);
-    assert_eq!(span["end"], 95);
+    // The `performs` section.
+    assert_eq!(span["start"], 102);
+    assert_eq!(span["end"], 120);
     assert_eq!(document["payload"]["accepted"], false);
 }
 

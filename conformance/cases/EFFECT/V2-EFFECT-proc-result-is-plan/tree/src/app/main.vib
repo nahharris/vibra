@@ -1,0 +1,4 @@
+proc double takes {n: I32} returns twice: I32 do
+  return I32.add(n n)
+endproc
+fn f takes {n: I32} returns r: I32 do return double(n) endfn

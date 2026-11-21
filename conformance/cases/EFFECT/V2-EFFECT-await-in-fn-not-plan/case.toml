@@ -1,0 +1,18 @@
+id = "V2-EFFECT-await-in-fn-not-plan"
+rule = "V2-EFFECT-await-in-fn-not-plan"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "07-diagnostics-and-conformance.md#contract-effect-and-authority-diagnostics: await in a fn body is one invalidAwait, and its operand is not checked"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@effect.invalidAwait"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 30, end = 40 }

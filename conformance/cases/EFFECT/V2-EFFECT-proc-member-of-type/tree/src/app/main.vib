@@ -1,0 +1,4 @@
+proc double takes {n: I32} returns twice: I32 do
+  return I32.add(n n)
+endproc
+type Box of {n: I32} proc twice takes {self: Self} returns r: I32 do return await double(self.n) endproc endtype

@@ -1,0 +1,5 @@
+proc double takes {n: I32} returns twice: I32 do
+  return I32.add(n n)
+endproc
+proc scale takes {n: I32} labelled {by: I32 be 2i32} returns r: I32 do return I32.add(n by) endproc
+proc run returns r: I32 do let a be await scale(1i32) endlet return await scale(a by: 3i32) endproc

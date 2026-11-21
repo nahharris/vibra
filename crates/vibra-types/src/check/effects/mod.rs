@@ -16,7 +16,7 @@
 //! | File | Hooks | Step |
 //! | --- | --- | --- |
 //! | [`rows`] | the resolution of a written row | 08 |
-//! | [`procs`] | [`procs::declare`], [`procs::module_headers`], [`procs::header`], [`procs::describe`], [`procs::apply`], [`procs::await_expr`], [`procs::lower`] | 05 |
+//! | [`procs`] | [`procs::declare`], [`procs::identity_kind`], [`procs::header`], [`procs::describe`], [`procs::callable_type`], [`procs::applied`], [`procs::apply`], [`procs::named_as_value`], [`procs::await_expr`], [`procs::finish_await`], [`procs::stub`], [`procs::lower`] | 05 |
 //! | [`procs`] | [`procs::test_header`], [`procs::test_context`] | 07, 21 |
 //! | [`members`] | [`members::contract_member`], [`members::impl_member`] | 08, 19 |
 //! | [`analysis`] | [`analysis::check_bodies`] | 09 |

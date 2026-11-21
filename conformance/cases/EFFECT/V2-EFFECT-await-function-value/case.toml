@@ -1,0 +1,18 @@
+id = "V2-EFFECT-await-function-value"
+rule = "V2-EFFECT-await-function-value"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "07-diagnostics-and-conformance.md#contract-effect-and-authority-diagnostics: await of a function value, which is not a plan, is invalidAwait at the await"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@effect.invalidAwait"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 156, end = 165 }
