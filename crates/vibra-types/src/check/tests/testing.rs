@@ -80,7 +80,8 @@ fn run(result: &CheckResult, name: &str) -> Result<TestExecution, String> {
         .ok_or_else(|| format!("`{name}` was not lowered"))?;
     let program = CheckedProgram::for_entry(Arc::clone(set), function)
         .map_err(|error| error.to_string())?;
-    run_test(&program, MemoryBudget::DEFAULT).map_err(|error| error.to_string())
+    run_test(&program, None, None, MemoryBudget::DEFAULT)
+        .map_err(|error| error.to_string())
 }
 
 #[test]

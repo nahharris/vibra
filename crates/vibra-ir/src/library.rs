@@ -6,6 +6,7 @@
 
 use std::collections::BTreeMap;
 
+use crate::external::compiler::NarrowingType;
 use crate::{IrError, Type, TypeId};
 
 /// A standard-library declaration the IR names by what it does, never by
@@ -116,41 +117,70 @@ impl Library {
 }
 
 /// The identity bound to each library declaration, as the checker binds
-/// them when it loads the standard library.
+/// them when it loads the standard library, and to each
+/// [narrowing type](NarrowingType) the grant rows of the compiler intrinsic
+/// registry name.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct LibraryTypes(BTreeMap<Library, TypeId>);
+pub struct LibraryTypes {
+    roles: BTreeMap<Library, TypeId>,
+    narrowing: BTreeMap<NarrowingType, TypeId>,
+}
 
 impl LibraryTypes {
     /// No binding.
     #[must_use]
     pub const fn new() -> Self {
-        Self(BTreeMap::new())
+        Self {
+            roles: BTreeMap::new(),
+            narrowing: BTreeMap::new(),
+        }
     }
 
     /// The same bindings with `library` bound to `id`.
     #[must_use]
     pub fn with(mut self, library: Library, id: TypeId) -> Self {
-        self.0.insert(library, id);
+        self.roles.insert(library, id);
+        self
+    }
+
+    /// The same bindings with the narrowing type `declaration` bound to
+    /// `id`.
+    #[must_use]
+    pub fn with_narrowing(mut self, declaration: NarrowingType, id: TypeId) -> Self {
+        self.narrowing.insert(declaration, id);
         self
     }
 
     /// The identity bound to `library`.
     #[must_use]
     pub fn get(&self, library: Library) -> Option<&TypeId> {
-        self.0.get(&library)
+        self.roles.get(&library)
+    }
+
+    /// The identity bound to the narrowing type `declaration`.
+    #[must_use]
+    pub fn narrowing(&self, declaration: NarrowingType) -> Option<&TypeId> {
+        self.narrowing.get(&declaration)
     }
 
     /// The library declaration bound to `id`, if any.
     #[must_use]
     pub fn library_of(&self, id: &TypeId) -> Option<Library> {
-        self.0
+        self.roles
             .iter()
             .find_map(|(library, bound)| (bound == id).then_some(*library))
     }
 
-    /// Every binding.
+    /// Every binding of a library declaration.
     pub fn bindings(&self) -> impl Iterator<Item = (Library, &TypeId)> {
-        self.0.iter().map(|(library, id)| (*library, id))
+        self.roles.iter().map(|(library, id)| (*library, id))
+    }
+
+    /// Every binding of a narrowing type.
+    pub fn narrowing_bindings(&self) -> impl Iterator<Item = (NarrowingType, &TypeId)> {
+        self.narrowing
+            .iter()
+            .map(|(declaration, id)| (*declaration, id))
     }
 
     /// The library type `library` applied to `arguments`.

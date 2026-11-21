@@ -585,11 +585,13 @@ pub(crate) fn apply<'a>(
     args: &[Val<'a>],
 ) -> Result<Val<'a>, Halt> {
     let result = match intrinsic {
+        // A narrowing asks the host context, which the machine holds and a
+        // pure row does not: `Machine::narrow` runs it.
         CompilerIntrinsic::GrantRestrict
         | CompilerIntrinsic::GrantSub
         | CompilerIntrinsic::GrantLimit => {
-            return Err(Halt::Unavailable(format!(
-                "`{}` narrows a sealed grant, which this interpreter does not hold",
+            return Err(Halt::Invalid(format!(
+                "`{}` narrows a sealed grant, which no pure row does",
                 intrinsic.symbol()
             )));
         }
@@ -626,15 +628,17 @@ mod tests {
     use super::apply;
     use crate::machine::Halt;
 
+    /// The grant rows are no pure rows: the machine routes them to the host
+    /// context before `apply`, so `apply` reaching one is a defect.
     #[test]
-    fn the_grant_rows_are_unavailable() {
+    fn the_grant_rows_are_not_pure_rows() {
         for intrinsic in [
             CompilerIntrinsic::GrantRestrict,
             CompilerIntrinsic::GrantSub,
             CompilerIntrinsic::GrantLimit,
         ] {
             assert!(
-                matches!(apply(intrinsic, &[]), Err(Halt::Unavailable(_))),
+                matches!(apply(intrinsic, &[]), Err(Halt::Invalid(_))),
                 "{}",
                 intrinsic.symbol()
             );

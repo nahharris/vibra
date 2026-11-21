@@ -8,6 +8,7 @@
 //! continuation and returning to the loop.
 
 use std::collections::{HashMap, HashSet};
+use std::ops::ControlFlow;
 use std::rc::Rc;
 
 use vibra_diagnostics::DiagnosticCode;
@@ -21,6 +22,7 @@ use vibra_ir::{
 use crate::compare::{DictBuild, DictFind, Structural};
 use crate::encode::{ObserveError, encoding, from_neutral};
 use crate::frame::{Frame, TypeEnv};
+use crate::host::HostSlot;
 use crate::ingress::{Check, Ingress, Then, checks_of, needs_checks, refused};
 use crate::plan::Invocation;
 use crate::types::{mentions_self, type_of};
@@ -33,8 +35,8 @@ pub(crate) enum Halt {
     /// The checked program is not one the checker accepts:
     /// `@runtime.invalidCheckedProgram`.
     Invalid(String),
-    /// A value the host handed in is not a value of its type:
-    /// `@runtime.invalidHostValue`.
+    /// A value the host handed in is not a value of its type, or the host
+    /// context faulted: `@runtime.invalidHostValue`.
     HostValue(String),
     /// The memory budget is exhausted.
     Memory,
@@ -45,7 +47,8 @@ pub(crate) enum Halt {
     Unavailable(String),
     /// An assertion did not hold, which ends a test body.
     Failed(Box<TestAssertionFailure>),
-    /// The encoder reached a value that has no value encoding: a plan.
+    /// The encoder reached a value that has no value encoding: a plan or a
+    /// grant.
     NoEncoding,
 }
 
@@ -201,6 +204,7 @@ pub(crate) enum Kont<'a> {
     Requires {
         function: &'a CheckedFunction,
         guard: &'a Guard,
+        origin: Option<&'a SourceOrigin>,
     },
     ClosureRequires {
         body: &'a ClosureBody,
@@ -315,6 +319,10 @@ pub(crate) struct Machine<'a> {
     pub(crate) probe: Option<usize>,
     /// The invocation current at each entry of `probe`, in order.
     pub(crate) probed: Vec<Invocation>,
+    /// The host context, when the execution has one, and the receipt of a
+    /// completed host call whose value has not yet reached its
+    /// continuation.
+    pub(crate) host: HostSlot<'a>,
 }
 
 /// The least growth of the accounted footprint, above the last
@@ -368,6 +376,7 @@ impl<'a> Machine<'a> {
             invocation: Invocation::ROOT,
             probe: None,
             probed: Vec::new(),
+            host: HostSlot::default(),
         }
     }
 
@@ -398,11 +407,25 @@ impl<'a> Machine<'a> {
                     self.origin = Some(origin);
                     self.eval(expr, origin)?
                 }
-                Step::Ret(value) => match self.konts.pop() {
-                    None => return invalid("a value with no continuation"),
-                    Some(Kont::End) => return Ok(value),
-                    Some(kont) => self.resume(kont, value)?,
-                },
+                Step::Ret(value) => {
+                    // The receipt of a host call whose value this is: it is
+                    // committed once the continuation has taken the value,
+                    // and never when taking it halts.
+                    let pending = self.host.pending.take();
+                    let next = match self.konts.pop() {
+                        None => return invalid("a value with no continuation"),
+                        Some(Kont::End) => ControlFlow::Break(value),
+                        Some(kont) => ControlFlow::Continue(self.resume(kont, value)?),
+                    };
+                    if pending.is_some() {
+                        self.host.deliver();
+                    }
+                    self.commit(pending)?;
+                    match next {
+                        ControlFlow::Break(value) => return Ok(value),
+                        ControlFlow::Continue(next) => next,
+                    }
+                }
             };
             self.stats.max_continuation_depth =
                 self.stats.max_continuation_depth.max(self.konts.len());
@@ -532,6 +555,15 @@ impl<'a> Machine<'a> {
             self.stats.peak_memory_bytes = self.stats.peak_memory_bytes.max(accounted);
             return Ok(());
         }
+        if self.remeasure(pending, in_flight) > self.budget {
+            return Err(Halt::Memory);
+        }
+        Ok(())
+    }
+
+    /// Measures the live bytes again from the roots and from `in_flight`,
+    /// and gives the footprint with `pending` more bytes.
+    fn remeasure(&mut self, pending: u64, in_flight: &[Val<'a>]) -> u64 {
         self.live_bytes = self.measure(in_flight);
         self.allocated_bytes = 0;
         let live = self.accounted().saturating_add(pending);
@@ -540,10 +572,14 @@ impl<'a> Machine<'a> {
         self.next_measure = live
             .saturating_mul(2)
             .max(live.saturating_add(MEASURE_FLOOR));
-        if live > self.budget {
-            return Err(Halt::Memory);
-        }
-        Ok(())
+        live
+    }
+
+    /// The bytes the budget can still account, from a fresh measurement of
+    /// the live footprint: the `room` of a host request.
+    pub(crate) fn room(&mut self) -> u64 {
+        let live = self.remeasure(0, &[]);
+        self.budget.saturating_sub(live)
     }
 
     /// A frame of `slot_count` slots, its bytes reserved before it is built;
@@ -1076,14 +1112,35 @@ impl<'a> Machine<'a> {
                 let receiver = env.apply(&call.receiver);
                 let interface_arguments = env.apply_all(&call.arguments);
                 let member_arguments = env.apply_all(&call.member_arguments);
-                if receiver.is_interface_value() {
+                let choices = env.apply_all_named(&call.choices)?;
+                let sealed = if receiver.is_interface_value() {
+                    self.sealed(&call.interface, &call.member, &args)?
+                } else {
+                    None
+                };
+                if let Some(function) = sealed {
+                    // A sealed grant is its interface's value itself: the
+                    // interface binds its members, and nothing is reboxed.
+                    Resolved {
+                        target: Target::Function(function),
+                        env: Rc::new(TypeEnv {
+                            binders: interface_arguments
+                                .iter()
+                                .chain(&member_arguments)
+                                .cloned()
+                                .collect(),
+                            self_type: Some(receiver.clone()),
+                            associated: Some(choices),
+                        }),
+                    }
+                } else if receiver.is_interface_value() {
                     let (held_type, result) = self.unbox(
                         &call.interface,
                         &call.member,
                         &mut args,
                         &interface_arguments,
                         &member_arguments,
-                        &env.apply_all_named(&call.choices)?,
+                        &choices,
                     )?;
                     // Reboxing is work after the return, so only a result
                     // that holds `Self` keeps the call out of tail position.
@@ -1269,10 +1326,14 @@ impl<'a> Machine<'a> {
                 frame.procedure = self.runs_in_procedure(&Target::Function(index))?;
                 self.push_frame(frame, tail)?;
                 if let Some(guard) = &function.entry_guard {
-                    self.konts.push(Kont::Requires { function, guard });
+                    self.konts.push(Kont::Requires {
+                        function,
+                        guard,
+                        origin,
+                    });
                     return Ok(Step::Eval(&guard.predicate));
                 }
-                self.start_body(function)
+                self.start_body(function, origin)
             }
         }
     }
@@ -1283,34 +1344,49 @@ impl<'a> Machine<'a> {
         Ok(Step::Eval(&body.body))
     }
 
-    /// Runs a function's body in its activation, arming its `ensures`.
-    fn start_body(&mut self, function: &'a CheckedFunction) -> Result<Step<'a>, Halt> {
+    /// Runs a function's body in its activation, arming its `ensures`. A
+    /// host body runs for the `await` written at `origin`.
+    fn start_body(
+        &mut self,
+        function: &'a CheckedFunction,
+        origin: Option<&'a SourceOrigin>,
+    ) -> Result<Step<'a>, Halt> {
         let frame = self.frame_mut()?;
         frame.exit = function.exit_guard.as_ref();
+        let parameters = |frame: &Frame<'a>, count: usize| {
+            frame
+                .slots
+                .iter()
+                .take(count)
+                .map(|slot| {
+                    slot.clone()
+                        .ok_or_else(|| Halt::Invalid("an unset parameter".to_owned()))
+                })
+                .collect::<Result<Vec<_>, _>>()
+        };
         match &function.body {
             FunctionBody::Expr(body) => Ok(Step::Eval(body)),
             FunctionBody::Intrinsic {
                 intrinsic,
                 type_arguments,
             } => {
-                let count = intrinsic.row().parameters.len();
-                let args = frame
-                    .slots
-                    .iter()
-                    .take(count)
-                    .map(|slot| {
-                        slot.clone().ok_or_else(|| {
-                            Halt::Invalid("an unset parameter".to_owned())
-                        })
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
+                let args = parameters(frame, intrinsic.row().parameters.len())?;
                 let type_arguments = frame.env.apply_all(type_arguments);
                 self.intrinsic(*intrinsic, &type_arguments, args, &function.origin)
             }
-            FunctionBody::Host(binding) => Err(Halt::Unavailable(format!(
-                "the host-bound member `{}` runs only with a host context",
-                binding.symbol()
-            ))),
+            FunctionBody::Host(binding) => {
+                let count = match function.signature.type_info() {
+                    Type::Proc(signature) => signature
+                        .parameters
+                        .len()
+                        .saturating_add(signature.labels.entries().len()),
+                    other => {
+                        return invalid(format!("a host-bound member of {other}"));
+                    }
+                };
+                let args = parameters(frame, count)?;
+                self.host_body(*binding, function, &args, origin)
+            }
         }
     }
 
@@ -1690,6 +1766,9 @@ impl<'a> Machine<'a> {
                 })?);
                 self.fold(function, items, 0, initial)
             }
+            CompilerIntrinsic::GrantRestrict
+            | CompilerIntrinsic::GrantSub
+            | CompilerIntrinsic::GrantLimit => self.narrow(intrinsic, args),
             CompilerIntrinsic::DictFromList => {
                 let [key, _] = type_arguments else {
                     return invalid("`dict.fromList` takes two type arguments");
@@ -1887,9 +1966,13 @@ impl<'a> Machine<'a> {
                 done.push(value);
                 self.operands(work, done)?
             }
-            Kont::Requires { function, guard } => {
+            Kont::Requires {
+                function,
+                guard,
+                origin,
+            } => {
                 if truth(&value)? {
-                    self.start_body(function)?
+                    self.start_body(function, origin)?
                 } else {
                     Step::Eval(&guard.consequence)
                 }

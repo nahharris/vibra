@@ -197,6 +197,8 @@ fn assert_equal_compares_values_200_000_deep() {
             let entry = function("test", signature(Vec::new(), Type::Void), body, 0);
             run_test(
                 &program(set_with_entry(entry), BASE + 1),
+                None,
+                None,
                 MemoryBudget::DEFAULT,
             )
             .unwrap()

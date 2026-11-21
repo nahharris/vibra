@@ -17,6 +17,7 @@
 mod deep;
 mod depth;
 mod evaluation;
+mod host;
 mod intrinsics;
 mod observation;
 mod plans;

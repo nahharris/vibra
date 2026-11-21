@@ -13,6 +13,7 @@
 
 use std::rc::Rc;
 
+use vibra_ir::authority::GrantToken;
 use vibra_ir::{ClosureBody, Type};
 
 use crate::frame::TypeEnv;
@@ -67,6 +68,9 @@ pub(crate) enum Repr<'a> {
     Closure(Rc<ClosureVal<'a>>),
     /// A plan: the resolved callee and its evaluated operands.
     Plan(Rc<PlanVal<'a>>),
+    /// A sealed grant: a token of the host context, copied freely, never
+    /// encoded, and never compared. Only `crate::host` makes one.
+    Grant(GrantToken),
 }
 
 /// A case with fields.

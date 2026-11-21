@@ -328,43 +328,51 @@ const HAND_ROWS: &[&str] = &[
     "grant.limit",
 ];
 
-/// A grant row applied to `Void` operands. The rows narrow a sealed grant,
-/// and no module set binds their narrowing types yet, so an expression that
-/// applies one is not a checked program.
-fn grant_row(intrinsic: CompilerIntrinsic) {
-    let node = generic_row(
-        intrinsic,
-        vec![Type::Void],
-        vec![var(0, Type::Void), var(1, Type::Void)],
-    );
-    assert_eq!(
-        evaluate(
-            &library_set(),
-            &node.expr,
-            &[Value::Void, Value::Void],
-            LIMITS
-        ),
-        Evaluation::Defect(Trap::InvalidCheckedProgram),
-        "{}",
-        intrinsic.symbol()
-    );
-}
-
+/// A grant row narrows a sealed grant through the host context, so its test
+/// runs in the fixture of `host.rs`: one narrowing request, and a result
+/// that holds the grant the context returned.
 #[test]
 fn grant_restrict() {
-    grant_row(CompilerIntrinsic::GrantRestrict);
+    crate::host::narrowing_row(CompilerIntrinsic::GrantRestrict);
 }
 
 #[test]
 fn grant_sub() {
-    grant_row(CompilerIntrinsic::GrantSub);
+    crate::host::narrowing_row(CompilerIntrinsic::GrantSub);
 }
 
 #[test]
 fn grant_limit() {
-    grant_row(CompilerIntrinsic::GrantLimit);
+    crate::host::narrowing_row(CompilerIntrinsic::GrantLimit);
 }
 
+/// A grant row outside a host context is unavailable: `evaluate` holds no
+/// context, so it reports a defect of the evaluation.
+#[test]
+fn a_grant_row_without_a_context_is_no_value() {
+    for intrinsic in [
+        CompilerIntrinsic::GrantRestrict,
+        CompilerIntrinsic::GrantSub,
+        CompilerIntrinsic::GrantLimit,
+    ] {
+        let node = generic_row(
+            intrinsic,
+            vec![Type::Void],
+            vec![var(0, Type::Void), var(1, Type::Void)],
+        );
+        assert_eq!(
+            evaluate(
+                &library_set(),
+                &node.expr,
+                &[Value::Void, Value::Void],
+                LIMITS
+            ),
+            Evaluation::Defect(Trap::InvalidCheckedProgram),
+            "{}",
+            intrinsic.symbol()
+        );
+    }
+}
 #[test]
 fn every_registry_row_has_a_test_named_after_its_wire_symbol() {
     let mut tested = VECTOR_ROWS
@@ -696,6 +704,8 @@ fn assert_true() {
             CompilerIntrinsic::AssertTrue,
             vec![crate::boolean(true)],
         )]),
+        None,
+        None,
         MemoryBudget::DEFAULT,
     )
     .unwrap();
@@ -706,6 +716,8 @@ fn assert_true() {
             assertion(CompilerIntrinsic::AssertTrue, vec![crate::boolean(false)]),
             equal_at(Type::I32, int(1), int(2)),
         ]),
+        None,
+        None,
         MemoryBudget::DEFAULT,
     )
     .unwrap()
@@ -723,6 +735,8 @@ fn assert_false() {
             CompilerIntrinsic::AssertFalse,
             vec![crate::boolean(false)],
         )]),
+        None,
+        None,
         MemoryBudget::DEFAULT,
     )
     .unwrap();
@@ -732,6 +746,8 @@ fn assert_false() {
             CompilerIntrinsic::AssertFalse,
             vec![crate::boolean(true)],
         )]),
+        None,
+        None,
         MemoryBudget::DEFAULT,
     )
     .unwrap()
@@ -746,12 +762,16 @@ fn assert_false() {
 fn assert_equal() {
     let passed = run_test(
         &test_body(vec![equal_at(Type::I32, int(1), int(1)), void()]),
+        None,
+        None,
         MemoryBudget::DEFAULT,
     )
     .unwrap();
     assert_eq!(passed.failure, None);
     let failed = run_test(
         &test_body(vec![equal_at(Type::I32, int(1), int(2))]),
+        None,
+        None,
         MemoryBudget::DEFAULT,
     )
     .unwrap()
@@ -781,6 +801,8 @@ fn assert_equal_of_an_unobservable_operand_is_an_observation_failure() {
     };
     let failed = run_test(
         &test_body(vec![equal_at(Type::Any, held(), held())]),
+        None,
+        None,
         MemoryBudget::DEFAULT,
     )
     .unwrap()

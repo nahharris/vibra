@@ -162,9 +162,10 @@ pub(crate) fn to_visit<'v, 'a>(
 ) -> Result<ToNeutral<'v, 'a>, Halt> {
     use Visited::{Leaf, Node};
     Ok(match (ty, &value.0) {
-        // A plan has no value encoding, and no neutral value holds one
-        // (`docs/spec/06-runtime.md`, "What has no encoding").
-        (_, Repr::Plan(_)) => return Err(Halt::NoEncoding),
+        // A plan and a sealed grant have no value encoding, and no neutral
+        // value holds one (`docs/spec/06-runtime.md`, "What has no
+        // encoding").
+        (_, Repr::Plan(_) | Repr::Grant(_)) => return Err(Halt::NoEncoding),
         (Type::I8, Repr::I8(n)) => Leaf(Value::I8(*n)),
         (Type::I16, Repr::I16(n)) => Leaf(Value::I16(*n)),
         (Type::I32, Repr::I32(n)) => Leaf(Value::I32(*n)),

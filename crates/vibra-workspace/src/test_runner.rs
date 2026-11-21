@@ -703,7 +703,7 @@ fn execute(
                 message: format!("a test is not a valid entry: {error}"),
             }
         })?;
-    run_test(&program, budget)
+    run_test(&program, None, None, budget)
 }
 
 #[cfg(test)]

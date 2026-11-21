@@ -12,13 +12,17 @@
 //! Vibra calls or awaits, and it reads nothing from its surroundings: no
 //! file, no environment variable, no clock, and no standard stream.
 //!
-//! Host operations, grants, and native bindings are not here: a host-bound
-//! member that is reached is reported as [`RuntimeError::Unavailable`].
+//! Host-bound members, the narrowing of grants, and the test-world rows run
+//! through a [`vibra_ir::authority::HostContext`] the caller hands in, which
+//! issues and checks every grant: a sealed grant is a token of that context,
+//! never encoded and never compared. With no context, a host-bound member
+//! that is reached is reported as [`RuntimeError::Unavailable`].
 
 mod compare;
 mod encode;
 mod evaluate;
 mod frame;
+mod host;
 mod ingress;
 mod intrinsics;
 mod machine;
@@ -26,7 +30,10 @@ mod plan;
 mod types;
 mod value;
 
-pub use evaluate::{evaluate, evaluate_reading, run, run_test, run_test_probing};
+pub use evaluate::{
+    evaluate, evaluate_reading, run, run_entry, run_test, run_test_probing,
+};
+pub use host::EntryArgument;
 pub use plan::Invocation;
 
 use std::collections::BTreeSet;

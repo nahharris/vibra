@@ -487,6 +487,20 @@ fn check_library(
             return Err(wrong());
         }
     }
+    // A narrowing type is an ordinary declaration of the set, with no
+    // parameters: the grant rows name it unapplied.
+    for (declaration, id) in library.narrowing_bindings() {
+        let definition = types
+            .get(id)
+            .ok_or_else(|| IrError::UnknownType(id.path().to_owned()))?;
+        if !definition.parameters().is_empty() {
+            return Err(IrError::InvalidType(format!(
+                "`{}` does not have the shape of `{}`",
+                id.path(),
+                declaration.name()
+            )));
+        }
+    }
     Ok(())
 }
 
@@ -1051,14 +1065,24 @@ impl Flow {
 }
 
 /// Whether the default body `default` of an interface member is a host
-/// binding. Such a binding is the implementation of a sealed grant only, so
-/// for an implementation the member is abstract: it supplies the member, and
-/// one that does not is rejected (`docs/spec/03-effects.md`, "Operation
-/// interfaces").
+/// binding or a grant row of the compiler intrinsic registry. Such a binding
+/// is the implementation of a sealed grant only, so for an implementation
+/// the member is abstract: it supplies the member, and one that does not is
+/// rejected (`docs/spec/03-effects.md`, "Operation interfaces",
+/// "Narrowing").
 fn host_bound(tables: &Tables<'_>, default: Option<usize>) -> bool {
     default
         .and_then(|index| tables.function(index).ok())
-        .is_some_and(|function| matches!(function.body, FunctionBody::Host(_)))
+        .is_some_and(|function| match &function.body {
+            FunctionBody::Host(_) => true,
+            FunctionBody::Intrinsic { intrinsic, .. } => matches!(
+                intrinsic,
+                CompilerIntrinsic::GrantRestrict
+                    | CompilerIntrinsic::GrantSub
+                    | CompilerIntrinsic::GrantLimit
+            ),
+            FunctionBody::Expr(_) => false,
+        })
 }
 
 fn table_bool(table: &TypeTable) -> Result<Type, IrError> {

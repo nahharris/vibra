@@ -460,8 +460,8 @@ impl RowType {
     ///
     /// # Errors
     ///
-    /// A library type it names is not bound, a generic has no argument, or
-    /// it names a narrowing type, which no module set binds.
+    /// A library type or a narrowing type it names is not bound, or a
+    /// generic has no argument.
     pub fn instantiate(
         &self,
         library: &LibraryTypes,
@@ -490,11 +490,14 @@ impl RowType {
                 library.declared(*declaration, all(arguments)?)?
             }
             Self::Narrowing(declaration) => {
-                return Err(IrError::UnknownType(format!(
-                    "{}.{}",
-                    declaration.module(),
-                    declaration.name()
-                )));
+                let id = library.narrowing(*declaration).ok_or_else(|| {
+                    IrError::UnknownType(format!(
+                        "{}.{}",
+                        declaration.module(),
+                        declaration.name()
+                    ))
+                })?;
+                Type::Declared(id.clone(), Vec::new())
             }
         })
     }

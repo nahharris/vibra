@@ -203,7 +203,7 @@ fn run_body(
 ) -> Result<TestExecution, RuntimeError> {
     let entry = BASE + functions.len() - 1;
     let set = set_with(functions, Vec::new(), Vec::new());
-    run_test(&program(set, entry), budget)
+    run_test(&program(set, entry), None, None, budget)
 }
 
 /// [`run_body`] under the default budget, which must pass: every
