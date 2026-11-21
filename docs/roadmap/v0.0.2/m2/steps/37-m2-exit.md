@@ -20,8 +20,8 @@ Crates: `vibra-conformance`, `conformance/cases`.
 
 | Existing | Symbol | Use |
 | --- | --- | --- |
-| `crates/vibra-conformance/src/rules.rs:227` | `pub fn parse` | the active rule identities |
-| `crates/vibra-conformance/src/corpus.rs:167` | `pub fn discover` | the cases the audit reads |
+| `crates/vibra-conformance/src/rules.rs:253` | `pub fn parse` | the active rule identities |
+| `crates/vibra-conformance/src/corpus.rs:168` | `pub fn discover` | the cases the audit reads |
 
 Proposed: `crates/vibra-conformance/tests/it/m2_coverage.rs`;
 `docs/roadmap/v0.0.2/m2/exit.md`.

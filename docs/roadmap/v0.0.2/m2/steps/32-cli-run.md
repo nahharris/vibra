@@ -27,7 +27,7 @@ Crates: `vibra-cli`, `vibra-schema`.
 | `crates/vibra-cli/src/args.rs:46` | `program_arguments` | the tokens after `--` |
 | `crates/vibra-cli/src/inventory.rs:158` | `run` | the command line marked supported |
 | `crates/vibra-cli/src/test.rs:52` | `pub fn run` | the model for a command module |
-| `crates/vibra-schema/src/test_payload.rs:127` | `pub struct TestItem` | the model for a payload type |
+| `crates/vibra-schema/src/test_payload.rs:128` | `pub struct TestItem` | the model for a payload type |
 
 From step 29: `run_target`, `Launch::System`, `RunOutcome`.
 

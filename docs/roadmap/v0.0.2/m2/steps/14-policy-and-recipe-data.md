@@ -22,7 +22,7 @@ Crates: `vibra-host`.
 | Existing | Symbol | Use |
 | --- | --- | --- |
 | `crates/vibra-ir/src/external/host.rs:161` | `pub struct HostRow` | `HostInterface`, the type of a leaf |
-| `crates/vibra-syntax/src/schema.rs:55` | `pub enum Slot` | the schema language the policy schema is written in |
+| `crates/vibra-syntax/src/document.rs:145` | `pub fn parse_data` | the iterative data reader whose `DataNode` tree the policy decoder walks; `Slot` has no recursive reference, so the recursive expression grammar is not a schema |
 | `crates/vibra-workspace/src/project.rs:356` | `fn grant_binding` | the recipe shape the project decoder already accepts |
 
 Proposed: `vibra-host::policy::{Policy, Expr, NameTest, decode,
@@ -46,10 +46,13 @@ RelativeNames}`; `vibra-host::recipe` as the architecture gives it, with
    crate's tests, `tests/it/names.tsv`: one name and its verdict per
    line. Step 31, which depends on this step and on the adapter, runs
    the adapter's check over the same file.
-2. `policy::decode`: the closed schema of `@scopePolicy.v1` of family
-   `@filesystem`. An unknown field, kind, version, or family is an error;
-   so is a missing field and an empty suffix. Family `@http` decodes to
-   "reserved" and is an error for every caller of this release.
+2. `policy::decode`: a hand-written iterative decoder of `@scopePolicy.v1`
+   of family `@filesystem` over the `DataNode` of `parse_data`, with the
+   closed-record rules of the schema reader, `format` checked first. An
+   unknown field, kind, version, or family is an error; so is a missing
+   field, an empty suffix, and a `prefix` name outside the name profile.
+   Family `@http` decodes to "reserved" and is an error for every caller
+   of this release. Invariant: no decoding function calls itself.
 3. `policy::normalize`: flatten nested `allOf` or `anyOf` of one kind,
    remove duplicates, sort items by canonical bytes, remove single-item
    wrappers, sort sets; path components keep their order. Explicit stack.
@@ -114,7 +117,7 @@ Host tests of `vibra-host`. `F(prefix depth actions names)` abbreviates a
 | size 4,096 | boundary | a policy counted at exactly 4,096 | accepted | 03: "at most 4,096 nodes and entries in total" |
 | size 4,097 | negative | one more entry | too complex | the same |
 | depth 64 and 65 | boundary, negative | nested `allOf` wrappers of distinct kinds to depth 64; to 65 | accepted; too complex | 03: "a depth of at most 64" |
-| deep input | boundary | 100,000 nested `anyOf` given to `decode` on a 256 KiB thread | too complex, no overflow | architecture, risk 5 |
+| deep input | boundary | 100,000 nested `anyOf`, each over a distinct rule and the next wrapper, given to `decode` on a 256 KiB thread | too complex, no overflow | architecture, risk 5 |
 | the name vectors | positive and negative | each line of `names.tsv`: the vectors of the chapter's reserved-name and name-profile sentences | `path::check_name` gives the line's verdict | 03 Reserved device names: "the same closed set is rejected on every platform" |
 | provider table | positive | each of the nine providers with each of its grant types and resource kinds | `validate` accepts | 04 Targets, the provider table |
 | provider cannot issue the type | negative | `@host.io.stdout` for a `DirReadText` leaf | `BindingFault` at `provider` | 04: "The leaf's type … MUST be one of the issuer's grant types" |
@@ -122,7 +125,7 @@ Host tests of `vibra-host`. `F(prefix depth actions names)` abbreviates a
 | `source` of the wrong kind | negative | an `@argumentPath` whose `source` is an `EnvReadVar` leaf | `BindingFault` at `source` | 04: "a leaf of type `EnvReadArgs` for an argument" |
 | variable outside `names` | negative | `@variablePath name: "HOME"` whose source's `names` are `["TMP"]` | `BindingFault` | 04: "whose `names` include the variable" |
 | `after` lacks `source` | negative | `source: @args`, `after: []` | `BindingFault` at `after` | 04: "It MUST contain the recipe's `source` leaf" |
-| `after` cycle | negative | `@a` after `@b`, `@b` after `@a` | a cycle fault at the later edge | 04: "The `after` relation MUST be acyclic" |
+| `after` cycle | negative | `@a` after `@b`, `@b` after `@a` | a cycle fault at the entry `@a` of `@b`'s list | 04: "the fault is at the entry `@a` of `@b`'s list" |
 | policy on another provider | negative | `policy` on `@host.io.stdout` | `BindingFault` at `policy` | 04: "for `@host.fs.directory` only" |
 | policy missing | negative | `@host.fs.directory` with no `policy` | `BindingFault` | 04: "and required there" |
 | policy with another root | negative | leaf `@notes`, a rule with `root: @logs` | an invalid-policy fault | 04: "Its rules name this leaf as their root" |

@@ -89,7 +89,7 @@ Tests of `vibra-ir` (`tests/it/registry.rs`).
 | the stdin rows take a count | positive | `host_row("io.stdinText")` and `host_row("io.stdinBytes")` | each has the one further parameter `max: U64` (Q10) | 06 Host registry, the rows of the two symbols |
 | each error type | positive | `HostErrorType::Fs.cases()` and the other four | its own cases followed by the four shared ones | 06 Error types, both tables |
 | the three grant rows | positive | `grant.restrict`, `grant.sub`, `grant.limit` | `Fn({G FsPolicy} Result(G ScopeError))`, `Fn({G RelativePath} Result(G ScopeError))`, `Fn({G GrantLimits} G)` | 06 Compiler intrinsic registry: "are the rows `grant.restrict`, `grant.sub`, and `grant.limit`" |
-| every row is `@once`, `since` 0 | positive | all 17 | `Delivery::Once`, 0 | 06 Host registry: "Every row below has `since` 0 and delivery `@once`" |
+| every row is `@once`, `since` 0 | positive | all 17 | `Delivery::Once`, 0 | 06 Host registry: "Every row of the host table below and of the test-world registry has `since` 0 and delivery `@once`" |
 | a major-1 spelling | negative | `host_row("io.stdin-text")` | `None` | 06 Host registry: "wire symbols are dotted camelCase strings" |
 | a test-world symbol in the host table | negative | `host_row("testWorld.output")` | `None` | 06 Host registry: "a separate closed test-world registry" |
 | registry snapshot | boundary | `registry_snapshot()` against `host-2.0.txt` and `compiler-2.0.txt` | equal, byte for byte | 06 Registry versioning: "A checked-in registry snapshot … MUST reject an unintended change" |

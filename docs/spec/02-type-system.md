@@ -174,8 +174,10 @@ digits of the SHA-256 of these bytes, in order:
    for a top-level declaration), the declaration kind atom, and the name.
 
 The declaration kinds are `@module`, `@type`, `@interface`, `@case`, `@fn`,
-`@proc`, `@value`, `@test`, and `@associatedType`. A module's anchor has an
-empty owner path and its own path's last part as the name. Test vector:
+`@proc`, `@value`, `@test`, and `@associatedType`. A member of a type or
+an interface has the kind of its form: `@fn` for a `fn` member and `@proc`
+for a `proc` member. A module's anchor has an empty owner path and its own
+path's last part as the name. Test vector:
 package `hello` version `0.1.0`, module `@hello.main`, no owner, kind
 `@proc`, name `main` gives
 `sha256:213e3a01ef10d7c10032616f8ab0da9a97fb729b9f98d723f4beb3158a25e2ad`.
@@ -720,7 +722,7 @@ type parameters matched in order whatever their names.
 | a callable member supplied twice in one `impl` | `@name.memberCollision`, the later name, related to the first |
 | an associated type chosen twice in one `impl` | `@name.redeclaration`, the later choice, related to the first |
 | a default member supplied again | `@type.defaultOverride`, the member's name, related to the default |
-| a member whose signature differs from the contract under the substitution | `@type.mismatch`, the differing type, default value, or written bound (the type parameter when none is written), or the member's name for a differing count of parameters or set of labels, related to the contract's counterpart |
+| a member whose signature differs from the contract under the substitution | `@type.mismatch`, the differing type, default value, or written bound (the type parameter when none is written), the member's `performs` section for a differing row, or the member's name for a differing count of parameters, set of labels, or kind (`fn` for `proc`, or `proc` for `fn`) and for an omitted row; related to the contract member's name, or to the contract's bound for a differing bound the contract writes |
 
 An implementation member declares no guard of its own: the contract's
 `requires` and `ensures` are its guards, as

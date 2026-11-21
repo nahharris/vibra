@@ -16,7 +16,7 @@ Crates: `vibra-fs-scope`, `vibra-host`, `vibra-workspace`, `vibra-cli`.
 
 | Existing | Symbol | Use |
 | --- | --- | --- |
-| `crates/vibra-fs-scope/src/windows.rs:54` | `pub struct ScopedDir` | adapter-side fixes |
+| `crates/vibra-fs-scope/src/windows.rs:55` | `pub struct ScopedDir` | adapter-side fixes |
 | `crates/vibra-cli/src/lib.rs:47` | `pub const fn exit_code` | command-side fixes |
 
 Driver-side fixes enter through `Driver::call` and `Driver::acquire`.

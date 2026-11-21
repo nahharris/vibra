@@ -20,8 +20,8 @@ Crates: `vibra-types`, `conformance/cases`.
 
 | Existing | Symbol | Use |
 | --- | --- | --- |
-| `crates/vibra-types/src/check/lower.rs:868` | `pub(crate) fn check_program` | calls `effects::analysis::check_bodies` (step 04) |
-| `crates/vibra-types/src/check/expr.rs:1368` | `ExprForm::Await` | records each `await` with its operand's `Intent` type |
+| `crates/vibra-types/src/check/lower.rs:873` | `pub(crate) fn check_program` | calls `effects::analysis::check_bodies` (step 04) |
+| `crates/vibra-types/src/check/expr.rs:1428` | `ExprForm::Await` | records each `await` with its operand's `Intent` type |
 | `crates/vibra-ir/src/types.rs:152` | `pub struct Row` | set operations on rows |
 
 Proposed: `effects::analysis::{Performed, Witness, check_bodies}` as the

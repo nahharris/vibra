@@ -22,10 +22,10 @@ Crates: `stdlib`, `vibra-types`, `conformance/cases`.
 
 | Existing | Symbol | Use |
 | --- | --- | --- |
-| `crates/vibra-types/src/stdlib/external.rs:52` | `pub fn check_externals` | checks a `@host` member against its row: owner, signature |
-| `crates/vibra-types/src/check/interfaces.rs:390` | `member.performs().is_some()` | reaches `effects::members::contract_member`, which gains the host-member rule |
-| `crates/vibra-ir/src/external/host.rs:377` | `pub fn host_row` | the rows |
-| `crates/vibra-ir/src/module_set.rs:42` | `pub enum FunctionBody` | `Host`, the body a bound member lowers to |
+| `crates/vibra-types/src/stdlib/external.rs:57` | `pub fn check_externals` | checks a `@host` member against its row: owner, signature |
+| `crates/vibra-types/src/check/effects/members.rs:48` | `CallableKind::Proc if member.external().is_some()` | `effects::members::contract_member` reports a host-bound member as unsupported; it gains the host-member rule |
+| `crates/vibra-ir/src/external/host.rs:842` | `pub fn host_row` | the rows |
+| `crates/vibra-ir/src/module_set.rs:46` | `pub enum FunctionBody` | `Host`, the body a bound member lowers to |
 
 Proposed: `stdlib/src/std/{io,fs,env,time,random}.vib`.
 

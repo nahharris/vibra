@@ -28,7 +28,7 @@ Crates: `vibra-types`, `vibra-workspace`, `conformance/cases`.
 | `crates/vibra-workspace/src/project.rs:490` | `TargetKind::Bin => Availability::Unavailable` | a binary target becomes available |
 | `crates/vibra-workspace/src/project.rs:374` | `fn target` | the target schema with `entry`, `effects`, `grants` |
 | `crates/vibra-workspace/src/semantic.rs:69` | `pub fn check_snapshot` | calls `entry::check_target` per binary target |
-| `crates/vibra-types/src/check/lower.rs:868` | `pub(crate) fn check_program` | exposes the entry's declaration to `effects::entry` |
+| `crates/vibra-types/src/check/lower.rs:873` | `pub(crate) fn check_program` | exposes the entry's declaration to `effects::entry` |
 
 Proposed: `vibra-types::check::effects::entry::{entry_signature,
 EntrySignature, GrantShape, LeafType}`; `vibra-workspace::entry::

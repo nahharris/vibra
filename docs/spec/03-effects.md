@@ -451,16 +451,18 @@ Unknown fields, kinds, and versions are rejected.
 [effective policy](#narrowing) every rule has a `root`: a rule a `restrict`
 or a `sub` contributes names the leaf its grant descends from, and every
 rule of a grant that descends from a `TestWorld` directory grant names
-`@testWorld`. `names` is a
-record whose `kind` is `@anyName`; `@exact` with `names`; `@suffix` with
-`value`; or `@allOf` or `@anyOf` with `items`.
+`@testWorld`. Each element of a `prefix` is a name under the profile of
+[Paths](#filesystem-policies), so a document whose `prefix` holds `..` is
+rejected. `names` is a record whose `kind` is `@anyName`; `@exact` with
+`names`; `@suffix` with `value`; or `@allOf` or `@anyOf` with `items`.
 
 A policy is normalized before it is hashed or shown: nested `allOf` or
 `anyOf` of the same kind are flattened, duplicate items removed, items
 sorted by their canonical bytes, single-item wrappers removed, and sets
-sorted. Sequences such as path components keep their order. The hash
-identifies this normal form; two policies with the same meaning may hash
-differently.
+sorted, each element kept once. The `actions` sort by their atoms and the
+`names` of `@exact` in `Str` order, by Unicode scalar. Sequences such as
+path components keep their order. The hash identifies this normal form; two
+policies with the same meaning may hash differently.
 
 A policy has at most 4,096 nodes and entries in total and a depth of at most
 64, counting ancestors acquired by restriction. A larger one is
@@ -468,9 +470,11 @@ A policy has at most 4,096 nodes and entries in total and a depth of at most
 a grant's [effective policy](#narrowing). A node is one expression record or
 one name-test record; an entry is one element of a `prefix`, `actions`, or
 `names` list. The depth is the nesting of expression and name-test records,
-plus one for each `restrict` and each `sub` in the grant's ancestry; a
-`limit` adds nothing. These numbers are an engineering default of the first
-tool profile, not a measured capacity.
+a lone record counting one, so a file rule whose `names` is
+`{kind: @anyName}` has depth 2; to it is added one for each `restrict` and
+each `sub` in the grant's ancestry, and a `limit` adds nothing. These
+numbers are an engineering default of the first tool profile, not a
+measured capacity.
 
 ### Filesystem policies
 
@@ -482,13 +486,20 @@ selects directories: `self` is `prefix` itself, `children` one name further,
 - **Actions.** `read` covers `DirReadBytes` and `DirReadText`; `replace` and
   `create` cover the two write interfaces for an existing and a new file;
   `list` covers `DirList`; `stat` covers `DirStat` for the kind of rule it
-  appears in. A grant's interface and its policy both have to allow a
-  request. Append, remove, and rename do not exist yet.
+  appears in: a `stat` of a directory is decided by the directory rules,
+  and a `stat` of any other entry by the file rules. A grant's interface
+  and its policy both have to allow a request. Append, remove, and rename
+  do not exist yet.
 - **A file rule grants no listing.** Permission to read `.txt` files does
   not permit enumerating a directory.
 - **Paths.** A `RelativePath` (`@std.fs`) is a list of names, built by the
   fallible constructor `RelativePath(names)`. The empty path is valid and
-  names the directory the grant holds. A name is non-empty and is
+  names the directory the grant holds. No file rule selects that directory,
+  so a policy permits a file operation on the empty path only if it
+  permits every request, as an empty `allOf` does; otherwise the request is
+  `denied` before any driver is asked. A request that reaches the driver,
+  such as one through a `TestWorld` directory grant that was never
+  restricted, is `notAFile`. A name is non-empty and is
   rejected if it is `.` or `..`, contains `/`, `\`, `:`, NUL, or a control
   character, ends in a dot or a space, or is a reserved device name.
   Absolute, drive-relative, UNC, and device paths cannot be represented.

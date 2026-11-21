@@ -15,9 +15,9 @@ Crates: `vibra-ir`, `vibra-interp`, `vibra-types`, `conformance/cases`.
 
 | Existing | Symbol | Use |
 | --- | --- | --- |
-| `crates/vibra-ir/src/module_set.rs:482` | `pub fn try_new` | IR-side fixes |
-| `crates/vibra-types/src/check/lower.rs:868` | `pub(crate) fn check_program` | checker-side fixes enter through `effects::` |
-| `crates/vibra-interp/src/machine.rs:1166` | `pub(crate) fn invoke` | interpreter-side fixes |
+| `crates/vibra-ir/src/module_set.rs:529` | `pub fn try_new` | IR-side fixes |
+| `crates/vibra-types/src/check/lower.rs:873` | `pub(crate) fn check_program` | checker-side fixes enter through `effects::` |
+| `crates/vibra-interp/src/machine.rs:1221` | `pub(crate) fn invoke` | interpreter-side fixes |
 
 ## Files owned
 

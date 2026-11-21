@@ -26,7 +26,7 @@ Measured, Acquire, DriverIdentity}`. From step 28: `startup::admit`.
 
 | Existing | Symbol | Use |
 | --- | --- | --- |
-| `crates/vibra-conformance/tests/it/ambient_reads.rs:53` | `AMBIENT_PATTERNS` | the patterns this module alone may contain |
+| `crates/vibra-conformance/tests/it/ambient_reads.rs:55` | `AMBIENT_PATTERNS` | the patterns this module alone may contain |
 
 Proposed: `vibra-host::system::{SystemDriver, SystemInputs}`, with the
 adapters `streams`, `env`, `clock`, `random` as submodules.
@@ -90,7 +90,7 @@ arguments, so every row runs on the three platforms; the two rows marked
 | Row | Kind | Input | Expected | Specification |
 | --- | --- | --- | --- | --- |
 | stdin text | positive | stdin `x\ny`; `io.stdinText` with `max: 16` twice | `Ok("x\ny")`, `Ok("")` | 06 Standard input: "At the end of input a completed read returns the empty value" |
-| stdin invalid text | negative | stdin `[255]`; `io.stdinText` with `max: 16` | `Err(invalidText)` | 06: "Text that cannot be decoded is `invalidText`" |
+| stdin invalid text | negative | stdin `[255]`; `io.stdinText` with `max: 16` | `Err(invalidText)` | 06: "Any other window, with an invalid sequence in it or a scalar cut off by the end of input, is `invalidText`" |
 | stdin read error | negative | `inputBytes: 5`; a reader that yields 3 bytes and then fails; `io.stdinBytes` with `max: 5`; then a read with `max: 5` through a gate-recording wrapper | `Err(other)`; the second read is reserved at 2: 3 were charged (Q28) | 06: "Input that cannot be read is `other`" |
 | stdin past the limit, a pipe | negative | an unsized reader holding `abc`; `inputBytes: 2`; `io.stdinBytes` with `max: 3`, twice | `Ok` of `ab`, then `Err(limitExceeded)` with the reader not read again; a later unbounded read returns `c` (Q10) | 06 Standard input: "a loop that reads to the end through a bound smaller than the input reads up to the bound and then receives `limitExceeded`" |
 | stdin within the limit, a pipe | boundary | the same reader; `inputBytes: 3`; `max: 3` | `Ok` of `abc` (Q10) | 06: "A limit MUST be reserved before an operation could exceed its count or byte bound" |

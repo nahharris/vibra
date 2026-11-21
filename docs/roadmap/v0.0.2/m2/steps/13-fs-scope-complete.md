@@ -108,7 +108,7 @@ they were before it.
 | the parent is reported before creation | boundary | `r/Out` a directory; `open_parent(["out"])`, then drop it without creating | `real_names` is `["Out"]`; `r` unchanged | 03: "Check the name the filesystem actually reports" |
 | `ATK-fs-create-parent-swapped` | negative | `r/d` a directory; `open_parent(["d"])`; then `r/d` is renamed to `r/e` and a junction to an outside directory is put at `r/d`; then `create_new("n.txt")` | the file is `r/e/n.txt`; the outside directory is unchanged | 03: "Perform the access on the object that was opened and checked" |
 | create below a link | negative | `open_parent(["j"])`, `j` a junction outside | `ScopeError::DeniedReparse`; the outside directory is unchanged | 03: "without following symbolic links, junctions, or other reparse points" |
-| create with a refused leaf | negative | `open_parent([])` then `create_new("nul.txt")` | `ScopeError::DeniedName`; `r` unchanged | 03 Reserved device names: "`nul`, `NUL.txt`, and `con .log` are rejected" |
+| create with a refused leaf | negative | `open_parent([])` then `create_new("nul.txt")` | `ScopeError::DeniedName`; `r` unchanged | 03 Reserved device names: "So `nul`, `NUL.txt`, `con .log`, … are rejected" |
 | create a new file | positive | `open_parent([])` then `create_new("new.txt")` | created, empty; `r` holds one new entry | the same |
 | link count one | boundary | a plain file | `links()` is 1 | 03 Hard links: "when the platform reports a link count above one" |
 | link count two | boundary | a file with a hard link outside `r` | `links()` is 2 | the same |
@@ -121,7 +121,7 @@ they were before it.
 | stat a link | negative | `stat(["link.txt"])` | `DeniedReparse`; the target's size is not returned | 06: "It does not follow a link" |
 | read a directory | negative | `open_read(["d"])` | `NotAFile` | 06: "a directory or other non-regular entry where a file is required as `notAFile`" |
 | missing parent | negative | `open_read(["no" "a.txt"])` | `NotFound` | 06: "the selected entry, or a parent it needs, does not exist" |
-| each reserved stem | negative | `nul`, `NUL.txt`, `con .log`, `COM0`, `LPT9.x`, `CONIN$`, `COM¹`, `aux.tar.gz` through `check_name` | rejected | 03 Reserved device names: "`nul`, `NUL.txt`, and `con .log` are rejected" |
+| each reserved stem | negative | `nul`, `NUL.txt`, `con .log`, `COM0`, `LPT9.x`, `CONIN$`, `COM¹`, `aux.tar.gz` through `check_name` | rejected | 03 Reserved device names: "So `nul`, `NUL.txt`, `con .log`, … are rejected" |
 | near a reserved stem | positive | `nul2`, `com10`, `console`, `lpt` | accepted | 03: "and `nul2` is not" |
 | name profile | negative | `.`, `..`, `a/b`, `a\b`, `a:b`, `a.`, `a `, a name with U+0007, the empty name | each rejected | 03 Paths: "A name is non-empty and is rejected if…" |
 | alternate stream | negative | `open_read(["a.txt::$DATA"])` | rejected by `check_name` | 03 Paths: contains `:` |

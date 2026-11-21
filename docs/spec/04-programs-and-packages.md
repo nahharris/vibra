@@ -252,6 +252,7 @@ output.
 | package | `name`, `version` | strings; `name` satisfies the source identifier grammar, is not a reserved word, and is camelCase, which here means that its first letter is lower case; `version` is one semantic version, never a range |
 | target | `name`, `kind`, `root`, `entry`, `effects`, `grants` | `name` is a one-part atom whose part is not a reserved word; `kind` is `@bin` or `@lib`; `root` a `Str`; a binary requires `entry` (an entity reference), `effects` (a list of entity references), and `grants` (a dict from leaf atom to grant binding); a library omits all three |
 | grant binding | `provider`, `resource`, `policy`, `limits`, `after` | `provider`, `resource`, `after` required; `policy` and `limits` optional; a present `limits` holds at least one bound; see [Targets](#targets) |
+| resource | `kind`, then the fields the [provider table](#targets) names for that kind, in its order | all required; `kind` is one of the table's resource kinds |
 | limits | `invocations`, `inputBytes`, `outputBytes` | each an optional `U64`; at least one present |
 | path dependency | `kind`, `path`, `target` | `kind` is `@path`; `path` a `Str` confined beneath the project root; `target` an optional atom |
 | Git dependency | `kind`, `git`, `rev`, `target` | `kind` is `@git`; `git` is an HTTPS URL without userinfo; `rev` is 40 lower-case hexadecimal digits; `target` an optional atom |
@@ -434,7 +435,13 @@ A recipe has:
 - `after`: a list, without repeats, of leaves this recipe must be acquired
   after. It MUST contain the recipe's `source` leaf when it has one. Every
   name in it MUST be a key of `grants`. The `after` relation MUST be
-  acyclic, or the project is `@grant.bindingCycle`.
+  acyclic, or the project is `@grant.bindingCycle` at each entry of `after`
+  that closes a cycle. The entries that close cycles are found by a
+  depth-first walk that starts from each leaf it has not yet reached, in
+  the UTF-8 byte order of their spellings, and follows each `after` list in
+  its written order; an entry closes a cycle when it leads back to a leaf
+  the walk is still inside. So for `@a` after `@b` and `@b` after `@a` the
+  fault is at the entry `@a` of `@b`'s list.
 
 | Provider | Grant types | Resource kinds |
 | --- | --- | --- |

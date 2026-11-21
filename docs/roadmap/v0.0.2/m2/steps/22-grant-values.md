@@ -21,8 +21,8 @@ Crates: `vibra-types`, `conformance/cases`.
 
 | Existing | Symbol | Use |
 | --- | --- | --- |
-| `crates/vibra-types/src/check/lower.rs:868` | `pub(crate) fn check_program` | calls into `effects::grants` through the hooks of step 04 |
-| `crates/vibra-types/src/check/expr.rs:2707` | `fn unequatable_operands` | calls `effects::grants::check_equatable` (step 04) |
+| `crates/vibra-types/src/check/lower.rs:873` | `pub(crate) fn check_program` | calls into `effects::grants` through the hooks of step 04 |
+| `crates/vibra-types/src/check/expr.rs:2764` | `fn unequatable_operands` | calls `effects::grants::check_equatable` (step 04) |
 | `crates/vibra-types/src/check/declare.rs:965` | `pub(crate) fn key_fault` | calls `effects::grants::check_dict_key` (step 04) |
 | `crates/vibra-ir/src/constant.rs:28` | `Type::Fn(_) \| Type::Proc(_)` | the IR-side rule of step 03 that this step mirrors |
 

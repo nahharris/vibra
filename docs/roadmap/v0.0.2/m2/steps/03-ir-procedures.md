@@ -44,7 +44,6 @@ architecture).
 - `crates/vibra-ir/src/authority.rs`
 - `crates/vibra-ir/src/origin.rs`
 - `crates/vibra-ir/src/constant.rs`
-- `crates/vibra-ir/src/encode.rs`
 - `crates/vibra-ir/src/program.rs`
 - `crates/vibra-ir/src/lib.rs`
 - `crates/vibra-ir/tests/it/effects.rs`
@@ -149,7 +148,9 @@ body in the interpreter (`RuntimeError::Unavailable`).
 ## Excluded
 
 Lowering source into the new nodes (05); running them (06, 20); the
-witness chain of a diagnostic, which is not a fact of the IR.
+witness chain of a diagnostic, which is not a fact of the IR; an encoding
+of a checked module set, which is an in-memory structure with no canonical
+document.
 
 ## Completion evidence
 

@@ -294,7 +294,8 @@ Resolution reads only the captured source graph.
 | a destination-dispatched call with no expected type | `@type.ambiguousDestination`, the application |
 | `From` and `TryFrom` sources of one receiver that unify | `@type.redundantConversion`, the later `impl` head, related to the earlier |
 | a receiver or destination with no implementation for the selected key; a call on a type parameter of a member its bound does not give; a label-bound parameter that fails its own bound | `@type.unsatisfiedBound`, the operand or the expected type, related to the interface or bound |
-| a declared type or case named in value position without being applied, whatever is expected there; an implementation member whose signature differs from the contract; a widening whose label differs from the implementation's choice; a label-bound parameter fixed to two types; a deferred associated equality or a complete result that disagrees after selection; a destination-dispatched call whose expected type has no position for `Self` or gives `Self` two types, at the application | `@type.mismatch`, the differing type or expression |
+| an implementation member whose signature, kind, or row differs from its contract member | `@type.mismatch`, where [Implementations](02-type-system.md#implementations) places it, related to the contract member's name, or to the contract's bound for a differing bound the contract writes |
+| a declared type or case named in value position without being applied, whatever is expected there; a widening whose label differs from the implementation's choice; a label-bound parameter fixed to two types; a deferred associated equality or a complete result that disagrees after selection; a destination-dispatched call whose expected type has no position for `Self` or gives `Self` two types, at the application | `@type.mismatch`, the differing type or expression |
 
 ### Binding, return and pattern diagnostics
 
@@ -344,6 +345,7 @@ Every row is an error with no automatic fix.
 | a conversion to a plain callable type that would hide a bare `requires` | `@contract.obligationLost`, the conversion, related to the guard |
 | a type invariant that is not a predicate over the representation | `@type.invalidInvariant`, the `where` |
 | a row, or a target's `effects` list, names one interface twice, under any spelling | `@effect.duplicateRoot`, the second entry, related to the first |
+| the owner of an interface member written in the member's own `performs` | `@effect.duplicateRoot`, that entry, related to the interface's name, since the owner's own entry is never written |
 | a row entry or an `effects` entry that is not an operation interface, one that resolves to nothing included | `@effect.invalidReference`, the entry |
 | a body performs an interface outside its ceiling | `@effect.outsideCeiling`, the first `await` that contributes it |
 | `await` outside a `proc` or test, or of a value that is not a plan; an `await` that is both is reported once, and its operand never as `@type.mismatch` | `@effect.invalidAwait`, the `await` |
@@ -356,7 +358,7 @@ Every row is an error with no automatic fix.
 | an entry row or startup step row outside the target's `effects` | `@effect.outsideCeiling`, the target's `effects` field in the project file, related to the entry's `performs` entry or to the recipe |
 | an `effects` entry that neither the entry nor a startup step performs | `@contract.unusedEffect` (warning), that entry of the list |
 | a missing, extra, ill-typed, or unapproved grant binding; an unknown, repeated, or missing `after` name; a `source` leaf of the wrong kind | `@grant.invalidBinding`, the binding, its field, or the `grants` record |
-| a cycle in `after` | `@grant.bindingCycle`, the later edge, related along the cycle |
+| a cycle in `after` | `@grant.bindingCycle`, each entry of `after` that closes a cycle, as [Targets](04-programs-and-packages.md#targets) finds it, related along the cycle |
 | a required grant refused at startup, in a case its issuer lists as a refusal | `@grant.requiredUnavailable`, the leaf's binding recipe in the project file; a startup result, not a check result |
 | an acquisition that fails at startup, in a case its issuer lists as a failure, for a required or an optional grant | `@grant.acquisitionFailed`, the leaf's binding recipe in the project file; a startup result, not a check result |
 | an invalid policy, or a policy naming another root | `@grant.invalidPolicy`, the policy value |
@@ -723,7 +725,7 @@ of its path.
 | --- | --- | --- |
 | `format` | `@types.v2` | required |
 | `moduleValues` | list of `{declaration: Str typeInfo: T}` sorted by `declaration` | the type of every module value |
-| `callables` | list of `{declaration: Str signature: G}` sorted by `declaration` | for every `fn`, `proc`, and member, `G` is its [signature record](06-runtime.md#open-signatures): its binders with their bounds, its receiver slot, and its complete callable type with its row, open where the declaration is |
+| `callables` | list of `{declaration: Str signature: G}` sorted by `declaration` | for every `fn`, `proc`, and member, abstract members included, `G` is its [signature record](06-runtime.md#open-signatures): its binders with their bounds, its receiver slot, and its complete callable type with its row, open where the declaration is |
 | `implementations` | list of [implementation records](06-runtime.md#open-signatures) sorted by the canonical bytes of `contract`, then of `receiver` | every implementation, with its positional key and its choices |
 | `obligations` | list of obligation records sorted by `declaration`, then `span` | every bare guard obligation |
 

@@ -84,7 +84,7 @@ row is committed with its receipt unless the row says otherwise.
 | projection after `limit` | positive | `limit(invocations: 5)` | `limits: {invocations: 5u64}` only | 06: "a record of the bounds that are set" |
 | narrowing keeps the origin | positive | `restrict` and `sub` of a `@testWorld` root | `issuedBy: {kind: @testWorld}`, the same `root` | 06: "Narrowing keeps the origin record of the grant it narrows" |
 | two roots | positive | two root grants | `root: 1u64` and `root: 2u64` (Q13) | 06: "a run-local ordinal of the root grant" |
-| drivers sorted | positive | drivers `@host.io.stdout` and `@host.fs.directory` | `drivers` lists `fs` first | 06: "sorted by `provider`" |
+| drivers sorted | positive | drivers `@host.io.stdout` and `@host.fs.directory` | `drivers` lists `fs` first | 06: "sorted by the UTF-8 bytes of the provider's spelling, then of the version" |
 | the driver of an event | positive | a scripted driver whose identity is `{provider: @host.io.stdout version: "9.9.9"}` | the event's `driver` and the one entry of `drivers` are that record | 06, the host event table: `driver` |
 | `ATK-trace-uncommitted-no-event` | negative | a completed call whose receipt is dropped without `commit` | `events` is empty; `uncommitted()` is 1 | 06 step 5: "Advance the continuation consistently with the completion, and then append the completed event" |
 | `ATK-trace-commit-once` | negative | a completed call; `commit`; then `commit` of a receipt with the same context and serial, made by the test-only constructor | `InvalidHostValue` for the second; `events` has one event | 06 Audit trace: "in completion order" |

@@ -141,7 +141,7 @@ means no event is due.
 | `sub` of a missing directory | positive | `sub(["nope"])` | `Narrowed::Grant` | 03: "It does not check that the directory exists" |
 | `restrict`: empty suffix | negative | a source policy with `suffix("")` | `Refused(invalidPolicy)` | 03 Names: "An empty suffix is invalid" |
 | `restrict`: too complex | negative | an ancestry at depth 64 and one more `restrict` | `Refused(policyTooComplex)` | 03: "counting ancestors acquired by restriction" |
-| `sub`: too complex | negative | an ancestry at depth 64 and one more `sub` | `Refused(policyTooComplex)` (Q9) | 03: "plus one for each `restrict` and each `sub` in the grant's ancestry" |
+| `sub`: too complex | negative | an ancestry at depth 64 and one more `sub` | `Refused(policyTooComplex)` (Q9) | 03: "one for each `restrict` and each `sub` in the grant's ancestry" |
 | `limit` keeps the smaller | positive | `limit(invocations: 5)` then `limit(invocations: 9)`; six calls | the sixth is `limitExceeded` | 03 Narrowing: "`limit` keeps the smaller of each bound" |
 | `limit` with `none` | positive | `limit(invocations: none)` on a grant bounded at 2; three calls | the third is `limitExceeded` | 03: "`Option.none()` leaves that bound as it was" |
 | siblings share the parent | negative | parent bounded at 3 invocations; two children; two calls each | the fourth call is `limitExceeded` | 03 Limits: "every copy and descendant of a grant draws on the same ancestor counters" |

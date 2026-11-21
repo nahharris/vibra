@@ -21,12 +21,12 @@ Crates: `vibra-interp`.
 
 | Existing | Symbol | Use |
 | --- | --- | --- |
-| `crates/vibra-interp/src/machine.rs:1264` | `fn dispatch` | selects the host-bound member for a `Grant` receiver |
-| `crates/vibra-interp/src/machine.rs:1614` | `fn intrinsic` | routes the three grant rows |
-| `crates/vibra-interp/src/intrinsics.rs:581` | `pub(crate) fn apply` | where step 02 left them unavailable |
-| `crates/vibra-interp/src/machine.rs:31` | `pub(crate) enum Halt` | gains the host-value trap |
-| `crates/vibra-interp/src/value.rs:26` | `pub(crate) enum Repr` | gains `Grant` |
-| `crates/vibra-interp/src/lib.rs:206` | `pub enum RuntimeError` | unchanged |
+| `crates/vibra-interp/src/machine.rs:1322` | `fn dispatch` | selects the host-bound member for a `Grant` receiver |
+| `crates/vibra-interp/src/machine.rs:1675` | `fn intrinsic` | routes the three grant rows |
+| `crates/vibra-interp/src/intrinsics.rs:583` | `pub(crate) fn apply` | where step 02 left them unavailable |
+| `crates/vibra-interp/src/machine.rs:32` | `pub(crate) enum Halt` | gains the host-value trap |
+| `crates/vibra-interp/src/value.rs:28` | `pub(crate) enum Repr` | gains `Grant` |
+| `crates/vibra-interp/src/lib.rs:220` | `pub enum RuntimeError` | unchanged |
 
 From step 03: `vibra_ir::authority`. From step 06: `plan.rs`,
 `Kont::Await`, `Invocation`. Step 12 repairs the files of step 06 that

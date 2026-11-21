@@ -90,8 +90,8 @@ by a test-only helper. The world `W` is the chapter's example document.
 | `clock` with no member | negative | `clock: {}` | `@data.invalidShape` | 06: "A `clock` or a `random` with no member is the empty tuple and `@data.invalidShape`" |
 | `clock` with one member | positive | `clock: {step: 1000u64}` | `wall` 0, `monotonic` 0 | 06: "leaves `wall` and `monotonic` at zero" |
 | unsuffixed integer | negative | `random: {seed: 42}` | data decoding fails | 06: "Every integer literal in a world carries its exact width suffix" |
-| path not canonical | negative | `files: ["/a/../b": "x"]` | invalid data | 06 Paths: "no empty, `.`, or `..` component" |
-| file and directory conflict | negative | `files: ["/a": "x" "/a/b": "y"]` | invalid data | 06: "including an ancestor used as both" |
+| path not canonical | negative | `files: ["/a/../b": "x"]` | invalid data | 06 Paths: "A component MUST NOT be empty, `.`, or `..`" |
+| file and directory conflict | negative | `files: ["/a": "x" "/a/b": "y"]` | invalid data | 06: "a file path that is also a directory, listed or implied as an ancestor of another path" |
 | root as a file | negative | `files: ["/": "x"]` | invalid data | 06: "The root cannot be a file" |
 | implied ancestors | positive | `files: ["/a/b/c.txt": "x"]`; stat of `["a" "b"]` under root `/` | directory, 0 | 06: "Missing ancestor directories are implied" |
 | read text | positive | `fs.readText` `["a.txt"]` under `/notes` | `Ok("hello")` | 06 Host registry, `fs.readText` |
@@ -118,7 +118,7 @@ by a test-only helper. The world `W` is the chapter's example document.
 | arguments | positive | `env.readArgs` | `Ok(["/notes"])` | 06: "in their original order" |
 | wall clock | positive | `time.nowWall` twice | `1700000000000000000` both times | 06: "always returns `clock.wall`" |
 | monotonic clock | positive | `time.nowMonotonic` three times | 0, 1000, 2000 | 06: "Each later one adds `step`" |
-| monotonic overflow | negative | `monotonic: 18446744073709551615u64 step: 1u64`, two reads | the value, then `Err(unavailable)` | 06: "returns `unavailable` if the `U64` would overflow" |
+| monotonic overflow | negative | `monotonic: 18446744073709551615u64 step: 1u64`, two reads | the value, then `Err(unavailable)` | 06: "The first read whose value would overflow the `U64`, and every read after it, returns `unavailable`" |
 | random vector | positive | seed 42; `generateBytes(3)`, then `(8)` | the bytes computed by hand in the test from SplitMix64, one output then one more | 06: "consumes ceil(count / 8) outputs … discards the unused tail" |
 | random zero | boundary | `generateBytes(0)` then `(8)` | empty; then the first output | 06: "A count of zero consumes nothing" |
 | fixed path absent | negative | `acquire` of `@fixedPath "/missing"` | `Refused` | 06 Recipes under a world: "a virtual directory that is absent is a refusal" |

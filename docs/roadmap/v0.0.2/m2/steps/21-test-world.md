@@ -25,11 +25,11 @@ Crates: `stdlib`, `vibra-host`, `vibra-types`, `vibra-workspace`,
 
 | Existing | Symbol | Use |
 | --- | --- | --- |
-| `crates/vibra-workspace/src/test_runner.rs:611` | `fn run_one` | builds one world, one `Context`, one trace per test |
-| `crates/vibra-workspace/src/test_runner.rs:664` | `fn execute` | passes the world token and the context to `run_test` |
-| `crates/vibra-types/src/check/testing.rs:101` | `test.view.takes().is_none()` | reaches `effects::procs::test_header` |
-| `crates/vibra-conformance/src/manifest.rs:452` | `fn validate_host_world` | validates the case's `@hostWorld.v2` |
-| `crates/vibra-schema/src/test_payload.rs:127` | `pub struct TestItem` | `auditTrace` carries the events |
+| `crates/vibra-workspace/src/test_runner.rs:621` | `fn run_one` | builds one world, one `Context`, one trace per test |
+| `crates/vibra-workspace/src/test_runner.rs:689` | `fn execute` | passes the world token and the context to `run_test` |
+| `crates/vibra-types/src/check/testing.rs:101` | `effects::procs::test_header(program, test)` | reaches `effects::procs::test_header` |
+| `crates/vibra-conformance/src/manifest.rs:460` | `fn validate_host_world` | validates the case's `@hostWorld.v2` |
+| `crates/vibra-schema/src/test_payload.rs:128` | `pub struct TestItem` | `auditTrace` carries the events |
 
 Proposed: `stdlib/src/std/test.vib`; `vibra-host::test_world`
 (`TestWorldRoot`, the six rows over `WorldDriver`).

@@ -21,10 +21,10 @@ Crates: `vibra-types`, `conformance/cases`.
 
 | Existing | Symbol | Use |
 | --- | --- | --- |
-| `crates/vibra-types/src/check/declare.rs:1212` | `TypeForm::Proc` | calls `effects::values::written_type` (step 04) |
-| `crates/vibra-types/src/check/expr.rs:1865` | `fn start_closure` | calls `effects::values::anonymous` |
-| `crates/vibra-types/src/check/expr.rs:2016` | `fn closure_instance` | the closure a named `proc` value becomes |
-| `crates/vibra-ir/src/expr.rs:574` | `pub struct ClosureBody` | an anonymous `proc` lowers to a closure of a `Proc` type |
+| `crates/vibra-types/src/check/declare.rs:1217` | `TypeForm::Proc` | calls `effects::values::written_type` (step 04) |
+| `crates/vibra-types/src/check/expr.rs:1919` | `fn start_closure` | calls `effects::values::anonymous` |
+| `crates/vibra-types/src/check/expr.rs:2067` | `fn closure_instance` | the closure a named `proc` value becomes |
+| `crates/vibra-ir/src/expr.rs:587` | `pub struct ClosureBody` | an anonymous `proc` lowers to a closure of a `Proc` type |
 
 Proposed: the bodies of `effects::values::{written_type, anonymous,
 named_value}`.

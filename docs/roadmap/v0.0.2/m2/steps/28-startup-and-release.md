@@ -30,7 +30,7 @@ step 17: `Context::startup_event`.
 
 | Existing | Symbol | Use |
 | --- | --- | --- |
-| `crates/vibra-ir/src/external/host.rs:377` | `pub fn host_row` | the rows of the two startup reads |
+| `crates/vibra-ir/src/external/host.rs:842` | `pub fn host_row` | the rows of the two startup reads |
 
 Proposed: `vibra-host::startup::{admit, EntryShape, EntryLeaf, Admission,
 AdmissionRefusal, start, Started, StartupRecord, BindingRecord,

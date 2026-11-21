@@ -22,7 +22,7 @@ Crates: none.
 
 | Existing | Symbol | Use |
 | --- | --- | --- |
-| `crates/vibra-fs-scope/src/windows.rs:127` | `pub fn open_root` | where a path becomes a held directory |
+| `crates/vibra-fs-scope/src/windows.rs:170` | `pub fn open_root` | where a path becomes a held directory |
 | `crates/vibra-cli/src/lib.rs:82` | `fn execute` | where the system launch is chosen |
 
 It reads `crates/vibra-fs-scope/src/`, `crates/vibra-host/src/system/`,
