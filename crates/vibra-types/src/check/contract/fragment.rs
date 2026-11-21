@@ -131,7 +131,8 @@ impl Facts {
             | Expr::LetElse { .. }
             | Expr::Lookup { .. }
             | Expr::Try(_)
-            | Expr::WidenToInterface { .. } => Admission::Outside,
+            | Expr::WidenToInterface { .. }
+            | Expr::Await { .. } => Admission::Outside,
         }
     }
 
@@ -243,7 +244,8 @@ pub(crate) fn operands(node: &Node) -> Vec<&Node> {
         Expr::Return(value)
         | Expr::Try(value)
         | Expr::WidenAtom(value)
-        | Expr::WidenToInterface { value, .. } => children.push(&**value),
+        | Expr::WidenToInterface { value, .. }
+        | Expr::Await { plan: value } => children.push(&**value),
     }
     children
 }

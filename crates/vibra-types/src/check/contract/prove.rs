@@ -2251,7 +2251,8 @@ fn with_constants(node: &Node, values: &BTreeMap<usize, Constant>) -> Node {
             Expr::Return(inner)
             | Expr::Try(inner)
             | Expr::WidenAtom(inner)
-            | Expr::WidenToInterface { value: inner, .. } => pending.push(inner),
+            | Expr::WidenToInterface { value: inner, .. }
+            | Expr::Await { plan: inner } => pending.push(inner),
             Expr::Literal(_)
             | Expr::Variable { .. }
             | Expr::Global(_)

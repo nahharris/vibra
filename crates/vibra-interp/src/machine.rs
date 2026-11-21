@@ -772,6 +772,7 @@ impl<'a> Machine<'a> {
             Expr::Default(_) => {
                 return invalid("a default outside a labelled argument");
             }
+            Expr::Await { .. } => return Err(unavailable_plan()),
         })
     }
 
@@ -1253,6 +1254,7 @@ impl<'a> Machine<'a> {
                 let type_arguments = frame.env.apply_all(type_arguments);
                 self.intrinsic(*intrinsic, &type_arguments, args, &function.origin)
             }
+            FunctionBody::Host(_) => Err(unavailable_plan()),
         }
     }
 

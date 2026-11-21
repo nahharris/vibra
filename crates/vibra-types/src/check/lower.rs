@@ -12,9 +12,9 @@ use std::sync::Arc;
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 use vibra_ir::{
-    Arguments, Binder, Bound, CallTarget, Case, CheckedFunction, CheckedGlobal,
-    CheckedModuleSet, Constant, ExitGuard, Expr, FnType, FunctionBody, Guard,
-    Implementation, ImplementationRecord, InterfaceDefinition, InterfaceKey,
+    Arguments, Binder, BodyContext, Bound, CallTarget, Case, CheckedFunction,
+    CheckedGlobal, CheckedModuleSet, Constant, ExitGuard, Expr, FnType, FunctionBody,
+    Guard, Implementation, ImplementationRecord, InterfaceDefinition, InterfaceKey,
     InterfaceMember, Invariant, Library, LibraryTypes, ModuleSetParts, NamedTypes,
     Node, SignatureRecord, SourceOrigin, Type, TypeBody, TypeDefinition, Value,
     Visibility, encode_open_type, encode_type,
@@ -1372,6 +1372,7 @@ fn assemble(
                         exit_guard,
                         slot_count: checked.slot_count,
                         origin,
+                        context: BodyContext::Pure,
                     }
                 }
                 None if stubs => {
@@ -1416,6 +1417,7 @@ fn assemble(
             exit_guard: None,
             slot_count,
             origin: origin(program, data.module, data.view.construct().span()),
+            context: BodyContext::Pure,
         });
     }
     for (ty, at) in &anonymous {
@@ -1449,6 +1451,7 @@ fn assemble(
             exit_guard: closure.exit_guard.clone(),
             slot_count: closure.slot_count,
             origin: origin(program, data.module, span),
+            context: BodyContext::Pure,
         });
     }
     let mut implementations = Vec::new();
@@ -1598,6 +1601,7 @@ fn stub(
         exit_guard: None,
         slot_count: signature.slot_count(),
         origin,
+        context: BodyContext::Pure,
     }
 }
 

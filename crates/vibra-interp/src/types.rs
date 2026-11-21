@@ -283,6 +283,11 @@ fn own_type(set: &CheckedModuleSet, expr: &Expr) -> Result<Type, Halt> {
         Expr::WidenToInterface { value_type, .. } => value_type.clone(),
         Expr::WidenAtom(_) => Type::Atom,
         Expr::Default(value_type) => value_type.clone(),
+        Expr::Await { .. } => {
+            return Err(Halt::Unavailable(
+                "`await` runs a plan, which this interpreter does not run".to_owned(),
+            ));
+        }
         Expr::Sequence(_)
         | Expr::Let { .. }
         | Expr::LetElse { .. }

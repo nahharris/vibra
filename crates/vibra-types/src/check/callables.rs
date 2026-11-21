@@ -405,6 +405,7 @@ pub(crate) fn substitute(node: &mut Node, binders: &[Type]) {
                 }
             }
             IrExpr::Field { record: inner, .. }
+            | IrExpr::Await { plan: inner }
             | IrExpr::Return(inner)
             | IrExpr::Try(inner)
             | IrExpr::WidenAtom(inner) => pending.push(inner),

@@ -2,8 +2,9 @@
 //! built from, validated as a whole.
 //!
 //! [`CheckedModuleSet::try_new`] checks every type, every expression's
-//! shape, every implementation against its interface, and that no two
-//! implementations overlap, and records the static dependency edges of each
+//! shape, every implementation against its interface, that no two
+//! implementations overlap, and the rules of the effects chapter that a set
+//! keeps (`crate::effects`), and records the static dependency edges of each
 //! initializer, function, and closure body. A module set is immutable and
 //! shared; a checker defect that reaches it is an [`IrError`], never an
 //! execution.
@@ -12,13 +13,16 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use crate::conformance::Evidence;
+use crate::constant::check_encodable;
+use crate::effects;
 use crate::encode::{TypeTable, encode_value};
 use crate::expr::{Checker, Tables, expect};
 use crate::external::CompilerIntrinsic;
+use crate::external::host::{HostOp, TestWorldOp};
 use crate::instantiation::{check_built_dicts, check_instantiations};
 use crate::{
     Constant, ExitGuard, FnType, Guard, Implementation, InterfaceDefinition, IrError,
-    Library, LibraryTypes, Node, OpenScope, SignatureRecord, SourceOrigin,
+    Library, LibraryTypes, Node, OpenScope, Row, SignatureRecord, SourceOrigin,
     Substitution, Type, TypeBody, TypeDefinition, TypeId,
 };
 
@@ -50,6 +54,43 @@ pub enum FunctionBody {
         /// One type for each of the row's generics.
         type_arguments: Vec<Type>,
     },
+    /// A member bound with `external @host`: the implementation of a
+    /// sealed grant of the interface that declares the member.
+    Host(HostBinding),
+}
+
+/// The registry row an `external @host` member is bound to
+/// (`docs/spec/06-runtime.md`, "Host registry").
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum HostBinding {
+    /// One of the 17 rows of the host registry.
+    Operation(HostOp),
+    /// One of the six rows of the test-world registry.
+    TestWorld(TestWorldOp),
+}
+
+impl HostBinding {
+    /// The row's wire symbol, such as `fs.readText`.
+    #[must_use]
+    pub const fn symbol(self) -> &'static str {
+        match self {
+            Self::Operation(op) => op.symbol(),
+            Self::TestWorld(op) => op.symbol(),
+        }
+    }
+}
+
+/// Whether a function's body runs in a procedure context
+/// (`docs/spec/03-effects.md`, "Cold plans and performed rows"). A function
+/// of a `Proc` type runs in one by its type; `Procedure` gives one to a
+/// function of a `Fn` type, a test body, with the row it states.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+pub enum BodyContext {
+    /// No context beyond the function's type: a `fn` performs nothing.
+    #[default]
+    Pure,
+    /// A procedure context whose ceiling is this row.
+    Procedure(Row),
 }
 
 /// A module function: a `fn` or a `proc`, a member of an implementation, or
@@ -73,6 +114,8 @@ pub struct CheckedFunction {
     pub slot_count: usize,
     /// Where it was declared.
     pub origin: SourceOrigin,
+    /// Whether its body runs in a procedure context: a `proc`, or a test.
+    pub context: BodyContext,
 }
 
 impl CheckedFunction {
@@ -102,6 +145,7 @@ impl CheckedFunction {
             exit_guard: None,
             slot_count,
             origin,
+            context: BodyContext::Pure,
         }
     }
 }
@@ -146,6 +190,8 @@ pub struct Facts {
     /// The callee type of each call of a value: a call through a callable
     /// value, or a row that applies its function operand.
     pub indirect: Vec<Type>,
+    /// The row of each plan it awaits, in the order the awaits are checked.
+    pub awaited: Vec<Row>,
 }
 
 impl Facts {
@@ -476,8 +522,9 @@ impl CheckedModuleSet {
     /// The first defect found: a duplicate identity; a type, signature, or
     /// constant that is malformed or names nothing; a library binding of the
     /// wrong shape; an implementation that does not fit its interface or
-    /// overlaps another; or an expression whose slots, arity, or types
-    /// disagree.
+    /// overlaps another; an expression whose slots, arity, or types
+    /// disagree; or a rule of the effects chapter that a body, a row, or a
+    /// host binding breaks.
     #[allow(clippy::too_many_lines)]
     pub fn try_new(parts: ModuleSetParts) -> Result<Arc<Self>, IrError> {
         let ModuleSetParts {
@@ -508,7 +555,9 @@ impl CheckedModuleSet {
             flow: Flow::default(),
         };
         let flow = set.validate()?;
-        Ok(Arc::new(Self { flow, ..set }))
+        let set = Self { flow, ..set };
+        effects::validate(&set)?;
+        Ok(Arc::new(set))
     }
 
     /// Whether a value of `held`, a closed type, may stand behind an
@@ -582,6 +631,7 @@ impl CheckedModuleSet {
     fn check_constant(&self, constant: &Constant) -> Result<(), IrError> {
         self.tables()
             .check_type(constant.value_type(), OpenScope::Closed)?;
+        check_encodable("a constant", constant.value_type(), &self.interfaces)?;
         encode_value(constant.value(), constant.value_type(), &self.table)
             .map(drop)
             .map_err(|error| IrError::InvalidExpression(format!("a constant: {error}")))
@@ -680,16 +730,16 @@ impl CheckedModuleSet {
             let mut gathered = Gathered::default();
             expect(
                 &global.value_type,
-                &checker.check_gathering(&global.initializer, &mut gathered)?,
+                &checker
+                    .check_gathering(&global.initializer, &mut gathered)
+                    .map_err(|error| error.owned_by(&global.name))?,
             )?;
             flow.absorb_owner(gathered, |flow, facts| flow.globals.push(facts));
         }
         for (index, function) in self.functions.iter().enumerate() {
-            let gathered = self.validate_function(
-                &tables,
-                function,
-                defaults.get(&index).copied(),
-            )?;
+            let gathered = self
+                .validate_function(&tables, function, defaults.get(&index).copied())
+                .map_err(|error| error.owned_by(&function.name))?;
             flow.absorb_owner(gathered, |flow, facts| flow.functions.push(facts));
         }
         check_instantiations(&tables)?;
@@ -742,7 +792,7 @@ impl CheckedModuleSet {
                 )));
             }
             for member in interface.members() {
-                if member.default.is_none()
+                if (member.default.is_none() || host_bound(tables, member.default))
                     && implementation.member(&member.name).is_none()
                 {
                     return Err(IrError::InvalidType(format!(
@@ -755,7 +805,7 @@ impl CheckedModuleSet {
                 let member = interface.member(name).ok_or_else(|| {
                     IrError::InvalidType(format!("`{path}` has no member `{name}`"))
                 })?;
-                if member.default.is_some() {
+                if member.default.is_some() && !host_bound(tables, member.default) {
                     return Err(IrError::InvalidType(format!(
                         "an implementation of `{path}` supplies the default member `{name}` again"
                     )));
@@ -890,6 +940,10 @@ impl CheckedModuleSet {
                     });
                 }
             }
+            // The member, the signature, and the row of a host binding are
+            // the registry row's, as `effects::validate` checks once the
+            // whole set is known.
+            FunctionBody::Host(_) => {}
         }
         checker.in_guard = true;
         if let Some(guard) = &function.entry_guard {
@@ -994,6 +1048,17 @@ impl Flow {
         self.closures.append(&mut gathered.closures);
         store(self, gathered.facts);
     }
+}
+
+/// Whether the default body `default` of an interface member is a host
+/// binding. Such a binding is the implementation of a sealed grant only, so
+/// for an implementation the member is abstract: it supplies the member, and
+/// one that does not is rejected (`docs/spec/03-effects.md`, "Operation
+/// interfaces").
+fn host_bound(tables: &Tables<'_>, default: Option<usize>) -> bool {
+    default
+        .and_then(|index| tables.function(index).ok())
+        .is_some_and(|function| matches!(function.body, FunctionBody::Host(_)))
 }
 
 fn table_bool(table: &TypeTable) -> Result<Type, IrError> {
