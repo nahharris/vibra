@@ -33,16 +33,110 @@ fn every_profile_spelling_is_accepted() {
         "nativeV1",
         "fullV2",
     ] {
-        let case = CaseManifest::from_str(&manifest(
-            "V2-SRC-READER-x",
-            spelling,
-            "reader",
-            "",
-        ))
-        .unwrap_or_else(|error| panic!("{spelling}: {error}"));
-        assert_eq!(case.profile.as_str(), spelling);
+        let profile = spelling
+            .parse::<ConformanceProfile>()
+            .unwrap_or_else(|error| panic!("{spelling}: {error}"));
+        assert_eq!(profile.as_str(), spelling);
     }
     assert_eq!(ConformanceProfile::ALL.len(), 6);
+}
+
+/// Each operation and the profile it belongs to, from the profile table of
+/// `docs/spec/07-diagnostics-and-conformance.md`, "Conformance profiles".
+const OWN_PROFILES: &[(&str, &str)] = &[
+    ("reader", "readerV2"),
+    ("projectDecode", "staticV2"),
+    ("sourceGraph", "staticV2"),
+    ("resolve", "staticV2"),
+    ("workspaceCheck", "staticV2"),
+    ("format", "toolingV2"),
+    ("query", "toolingV2"),
+    ("interpret", "interpreterV2"),
+    ("workspaceRun", "interpreterV2"),
+    ("workspaceTest", "interpreterV2"),
+];
+
+/// The profile `operation` belongs to.
+fn own_profile(operation: &str) -> &'static str {
+    OWN_PROFILES
+        .iter()
+        .find(|(name, _)| *name == operation)
+        .map(|(_, profile)| *profile)
+        .unwrap_or_else(|| panic!("`{operation}` is an operation of the table"))
+}
+
+#[test]
+fn manifest_the_profile_of_the_operation() {
+    for (operation, profile) in OWN_PROFILES {
+        let case = CaseManifest::from_str(&manifest_of_operation(operation))
+            .unwrap_or_else(|error| panic!("{operation}: {error}"));
+        assert_eq!(case.profile.as_str(), *profile, "{operation}");
+        assert_eq!(case.operation.profile(), case.profile, "{operation}");
+    }
+    assert_eq!(OWN_PROFILES.len(), ConformanceOperation::ALL.len());
+}
+
+#[test]
+fn manifest_the_profile_of_the_operation_in_the_whole_corpus() {
+    let corpus = Corpus::discover(vibra_conformance::corpus_root())
+        .expect("every case of the corpus loads");
+    assert!(!corpus.is_empty());
+    for case in &corpus {
+        let manifest = case.manifest();
+        assert_eq!(
+            manifest.profile.as_str(),
+            own_profile(manifest.operation.as_str()),
+            "{}",
+            manifest.id
+        );
+    }
+}
+
+/// `manifest_of_operation(operation)` naming `profile` instead of the
+/// operation's own.
+fn manifest_naming(operation: &str, profile: &str) -> String {
+    manifest_of_operation(operation).replace(
+        &format!("profile = \"{}\"", own_profile(operation)),
+        &format!("profile = \"{profile}\""),
+    )
+}
+
+#[test]
+fn manifest_another_profile() {
+    let error = error_of(&manifest_naming("workspaceCheck", "interpreterV2"));
+    assert!(
+        error.contains("`workspaceCheck`")
+            && error.contains("`staticV2`")
+            && error.contains("`interpreterV2`"),
+        "{error}"
+    );
+    // Every operation under every profile that is not its own.
+    for (operation, own) in OWN_PROFILES {
+        for profile in ConformanceProfile::ALL {
+            if profile.as_str() == *own {
+                continue;
+            }
+            let error = error_of(&manifest_naming(operation, profile.as_str()));
+            assert!(
+                error.contains(&format!("`{operation}`"))
+                    && error.contains(&format!("`{own}`")),
+                "{operation} under {profile}: {error}"
+            );
+        }
+    }
+}
+
+#[test]
+fn manifest_a_profile_with_no_operation_of_its_own() {
+    for profile in ["fullV2", "nativeV1"] {
+        let error = error_of(&manifest_naming("interpret", profile));
+        assert!(
+            error.contains("`interpret`")
+                && error.contains("`interpreterV2`")
+                && error.contains(&format!("`{profile}`")),
+            "{profile}: {error}"
+        );
+    }
 }
 
 #[test]
@@ -66,8 +160,14 @@ fn manifest_of_operation(operation: &str) -> String {
         }
         _ => "tree = \"workspace\"\nproject = \"workspace/project.vibon\"",
     };
+    // An operation outside the table (a misspelling) keeps a profile that
+    // parses, so that the operation's own error is the one reported.
+    let profile = OWN_PROFILES
+        .iter()
+        .find(|(name, _)| *name == operation)
+        .map_or("readerV2", |(_, profile)| *profile);
     format!(
-        "id = \"V2-TOOL-x\"\nrule = \"V2-TOOL-x\"\nprofile = \"fullV2\"\n\
+        "id = \"V2-TOOL-x\"\nrule = \"V2-TOOL-x\"\nprofile = \"{profile}\"\n\
          operation = \"{operation}\"\n\n[inputs]\n{inputs}\n\n\
          [expect]\nverdict = \"accepted\"\n"
     )

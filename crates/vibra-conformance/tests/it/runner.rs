@@ -51,24 +51,33 @@ fn the_binary_takes_only_root_and_rejects_a_write_option() {
     assert!(text(&output.stderr).contains("--root"));
 }
 
-/// The one case of `root` moved to `profile`, which no standard handler
-/// covers.
-fn under_profile(root: &Path, profile: &str) {
-    let manifest = root.join("SRC-READER/V2-SRC-READER-x/case.toml");
+/// The one case of `root` made a `query` case of `toolingV2`, the profile of
+/// its operation, with a tree. No standard handler runs `query`.
+fn as_query_case(root: &Path) {
+    let directory = root.join("SRC-READER/V2-SRC-READER-x");
+    let manifest = directory.join("case.toml");
     let text = std::fs::read_to_string(&manifest).expect("the manifest");
-    std::fs::write(&manifest, text.replace("readerV2", profile)).expect("rewrite");
+    let text = text
+        .replace("profile = \"readerV2\"", "profile = \"toolingV2\"")
+        .replace("operation = \"reader\"", "operation = \"query\"")
+        .replace(
+            "data = [\"input.vibon\"]",
+            "tree = \"workspace\"\nproject = \"workspace/project.vibon\"",
+        );
+    std::fs::write(&manifest, text).expect("rewrite");
+    write(&directory, "workspace/project.vibon", "{}");
 }
 
 #[test]
 fn a_case_with_no_handler_is_unavailable_and_fails_the_run() {
     let root = one_reader_case("");
-    under_profile(&root, "staticV2");
+    as_query_case(&root);
     let output = conformance(&["--root".as_ref(), root.as_os_str()]);
     assert_eq!(output.status.code(), Some(1));
     let stdout = text(&output.stdout);
     assert!(
         stdout.lines().any(|line| line
-            == "staticV2 conformance: 0 passed, 0 failed, 0 unknown, 1 unavailable"),
+            == "toolingV2 conformance: 0 passed, 0 failed, 0 unknown, 1 unavailable"),
         "{stdout}"
     );
     assert!(stdout.contains("UNAVAILABLE V2-SRC-READER-x"), "{stdout}");
@@ -103,7 +112,7 @@ fn the_standard_dispatcher_runs_reader_cases_only() {
         report.cases()[0].provided_profile,
         Some(ConformanceProfile::ReaderV2)
     );
-    under_profile(&root, "staticV2");
+    as_query_case(&root);
     let corpus = Corpus::discover(&root).expect("the corpus loads");
     let report = ConformanceRunner::new(standard_dispatcher()).run(&corpus);
     assert!(matches!(
@@ -144,12 +153,13 @@ fn a_tree_snapshot_is_compared_as_a_decoded_value() {
     );
 }
 
-/// A handler that returns a fixed observation for every reader case.
+/// A handler that returns a fixed observation for every case it is asked
+/// about, whatever its operation.
 struct Fixed(CaseObservation);
 
 impl ProfileHandler for Fixed {
-    fn can_run(&self, case: &Case) -> bool {
-        case.manifest().operation == vibra_conformance::ConformanceOperation::Reader
+    fn can_run(&self, _case: &Case) -> bool {
+        true
     }
 
     fn run(&self, _case: &Case) -> Result<CaseObservation, HandlerError> {
@@ -197,12 +207,12 @@ fn a_matching_observation_passes_and_counts_as_passed() {
 
 #[test]
 fn a_narrower_profile_does_not_run_a_broader_case() {
-    let root = one_reader_case("").parent().expect("a base").to_path_buf();
-    let manifest = root.join("cases/SRC-READER/V2-SRC-READER-x/case.toml");
-    let text = std::fs::read_to_string(&manifest).expect("the manifest");
-    std::fs::write(&manifest, text.replace("readerV2", "staticV2")).expect("rewrite");
+    // A `readerV2` handler that claims every case is not given a
+    // `toolingV2` one.
+    let root = one_reader_case("");
+    as_query_case(&root);
     let status = status_under(
-        &root.join("cases"),
+        &root,
         ConformanceProfile::ReaderV2,
         CaseObservation::new(Verdict::Accepted),
     );

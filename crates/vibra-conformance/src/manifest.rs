@@ -218,7 +218,8 @@ pub struct CaseManifest {
     pub id: String,
     /// The rule identity the case addresses.
     pub rule: String,
-    /// The profile the case requires.
+    /// The profile the case requires: always the profile of its operation,
+    /// [`ConformanceOperation::profile`].
     pub profile: ConformanceProfile,
     /// The operation the case selects.
     pub operation: ConformanceOperation,
@@ -290,6 +291,13 @@ impl TryFrom<RawCaseManifest> for CaseManifest {
             .operation
             .parse::<ConformanceOperation>()
             .map_err(|error| ManifestError::Invalid(error.to_string()))?;
+        if profile != operation.profile() {
+            return Err(ManifestError::Invalid(format!(
+                "operation `{operation}` belongs to profile `{}`, and a case names the \
+                 profile of its operation, not `{profile}`",
+                operation.profile()
+            )));
+        }
 
         let inputs = CaseInputs {
             source: raw.inputs.source,
