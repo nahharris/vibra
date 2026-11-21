@@ -115,6 +115,9 @@ type parameter, or pattern binder spelled as one is
 `@name.reservedDeclaration` at the name; a module value, `fn`, `proc`, or
 import spelled as one is `@name.reservedValueSpelling` at the name. Either
 still binds for the rest of its scope so that the error does not cascade.
+The reservations apply to the modules of user packages: the embedded
+standard library introduces the prelude names, so its declarations and
+imports are not reserved.
 
 ### Atoms
 

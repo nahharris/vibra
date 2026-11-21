@@ -201,6 +201,10 @@ cycle is an error whatever the revisions.
 `fmt PATH` formats source or VIBON according to the extension. For VIBON it
 is the source-preserving formatter: it keeps comments, spellings, and the
 written order of entries. It previews by default; `--write` applies.
+`fmt` has no mode for the files of the embedded standard library: the
+extension alone selects the grammar, so a section only the library admits is
+reported as in any other file. The toolchain's own tests keep those files
+canonical.
 
 | Outcome | `changed` | `written` | `text` |
 | --- | --- | --- | --- |
@@ -255,9 +259,11 @@ input (exit 2, no diagnostics).
 their difference. An item that ended unknown or exhausted is never counted as
 passed, and the other items keep their results. When items differ, the suite
 result follows this precedence: trap, operational exhaustion, unavailable, test
-failed, ok. A diagnostic appears once in the envelope and is attributed to every
-item it affects. An item keeps the audit events it completed before a later
-failure.
+failed, ok. A diagnostic appears once in the envelope. Every error is attributed
+to every item of an invalid selection; an item's ending diagnostic (its
+`@tool.unavailable`, its trap, its exhaustion, or its observation error) is
+attributed to that item; a warning is attributed to no item. An item keeps the
+audit events it completed before a later failure.
 
 ## Machine contracts
 
@@ -287,8 +293,9 @@ Every structured response is a closed object with these fields:
 }
 ```
 
-- `workspaceRevision` is `null` only when no snapshot was taken: help, a
-  command-line error, or failed discovery. It is never invented.
+- `workspaceRevision` is `null` only when no snapshot was taken (help, a
+  command-line error, or failed discovery) and for invalid input. It is never
+  invented.
 - `status` is `passed`, `refuted`, `unknown`, or `unsupported`. It describes
   the observation requested. Passing sampled tests is `passed` for that run,
   not a universal claim about the program. The result fixes it, as the table
@@ -328,10 +335,9 @@ Every structured response is a closed object with these fields:
   program's output into the payload; bytes that are not UTF-8 show as U+FFFD
   there, and the audit trace keeps the exact bytes. In human format the
   program's bytes go straight through and diagnostics go to standard error.
-- **Invalid input.** Before a command's typed inputs are validated, the
-  response has the recognized command name, or an empty one, and an empty
-  payload. After validation it has that command's payload, with unavailable
-  facts `null`.
+- **Invalid input.** The response has the recognized command name, or an
+  empty one, a `null` `workspaceRevision`, no diagnostic, and the empty
+  payload, whether the fault is found before or after a snapshot.
 
 ### Command payloads
 
@@ -364,7 +370,7 @@ in the
 | `TestItem` | `name`, the selector; `result`, the `@test.*` atom; `failure` (nullable); `trap` (nullable); `auditTrace`: `AuditEvent[]`, the test's events; `diagnostics`: string[], the codes of the envelope's diagnostics attributed to the item; `status`, that of the command result the item's result corresponds to: `passed` for `@test.passed`, `refuted` for `@test.assertionFailed` and `@test.invalid`, `unknown` for `@test.trap` and `@test.exhausted`, and `unsupported` for `@test.unavailable` |
 | `TestItem.failure` | `kind`: `assertion` or `observation`; `assertion`, `expected`, `actual`: canonical text or null; `primarySpan`: `SpanDocument`; `observationError`: null for an assertion |
 | `TrapRecord` | `trapCode`; `origin` (nullable) |
-| `ObservationError` | `code`: `unsupportedValue`; `type` and `origin`: nullable |
+| `ObservationError` | `code`: `unsupportedValue`, the JSON spelling of the observation error `@tool.unsupportedValue`; `type`: the canonical `@type.v2` text of the operand's type, or null; `origin`: a `U64`, or null |
 | `StartupRecord` | `status`: `notStarted`, `acquired`, or `failed`; `bindings`; `auditTrace`; `failure`: null or `{binding, code, origin}`, where `code` is `@grant.requiredUnavailable` for a refused required leaf and `@grant.acquisitionFailed` for a failed acquisition |
 | `StartupRecord.bindings[]` | one per processed leaf, in processing order: `name`; `recipeIdentity`: `sha256:` and the SHA-256 of `vibraRecipeIdentityV2`, a zero byte, and the canonical bytes of the recipe with its policy normalized; `providerIdentity`: `{provider, version}`; `status`: `acquired`, `refused`, or `failed`, the three outcomes of the [startup order](04-programs-and-packages.md#startup-order), or `released` for an acquired leaf after its release; `grantProjection` (nullable) |
 
@@ -659,19 +665,13 @@ of identities and types, and `constructor` is the resolved identity or
 `null`.
 
 **Obligation record:** `{kind, declaration, predicateIdentity, source,
-status, ruleIds, dependencies, counterexample}`, the JSON projection of the
+status, ruleIds, dependencies, counterexample}`, the JSON form of the
 [obligation record](07-diagnostics-and-conformance.md#persistent-observations)
-of `@types.v2`, field for field. `kind` is `requires`, `ensures`, or
-`where`. `declaration` is the identity of the declaration that contains the
-site and `predicateIdentity` the identity of the guarded declaration (the
-record's `predicate`). `source` is the span document of the site (the
-record's `span`). `status` is `passed`, `refuted`, `unknown`, or
-`unsupported`. `ruleIds` is the record's `rules`, and `dependencies` its
-sorted identities of the guarded declaration and of every declaration whose
-checked body or value the discharge read. `counterexample` is the canonical
-VIBON text of the refuting values or `null`. A guard with `else` is
-recorded in the declaration's metadata with its consequence; having a
-consequence never makes its predicate `passed`.
+of `@types.v2`, whose table gives each field with its JSON name and type:
+`declaration` and `predicateIdentity` are strings, `source` is a
+`SpanDocument`, and `counterexample` is a string or `null`. A guard with
+`else` is recorded in the declaration's metadata with its consequence;
+having a consequence never makes its predicate `passed`.
 
 ### Effect and authority projections
 
