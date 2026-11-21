@@ -1,0 +1,23 @@
+use @std.assert enduse
+
+use @gatePure.metric enduse
+
+test "a summary counts notes and lines and keeps the longest"
+  do
+    let summary be metric.summarize([2u64 3u64]) endlet
+    assert.equal(metric.Summary(notes: 2u64 lines: 5u64 longest: 3u64) summary)
+    assert.equal("2 notes, 5 lines" metric.render(summary))
+endtest
+
+test "the mean is the integer quotient"
+  do
+    assert.equal(
+      Option.some(value: 2u64)
+      metric.meanLines(metric.summarize([2u64 3u64]))
+    )
+endtest
+
+test "no notes have no mean"
+  do
+    assert.equal(Option.none() metric.meanLines(metric.summarize([])))
+endtest

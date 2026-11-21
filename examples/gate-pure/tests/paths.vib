@@ -1,0 +1,44 @@
+use @std.assert enduse
+
+use @gatePure.paths enduse
+
+use @gatePure.errors enduse
+
+test "a text file is a note named by its stem"
+  do
+    assert.equal(Result.ok(value: "monday") paths.noteName("monday.txt"))
+endtest
+
+test "another extension is not a note"
+  do
+    assert.equal(
+      Result.err(error: errors.GateError.notANote(name: "a.md"))
+      paths.noteName("a.md")
+    )
+endtest
+
+test "a name shorter than the extension is not a note"
+  do
+    assert.equal(
+      Result.err(error: errors.GateError.notANote(name: "txt"))
+      paths.noteName("txt")
+    )
+endtest
+
+test "the extension alone has an empty name"
+  do
+    assert.equal(Result.err(error: errors.GateError.emptyName()) paths.noteName(".txt"))
+endtest
+
+test "the log of a note"
+  do
+    assert.equal("monday.log" paths.logName("monday"))
+endtest
+
+test "an error is described"
+  do
+    assert.equal(
+      "not a note: a.md"
+      errors.describe(errors.GateError.notANote(name: "a.md"))
+    )
+endtest

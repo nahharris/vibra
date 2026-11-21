@@ -1,0 +1,33 @@
+use @gatePure.errors.GateError enduse
+
+fn noteName
+  takes {file: Str}
+  returns name: Result(Str GateError)
+  visibility @public
+  do
+    let length be Str.length(file) endlet
+    let Result.ok(value: cut) be U64.subChecked(length 4u64) else
+      return Result.err(error: GateError.notANote(name: file))
+    endlet
+    let Option.some(value: suffix) be Str.slice(file cut length) else
+      return Result.err(error: GateError.notANote(name: file))
+    endlet
+    if Bool.not(Equatable.equal(suffix ".txt")) then
+      return Result.err(error: GateError.notANote(name: file))
+    endif
+    let Option.some(value: stem) be Str.slice(file 0u64 cut) else
+      return Result.err(error: GateError.notANote(name: file))
+    endlet
+    if Equatable.equal(stem "") then
+      return Result.err(error: GateError.emptyName())
+    endif
+    return Result.ok(value: stem)
+endfn
+
+fn logName
+  takes {name: Str}
+  returns file: Str
+  visibility @public
+  do
+    return Str.concat(name ".log")
+endfn
