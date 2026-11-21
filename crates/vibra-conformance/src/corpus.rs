@@ -3,14 +3,15 @@
 //! The corpus lives at `conformance/cases`, one directory per section prefix
 //! and one directory per case below it:
 //! `conformance/cases/<PREFIX>/<case identity>/case.toml`. The rule index,
-//! `conformance/rules.tsv`, lies beside the corpus root.
+//! `conformance/rules.tsv` and the files of `conformance/rules/`, lies in the
+//! conformance root, the parent of the corpus root.
 
 use std::collections::BTreeSet;
 use std::fmt;
 use std::path::{Component, Path, PathBuf};
 
 use crate::manifest::{CaseManifest, MANIFEST_FILE_NAME, ManifestError};
-use crate::rules::{RULES_FILE_NAME, RuleIndex, RuleStatus, RulesError};
+use crate::rules::{RuleIndex, RuleStatus, RulesError};
 
 /// The workspace root, found from this crate's manifest.
 #[must_use]
@@ -162,8 +163,8 @@ impl Corpus {
     /// directory is a case directory, and every case directory holds a
     /// `case.toml`. A case's directory is named by its identity and lies in
     /// the directory of its identity's prefix. When the corpus has a case,
-    /// the rule index `rules.tsv` beside `root` must list the case's rule as
-    /// `active`.
+    /// the rule index of the parent of `root`, read by
+    /// [`RuleIndex::from_root`], must list the case's rule as `active`.
     pub fn discover(root: impl AsRef<Path>) -> Result<Self, CorpusError> {
         let root = root.as_ref();
         let metadata = std::fs::metadata(root).map_err(|source| CorpusError::Io {
@@ -210,15 +211,14 @@ impl Corpus {
             });
         }
 
-        let rules_path = root.parent().map_or_else(
-            || PathBuf::from(RULES_FILE_NAME),
-            |parent| parent.join(RULES_FILE_NAME),
-        );
-        let rules =
-            RuleIndex::from_path(&rules_path).map_err(|source| CorpusError::Rules {
-                path: rules_path.clone(),
+        let conformance_root =
+            root.parent().map_or_else(PathBuf::new, Path::to_path_buf);
+        let rules = RuleIndex::from_root(&conformance_root).map_err(|source| {
+            CorpusError::Rules {
+                path: conformance_root.clone(),
                 source,
-            })?;
+            }
+        })?;
 
         let mut cases = Vec::with_capacity(found.len());
         for (prefix_directory, directory, manifest_path) in found {
@@ -304,7 +304,7 @@ pub enum CorpusError {
     },
     /// The rule index could not be decoded.
     Rules {
-        /// The index path.
+        /// The conformance root the index was read from.
         path: PathBuf,
         /// The decoding failure.
         source: RulesError,

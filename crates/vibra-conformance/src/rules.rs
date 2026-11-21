@@ -1,22 +1,31 @@
-//! Rule identities and the rule index, `conformance/rules.tsv`.
+//! Rule identities and the rule index: `conformance/rules.tsv` and the files
+//! of `conformance/rules/`.
 //!
 //! `docs/spec/07-diagnostics-and-conformance.md`, "Rule identities and
 //! example coverage", defines a rule identity as `V1-` or `V2-`, one of twenty
 //! section prefixes, and a descriptive suffix in lower case with hyphens. An
 //! identity is never reused: a removed rule stays in the index as retired.
 //!
-//! The index is a tab-separated file with the header
-//! `identity<TAB>status<TAB>anchor` and one row per rule identity. A case may
-//! address only a rule whose row is `active`.
+//! Each rules file is tab-separated, with the header
+//! `identity<TAB>status<TAB>anchor` and one row per rule identity. The index
+//! is `rules.tsv` followed by every `rules/*.tsv`, so that each step of a
+//! milestone adds its rules in a file of its own. A rule identity is a row of
+//! exactly one file. A case may address only a rule whose row is `active`.
 
 use std::collections::BTreeMap;
+use std::ffi::OsString;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
-/// The file name of the rule index, beside the corpus root.
+/// The file name of the first rules file, in the conformance root beside the
+/// corpus root.
 pub const RULES_FILE_NAME: &str = "rules.tsv";
 
-/// The header line of the rule index.
+/// The directory of the further rules files, in the conformance root. Only
+/// its files whose extension is `tsv` are rules files.
+pub(crate) const RULES_DIRECTORY_NAME: &str = "rules";
+
+/// The header line of every rules file.
 pub const RULES_HEADER: &str = "identity\tstatus\tanchor";
 
 /// The twenty section prefixes of a rule identity, in specification order.
@@ -180,8 +189,11 @@ pub enum RulesError {
         /// The underlying failure.
         source: std::io::Error,
     },
-    /// The index violates its format; `line` is one-based.
+    /// A rules file violates its format; `line` is one-based.
     Invalid {
+        /// The rules file, as [`RuleIndex::from_root`] names it: `rules.tsv`
+        /// or `rules/<name>.tsv`.
+        file: String,
         /// The offending line.
         line: usize,
         /// What is wrong with it.
@@ -195,8 +207,12 @@ impl fmt::Display for RulesError {
             Self::Io { path, source } => {
                 write!(formatter, "cannot read {}: {source}", path.display())
             }
-            Self::Invalid { line, message } => {
-                write!(formatter, "{RULES_FILE_NAME} line {line}: {message}")
+            Self::Invalid {
+                file,
+                line,
+                message,
+            } => {
+                write!(formatter, "{file} line {line}: {message}")
             }
         }
     }
@@ -211,25 +227,107 @@ impl std::error::Error for RulesError {
     }
 }
 
+/// One row of the index and the place it was read from.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Entry {
+    row: RuleRow,
+    /// The rules file that holds the row.
+    file: String,
+    /// The one-based line of the row.
+    line: usize,
+}
+
 /// The decoded rule index.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct RuleIndex {
-    rows: BTreeMap<String, RuleRow>,
+    rows: BTreeMap<String, Entry>,
 }
 
 impl RuleIndex {
-    /// Decodes the text of a rule index.
+    /// Decodes the text of one rules file, named `rules.tsv` in errors.
     ///
     /// The first line is exactly [`RULES_HEADER`]. Every other line is three
     /// tab-separated fields: a rule identity, `active` or `retired`, and a
     /// non-empty anchor. An identity appears once. The text may end with one
     /// line feed.
     pub fn parse(text: &str) -> Result<Self, RulesError> {
+        let mut index = Self::default();
+        index.add_file(RULES_FILE_NAME, text)?;
+        Ok(index)
+    }
+
+    /// Reads and decodes the rule index of a conformance root: the file
+    /// [`RULES_FILE_NAME`], then every file of the directory `rules` whose
+    /// extension is `tsv`, in the byte order of their file names.
+    ///
+    /// Each file is decoded as [`RuleIndex::parse`] decodes one. A rule
+    /// identity is a row of exactly one file: a second row for an identity,
+    /// in the same file or in a later one, is the error a duplicate inside one
+    /// file is, naming the file of the second row. A root without the
+    /// directory has the rows of `rules.tsv` alone; any other entry of the
+    /// directory is not a rules file and is ignored.
+    pub fn from_root(root: impl AsRef<Path>) -> Result<Self, RulesError> {
+        let root = root.as_ref();
+        let mut index = Self::default();
+        index.add_path(&root.join(RULES_FILE_NAME), RULES_FILE_NAME)?;
+
+        let directory = root.join(RULES_DIRECTORY_NAME);
+        let io = |source| RulesError::Io {
+            path: directory.clone(),
+            source,
+        };
+        let entries = match std::fs::read_dir(&directory) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(index);
+            }
+            Err(source) => return Err(io(source)),
+        };
+        let mut names: Vec<OsString> = Vec::new();
+        for entry in entries {
+            let name = entry.map_err(io)?.file_name();
+            if Path::new(&name)
+                .extension()
+                .is_some_and(|extension| extension == "tsv")
+            {
+                names.push(name);
+            }
+        }
+        names.sort_by(|left, right| {
+            left.as_encoded_bytes().cmp(right.as_encoded_bytes())
+        });
+        for name in names {
+            let file = format!("{RULES_DIRECTORY_NAME}/{}", name.to_string_lossy());
+            index.add_path(&directory.join(&name), &file)?;
+        }
+        Ok(index)
+    }
+
+    /// Reads and decodes one rules file, named by its path in errors.
+    pub fn from_path(path: impl AsRef<Path>) -> Result<Self, RulesError> {
+        let path = path.as_ref();
+        let mut index = Self::default();
+        index.add_path(path, &path.display().to_string())?;
+        Ok(index)
+    }
+
+    /// Reads the rules file at `path` and adds its rows, naming it `file`.
+    fn add_path(&mut self, path: &Path, file: &str) -> Result<(), RulesError> {
+        let text = std::fs::read_to_string(path).map_err(|source| RulesError::Io {
+            path: path.to_path_buf(),
+            source,
+        })?;
+        self.add_file(file, &text)
+    }
+
+    /// Decodes the text of the rules file `file` and adds its rows.
+    fn add_file(&mut self, file: &str, text: &str) -> Result<(), RulesError> {
         let body = text.strip_suffix('\n').unwrap_or(text);
         let mut lines = body.split('\n').enumerate();
         let header = lines.next().map(|(_, line)| line);
         if header != Some(RULES_HEADER) {
             return Err(RulesError::Invalid {
+                file: file.to_owned(),
                 line: 1,
                 message: format!(
                     "the header must be `{}`",
@@ -237,10 +335,10 @@ impl RuleIndex {
                 ),
             });
         }
-        let mut rows = BTreeMap::new();
         for (index, line) in lines {
             let number = index + 1;
             let invalid = |message: String| RulesError::Invalid {
+                file: file.to_owned(),
                 line: number,
                 message,
             };
@@ -264,37 +362,38 @@ impl RuleIndex {
             if anchor.is_empty() {
                 return Err(invalid(format!("rule `{identity}` has no anchor")));
             }
+            if let Some(first) = self.rows.get(*identity) {
+                return Err(invalid(format!(
+                    "rule `{identity}` appears twice: its first row is {} line {}",
+                    first.file, first.line
+                )));
+            }
             let row = RuleRow {
                 identity: (*identity).to_owned(),
                 status,
                 anchor: (*anchor).to_owned(),
             };
-            if rows.insert(row.identity.clone(), row).is_some() {
-                return Err(invalid(format!("rule `{identity}` appears twice")));
-            }
+            self.rows.insert(
+                row.identity.clone(),
+                Entry {
+                    row,
+                    file: file.to_owned(),
+                    line: number,
+                },
+            );
         }
-        Ok(Self { rows })
-    }
-
-    /// Reads and decodes a rule index file.
-    pub fn from_path(path: impl AsRef<Path>) -> Result<Self, RulesError> {
-        let path = path.as_ref();
-        let text = std::fs::read_to_string(path).map_err(|source| RulesError::Io {
-            path: path.to_path_buf(),
-            source,
-        })?;
-        Self::parse(&text)
+        Ok(())
     }
 
     /// The status of `identity`, or `None` when the index has no row for it.
     #[must_use]
     pub fn status(&self, identity: &str) -> Option<RuleStatus> {
-        self.rows.get(identity).map(|row| row.status)
+        self.rows.get(identity).map(|entry| entry.row.status)
     }
 
     /// Every row, ordered by identity.
     pub fn rows(&self) -> impl Iterator<Item = &RuleRow> {
-        self.rows.values()
+        self.rows.values().map(|entry| &entry.row)
     }
 
     /// The number of rows.
