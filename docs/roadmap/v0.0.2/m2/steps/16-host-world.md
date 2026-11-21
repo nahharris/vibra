@@ -10,7 +10,9 @@ Crates: `vibra-host`.
 
 - Read: [runtime chapter](../../../../spec/06-runtime.md#host-world) "Host
   world" whole, "Closed operation semantics" whole;
-  [questions](../spec-questions.md) Q10, Q12, Q24.
+  [architecture](../architecture.md) "The gate", "Settlement", "The
+  order of a mutating call"; [questions](../spec-questions.md) Q10, Q12,
+  Q24.
 
 ## Entry points
 
@@ -19,7 +21,8 @@ Crates: `vibra-host`.
 | `crates/vibra-host/src/random.rs:13` | `pub struct SplitMix64` | the world's random source |
 | `crates/vibra-syntax/src/schema.rs:55` | `pub enum Slot` | the schema of the document |
 
-From step 15: `driver::{Driver, Gate, Found, Completion, Acquire}`.
+From step 15: `driver::{Driver, Gate, Found, Completion, Progress,
+Measured, Acquire}`.
 
 Proposed: `vibra-host::world::{HostWorld, WORLD_FORMAT, decode_world,
 WorldDriver, VirtualFs}`.
@@ -43,13 +46,22 @@ WorldDriver, VirtualFs}`.
    under `/`; an absent directory or a file there is `Refused`; streams,
    clocks, random, arguments, and variables always acquire.
 4. `call`, per row, with the gate consulted before any content is
-   produced:
-   - files: `notFound`, `notAFile`, `notADirectory`, `invalidText`; a
-     write creates or replaces in the copy, never a parent directory;
-     `links` is always 1 and `real_names` the requested names;
+   produced and before the copy changes. A gate refusal returns
+   `Completion::Refused`. Every completion carries `Known` progress: the
+   world measures every byte.
+   - files: `notFound`, `notAFile`, `notADirectory`, `invalidText`;
+     `links` is always `Some(1)` and `real_names` the requested names;
+   - a write of an existing file asks the gate with `Replace`, then
+     replaces in the copy; a write of an absent file whose parent exists
+     asks the gate with `Create` on the parent's names and the leaf, then
+     inserts; it never makes a parent directory. Invariant: a refused
+     write leaves the copy equal to what it was;
    - `entries`: names sorted by Unicode scalar;
    - `stat`: kind and size, zero for a directory;
-   - stdin: whole remaining input, then the empty value;
+   - stdin: the remaining input is of known size, which the driver
+     reports to the gate as `size` before it yields a byte; a read yields
+     the remaining input, then the empty value. How a read is bounded is
+     Q10;
    - stdout and stderr: appended to per-stream buffers;
    - variables and arguments from the world; a name no environment can
      hold is `notPresent`;
@@ -65,7 +77,10 @@ WorldDriver, VirtualFs}`.
 ## Test matrix
 
 Host tests through `Context` over a `WorldDriver`, with root grants issued
-by a test-only helper. The world `W` is the chapter's example document.
+by a test-only helper. The world `W` is the chapter's example document. A
+row marked *awaits Q10* is written as option (a) of that question gives
+it, and is not implemented and not counted before the ruling; under that
+option every other stdin row names a `max` and is otherwise the same.
 
 | Row | Kind | Input | Expected | Specification |
 | --- | --- | --- | --- | --- |
@@ -91,8 +106,12 @@ by a test-only helper. The world `W` is the chapter's example document.
 | write creates | positive | `fs.writeText` `["new.txt"]` | `Ok`; a read returns it; a second `WorldDriver` of `W` does not have it | 06: "A write changes only the copy" |
 | write replaces | positive | `fs.writeText` `["a.txt"]` `"x"` | a read returns `x` | 06 File writes: "create or replace the whole contents" |
 | write without a parent | negative | `fs.writeText` `["no" "a.txt"]` | `Err(notFound)` | 06: "do not create parent directories" |
+| a refused create leaves the copy | negative | policy `actions: [@replace]`; `fs.writeText` `["new.txt"]` through a gate that sees `Create` | `Err(denied)`; a listing of `/notes` through an unrestricted grant equals the listing before | 03: "Never truncate or create before authorization" |
+| a refused replace leaves the copy | negative | policy `actions: [@create]`; `fs.writeText` `["a.txt"]` `"x"` | `Err(denied)`; a read returns `hello` | the same |
 | stdin once | positive | `io.stdinText` twice | `Ok("x\ny")` then `Ok("")` | 06 Standard input: "a second completed read returns the empty value" |
 | stdin invalid text | negative | `stdin` a bytes record `[255]`; `io.stdinText` | `Err(invalidText)`; a second read is empty | 06: "After a completed success or domain failure the position is at the end" |
+| stdin reports its size | boundary | `io.stdinText` on `W` through a gate-recording wrapper | the gate saw `size: Some(3)` before the driver yielded a byte | 06: "A read first learns the size of the opened object, reserves it" |
+| stdin by count | positive, *awaits Q10* | `io.stdinText` with `max: 2` three times on `W` | `Ok("x\n")`, `Ok("y")`, `Ok("")` | 06 Standard input: "a second completed read returns the empty value" |
 | stdout order | positive | `io.stdoutText "a"`, `io.stdoutBytes [98]`, `io.stderrText "e"` | `output()` is `ab` and `e` | 06: "A write delivers its whole value, in invocation order" |
 | variable present, absent | positive, negative | `env.readVar "HOME"`; `"NOPE"` with both in `names` | `Ok("/home/vibra")`; `Err(notPresent)` | 06 Environment |
 | unholdable name | negative | `env.readVar ""` and `"A=B"`, both in `names` | `Err(notPresent)` | 06: "So is a name no environment can hold" |
@@ -104,9 +123,11 @@ by a test-only helper. The world `W` is the chapter's example document.
 | random zero | boundary | `generateBytes(0)` then `(8)` | empty; then the first output | 06: "A count of zero consumes nothing" |
 | fixed path absent | negative | `acquire` of `@fixedPath "/missing"` | `Refused` | 06 Recipes under a world: "a virtual directory that is absent is a refusal" |
 | fixed path relative | positive | `@fixedPath "notes"` | acquires `/notes` | 06: "with a relative one taken under `/`" |
+| the world's identity | positive | `WorldDriver::identity` of each of the nine providers | `{provider: @hostWorld.v2 version: "0.0.2"}` each time | 06: "`provider` is `@hostWorld.v2` for a fake world's driver" |
+| progress is measured | positive | a read of 5 bytes and a write of 3, through a completion-recording wrapper | `input: Known(5)`; `output: Known(3)` | 03 Limits: "charges actual progress" |
 | `ATK-driver-error-not-fault` | negative | every error row above | each is a `Completion`, none a `HostFault` | 06: "A driver MUST NOT turn an ordinary failure into a process crash" |
 | `ATK-no-redispatch-on-error` | negative | a read that returns `notFound`, counted by a wrapper driver | exactly one `call` | 03 Delivery: "The runtime never dispatches one invocation twice" |
-| gate before content | negative | policy `suffix(".txt")`, read `raw.bin` through a gate-recording wrapper | denied before step 3 ends; the virtual file is not read | 06 Host calls, step 3 |
+| gate before content | negative | policy `suffix(".txt")`, read `raw.bin` through a gate-recording wrapper | denied before step 3 ends; the gate is not called; the virtual file is not read | 06 Host calls, step 3 |
 
 ## Diagnostics and schema changes
 
@@ -137,7 +158,9 @@ links"; their evidence is steps 13, 31, and 33.
 
 ## Completion evidence
 
-- [ ] Each of the 38 rows is a test, named in the report.
+- [ ] Each of the 43 rows that await no ruling is a test, named in the
+      report; the row marked *awaits Q10* is listed as open, or as a test
+      once the question is ruled.
 - [ ] The random vector is derived in the report from the SplitMix64
       definition, not from the implementation's output.
 - [ ] `world.rs` names no item of `std::fs`, `std::env`, or `std::time`.

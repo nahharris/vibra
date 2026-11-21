@@ -16,7 +16,7 @@ Crates: `stdlib`, `vibra-types`, `conformance/cases`.
   source types and "Paths", "Reserved device names"); [runtime
   chapter](../../../../spec/06-runtime.md#host-registry) "Host registry",
   "Error types", "External providers"; [questions](../spec-questions.md)
-  Q2, Q16, Q26.
+  Q1, Q2, Q10, Q16, Q26.
 
 ## Entry points
 
@@ -67,8 +67,11 @@ Proposed: `stdlib/src/std/{io,fs,env,time,random}.vib`.
 6. The 17 interfaces, each with its one `external @host` member; the
    narrowing members as `external @compiler` members bound to
    `grant.limit` on all 17, and to `grant.restrict` and `grant.sub` on
-   the six `Dir…` interfaces. An `impl` that supplies one is
-   `@type.defaultOverride` (Q2).
+   the six `Dir…` interfaces. Whether an `impl` supplies them, may supply
+   them, or must not *awaits Q1*, and so does the result type of `limit`.
+   Whether the two standard-input members take `max: U64` *awaits Q10*;
+   under its option (a) `@std.io` also gains the two procedures that
+   read to the end by a loop over the member.
 7. The manifest: the five modules, and the `host` symbol list with the 17
    symbols, sorted.
 
@@ -83,7 +86,12 @@ Proposed: `stdlib/src/std/{io,fs,env,time,random}.vib`.
 ## Test matrix
 
 `workspaceCheck`, profile `staticV2`, unless stated. Loader rows are tests
-of `vibra-types` over an altered copy of a library module.
+of `vibra-types` over an altered copy of a library module. A row marked
+*awaits Q1* is written as option (c) of that question gives it; the
+question lists what each option makes of it. It is not implemented and
+not counted before the ruling. Under option (a) of Q1 the three
+`V2-EFFECT-impl-host-member-…` rows keep their verdicts and each `impl`
+also supplies the narrowing members.
 
 | Case id | Kind | Input | Expected | Specification |
 | --- | --- | --- | --- | --- |
@@ -104,7 +112,7 @@ of `vibra-types` over an altered copy of a library module.
 | `V2-EFFECT-impl-host-member-supplied` | positive | `type Memory … impl DirReadText proc read takes {dir: Self at: RelativePath} returns r: Result(Str FsError) do return Result.err(error: FsError.notFound()) endproc endimpl` | accepted (Q2) | 03: "such as a package's in-memory model of the interface" |
 | `V2-EFFECT-impl-host-member-missing` | negative | `impl DirReadText` with no member | `@type.missingAbstractMember` at the `impl` (Q2) | 02 Implementations |
 | `V2-EFFECT-impl-host-member-row` | negative | the `impl` member with `performs {StdoutText}` | `@type.mismatch` at the `performs` section | 03: "It MUST keep each member's row" |
-| `V2-GRANT-impl-supplies-limit` | negative | the `impl` with an added `fn limit` member | `@type.defaultOverride` at the member's name (Q2) | 07: "a default member supplied again by an implementation" |
+| `V2-GRANT-impl-supplies-limit` | negative, *awaits Q1* | the `impl` with an added `fn limit` member | `@type.defaultOverride` at the member's name | 07: "a default member supplied again by an implementation" |
 | `V2-GRANT-narrowing-types` | positive | `fn f takes {d: DirReadText p: FsPolicy l: GrantLimits} returns r: Result(DirReadText ScopeError) do let n be DirReadText.limit(d l) endlet return DirReadText.restrict(n p) endfn` | accepted: narrowing is pure | 03 Narrowing: "They perform nothing and open nothing" |
 | `V2-GRANT-restrict-on-stream` | negative | `StdoutText.restrict(out p)` | `@name.unknownSymbol` at `restrict` | 03 Narrowing, the table: "the six `Dir…` interfaces" |
 | `V2-GRANT-sub-result-is-fallible` | negative | `let d2: DirReadText be DirReadText.sub(d p) endlet` | `@type.mismatch` at the initializer | 03: `sub` returns `Result(Self ScopeError)` |
@@ -154,7 +162,8 @@ model runs; a host body is never reached.
 
 ## Completion evidence
 
-- [ ] `conformance/rules/m2-19.tsv` has one `active` row per `V2-` id.
+- [ ] `conformance/rules/m2-19.tsv` has one `active` row per `V2-` id
+      that awaits no ruling.
 - [ ] A script in the report lists the 17 `external @host` symbols of the
       library and compares them with `host-2.0.txt`.
 - [ ] Every position of the table has a positive and a negative row.

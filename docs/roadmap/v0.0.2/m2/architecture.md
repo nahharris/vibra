@@ -168,12 +168,24 @@ pub struct HostRequest<'v> {
     pub invocation: u64,
     pub parent: Option<u64>,
     pub origin: u64,
+    /// The most result bytes the caller's memory budget can still account.
+    pub room: u64,
 }
 /// The complete `Result` of one operation, in registry terms.
 pub enum HostReply {
     Ok(HostOk),          // Void | Text | Bytes | Names | Metadata | I64 | U64
     Err(HostErrorCase),  // the row's error type and one of its cases
 }
+/// What `host` returns: the reply, and the audit event that is due for it.
+pub struct HostCompletion {
+    pub reply: HostReply,
+    /// `None` when no event is due: a refusal of steps 1 to 3, or a call
+    /// known not submitted.
+    pub receipt: Option<Receipt>,
+}
+/// A pending audit event. Neither `Clone` nor `Copy`: `commit` consumes it.
+/// Like a token it is an index, and the broker validates it.
+pub struct Receipt { context: u64, serial: u64 }
 pub enum NarrowRequest<'v> {
     Restrict { grant: GrantToken, policy: &'v Value },
     Sub { grant: GrantToken, prefix: &'v [String] },
@@ -189,7 +201,13 @@ pub enum Issued {
 pub enum HostFault { InvalidHostValue(String), MemoryExhausted }
 
 pub trait HostContext {
-    fn host(&mut self, request: HostRequest<'_>) -> Result<HostReply, HostFault>;
+    /// Steps 1 to 4 of a host call. The event of a completed call is
+    /// pending, not appended, when this returns.
+    fn host(&mut self, request: HostRequest<'_>)
+            -> Result<HostCompletion, HostFault>;
+    /// Appends the event of `receipt`. The caller calls it exactly once,
+    /// after it has accepted the reply and advanced its continuation.
+    fn commit(&mut self, receipt: Receipt) -> Result<(), HostFault>;
     fn narrow(&mut self, request: NarrowRequest<'_>) -> Result<Narrowed, HostFault>;
     fn test_world(&mut self, op: TestWorldOp, world: GrantToken,
                   arguments: &[Value], invocation: u64)
@@ -200,6 +218,17 @@ pub trait HostContext {
 A typed refusal (`denied`, `limitExceeded`, `unsupported`,
 `outcomeUnknown`) is a `HostReply::Err`. `HostFault` is only the two things
 that are not a program result.
+
+**The completion receipt.** The broker cannot see the caller's continuation
+advance, so it does not append the event of a completed call: it keeps the
+event pending and hands back a receipt. The caller validates the reply
+against the member's result type, delivers the value to its continuation,
+and then commits the receipt. A caller that rejects the reply never
+commits, and the trace holds no event for that call. The broker holds at
+most one pending event: `host` with an event still pending, and `commit` of
+a receipt that is not the pending one, are `HostFault::InvalidHostValue`.
+The two callers are the interpreter, at an `await` of a host-bound member,
+and `vibra-host::startup`, at a startup read; both follow this order.
 
 ### The interpreter
 
@@ -218,20 +247,35 @@ pub(crate) enum Repr<'a> {
 // vibra-interp/src/machine.rs
 pub(crate) enum Kont<'a> {
     // …
-    /// The invocation that an `await` started: restored when it returns.
-    Await { caller_invocation: u64 },
+    /// A restoration boundary: the invocation to restore when the awaited
+    /// one returns. A non-tail `await` pushes one; a tail `await` none.
+    Await { caller: Invocation },
 }
+/// The identity of a running invocation: the machine holds the current
+/// one, and it is the metadata an awaited host member sends.
+#[derive(Clone, Copy)]
+pub(crate) struct Invocation { pub ordinal: u64, pub parent: Option<u64> }
 ```
 
 - Applying a callee of a `Proc` type allocates a `Plan` and returns. It
   enters no frame and runs no guard.
-- `await` takes the next invocation ordinal, pushes `Kont::Await`, and
-  enters the plan's callee exactly as a call enters a function: a
-  `requires … else`, the body, and an `ensures … else` run on each one. A
-  `return await` in tail position reuses the activation.
-- A `FunctionBody::Host` is entered by building a `HostRequest` and calling
-  `HostContext::host`. With no context (compile-time evaluation,
-  `interpret`) it is `RuntimeError::Unavailable`.
+- `await` takes the next invocation ordinal and makes the new
+  `Invocation`, whose `parent` is the ordinal of the invocation that
+  performed the `await`. It then enters the plan's callee exactly as a
+  call enters a function: a `requires … else`, the body, and an
+  `ensures … else` run on each one.
+- A non-tail `await` pushes `Kont::Await` with the caller's `Invocation`.
+  A `return await` in tail position replaces the activation and pushes
+  nothing: the one boundary below it restores the right caller when the
+  chain returns, and the parent of each transfer lives in the new
+  `Invocation`, not in a continuation. A chain of tail awaits therefore
+  holds one activation, one boundary, and one `Invocation`, whatever its
+  length.
+- A `FunctionBody::Host` is entered by building a `HostRequest` from the
+  current `Invocation` and calling `HostContext::host`; the reply is
+  accepted, the continuation advanced, and the receipt committed, in that
+  order. With no context (compile-time evaluation, `interpret`) it is
+  `RuntimeError::Unavailable`.
 - Dispatch on a receiver whose `Repr` is `Grant` selects the interface's
   host-bound member; on any other held value it selects that type's `impl`,
   as for every interface.
@@ -240,7 +284,10 @@ pub(crate) enum Kont<'a> {
 
 ```rust
 // vibra-interp/src/lib.rs
+/// `first_invocation` is the ordinal of the entry's own invocation: one
+/// more than the number of startup reads, which only the caller knows.
 pub fn run_entry(program: &CheckedProgram, grants: Vec<EntryArgument>,
+                 first_invocation: u64,
                  host: &mut dyn HostContext, budget: MemoryBudget)
                  -> Result<Execution, RuntimeError>;
 pub fn run_test(program: &CheckedProgram, world: Option<GrantToken>,
@@ -262,7 +309,11 @@ impl<'d> Context<'d> {
     pub fn new(driver: &'d mut dyn Driver, std: StdlibIdentity,
                revision: String) -> Self;
     /// Issues a root grant. Only `startup` and `test_world` call it.
-    pub(crate) fn issue(&mut self, root: RootGrant) -> GrantToken;
+    pub(crate) fn issue(&mut self, root: RootGrant)
+                        -> Result<GrantToken, HostFault>;
+    /// Makes every grant that descends from a root on `resource`
+    /// unusable, and only then releases the resource.
+    pub(crate) fn release(&mut self, resource: ResourceId);
     pub fn trace(&self) -> &AuditTrace;
 }
 impl vibra_ir::authority::HostContext for Context<'_> { /* … */ }
@@ -280,25 +331,98 @@ pub trait Driver {
 }
 pub enum Acquire { Acquired(ResourceId), Refused, Failed(String) }
 pub trait Gate {
-    fn admit(&mut self, found: &Found<'_>) -> Result<(), Refusal>;
+    fn admit(&mut self, found: &Found<'_>) -> Result<(), Refused>;
 }
+/// The gate said no. The broker keeps the reason; the driver stops.
+pub struct Refused(());
 pub struct Found<'n> {
-    pub real_names: &'n [String], // as the filesystem reports them
+    /// As the filesystem reports them. For a create: the names of the
+    /// parent that was opened and is held, then the proposed leaf.
+    pub real_names: &'n [String],
     pub action: FoundAction,      // Read | Replace | Create | List | Stat
-    pub size: Option<u64>,        // bytes to reserve, when it is a read
-    pub links: Option<u32>,
+    pub size: Option<u64>,        // input bytes to reserve, when known
+    pub links: Option<u32>,       // `None`: the platform reports no count
 }
 pub enum Completion {
-    NotSubmitted(HostErrorCase), // known not submitted: no event
-    Completed(HostReply),        // traced
+    /// The gate refused. Nothing was read, created, or changed.
+    Refused,
+    /// The adapter knows the action was not submitted: no event.
+    NotSubmitted(HostErrorCase),
+    /// The adapter call completed: an event is due.
+    Completed { reply: HostReply, progress: Progress },
 }
+/// What the adapter measured, per charged byte resource, separately from
+/// the typed reply.
+pub struct Progress { pub input: Measured, pub output: Measured }
+pub enum Measured { Known(u64), Uncertain }
 ```
 
-`Context::host` is the five steps of the runtime chapter, in one function:
+`Context::host` is steps 1 to 4 of the runtime chapter, in one function:
 validate the token, derive the request, evaluate the whole ancestry's
-policy and reserve every counter, call `Driver::call` with a gate, then
-append the event. `vibra-host::startup` and `vibra-host::test_world` are
-the only callers of `Context::issue`; `issue` is `pub(crate)`.
+policy and reserve every counter, call `Driver::call` with a gate, and
+settle the counters. Step 5 is split with the caller: the caller advances,
+then `Context::commit` appends the pending event.
+`vibra-host::startup` and `vibra-host::test_world` are the only callers of
+`Context::issue`; `issue` is `pub(crate)`.
+
+**Lineages.** A slot of the grant table holds its parent slot (none for a
+root), the one constraint it adds, and its **lineage**: the root it
+descends from. A lineage holds the resource, the origin record, the root
+ordinal, a generation, and whether it is live. Step 1 of every call, and
+every `narrow`, reads the lineage of the token's slot: a lineage that is
+not live, or whose generation differs from the token's, is
+`InvalidHostValue`. So a descendant has no liveness of its own to keep.
+`Context::release` marks every lineage on the resource dead and bumps its
+generation, and only then calls `Driver::release`. The walk from a slot to
+its root is a loop over parent slots.
+
+**The gate.** The driver calls the gate with what it found before it
+reads, creates, or changes anything. The gate decides the policy on the
+real names and the found action, then the hard-link rule, then reserves
+the size. The broker keeps the gate's reason and maps it: a policy or hard-link refusal is a completed `denied`, with
+an event; a size over a byte limit and a missing fact the rule needs (no
+link count on a replace) are `limitExceeded` and `unsupported`, with no
+event ([Q29](spec-questions.md#q29-a-refusal-decided-after-the-adapter-opened-an-entry));
+a size over `HostRequest::room` is `HostFault::MemoryExhausted`. A driver
+whose gate refused returns `Completion::Refused`. Any other completion
+after a refusal is `InvalidHostValue`: the driver acted against the gate.
+
+**Settlement.** Step 3 reserves one invocation and the encoded size of a
+write on the grant's counters and on every ancestor's, all or none; the
+gate reserves the size of a read the same way. When the driver returns,
+the broker settles each byte reservation, on the grant and on every
+ancestor, from the completion:
+
+| Completion | Charged | Refunded |
+| --- | --- | --- |
+| `Completed`, `Known(n)` | `n` | the reservation less `n` |
+| `Completed`, `Uncertain` | the whole reservation | nothing |
+| `Completed` with the reply `outcomeUnknown` | the whole reservation | nothing |
+| `Refused`, `NotSubmitted` | nothing | the whole reservation |
+
+A `Known(n)` above the reservation is `InvalidHostValue` and charges the
+whole. A reply never stands in for progress: a write that returns `other`
+after two known bytes and one that returns `other` after an unknown number
+have the same reply and different records. The invocation is charged when
+the call passes reservation, which for a read includes the gate's
+reservation of its size, and is not refunded afterwards. A read the gate
+refuses for its size did not pass and holds no invocation (Q29).
+
+**The order of a mutating call.** No call changes the filesystem before
+its last authority check.
+
+- A replace opens the existing file without truncation. The gate admits
+  `Replace` on its real names and its link count. Only then does the
+  driver truncate and write, on that handle.
+- A create opens the parent directory and keeps the handle. The gate
+  admits `Create` on the parent's real names followed by the proposed
+  leaf; the output bytes were reserved in step 3. Only then does the
+  driver create the leaf, exclusively, relative to that parent handle.
+  Nothing is created and then removed.
+- A driver that cannot hold the parent, report its real names, or create
+  relative to it answers `unsupported` before any change.
+- The registry has no remove, rename, append, or directory creation, and
+  the file-scope adapter exports no function that does one.
 
 The recipe data both sides of the project boundary share:
 
@@ -328,6 +452,33 @@ impl BindingPlan {
 `vibra-workspace::binding` decodes a target's `grants` into a
 `BindingPlan` and reports `BindingFault`s as diagnostics;
 `vibra-host::startup` runs `validate` again before it acquires anything.
+
+```rust
+// vibra-host/src/startup.rs
+/// What admission needs of the checked entry.
+pub struct EntryShape {
+    pub row: Row,                // the entry's written `performs` row
+    pub leaves: Vec<EntryLeaf>,  // name, interface, optional
+}
+pub fn admit(plan: &BindingPlan, entry: &EntryShape, ceiling: &Row,
+             driver: &dyn Driver) -> Result<Admission, AdmissionRefusal>;
+pub fn start(admission: Admission, context: &mut Context<'_>) -> Started;
+pub struct Started {
+    pub record: StartupRecord,
+    pub arguments: Option<Vec<EntryArgument>>, // `None`: startup failed
+    pub next_invocation: u64,    // one more than the startup reads
+    /* the teardown guard: the acquired resources, in order */
+}
+```
+
+`admit` makes two separate checks. The ceiling check compares rows: the
+entry's row and the row of each startup step are contained in `ceiling`. A
+leaf's interface is not a row: an entry may take a grant it never
+performs. The conformance check compares shapes: the plan's leaves are the
+entry's leaves, name by name, with the same interface and the same
+optionality. `Started` owns teardown: a resource is in its list from the
+statement after `Driver::acquire` returns it, before any step that can
+fail.
 
 ### The workspace and the tools
 
@@ -368,32 +519,32 @@ corpus. The step in brackets owns the case.
 | A2 | `await` runs only in a `proc` or a test | `check::effects::procs` | `vibra-ir::effects` (the function's `BodyContext`); the interpreter refuses `Await` in a pure frame as `@runtime.invalidCheckedProgram` | `ATK-ir-await-in-fn` [03], `ATK-interp-await-in-pure-frame` [06], `V2-EFFECT-await-in-anon-fn` [05] | three layers agree on a wrong context |
 | A3 | Callable types compare rows exactly | type equality in `vibra-types` | `vibra-ir` type equality at every call, conversion, and member comparison | `ATK-ir-row-widened-at-call` [03], `V2-EFFECT-callback-row-wider` [10], `V2-EFFECT-callback-row-narrower` [10] | `Row` equality is wrong in `vibra-ir` |
 | A4 | Building a plan runs nothing and consumes nothing | `vibra-interp::plan` | the trace and the counters: a built and dropped plan leaves no event and no charge | `V2-RUNTIME-plan-built-not-run` [07], `ATK-broker-no-charge-without-await` [20] | the interpreter enters a callee at application |
-| A5 | A host action needs a grant, and the whole policy is enforced | `Context::host`, steps 1 to 3 | the driver's gate at step 4, on the opened object | `ATK-policy-ancestor-dropped` [15], `V2-GRANT-denied-outside-policy` [22], `ATK-fs-alias-name` [31] | the broker and the adapter both admit the request |
+| A5 | A host action needs a grant, and the whole policy is enforced | `Context::host`, steps 1 to 3 | the driver's gate at step 4, on the opened object; a completion other than `Refused` after the gate refused is `InvalidHostValue` | `ATK-policy-ancestor-dropped` [15], `ATK-driver-ignores-gate` [15], `V2-GRANT-denied-outside-policy` [22], `ATK-fs-alias-name` [31] | the broker and the adapter both admit the request |
 | A6 | Missing authority never falls back to ambient access | no driver is reachable except through `Driver::call` | the ambient-reads architecture test: `std::fs`, `std::env`, and the standard streams are named only under `vibra-host/src/system/` | `ATK-ambient-read-outside-system` [15], `ATK-ambient-read-in-interp` [20] | a crate reads the process directly and the architecture test misses it |
 | A7 | A denial, an unsupported action, and an exhausted limit are values | `Context::host` returns `HostReply::Err` | the interpreter has no path from a reply to a trap; conformance compares the typed result | `V2-GRANT-denied-is-value` [22], `V2-GRANT-limit-exceeded-is-value` [22], `ATK-driver-error-not-fault` [16] | a driver returns a `HostFault` for an ordinary failure |
 | A8 | No source expression makes a grant | `check::effects::grants`: an interface value type has no constructor, and widening a model makes no token | `vibra-ir`: `Value` has no grant form; the interpreter makes a `Repr::Grant` only from an `Issued` or a `Narrowed`; the broker validates every token | `V2-GRANT-no-constructor` [22], `V2-GRANT-model-is-not-grant` [22], `ATK-forged-token` [15], `ATK-ir-grant-constant` [03] | the broker accepts a token it did not issue |
 | A9 | A grant has no encoding | `check::effects::grants` (`@type.functionNotEquatable`, dict keys) | `vibra-ir::constant`; the interpreter's encoder, `@tool.unsupportedValue` | `V2-GRANT-assert-equal-grant` [22], `V2-GRANT-dict-key-grant` [22], `ATK-encode-grant` [20] | the encoder invents a value for a token |
-| A10 | A foreign or released grant is unusable | `Context::host`, step 1: context identity and generation | `Driver::call` receives a `ResourceId` the context resolved, never a token | `ATK-foreign-grant` [15], `ATK-stale-grant` [15], `ATK-released-grant` [28] | generations are reused |
+| A10 | A foreign or released grant is unusable, and so is every grant narrowed from a released one | `Context::host`, step 1: context identity, and the liveness and generation of the slot's lineage, which a descendant shares with its root | `Context::release` kills the lineage before `Driver::release`; `Driver::call` receives a `ResourceId` the context resolved, never a token | `ATK-foreign-grant` [15], `ATK-stale-grant` [15], `ATK-stale-derived-grant` [15], `ATK-released-grant` [28], `ATK-released-derived-grant` [28] | a slot keeps a liveness of its own, or a generation is reused |
 | A11 | Implementing an operation interface makes no grant | dispatch: only `Repr::Grant` reaches a host body | the broker never receives a held model; an `impl` body is under A1 | `V2-GRANT-model-is-not-grant` [22], `V2-EFFECT-impl-forwards-wider` [09] | dispatch sends a model to a host body |
 | A12 | Only the embedded library binds a host symbol, with the registry's owner and signature | the reader (`@syntax.invalidSection`) and the library loader | `vibra-ir::effects`: a `Host` body is valid only on the member the registry row names, with its signature and the row `{owner}` | `V2-SRC-DECL-fn-external-outside-stdlib` (M1), `ATK-ir-host-body-wrong-owner` [03], `ATK-stdlib-host-signature` [19] | the registry itself is wrong; the snapshot test guards that |
-| A13 | Narrowing never adds a right, a resource, a driver, or a budget; the parent stays a conjunction | `vibra-host::broker`: a child is its parent plus one constraint, and no operation replaces a parent | `Context::host` walks the whole ancestry on every call; nothing caches an "effective" decision | `ATK-narrow-broader-policy` [15], `ATK-narrow-other-resource` [15], `V2-GRANT-restrict-keeps-parent` [22] | the ancestry walk stops early |
-| A14 | Copies and descendants share ancestor counters; a counter that would overflow denies; an unknown outcome is not refunded | `vibra-host::broker` counters | property test over random narrowing trees against a model | `ATK-counter-overflow` [15], `ATK-counter-refund-unknown` [15], `V2-GRANT-limit-siblings-share` [22] | reservation is not atomic across the ancestry |
+| A13 | Narrowing never adds a right, a resource, a driver, or a budget; the parent stays a conjunction | `vibra-host::broker`: a child is its parent plus one constraint, and no operation replaces a parent | `Context::host` walks the whole ancestry on every call; nothing caches an "effective" decision | `ATK-narrow-broader-policy` [15], `ATK-narrow-other-resource` [15], `V2-GRANT-restrict-keeps-parent` [22], `V2-GRANT-narrow-forward-limit` [22] | the ancestry walk stops early; for a value that is not a sealed grant the row awaits [Q1](spec-questions.md#q1-narrowing-members-on-a-value-that-is-not-a-sealed-grant) |
+| A14 | Copies and descendants share ancestor counters; known progress is charged and a known remainder refunded; uncertain progress and an unknown outcome are charged in full; a counter that would overflow denies | `vibra-host::broker`: reservation all or none across the ancestry, settlement from the driver's `Progress` | property test over random narrowing trees against a model; a `Known` above the reservation is `InvalidHostValue` | `ATK-counter-overflow` [15], `ATK-counter-refund-unknown` [15], `ATK-counter-partial-known` [15], `ATK-counter-partial-unknown` [15], `ATK-counter-reservation-all-or-none` [15], `V2-GRANT-limit-siblings-share` [22] | reservation is not atomic across the ancestry, or the broker settles from the reply instead of the progress record |
 | A15 | The fields of one rule stay together | `vibra-host::policy::permits`, one rule at a time | the gate evaluates the same function on the real name and the found action | `ATK-policy-rule-fields-crossed` [14], `V2-GRANT-rule-correlation` [22] | evaluation distributes over fields |
 | A16 | A policy over the size or depth limit is refused | `vibra-host::policy`, at decode and at `restrict` | `Context::host` never evaluates a policy that was not counted | `V2-GRANT-policy-4097-nodes` [26], `V2-GRANT-restrict-too-complex` [22] | the count is taken before normalization only |
-| A17 | An entry row and every startup row are inside the target's `effects` | `vibra-workspace::entry` | `vibra-host::startup::admit`, before any leaf is processed | `V2-EFFECT-entry-outside-ceiling` [25], `V2-EFFECT-startup-row-outside-ceiling` [26], `ATK-admit-plan-outside-ceiling` [28] | both compare against a different list |
-| A18 | Every leaf has a valid recipe from a provider that issues its type; `after` is acyclic; a process read names its source leaf | `vibra-workspace::binding` | `BindingPlan::validate` in `vibra-host::startup` | `V2-GRANT-binding-missing` [26], `V2-GRANT-binding-cycle` [26], `ATK-plan-provider-mismatch` [28] | the provider table differs between the two callers; it is one table |
+| A17 | An entry row and every startup row are inside the target's `effects`; a grant the entry takes and never performs needs no entry of the list | `vibra-workspace::entry` (the entry row), `vibra-workspace::binding` (the startup rows) | `vibra-host::startup::admit`, which is given the checked entry row and compares it and each startup step's row with the ceiling before any leaf is processed | `V2-EFFECT-entry-outside-ceiling` [25], `V2-EFFECT-startup-row-outside-ceiling` [26], `V2-GRANT-binding-unused-grant` [26], `ATK-admit-entry-row-outside-ceiling` [28], `ATK-admit-startup-read-outside-ceiling` [28] | both compare against a different list |
+| A18 | Every leaf has a valid recipe from a provider that issues its type; `after` is acyclic; a process read names its source leaf; a recipe's leaf has the interface of the parameter it binds | `vibra-workspace::binding` | `BindingPlan::validate` and the leaf conformance check of `vibra-host::startup::admit` | `V2-GRANT-binding-missing` [26], `V2-GRANT-binding-cycle` [26], `ATK-plan-provider-mismatch` [28], `ATK-admit-leaf-interface-mismatch` [28] | the provider table differs between the two callers; it is one table |
 | A19 | Startup follows the one order; a refused required leaf and every failure stop it; a failure is never an absence | `vibra-host::startup` | the `@startup` events and the startup record state each leaf's outcome | `V2-GRANT-startup-order-permuted` [28], `V2-GRANT-startup-failed-optional` [28], `ATK-startup-failure-not-none` [28] | an issuer's failure is mapped to `Refused` |
-| A20 | On every ending the acquired grants are released in reverse order | the single exit path of `run_target` | a `Drop` guard on the startup state; the record's `released` statuses | `ATK-release-on-trap` [29], `ATK-release-on-exhaustion` [29], `V2-GRANT-release-order` [28] | a second exit path is added without the guard |
+| A20 | On every ending the acquired grants are released in reverse order, and an acquired resource has a teardown owner from the moment it exists | the single exit path of `run_target`; `Started` lists a resource in the statement after `Driver::acquire` returns it | a `Drop` guard on `Started`; the record's `released` statuses | `ATK-release-on-trap` [29], `ATK-release-on-exhaustion` [29], `V2-GRANT-release-order` [28], `ATK-acquire-then-fail-leaks-nothing` [28] | a second exit path is added without the guard, or a fallible step runs between acquisition and registration |
 | A21 | A file request is resolved from the held directory, one name at a time, following no link | `vibra-fs-scope` | the gate checks the real names of every opened component | `ATK-fs-file-symlink` [13], `ATK-fs-junction` [13], `ATK-fs-swapped-junction` [13], `ATK-run-symlink-denied` [33] | the adapter opens by joined path |
 | A22 | The name the filesystem reports decides a name test | `vibra-fs-scope` (`FileNormalizedNameInformation`) | the gate, with `Found::real_names` | `ATK-fs-case-alias` [13], `ATK-fs-short-name` [13], `ATK-run-alias-denied` [33] | the gate is given the requested name |
-| A23 | Nothing is truncated or created before authorization; create is exclusive | `vibra-fs-scope`: open without truncation, then `replace_contents` | the gate is called between open and write | `ATK-fs-replace-no-truncate` [13], `ATK-fs-create-over-alias` [13], `ATK-run-denied-leaves-file` [33] | the driver writes before `Gate::admit` returns |
+| A23 | Nothing is truncated or created before the last authority check; create is exclusive | the driver's order: a replace opens without truncation and a create opens and holds the parent; `Gate::admit`; then `replace_contents`, or exclusive creation relative to the held parent | the attack rows read the directory's contents after the refusal; the adapter has no create-then-remove path and no remove or rename | `ATK-fs-replace-no-truncate` [13], `ATK-fs-create-over-alias` [13], `ATK-fs-create-parent-swapped` [13], `ATK-fs-create-denied-on-real-parent` [31], `ATK-run-denied-leaves-file` [33], `ATK-run-create-denied-leaves-directory` [33] | the driver creates or truncates before `Gate::admit` returns, or creates through a path instead of the checked parent handle |
 | A24 | No intermediate handle outlives an operation; authority follows the opened directory | `vibra-fs-scope`: every operation walks from the root handle | the renamed-root and replaced-root cases | `ATK-fs-root-renamed` [13], `ATK-run-root-replaced` [33] | the driver caches a child handle |
-| A25 | Replacing a file with more than one link is `denied` | the gate, from `Found::links` | the adapter reports the count of the opened handle | `ATK-fs-hard-link-replace` [31], `ATK-run-hard-link-read-allowed` [33] | the adapter reports no count and the gate treats that as one |
+| A25 | Replacing a file with more than one link is `denied` | the gate, from `Found::links` | the adapter reports the count of the opened handle; a replace with no count is `unsupported` | `ATK-fs-hard-link-replace` [31], `ATK-gate-replace-without-link-count` [15], `ATK-run-hard-link-read-allowed` [33] | the gate treats a missing count as one |
 | A26 | Where the platform cannot give the guarantees the result is `unsupported`, before acting | `vibra-fs-scope` (`ScopeError::Unsupported`), `Driver::identity` | admission refuses a provider with no driver as `@tool.unavailable` | `ATK-fs-no-normalized-name` [31], `ATK-driver-absent-at-admission` [30] | a fallback path is added |
 | A27 | A test obtains grants only from its `TestWorld`, and reaches no real provider | the test runner builds a `Context` over a `WorldDriver` only | `Launch::System` is constructed only in `vibra-cli::run`; an architecture test fixes that | `V2-GRANT-test-without-world` [21], `ATK-test-runner-no-system-driver` [21] | the runner is given a system driver |
 | A28 | A target cannot obtain a `TestWorld` | no provider issues it (`vibra-workspace::binding`) | `Context::test_world` requires a token of the test root, which only the runner issues | `V2-GRANT-entry-test-world-leaf` [26], `ATK-test-world-op-on-leaf` [21] | `startup` issues a test root |
 | A29 | An `@once` operation is never dispatched twice for one invocation | the interpreter advances the continuation once per reply | the broker has no retry; one event per completed call | `V2-RUNTIME-await-twice-two-events` [20], `ATK-no-redispatch-on-error` [16] | a retry loop is added in a driver |
-| A30 | A completed call is recorded once, in order; a refusal before the adapter records nothing; a projection restores nothing | `Context::host`, step 5 | `vibra-host::trace` has a decoder that yields data only | `V2-RUNTIME-trace-order` [21], `V2-GRANT-denied-no-event` [22], `ATK-trace-decode-grants-nothing` [17] | an event is appended before the reply is delivered |
+| A30 | A completed call is recorded once, in order, after its continuation advanced; a refusal before the adapter and a reply the caller rejects record nothing; a projection restores nothing | `Context::commit`, called by the caller after it accepted the reply and advanced, at an `await` and at a startup read alike | the broker holds one pending event at most and validates the receipt; `vibra-host::trace` has a decoder that yields data only | `V2-RUNTIME-trace-order` [21], `V2-GRANT-denied-no-event` [22], `ATK-trace-uncommitted-no-event` [17], `ATK-trace-commit-once` [17], `ATK-startup-read-malformed-reply` [28], `ATK-trace-decode-grants-nothing` [17] | a caller commits before it advances |
 | A31 | No operation terminates the process or returns `Never` | the registry signatures | no driver calls an exit function; an architecture test | `ATK-no-process-exit` [30] | a driver aborts |
 
 ### What the checked IR validates and what it trusts
@@ -412,11 +563,27 @@ checker".
 | No constant or neutral value holds a grant or a plan | yes, by construction | no |
 | A type that contains a grant or callable is no dict key and no constant | yes (`constant.rs`) | no |
 | The witness chain of an `@effect.outsideCeiling` | no: a diagnostic, not a property of an accepted program | — |
-| The entry's leaves match the recipes | no: checked by `BindingPlan::validate` in `vibra-host` | — |
+| The entry's leaves match the recipes | no: checked by `startup::admit` in `vibra-host`, against the leaves of the checked entry | — |
 
 Grant sealedness, counters, and policy are never facts of the IR: they are
 run-time state of the broker, which trusts neither the checker nor the
 interpreter.
+
+### What the argument does not cover
+
+- **Existence under an alias.** A request whose written names the policy
+  permits, for an entry that does not exist below a parent reached by an
+  alias, returns `notFound` without a real-name check, because nothing was
+  opened to check. The chapter's `denied` promises that no content is
+  read, created, or changed; it does not promise that existence is hidden.
+  Gate 34 reads this path.
+- **A value that is not a sealed grant.** Whether narrowing one narrows
+  anything is [Q1](spec-questions.md#q1-narrowing-members-on-a-value-that-is-not-a-sealed-grant).
+  Until it is ruled, A13 is an argument about sealed grants only.
+- **An unsized input under a byte limit.** How it is reserved is
+  [Q10](spec-questions.md#q10-reserving-a-read-whose-size-is-not-known).
+  Until it is ruled, A14 is an argument about writes and about inputs
+  whose size is known before content is read.
 
 ## 3. Fake and real drivers
 
@@ -493,14 +660,17 @@ three platforms and CI stays green there. The architecture test allows
    validator is written from the chapter by a different step (03) before
    the checker's analysis (09) exists, with hand-built IR; review gate 11
    reads both against the chapter.
-2. **The run observation has no specified format (Q17).** Every
-   `workspaceRun` case waits on it. Mitigation: the run API and its host
-   tests land first (29); the rows are written as fields; the corpus cases
-   are added when the chapter names the document.
-3. **`sub` semantics and the projected policy (Q7) change the broker's
-   central data type.** Mitigation: step 15 keeps the ancestry as a list of
-   constraints and computes the effective policy in one function, so the
-   other ruling changes that function and its rows, not the grant table.
+2. **Two rulings are awaited, and each can change a registry row.** Q1,
+   under its option (b), changes the signature of `grant.limit`; Q10,
+   under its option (a), changes the two standard-input rows. Mitigation:
+   both are ruled before step 02 freezes the snapshots; every row either
+   ruling changes carries a visible mark, and the questions list the rows
+   per option.
+3. **The chapter does not yet name the run observation (Q17).** Every
+   `workspaceRun` case waits on the name and the manifest key. Mitigation:
+   the run API and its host tests land first (29); the rows are written as
+   the ruled fields; the corpus cases are added when the chapter names the
+   document.
 4. **The Windows adapter's residual gaps become escapes once it is behind
    a policy:** an alias is opened before it is refused; only NTFS on a
    local volume was measured. Mitigation: step 13 closes the measured gaps
@@ -509,16 +679,19 @@ three platforms and CI stays green there. The architecture test allows
    query, and gate 34 is an adversarial review of exactly these files.
 5. **Host-stack recursion returns through `await`.** A deep chain of
    awaits, a deep policy, or a deep ancestry of grants could recurse.
-   Mitigation: `Kont::Await`; policy evaluation and normalization with
-   explicit stacks and the depth limit of 64; ancestry as a flat list; a
-   100,000-deep row in steps 06 and 15, on a small-stack thread.
+   Mitigation: `Kont::Await`, with none pushed by a tail `await`; policy
+   evaluation and normalization with explicit stacks and the depth limit
+   of 64; the ancestry walked by a loop over parent slots; a 100,000-deep
+   row in steps 06 and 15, on a small-stack thread.
 6. **A shared file reappears.** Mitigation: the ownership lists in every
    guide and the script that rejects two parallel steps with one file;
    step 04 for the checker; one rules file per step.
-7. **Stream limits (Q10) cannot be made to fit "nothing was attempted".**
-   Mitigation: the recommended answer is isolated in the stream adapters;
-   the broker's reservation interface already carries a size learned after
-   opening.
+7. **A driver reports progress it did not measure.** The broker settles
+   from the driver's record and cannot check it against the world.
+   Mitigation: a `Known` above the reservation is a defect; every adapter
+   that can fail part-way has a row with a known and a row with an
+   uncertain count; gate 34 reads every path from an operating-system
+   result to a `Progress`.
 8. **Memory on the build machine.** Mitigation: no guide runs the
    whole-workspace test suite; each names the packages it touches and
    their dependents.

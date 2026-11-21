@@ -37,13 +37,15 @@ RelativeNames}`; `vibra-host::recipe` as the architecture gives it, with
 - `crates/vibra-host/src/recipe.rs`
 - `crates/vibra-host/tests/it/policy.rs`
 - `crates/vibra-host/tests/it/recipe.rs`
+- `crates/vibra-host/tests/it/names.tsv`
 
 ## Ordered tasks
 
 1. `path::check_name`: the name profile and the closed reserved set,
-   written from the chapter and tested against the same vectors as
-   `vibra-fs-scope::name` (step 13). Invariant: the two functions agree
-   on every vector; a shared vector file is in this crate's tests.
+   written from the chapter and tested against a vector file in this
+   crate's tests, `tests/it/names.tsv`: one name and its verdict per
+   line. Step 31, which depends on this step and on the adapter, runs
+   the adapter's check over the same file.
 2. `policy::decode`: the closed schema of `@scopePolicy.v1` of family
    `@filesystem`. An unknown field, kind, version, or family is an error;
    so is a missing field and an empty suffix. Family `@http` decodes to
@@ -64,7 +66,11 @@ RelativeNames}`; `vibra-host::recipe` as the architecture gives it, with
    provider, resource kind, `source` leaf kind and, for a variable, its
    `names`; policy present exactly for `@host.fs.directory` and rooted at
    its own leaf; `after` contains `source`, names leaves, is acyclic);
-   `BindingPlan::order`; `recipe_identity`.
+   `BindingPlan::order`; `recipe_identity`. `order` repeats one step:
+   among the leaves not yet taken whose `after` leaves are all taken,
+   take the smallest in UTF-8 byte order. Invariant: readiness is
+   computed again after every leaf, so a leaf that becomes ready precedes
+   a later-spelled leaf that was ready from the start.
 
 ## Test matrix
 
@@ -109,7 +115,7 @@ Host tests of `vibra-host`. `F(prefix depth actions names)` abbreviates a
 | size 4,097 | negative | one more entry | too complex | the same |
 | depth 64 and 65 | boundary, negative | nested `allOf` wrappers of distinct kinds to depth 64; to 65 | accepted; too complex | 03: "a depth of at most 64" |
 | deep input | boundary | 100,000 nested `anyOf` given to `decode` on a 256 KiB thread | too complex, no overflow | architecture, risk 5 |
-| names agree with the adapter | positive | the shared vector file | `path::check_name` equals `vibra_fs_scope::name::check` on each | 03 Reserved device names: "the same closed set is rejected on every platform" |
+| the name vectors | positive and negative | each line of `names.tsv`: the vectors of the chapter's reserved-name and name-profile sentences | `path::check_name` gives the line's verdict | 03 Reserved device names: "the same closed set is rejected on every platform" |
 | provider table | positive | each of the nine providers with each of its grant types and resource kinds | `validate` accepts | 04 Targets, the provider table |
 | provider cannot issue the type | negative | `@host.io.stdout` for a `DirReadText` leaf | `BindingFault` at `provider` | 04: "The leaf's type … MUST be one of the issuer's grant types" |
 | resource kind | negative | `@host.random` with `@fixedPath` | `BindingFault` at `resource` | 04: "of a kind the issuer accepts" |
@@ -122,6 +128,7 @@ Host tests of `vibra-host`. `F(prefix depth actions names)` abbreviates a
 | policy with another root | negative | leaf `@notes`, a rule with `root: @logs` | an invalid-policy fault | 04: "Its rules name this leaf as their root" |
 | order by spelling | positive | leaves `@b`, `@a`, `@logs.reader`, no `after` | `@a`, `@b`, `@logs.reader` | 04 Startup order: "smallest in UTF-8 byte order" |
 | order with `after` | positive | `@a` after `@z` | `@z`, `@a` | 04: "A leaf is ready when every leaf in its `after` list is processed" |
+| order recomputes readiness | positive | `@a` after `@b`, and `@z` with no `after`; the plan built from the leaves in each of their six orders | `@b`, `@a`, `@z` every time | 04 Startup order: "Readiness is recomputed after each leaf" |
 | recipe identity | positive | one recipe written with its policy items in two orders | one identity | 05: "the canonical bytes of the recipe with its policy normalized" |
 
 ## Diagnostics and schema changes
