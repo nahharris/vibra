@@ -1,6 +1,6 @@
 # Vibra v0.0.2
 
-**Planned pre-alpha release.** The language of the active specification runs
+**Pre-alpha release in progress.** The language of the active specification runs
 on the reference interpreter with written effect ceilings and bound grants,
 an agent can inspect, repair, and retest a project through structured tools,
 and one checked slice runs as native code.
@@ -8,7 +8,7 @@ and one checked slice runs as native code.
 | Order | Milestone | Evidence |
 | --- | --- | --- |
 | M0 | [Specification and transition](m0/README.md) | No contradictory active rule; every supported form has a test, diagnostic, and schema owner; Windows file-scope feasibility recorded. |
-| M1 | [Pure language](m1/README.md) | The pure language passes its corpus on the interpreter, including static contract discharge and rejection. |
+| M1 | [Pure language](m1/README.md) | The pure language passes its corpus on the interpreter, including static contract discharge and rejection. Exited: [exit record](m1/exit.md). |
 | M2 | [Operations and authority](m2/README.md) | A command-line program runs with bound grants; forbidden and unbound operations are rejected or denied as specified. The model-writing pilot is run. |
 | M3 | [Identity and repair loop](m3/README.md) | An agent starts from a seeded defect, inspects, repairs, and retests it; stale and replaced approvals are rejected. |
 | M4 | [First native slice](m4/README.md) | One new checked slice agrees across interpreter, stepper, and a linked Windows executable. |

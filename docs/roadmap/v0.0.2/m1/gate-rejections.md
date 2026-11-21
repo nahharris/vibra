@@ -1,11 +1,12 @@
 # Gate rejections
 
-The constructions of the release gate's pure modules that the contract rules
-of the [type chapter](../../../spec/02-type-system.md#guards) rejected, each
-with its predicate, its diagnostic, the rule that would have had to apply,
-and its repair.
+The constructions of the release gate's pure modules that the contract rules of
+the [type chapter](../../../spec/02-type-system.md#guards) rejected, each with
+its predicate, its diagnostic, the rule that would have had to apply, and its
+repair.
 
-The modules are those of [`examples/gate-pure/`](../../../../examples/gate-pure/):
+The modules are those of
+[`examples/gate-pure/`](../../../../examples/gate-pure/):
 
 - `errors`: the error type `GateError` and its description;
 - `paths`: a note's name from its file name, and a note's log file;
@@ -22,5 +23,5 @@ The one bare guard of the modules is `requires Ordered.greater(notes 0u64)` on
 written over the field reads `summary.notes` and `summary.lines`, with no
 destructuring pattern, is discharged as well.
 
-No predicate the modules needed fell outside the rules, so this list raises
-no specification question.
+No predicate the modules needed fell outside the rules, so this list raises no
+specification question.
