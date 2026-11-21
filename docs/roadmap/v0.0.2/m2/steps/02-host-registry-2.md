@@ -13,7 +13,7 @@ Crates: `vibra-ir`, `vibra-host`, `vibra-interp`, `vibra-types`.
   intrinsic registry" (the paragraph on the three narrowing rows);
   [effects chapter](../../../../spec/03-effects.md#standard-operation-inventory)
   "Standard operation inventory", "Delivery and typed outcomes";
-  [questions](../spec-questions.md) Q25.
+  [questions](../spec-questions.md) Q10, Q25.
 
 ## Entry points
 
@@ -49,8 +49,9 @@ GrantLimit}`; `crates/vibra-ir/registry/host-2.0.txt`.
 1. Replace the row table with the 17 rows of the chapter: wire symbol,
    `HostOp`, owner (`HostInterface`, with its module and name), the typed
    parameters after the grant, the `Ok` type, the error type, `since: 0`,
-   `Delivery::Once`. Invariant: one owner per operation and one operation
-   per owner.
+   `Delivery::Once`. The rows `io.stdinText` and `io.stdinBytes` have the
+   further parameter `max: U64` (Q10). Invariant: one owner per operation
+   and one operation per owner.
 2. The five error types carry their own cases and the four shared cases
    `denied`, `limitExceeded`, `unsupported`, `outcomeUnknown`. Invariant:
    every case name is camelCase and is in the chapter's tables.
@@ -85,6 +86,7 @@ Tests of `vibra-ir` (`tests/it/registry.rs`).
 | --- | --- | --- | --- | --- |
 | each of the 17 host rows | positive | `host_row("fs.readText")` and the other sixteen symbols | the owner, further parameters, and result of the chapter's table | 06 Host registry, the row of that symbol |
 | each of the 6 test-world rows | positive | `test_world_row("testWorld.directory")` and the other five | owner `TestWorld`, module `@std.test` | 06 Host registry: "one row per member" |
+| the stdin rows take a count | positive | `host_row("io.stdinText")` and `host_row("io.stdinBytes")` | each has the one further parameter `max: U64` (Q10) | 06 Host registry, the rows of the two symbols |
 | each error type | positive | `HostErrorType::Fs.cases()` and the other four | its own cases followed by the four shared ones | 06 Error types, both tables |
 | the three grant rows | positive | `grant.restrict`, `grant.sub`, `grant.limit` | `Fn({G FsPolicy} Result(G ScopeError))`, `Fn({G RelativePath} Result(G ScopeError))`, `Fn({G GrantLimits} G)` | 06 Compiler intrinsic registry: "are the rows `grant.restrict`, `grant.sub`, and `grant.limit`" |
 | every row is `@once`, `since` 0 | positive | all 17 | `Delivery::Once`, 0 | 06 Host registry: "Every row below has `since` 0 and delivery `@once`" |

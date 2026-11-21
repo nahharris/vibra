@@ -2,19 +2,14 @@
 
 Each question is a place where the specification is silent, says two things,
 or decides an observable behaviour by a sentence that can be read two ways.
-A step guide never settles one by choosing. A question is in one of three
+A step guide never settles one by choosing. A question is in one of two
 states:
 
 - **Ruled.** Its entry carries a **Ruling**, and the rows under
   **Depends** are written against it.
-- **With Hannah.** Q1 and Q10. Each lays out its options and, per option,
-  the exact rows and steps that change, so the ruling is a mechanical
-  edit. The rows they decide carry the mark *awaits Q1* or *awaits Q10* in
-  their guide, and are not implemented and not counted before the ruling.
-- **Open.** Q28 and Q29. Each carries a **recommended answer**; the rows
-  under **Depends** are written against it and name the question, so a
-  different ruling changes exactly those rows.
-
+- **Open.** Q28, Q29, and Q30. Each carries a **recommended answer**; the
+  rows under **Depends** are written against it and name the question, so
+  a different ruling changes exactly those rows.
 Chapters: [01 source](../../../spec/01-source-language.md),
 [02 types](../../../spec/02-type-system.md),
 [03 effects](../../../spec/03-effects.md),
@@ -23,11 +18,8 @@ Chapters: [01 source](../../../spec/01-source-language.md),
 [06 runtime](../../../spec/06-runtime.md),
 [07 diagnostics](../../../spec/07-diagnostics-and-conformance.md).
 
-Q1 and Q10 are ruled before step 02 and step 18 start: one option of each
-changes a registry row that step 02 freezes in a snapshot, and one option
-of Q1 adds a case to `ScopeError`, which step 18 declares. Steps 01 and 13
-depend on neither.
-
+A ruling that the chapters do not yet say names the chapter sections it
+changes; step 01 does not start before those sections say it.
 ## Rows, plans, and callables
 
 ### Q1. Narrowing members on a value that is not a sealed grant
@@ -86,52 +78,41 @@ depend on neither.
 
   A caller that narrows a `Forward`, viewed as a `DirReadText`, and hands
   the result on expects to have handed on less.
-- **Status.** With Hannah. The options:
-  - **(a) The three members are abstract.** They are bound with
-    `external @compiler`, and such a member is the implementation of a
-    sealed grant only, exactly as an `external @host` member is under Q2.
-    Every `impl` of a standard operation interface supplies `limit`, and
-    `restrict` and `sub` on the six `Dir…` interfaces. A model that wraps
-    a grant forwards the narrowing to it; a memory-only model returns
-    itself or keeps its own bounds.
-  - **(b) A typed failure for an unsealed receiver.** `limit` returns
-    `Result(Self ScopeError)`, and the three members return a new
-    `ScopeError` case on a value that is not a sealed grant. The case
-    needs a name, which the ruling gives.
-  - **(c) Identity.** `limit` returns the value, and `restrict` and `sub`
-    return `Result.ok` of it. This is what the guides are written against
-    today. With it a grant-backed model keeps the whole authority of the
-    grant it wraps after a caller narrowed it, and the caller is not told.
-- **What changes, per option.** The first three rows of the table are the
-  same in every option.
+- **Ruling.** The three members are ordinary abstract members. They are
+  bound with `external @compiler`, and such a binding is the
+  implementation of a sealed grant only, exactly as an `external @host`
+  binding is under Q2: the broker's narrowing is the sealed grant's
+  implementation. Every `impl` of a standard operation interface supplies
+  `limit`, and `restrict` and `sub` on the six `Dir…` interfaces. Dispatch
+  on a held value that is not a sealed grant selects that type's member,
+  as for every member. A model that wraps a grant forwards the narrowing
+  to it; a memory-only model returns itself or keeps its own bounds.
+  `Forward` forwards:
 
-  | Row or task | (a) abstract | (b) typed failure | (c) identity |
-  | --- | --- | --- | --- |
-  | `V2-GRANT-model-is-not-grant` [22] | passes; the model supplies the three members | unchanged | unchanged |
-  | `V2-GRANT-forward-model-reads` [22] | `Ok("A")`, one event; `Forward` supplies the three members | `Ok("A")`, one event | `Ok("A")`, one event |
-  | step 20, a narrowing row on a sealed grant | unchanged | `limit` yields `Result.ok` of the token | unchanged |
-  | `V2-GRANT-narrow-model-limit` [22] | the `impl`'s `limit` runs and returns the model; a read answers | `Err` of the new case | the model; a read answers |
-  | `V2-GRANT-narrow-model-restrict` [22] | the `impl`'s `restrict` runs: `Result.ok` of the model | `Err` of the new case | `Result.ok`; the model reads `b.bin` |
-  | `V2-GRANT-narrow-model-sub` [22] | the `impl`'s `sub` runs: `Result.ok` of the model | `Err` of the new case | `Result.ok` |
-  | `V2-GRANT-narrow-forward-limit` [22] | `Forward.limit` limits `inner`: `Ok("A")`, then `limitExceeded` | `Err` of the new case at the `limit`; no read | `Ok("A")`, then `Ok("A")` |
-  | `V2-GRANT-narrow-forward-restrict` [22] | `Forward.restrict` restricts `inner`: `b.bin` is `denied` | `Err` of the new case at the `restrict` | `Result.ok`; `b.bin` is `Ok("B")` |
-  | `V2-GRANT-impl-supplies-limit` [19] | positive: accepted | unchanged | negative: `@type.defaultOverride` |
-  | a new row of step 19: an `impl` without `limit` | added: `@type.missingAbstractMember` at the `impl` | not added | not added |
-  | `V2-EFFECT-impl-host-member-supplied`, `V2-EFFECT-impl-host-member-row`, `V2-EFFECT-impl-host-member-missing` [19] | each `impl` also supplies the three members, so its one fault stays one | unchanged | unchanged |
-  | `V2-GRANT-narrowing-types` [19] | unchanged | the `limit` is under `try` | unchanged |
-  | a new row of step 19: a `limit` result bound as a grant | not added | added: `@type.mismatch` at the initializer | not added |
-  | step 19, task 6 | the three members are abstract for an `impl` | `limit` is declared with the `Result` | a default member; an `impl` that supplies one is `@type.defaultOverride` |
-  | step 20, task 5 and the row "narrowing on a model" | a model receiver dispatches to its `impl`, as every member does; no request | a model receiver yields `Result.err` of the new case; no request | a model receiver yields itself; no request |
-  | step 02, the row "the three grant rows" and `compiler-2.0.txt` | unchanged | `grant.limit` is `Fn({G GrantLimits} Result(G ScopeError))` | unchanged |
-  | step 18, `ScopeError` and `V2-TYPE-INTERFACE-scope-error-cases` | unchanged | five cases | unchanged |
-  | every row of step 22 that calls `limit` (`V2-GRANT-limit-*`, `V2-GRANT-copy-shares`) | unchanged | the `limit` is under `try` | unchanged |
-  | chapters | 03 Narrowing and 03 Operation interfaces say the members are abstract for an `impl` | 03 Narrowing (the table, `ScopeError`), 06 Compiler intrinsic registry | 03 Narrowing says the members are the identity on another value |
+  ```vibra
+      fn limit
+        takes {self: Self limits: GrantLimits}
+        returns narrowed: Self
+        do
+          return Forward(inner: DirReadText.limit(self.inner limits))
+      endfn
+  ```
 
-  Q2's second half follows this ruling: under (a) it reads "an
-  `external @compiler` member of an interface is abstract for every
-  `impl`".
-- **Depends.** Steps 02, 18, 19, 20, 22. The rows of the table.
+  and its `restrict` and `sub` do the same under `try`. The type system
+  requires the members; it cannot require that a wrapping model forwards.
+  A model that returns itself keeps what it holds, and that is the
+  model's code, which the caller's package chose.
 
+  The chapters say this in 03 "Narrowing" and 03 "Operation interfaces":
+  the members are abstract for an `impl`, and the sentence that a model
+  "holds no real grant" gives way to the runtime chapter's "a source
+  implementation may model an interface using grants it holds".
+- **Depends.** Steps 19, 20, 22. Rows `V2-GRANT-impl-supplies-limit`,
+  `V2-GRANT-impl-missing-limit`, `V2-GRANT-narrow-model-limit`,
+  `V2-GRANT-narrow-model-restrict`, `V2-GRANT-narrow-model-sub`,
+  `V2-GRANT-forward-model-reads`, `V2-GRANT-narrow-forward-limit`,
+  `V2-GRANT-narrow-forward-restrict`, and "narrowing on a model" of
+  step 20.
 ### Q2. Which members of a standard operation interface an `impl` supplies
 
 - **Anchor.** [03 Operation interfaces](../../../spec/03-effects.md#operation-interfaces),
@@ -143,16 +124,14 @@ depend on neither.
   narrowing members.
 - **Program.** The `Memory` type of Q1 with and without its `read` member,
   and with an added `fn limit` member.
-- **Ruling.** An `external @host` member is abstract for every
-  `impl`: the binding is the implementation of sealed grants only. An
-  `external @compiler` member of an interface is a default member with a
-  toolchain body, so an `impl` that supplies `restrict`, `sub`, or `limit`
-  is `@type.defaultOverride`.  The sentence about the three narrowing members holds under options (b)
-  and (c) of Q1 and is reversed under its option (a); the row
-  `V2-GRANT-impl-supplies-limit` carries the mark *awaits Q1*.
+- **Ruling.** Both are abstract for every `impl`. An `external @host`
+  binding and an `external @compiler` binding of an interface member are
+  the implementation of sealed grants only, so an `impl` supplies the
+  operation member and the narrowing members (Q1), and one that lacks any
+  of them is `@type.missingAbstractMember`.
 - **Depends.** Steps 08, 19. Rows `V2-EFFECT-impl-host-member-supplied`,
-  `V2-EFFECT-impl-host-member-missing`, `V2-GRANT-impl-supplies-limit`.
-
+  `V2-EFFECT-impl-host-member-missing`, `V2-GRANT-impl-supplies-limit`,
+  `V2-GRANT-impl-missing-limit`.
 ### Q3. An unawaited plan as a statement
 
 - **Anchor.** [01 Bodies and statements](../../../spec/01-source-language.md#bodies-and-statements),
@@ -320,79 +299,45 @@ depend on neither.
   rejection before dispatch consumes nothing".
 - **Program.** A test whose `streams(world stdin: "0123456789a")` grant is
   limited to `inputBytes: 10u64` and read once, then once more.
-- **Status.** With Hannah. Two cases are separate.
+- **Ruling.** A stream read asks for a count. `StdinText.read` and
+  `StdinBytes.read` take `max: U64` and return at most that many bytes;
+  the empty value is the end of input. The registry rows `io.stdinText`
+  and `io.stdinBytes` have the further parameter `max: U64`.
 
-  **Input whose size is known before content is read** is the same in
-  every option: a file, the standard input of a world (the document holds
-  it), and a process's standard input when it is a regular file. The
-  adapter reports the remaining size to the gate, the broker reserves it,
-  and a size over the remaining bound is `limitExceeded` with nothing
-  consumed. An empty input reserves zero, so it succeeds at a zero budget.
+  The bytes are reserved before the stream yields one, at the gate, and
+  the settlement refunds what was not read:
 
-  **Input whose size is unknown** (a pipe, a console) under a set
-  `inputBytes` bound is the question. The options:
-  - **(a) A read asks for a count.** `StdinText.read` and
-    `StdinBytes.read` take `max: U64` and return at most that many bytes;
-    the empty value is the end of input. The broker reserves `max` in
-    step 3 (for an input of known size, the smaller of `max` and that
-    size), and the settlement refunds what was not read. "Read to the
-    end" is a library procedure of `@std.io` that loops over the member.
-    Reservation always precedes the action, and no operation is special:
-    this is the shape `RandomBytes.generate(count)` already has. The
-    ruling also says what a text read does with a scalar that `max`
-    splits; the rows below use ASCII and do not depend on it.
-  - **(b) A typed refusal.** A read of an unsized stream through a grant
-    with a set `inputBytes` bound is `unsupported`, decided before the
-    stream is touched. A grant with no such bound reads to the end.
-  - **(c) Read one byte past the bound.** The broker reserves the whole
-    remaining bound and the adapter reads at most that many bytes plus
-    one. Within the bound the read succeeds and the rest is refunded;
-    otherwise it returns `limitExceeded` as a completed, traced call that
-    consumed and charged what it read. This contradicts "A limit MUST be
-    reserved before an operation could exceed its count or byte bound",
-    spends a byte beyond the bound, and makes `limitExceeded` follow an
-    attempt.
-- **What changes, per option.** The awaiting rows are written in their
-  guides as option (a) gives them. `K` rows are of known size and differ
-  between the options only in the `max` argument that (a) adds.
+  - **Input of known size** (the standard input of a world, which the
+    document holds; a process's standard input that is a regular file):
+    the adapter reports the remaining size, and the broker reserves the
+    smaller of `max` and that size. An empty input reserves zero, so it
+    succeeds at a zero budget.
+  - **Input of unknown size** (a pipe, a console): the broker reserves
+    `max`.
 
-  | Row | (a) a count | (b) typed refusal | (c) one byte past |
-  | --- | --- | --- | --- |
-  | `V2-GRANT-limit-stdin-exact` [22] (`K`) | `read(max: 3)`, bound 3, `abc`: `Ok("abc")` | `read()`: `Ok("abc")` | `read()`: `Ok("abc")` |
-  | `V2-GRANT-limit-stdin-over` [22] (`K`) | `read(max: 3)`, bound 2: `limitExceeded`; an unlimited grant then reads `abc` | `read()`: the same | `read()`: the same |
-  | `V2-GRANT-limit-stdin-zero` [22] (`K`) | `read(max: 1)`, bound 0, empty input: `Ok("")` | `read()`: `Ok("")` | `read()`: `Ok("")` |
-  | `V2-GRANT-limit-stdin-count` [22] (`K`) | `read(max: 2)` of `abc`, bound 2: `Ok("ab")`; an unlimited grant then reads `c` | the row is deleted | the row is deleted |
-  | step 15, "stdin, known size" (three rows) | with `max` | without `max` | without `max` |
-  | step 15, "stdin, unsized, within the count" | bound 10, `max: 10`, the driver holds `abc`: `Ok("abc")`; 3 charged, 7 refunded | `Err(unsupported)`; no driver call | `Ok("abc")`; 3 charged |
-  | step 15, "stdin, unsized, over the bound" | bound 2, `max: 3`: `limitExceeded`; no driver call; nothing consumed | `Err(unsupported)`; no driver call | `Err(limitExceeded)`, a completed event; 3 bytes consumed and charged |
-  | step 15, "stdin, unsized, a short count" | bound 2, `max: 2`, the driver holds `abc`: `Ok("ab")`; 2 charged; `c` remains | the row is deleted | the row is deleted |
-  | step 16, "stdin reports its size" | unchanged | unchanged | unchanged |
-  | step 16, "stdin by count" | `read(max: 2)` of `x\ny` three times: `x\n`, `y`, the empty value | the row is deleted | the row is deleted |
-  | step 30, "stdin over the limit, a pipe" | bound 2, `max: 3`: `limitExceeded`; a later unlimited read returns `abc` | `Err(unsupported)`; a later unlimited read returns `abc` | `Err(limitExceeded)`, completed; a later read returns the empty value |
-  | step 30, "stdin within the limit, a pipe" | bound 3, `max: 3`: `Ok("abc")` | `Err(unsupported)` | `Ok("abc")` |
-  | step 30, "stdin, a file of known size" | `K` | `K` | `K` |
+  A reservation over the remaining `inputBytes` bound is `limitExceeded`
+  with nothing consumed. So a limit is always reserved before the
+  operation could exceed it, `limitExceeded` never follows an attempt,
+  and no operation is special: this is the shape
+  `RandomBytes.generate(count)` has.
 
-  Option (a) also changes rows that no other option touches, because the
-  member gains a parameter and "to the end" becomes a library loop:
+  "Read to the end" is a library loop: `@std.io` has the procedures
+  `readAllText` and `readAllBytes`, each with the row of its interface,
+  which call the member with a fixed count of 65,536 until it returns the
+  empty value. Each turn of the loop is an invocation. Through a grant
+  whose `inputBytes` bound is below that count, the loop over an input of
+  unknown size returns `limitExceeded`; a program with such a budget
+  calls the member with its own count.
 
-  | Step | What changes under (a) |
-  | --- | --- |
-  | 02 | the rows `io.stdinText` and `io.stdinBytes` have the further parameter `max: U64`; `host-2.0.txt` |
-  | 16 | "stdin once", "stdin invalid text": each read names a `max`; a read after the end is the empty value |
-  | 19 | `StdinText.read` and `StdinBytes.read` take `max`; `@std.io` gains the two read-to-the-end procedures; `V2-EFFECT-std-each-interface` |
-  | 20 | "each argument form": the two stdin rows send `Count` |
-  | 21 | `V2-GRANT-test-stdin-twice` reads through the library procedure |
-  | 29 | `V2-RUNTIME-run-stdin`: the echoing entry uses the library procedure |
-  | 30 | "stdin text", "stdin invalid text", "stdin read error": each read names a `max` |
-  | 32 | "stdin passes through": the echoing entry uses the library procedure |
-  | chapters | 03 Standard operation inventory; 06 Host registry, the two rows; 06 Closed operation semantics, "Standard input" and the read sentence of "All operations"; 04 The standard library |
-
-  Under (b) the chapters gain one sentence in 06 "Standard input"; under
-  (c), the exception in 03 "Delivery and typed outcomes" and 06 "Error
-  types" that `limitExceeded` can follow an attempt.
-- **Depends.** Steps 02, 15, 16, 19, 20, 21, 22, 29, 30, 32. The rows of
-  the two tables.
-
+  The chapters say this in 03 "Standard operation inventory", 06 "Host
+  registry" (the two rows), 06 "Closed operation semantics" ("Standard
+  input" and the read sentence of "All operations"), and 04 "The standard
+  library".
+- **Depends.** Steps 02, 15, 16, 19, 20, 21, 22, 29, 30, 32. Rows
+  `V2-GRANT-limit-stdin-exact`, `V2-GRANT-limit-stdin-over`,
+  `V2-GRANT-limit-stdin-zero`, `V2-GRANT-limit-stdin-count`,
+  `V2-EFFECT-std-read-all`, `V2-GRANT-test-stdin-twice`,
+  `V2-RUNTIME-run-stdin`, and the stdin rows of steps 15, 16, and 30.
 ### Q11. Own counters and ancestor counters under `limit`
 
 - **Anchor.** [03 Narrowing](../../../spec/03-effects.md#narrowing),
@@ -743,6 +688,27 @@ depend on neither.
   `V2-GRANT-limit-input-bytes`, `ATK-fs-no-normalized-name`, and "size
   refusal at the gate" of step 17.
 
+### Q30. A text read whose count splits a scalar
+
+- **Anchor.** [06 Closed operation semantics](../../../spec/06-runtime.md#closed-operation-semantics),
+  [Q10](#q10-reserving-a-read-whose-size-is-not-known).
+- **Question.** `StdinText.read(input max)` returns at most `max` bytes
+  of text. The input holds a scalar of three bytes and `max` is 2, or the
+  `max`-th byte falls inside a scalar. What is returned, what is
+  consumed, and what does a count of zero return, given that the empty
+  value is the end of input?
+- **Program.** Standard input holding U+20AC and `a`;
+  `StdinText.read(input 4u64)` twice; then the same input read with a
+  count of 2.
+- **Recommended answer.** A text read returns the longest prefix of whole
+  scalars that fits in `max` bytes, and consumes exactly those bytes: the
+  first read returns U+20AC and `a`, the second the empty value. A text
+  count below 4, the longest scalar, is `unsupported` before the stream
+  is touched, so a completed text read is empty only at the end of input.
+  A byte read accepts every count; a count of zero returns the empty
+  value and consumes nothing, as a zero `count` of random bytes does.
+- **Depends.** Steps 16, 30. Rows "stdin text below a scalar" of both.
+  Every other text row uses a count of at least 4.
 ## Where the tree contradicts the M2 chapters
 These are not open questions. Each is a place where the code as it stands
 differs from the specification, with the step that replaces it.

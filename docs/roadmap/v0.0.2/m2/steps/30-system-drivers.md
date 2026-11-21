@@ -4,7 +4,7 @@ Kind: vertical. Slice 7, the portable drivers: `SystemDriver` with the
 real standard streams, environment, arguments, clocks, and random source.
 The directory provider has no driver yet, so a target that binds one is
 unavailable under the system launch.
-Depends on: 24.
+Depends on: 24, 28.
 Crates: `vibra-host`.
 
 ## Prerequisites
@@ -16,12 +16,13 @@ Crates: `vibra-host`.
   chapter](../../../../spec/04-programs-and-packages.md#startup-order) the
   refusal and failure table; [tooling
   chapter](../../../../spec/05-tooling.md#program-arguments-execution-and-evaluation)
-  Arguments; [questions](../spec-questions.md) Q10, Q24.
+  Arguments; [architecture](../architecture.md) "The gate" and
+  "Settlement"; [questions](../spec-questions.md) Q10, Q24, Q28, Q30.
 
 ## Entry points
 
-From step 15: `driver::{Driver, Gate, Found, Completion, Acquire,
-DriverIdentity}`.
+From step 15: `driver::{Driver, Gate, Found, Completion, Progress,
+Measured, Acquire, DriverIdentity}`. From step 28: `startup::admit`.
 
 | Existing | Symbol | Use |
 | --- | --- | --- |
@@ -50,21 +51,30 @@ adapters `streams`, `env`, `clock`, `random` as submodules.
 3. `acquire`: a stream the process does not have is `Refused`; any other
    error obtaining it is `Failed`; the others acquire, or fail when the
    operating system cannot provide the resource.
-4. Streams: stdin reads to the end through the gate's size reservation
-   as Q10 recommends; a second read is the empty value; undecodable text
-   is `invalidText`; a read error is `other`. Writes deliver the whole
-   value; a closed stream is `closed`; a failure after a possible partial
-   write is reported as completed with `other`, never as not submitted.
-5. Environment: a name is read exactly; absent, empty, containing `=` or
+4. Standard input: before it reads, the adapter calls the gate with
+   `size: Some(remaining)` when the input is a regular file and `None`
+   otherwise (a pipe, a console, the in-memory reader of the tests unless
+   it declares a size); then it reads at most `max` bytes (Q10). The
+   empty value is the end of input; a text read returns whole scalars
+   and refuses a `max` below 4 as `unsupported` (Q30); undecodable text
+   is `invalidText`; a read error is `other`. Progress is the bytes taken
+   from the stream, whatever the reply (Q28).
+5. Standard output and error: a write delivers the whole value; a closed
+   stream is `closed`; a failure after a possible partial write is
+   completed with `other`, never not submitted. Progress is `Known(n)`
+   when the system reported the bytes written before the failure, and
+   `Uncertain` when it did not.
+6. Environment: a name is read exactly; absent, empty, containing `=` or
    NUL is `notPresent`; not Unicode is `notUnicode`. Arguments in order,
    without the executable; one that is not Unicode is `notUnicode`.
-6. Clocks: wall in nanoseconds since the Unix epoch as `I64`; monotonic
+7. Clocks: wall in nanoseconds since the Unix epoch as `I64`; monotonic
    from an origin fixed at construction, never decreasing; a value that
    does not fit is `unavailable`.
-7. Random: exactly `count` bytes from the operating system's generator,
-   reserved against `inputBytes` before generation; no source is
-   `unavailable`.
-8. No adapter calls an exit function, aborts, or panics on an operating
+8. Random: exactly `count` bytes from the operating system's generator.
+   The broker reserved `count` against `inputBytes`, and refused a count
+   above the request's `room` as the memory host event, before this
+   adapter is called; no source is `unavailable`.
+9. No adapter calls an exit function, aborts, or panics on an operating
    system error.
 
 ## Test matrix
@@ -76,13 +86,20 @@ arguments, so every row runs on the three platforms; the two rows marked
 
 | Row | Kind | Input | Expected | Specification |
 | --- | --- | --- | --- | --- |
-| stdin text | positive | stdin `x\ny`; `io.stdinText` twice | `Ok("x\ny")`, `Ok("")` | 06 Standard input: "a second completed read returns the empty value" |
-| stdin invalid text | negative | stdin `[255]`; `io.stdinText` | `Err(invalidText)` | 06: "Text that cannot be decoded is `invalidText`" |
-| stdin read error | negative | a reader that fails | `Err(other)` | 06: "Input that cannot be read is `other`" |
-| stdin over the limit | negative | stdin `abc`, `inputBytes: 2` | `Err(limitExceeded)`; a later unbounded read returns `abc` (Q10) | 06: "A rejection before dispatch … consumes nothing" |
+| stdin text | positive | stdin `x\ny`; `io.stdinText` with `max: 16` twice | `Ok("x\ny")`, `Ok("")` | 06 Standard input: "a second completed read returns the empty value" |
+| stdin invalid text | negative | stdin `[255]`; `io.stdinText` with `max: 16` | `Err(invalidText)` | 06: "Text that cannot be decoded is `invalidText`" |
+| stdin read error | negative | `inputBytes: 5`; a reader that yields 3 bytes and then fails; `io.stdinBytes` with `max: 5`; then a read with `max: 3` | `Err(other)`, then `Err(limitExceeded)`: 3 were charged (Q28) | 06: "Input that cannot be read is `other`" |
+| stdin over the limit, a pipe | negative | an unsized reader holding `abc`; `inputBytes: 2`; `io.stdinBytes` with `max: 3` | `Err(limitExceeded)`; the reader was not read; a later unbounded read returns `abc` (Q10) | 06: "A rejection before dispatch … consumes nothing" |
+| stdin within the limit, a pipe | boundary | the same reader; `inputBytes: 3`; `max: 3` | `Ok` of `abc` (Q10) | 06: "A limit MUST be reserved before an operation could exceed its count or byte bound" |
+| stdin by count, a pipe | positive | the same reader; `max: 2` three times | `ab`, `c`, and no bytes (Q10) | 06 Standard input: "a second completed read returns the empty value" |
+| stdin, a file of known size | boundary | a reader that declares the size 3; `inputBytes: 3`; `max: 10` | `Ok` of `abc`: the gate saw `size: Some(3)` and 3 were reserved (Q10) | 06: "A read first learns the size of the opened object, reserves it" |
+| stdin, an empty file at zero | boundary | a reader that declares the size 0; `inputBytes: 0`; `max: 1` | `Ok` of no bytes (Q10) | the same |
+| stdin text below a scalar | negative | `io.stdinText` with `max: 3` | `Err(unsupported)`; the reader was not read (Q30) | 06 Error types: "nothing was attempted" |
+| stdin text at a scalar boundary | boundary | stdin U+20AC then `a`; `io.stdinText` with `max: 4` twice | the two scalars, then `Ok("")` (Q30) | 06 Standard input: "a second completed read returns the empty value" |
 | stdout whole value | positive | `io.stdoutText "a"`, `io.stdoutBytes [98]` | the sink holds `ab` | 06: "A write delivers its whole value, in invocation order" |
 | stdout closed | negative | a sink that reports a broken pipe | `Err(closed)`, completed | 06: "A closed stream is `closed`" |
-| stdout partial failure | negative | a sink that accepts 2 bytes of 5 and then fails | `Err(other)`, a completed event; the 5 bytes stay charged | 06: "The outcome MUST still say accurately whether the write completed or was submitted" |
+| stdout partial failure, known | negative | `outputBytes: 10`; a sink that accepts 2 bytes of 5 and then fails, reporting the 2; then a write of 8; then a write of 1 | `Err(other)`, a completed event; then `Ok`; then `Err(limitExceeded)`: 2 were charged | 06: "The outcome MUST still say accurately whether the write completed or was submitted" |
+| stdout partial failure, unknown | negative | the same bound; a sink that fails without a count; then a write of 6; then a write of 5 | `Err(other)`, a completed event; then `Err(limitExceeded)`; then `Ok`: all 5 stay charged | 06 Accounting: "A consumption that might have happened MUST NOT be refunded" |
 | stream absent | negative | `acquire` of `@host.io.stdin` with no stdin in `inputs` | `Refused` | 04: "the process has no such stream" |
 | variable present | positive | `HOME=/h`; `env.readVar "HOME"` | `Ok("/h")` | 06 Environment |
 | variable absent | negative | `env.readVar "NOPE"` (in `names`) | `Err(notPresent)` | 06: "A missing name is `notPresent`" |
@@ -94,7 +111,7 @@ arguments, so every row runs on the three platforms; the two rows marked
 | monotonic clock, process | positive | `time.nowMonotonic` 1,000 times | never decreases | 06: "never decreases within it" |
 | random count | positive | `generateBytes(0)`, `(1)`, `(4096)` | exactly that many bytes | 06: "returns exactly `count` bytes" |
 | random over the limit | negative | `inputBytes: 8`, `generateBytes(9)` | `Err(limitExceeded)` | 03 Limits: "and random bytes" |
-| random huge count | negative | `generateBytes(u64::MAX)` with no limit | a typed error or the memory host event; no allocation of that size is attempted first | 06: "A driver MUST NOT read, allocate, or send an unbounded payload first" |
+| random huge count | negative | `generateBytes(u64::MAX)` with no limit and `room: 1024` | `HostFault::MemoryExhausted`; the generator was not called and no buffer was allocated | 06: "A driver MUST NOT read, allocate, or send an unbounded payload first" |
 | identities | positive | `identity` of the eight providers | each `version: "0.0.2"` (Q24) | 06 Audit trace, `drivers` |
 | `ATK-driver-absent-at-admission` | negative | `startup::admit` of a plan with a `@host.fs.directory` leaf over this driver | "unavailable"; nothing acquired | 04: "A driver the platform does not support at all … is rejected at admission" |
 | `ATK-no-process-exit` | negative | an architecture test over `crates/vibra-host/src` for `process::exit`, `process::abort`, `panic!` outside tests, and `unwrap()` on an operating-system result | none | 03: "No operation returns `Never`, and none terminates the process" |
@@ -129,7 +146,9 @@ Directories (31); the command (32).
 
 ## Completion evidence
 
-- [ ] Each of the 23 rows is a test, named in the report.
+- [ ] Each of the 30 rows is a test, named in the report.
+- [ ] Every path from an operating-system write result to a `Progress`
+      is quoted in the report with the count it carries.
 - [ ] The crate has no `unsafe`.
 - [ ] CI is green on the three platforms.
 - [ ] The validation commands exit 0.

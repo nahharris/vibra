@@ -21,12 +21,12 @@ Crates: `vibra-interp`.
 
 | Existing | Symbol | Use |
 | --- | --- | --- |
-| `crates/vibra-interp/src/machine.rs:1254` | `fn dispatch` | selects the host-bound member for a `Grant` receiver |
-| `crates/vibra-interp/src/machine.rs:1604` | `fn intrinsic` | routes the three grant rows |
+| `crates/vibra-interp/src/machine.rs:1264` | `fn dispatch` | selects the host-bound member for a `Grant` receiver |
+| `crates/vibra-interp/src/machine.rs:1614` | `fn intrinsic` | routes the three grant rows |
 | `crates/vibra-interp/src/intrinsics.rs:581` | `pub(crate) fn apply` | where step 02 left them unavailable |
 | `crates/vibra-interp/src/machine.rs:31` | `pub(crate) enum Halt` | gains the host-value trap |
 | `crates/vibra-interp/src/value.rs:26` | `pub(crate) enum Repr` | gains `Grant` |
-| `crates/vibra-interp/src/lib.rs:186` | `pub enum RuntimeError` | unchanged |
+| `crates/vibra-interp/src/lib.rs:206` | `pub enum RuntimeError` | unchanged |
 
 From step 03: `vibra_ir::authority`. From step 06: `plan.rs`,
 `Kont::Await`, `Invocation`. Step 12 repairs the files of step 06 that
@@ -72,9 +72,10 @@ arguments); `run_entry`, `EntryArgument`.
    receiver that is not a `Grant` is `@runtime.invalidCheckedProgram`.
 5. `grant.restrict`, `grant.sub`, `grant.limit`: on a `Grant`, encode the
    policy, prefix, or limits and call `HostContext::narrow`. They are
-   intrinsics: they take no invocation ordinal. What they do on a value
-   that is not a `Grant` *awaits Q1*; until the ruling such a receiver is
-   `RuntimeError::Unavailable`.
+   intrinsics: they take no invocation ordinal. A receiver that is not a
+   `Grant` never reaches them: dispatch selects that type's own member,
+   as for every member (Q1). An intrinsic reached with another receiver
+   is `@runtime.invalidCheckedProgram`.
 6. `FunctionBody::Host(TestWorld(op))`: call `HostContext::test_world`
    and build the member's result record from `Issued`.
 7. `run_entry`: build the entry's arguments from `EntryArgument`s
@@ -90,8 +91,7 @@ Tests of `vibra-interp` over hand-built checked IR and a recording
 `HostContext` defined in the tests, which answers from a table and logs
 every request. `R` is an interface with one host-bound member bound to
 `fs.readText`. The recording context logs `commit` too, with its position
-among the requests. A row marked *awaits Q1* is not implemented and not
-counted before the ruling.
+among the requests.
 
 | Row | Kind | Input | Expected | Specification |
 | --- | --- | --- | --- | --- |
@@ -99,7 +99,7 @@ counted before the ruling.
 | commit follows the continuation | positive | the same; a test hook records when the continuation receives the value | the log is: request, value delivered, `commit` | 06 step 5: "Advance the continuation consistently with the completion, and then append the completed event" |
 | the room of a request | boundary | a memory budget with 100 accountable bytes left at the `await` | the request has `room: 100` | 06: "Memory exhaustion stays a host event and never becomes an error case" |
 | an error reply | positive | the context answers `Err(notFound)` | `Result.err(FsError.notFound)` as a value, no trap | 06 Error types: "An ordinary domain failure is never a trap" |
-| each argument form | positive | one call per row kind: `Str`, `Bytes`, `RelativePath`, `U64`, none | `Text`, `Bytes`, `Path`, `Count`, empty | 06 Host registry, "Further parameters" |
+| each argument form | positive | one call per row kind: `Str`, `Bytes`, `RelativePath`, `U64` (random's `count` and standard input's `max`), none | `Text`, `Bytes`, `Path`, `Count`, empty | 06 Host registry, "Further parameters" |
 | each result form | positive | replies `Void`, `Text`, `Bytes`, `Names`, `Metadata`, `I64`, `U64` | the typed value of the row | 06 Host registry, "Result of an invocation" |
 | `ATK-broker-no-charge-without-await` | negative | build `Call(R.read, …)` 1,000 times and drop each plan | the context logged no request | 03 Cold plans: "Building a plan MUST NOT … dispatch a host action, or consume any limit" |
 | `V2-RUNTIME-await-twice-two-events` | positive | one plan awaited twice | two requests, invocations 2 and 3, both with parent 1 | 03 Delivery: "Two `await`s of one plan are two invocations" |
@@ -116,7 +116,9 @@ counted before the ruling.
 | `restrict` on a grant | positive | `grant.restrict(g, policy)`; the context answers `Grant(t2)` | `Result.ok` holding `t2`; a `Restrict` request with the policy's canonical value | 03 Narrowing |
 | `restrict` refused | positive | the context answers `Refused(policyTooComplex)` | `Result.err(ScopeError.policyTooComplex)` | 03: "A larger one is `ScopeError.policyTooComplex`" |
 | `limit` on a grant | positive | `grant.limit(g, {invocations: some(3) …})` | the returned token; `GrantLimits { invocations: Some(3), .. }` | 03 Narrowing |
-| narrowing on a model | *awaits Q1* | the three rows on a model value | as the option gives it; no request under any option | 03 Narrowing: "They perform nothing and open nothing" |
+| narrowing on a model | positive | a type whose `impl` of `R` supplies `limit` returning the receiver; `R.limit` on it through an interface value | the `impl` member's result; the context logged no `narrow` (Q1) | 03: "dispatch on any other held value … selects that type's `impl`" |
+| a forwarding model narrows its grant | positive | a type holding a `Grant` whose `limit` calls `R.limit` on it; `R.limit` on the model | one `Limit` request for the held token; the result is a model holding the returned token (Q1) | the same |
+| a narrowing intrinsic with a model receiver | negative | an unchecked set that calls `grant.limit` directly with a record | the trap `@runtime.invalidCheckedProgram` | 06 Host registry: "a record with similar fields is not a grant" |
 | narrowing is no invocation | positive | `limit` then one host call | the call's invocation is the next ordinal | 06 Invocations: "Every `await` is an invocation" |
 | test-world row | positive | `Await(Call(TestWorld.directory, [world], files: …))`; the context answers a `Bundle` of six tokens | the record of six grants by field name | 04 Test worlds, the table |
 | test-world output | positive | `TestWorld.output`; the context answers `Output` | `{stdout: Bytes stderr: Bytes}` | the same |
@@ -157,9 +159,7 @@ The broker's behaviour (15); what a real context answers.
 
 ## Completion evidence
 
-- [ ] Each of the 31 rows that await no ruling is a test, named in the
-      report; the row marked *awaits Q1* is listed as open, or as a test
-      once the question is ruled.
+- [ ] Each of the 34 rows is a test, named in the report.
 - [ ] `HostContext::commit` is called from one place, after the
       continuation received the value: the report quotes the function.
 - [ ] `crates/vibra-interp/Cargo.toml` has no `vibra-host` dependency,

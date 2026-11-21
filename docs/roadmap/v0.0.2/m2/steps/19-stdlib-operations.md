@@ -67,12 +67,16 @@ Proposed: `stdlib/src/std/{io,fs,env,time,random}.vib`.
 6. The 17 interfaces, each with its one `external @host` member; the
    narrowing members as `external @compiler` members bound to
    `grant.limit` on all 17, and to `grant.restrict` and `grant.sub` on
-   the six `Dir…` interfaces. Whether an `impl` supplies them, may supply
-   them, or must not *awaits Q1*, and so does the result type of `limit`.
-   Whether the two standard-input members take `max: U64` *awaits Q10*;
-   under its option (a) `@std.io` also gains the two procedures that
-   read to the end by a loop over the member.
-7. The manifest: the five modules, and the `host` symbol list with the 17
+   the six `Dir…` interfaces. For an `impl` each narrowing member is
+   abstract, as the host-bound member is (Q1, Q2): a missing one is
+   `@type.missingAbstractMember`. `StdinText.read` and `StdinBytes.read`
+   take `max: U64` (Q10).
+7. `@std.io.readAllText` and `@std.io.readAllBytes`: procedures in
+   source, with the rows `{StdinText}` and `{StdinBytes}`, that await the
+   member with a count of 65,536 until it returns the empty value, and
+   return the concatenation or the first error (Q10). Written as a tail
+   recursion over an accumulator.
+8. The manifest: the five modules, and the `host` symbol list with the 17
    symbols, sorted.
 
 ## Positions
@@ -86,18 +90,21 @@ Proposed: `stdlib/src/std/{io,fs,env,time,random}.vib`.
 ## Test matrix
 
 `workspaceCheck`, profile `staticV2`, unless stated. Loader rows are tests
-of `vibra-types` over an altered copy of a library module. A row marked
-*awaits Q1* is written as option (c) of that question gives it; the
-question lists what each option makes of it. It is not implemented and
-not counted before the ruling. Under option (a) of Q1 the three
-`V2-EFFECT-impl-host-member-…` rows keep their verdicts and each `impl`
-also supplies the narrowing members.
+of `vibra-types` over an altered copy of a library module. `Memory` is a
+type with `impl DirReadText` that supplies `read` (returning
+`Result.err(error: FsError.notFound())`), `limit` (returning `self`), and
+`restrict` and `sub` (returning `Result.ok(value: self)`). Every `impl`
+of a standard operation interface in a later guide supplies its
+narrowing members the same way unless its row says otherwise.
 
 | Case id | Kind | Input | Expected | Specification |
 | --- | --- | --- | --- | --- |
 | `V2-EFFECT-std-copy-note` | positive | the chapter's `copyNote`, with its imports | accepted | 03 Effect ceilings, the example |
 | `V2-EFFECT-std-prepare-write` | positive | the chapter's `prepareWrite` and `writeTwice` | accepted | 03 Cold plans, the example |
-| `V2-EFFECT-std-each-interface` | positive | one `proc` per interface awaiting its member through a parameter of that type, all 17 | accepted; `@types.v2` gives each member the registry's result type | 03 Standard operation inventory, the table |
+| `V2-EFFECT-std-each-interface` | positive | one `proc` per interface awaiting its member through a parameter of that type, all 17; the two standard-input members with `4096u64` | accepted; `@types.v2` gives each member the registry's result type | 03 Standard operation inventory, the table |
+| `V2-EFFECT-std-read-all` | positive | `proc slurp takes {input: StdinText} returns r: Result(Str IoError) performs {StdinText} do return await io.readAllText(input) endproc` | accepted (Q10) | 03 Standard operation inventory, the table |
+| `V2-EFFECT-std-read-all-row` | negative | the same with no `performs` | `@effect.outsideCeiling` at the `await` (Q10) | 03 Effect ceilings |
+| `V2-EFFECT-std-stdin-count-missing` | negative | `await StdinText.read(input)` | `@type.argumentMismatch` at the call (Q10) | 03 Standard operation inventory, the table |
 | `V2-EFFECT-std-row-missing` | negative | `copyNote` with `performs {DirReadText}` | `@effect.outsideCeiling` at the `await` of `DirWriteText.write` | 03 Effect ceilings |
 | `V2-EFFECT-std-error-not-converted` | negative | `try await StdoutText.write(out "x")` in a `proc` returning `Result(Void FsError)` | `@type.invalidTry` at the `try` | 03 Delivery: "There is no implicit conversion between error types" |
 | `V2-EFFECT-std-unhandled-result` | negative | the statement `await StdoutText.write(out "x")` | `@type.unhandledFallible` at the statement | 01 `let`: a fallible value left unused |
@@ -109,10 +116,12 @@ also supplies the narrowing members.
 | `V2-TYPE-INTERFACE-relative-path-dotdot` | negative | the same with `[".."]` | `@pattern.refutableBinding` at the pattern | 03 Paths: "rejected if it is `.` or `..`" |
 | `V2-RUNTIME-relative-path-names` | positive, `workspaceTest` | `assert.true(Result.isErr(RelativePath([n])))` for `""`, `.`, `a/b`, `a\\b`, `a:b`, `a.`, `a `, `NUL.txt`, `con .log`, `COM¹`; `assert.true(Result.isOk(…))` for `nul2`, `a.txt`, `.txt`, `com10` | `@test.passed` | 03 Paths; Reserved device names |
 | `V2-TYPE-INTERFACE-relative-path-ordered` | positive | `Dict(RelativePath Str)` as a parameter type | accepted (Q16) | 04 Test worlds: "`files: Dict(RelativePath Str) be [:]`" |
-| `V2-EFFECT-impl-host-member-supplied` | positive | `type Memory … impl DirReadText proc read takes {dir: Self at: RelativePath} returns r: Result(Str FsError) do return Result.err(error: FsError.notFound()) endproc endimpl` | accepted (Q2) | 03: "such as a package's in-memory model of the interface" |
-| `V2-EFFECT-impl-host-member-missing` | negative | `impl DirReadText` with no member | `@type.missingAbstractMember` at the `impl` (Q2) | 02 Implementations |
-| `V2-EFFECT-impl-host-member-row` | negative | the `impl` member with `performs {StdoutText}` | `@type.mismatch` at the `performs` section | 03: "It MUST keep each member's row" |
-| `V2-GRANT-impl-supplies-limit` | negative, *awaits Q1* | the `impl` with an added `fn limit` member | `@type.defaultOverride` at the member's name | 07: "a default member supplied again by an implementation" |
+| `V2-EFFECT-impl-host-member-supplied` | positive | `Memory` | accepted (Q1, Q2) | 03: "such as a package's in-memory model of the interface" |
+| `V2-EFFECT-impl-host-member-missing` | negative | `Memory` without its `read` member | `@type.missingAbstractMember` at the `impl` (Q2) | 02 Implementations |
+| `V2-EFFECT-impl-host-member-row` | negative | `Memory` whose `read` has `performs {StdoutText}` | `@type.mismatch` at the `performs` section | 03: "It MUST keep each member's row" |
+| `V2-GRANT-impl-supplies-limit` | positive | `Memory`, and a `fn` that calls `DirReadText.limit` on a `Memory` viewed as a `DirReadText` | accepted (Q1) | 03 Narrowing |
+| `V2-GRANT-impl-missing-limit` | negative | `Memory` without its `limit` member | `@type.missingAbstractMember` at the `impl` (Q1) | 02 Implementations |
+| `V2-GRANT-impl-missing-restrict` | negative | `Memory` without its `restrict` member | `@type.missingAbstractMember` at the `impl` (Q1) | 02 Implementations |
 | `V2-GRANT-narrowing-types` | positive | `fn f takes {d: DirReadText p: FsPolicy l: GrantLimits} returns r: Result(DirReadText ScopeError) do let n be DirReadText.limit(d l) endlet return DirReadText.restrict(n p) endfn` | accepted: narrowing is pure | 03 Narrowing: "They perform nothing and open nothing" |
 | `V2-GRANT-restrict-on-stream` | negative | `StdoutText.restrict(out p)` | `@name.unknownSymbol` at `restrict` | 03 Narrowing, the table: "the six `Dir…` interfaces" |
 | `V2-GRANT-sub-result-is-fallible` | negative | `let d2: DirReadText be DirReadText.sub(d p) endlet` | `@type.mismatch` at the initializer | 03: `sub` returns `Result(Self ScopeError)` |
@@ -128,7 +137,7 @@ also supplies the narrowing members.
 Codes: `@effect.outsideCeiling`, `@type.invalidTry`,
 `@type.unhandledFallible`, `@pattern.nonExhaustive`,
 `@pattern.refutableBinding`, `@type.argumentMismatch`, `@type.mismatch`,
-`@type.missingAbstractMember`, `@type.defaultOverride`,
+`@type.missingAbstractMember`,
 `@name.unknownSymbol`, `@syntax.invalidSection`,
 `@external.signatureMismatch`, `@external.ownerMismatch`,
 `@external.unknownSymbol`. The manifest gains five modules and the `host`
@@ -162,8 +171,7 @@ model runs; a host body is never reached.
 
 ## Completion evidence
 
-- [ ] `conformance/rules/m2-19.tsv` has one `active` row per `V2-` id
-      that awaits no ruling.
+- [ ] `conformance/rules/m2-19.tsv` has one `active` row per `V2-` id.
 - [ ] A script in the report lists the 17 `external @host` symbols of the
       library and compares them with `host-2.0.txt`.
 - [ ] Every position of the table has a positive and a negative row.

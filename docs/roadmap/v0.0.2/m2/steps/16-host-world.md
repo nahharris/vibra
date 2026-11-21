@@ -12,7 +12,7 @@ Crates: `vibra-host`.
   world" whole, "Closed operation semantics" whole;
   [architecture](../architecture.md) "The gate", "Settlement", "The
   order of a mutating call"; [questions](../spec-questions.md) Q10, Q12,
-  Q24.
+  Q24, Q30.
 
 ## Entry points
 
@@ -60,8 +60,9 @@ WorldDriver, VirtualFs}`.
    - `stat`: kind and size, zero for a directory;
    - stdin: the remaining input is of known size, which the driver
      reports to the gate as `size` before it yields a byte; a read yields
-     the remaining input, then the empty value. How a read is bounded is
-     Q10;
+     at most `max` bytes of it, then the empty value at the end (Q10); a
+     text read yields whole scalars, and a text `max` below 4 is
+     `unsupported` (Q30);
    - stdout and stderr: appended to per-stream buffers;
    - variables and arguments from the world; a name no environment can
      hold is `notPresent`;
@@ -77,10 +78,7 @@ WorldDriver, VirtualFs}`.
 ## Test matrix
 
 Host tests through `Context` over a `WorldDriver`, with root grants issued
-by a test-only helper. The world `W` is the chapter's example document. A
-row marked *awaits Q10* is written as option (a) of that question gives
-it, and is not implemented and not counted before the ruling; under that
-option every other stdin row names a `max` and is otherwise the same.
+by a test-only helper. The world `W` is the chapter's example document.
 
 | Row | Kind | Input | Expected | Specification |
 | --- | --- | --- | --- | --- |
@@ -108,10 +106,11 @@ option every other stdin row names a `max` and is otherwise the same.
 | write without a parent | negative | `fs.writeText` `["no" "a.txt"]` | `Err(notFound)` | 06: "do not create parent directories" |
 | a refused create leaves the copy | negative | policy `actions: [@replace]`; `fs.writeText` `["new.txt"]` through a gate that sees `Create` | `Err(denied)`; a listing of `/notes` through an unrestricted grant equals the listing before | 03: "Never truncate or create before authorization" |
 | a refused replace leaves the copy | negative | policy `actions: [@create]`; `fs.writeText` `["a.txt"]` `"x"` | `Err(denied)`; a read returns `hello` | the same |
-| stdin once | positive | `io.stdinText` twice | `Ok("x\ny")` then `Ok("")` | 06 Standard input: "a second completed read returns the empty value" |
-| stdin invalid text | negative | `stdin` a bytes record `[255]`; `io.stdinText` | `Err(invalidText)`; a second read is empty | 06: "After a completed success or domain failure the position is at the end" |
-| stdin reports its size | boundary | `io.stdinText` on `W` through a gate-recording wrapper | the gate saw `size: Some(3)` before the driver yielded a byte | 06: "A read first learns the size of the opened object, reserves it" |
-| stdin by count | positive, *awaits Q10* | `io.stdinText` with `max: 2` three times on `W` | `Ok("x\n")`, `Ok("y")`, `Ok("")` | 06 Standard input: "a second completed read returns the empty value" |
+| stdin once | positive | `io.stdinText` with `max: 16` twice | `Ok("x\ny")` then `Ok("")` | 06 Standard input: "a second completed read returns the empty value" |
+| stdin invalid text | negative | `stdin` a bytes record `[255]`; `io.stdinText` with `max: 16` | `Err(invalidText)`; a second read is empty | 06: "After a completed success or domain failure the position is at the end" |
+| stdin reports its size | boundary | `io.stdinBytes` with `max: 16` on `W` through a gate-recording wrapper | the gate saw `size: Some(3)` before the driver yielded a byte | 06: "A read first learns the size of the opened object, reserves it" |
+| stdin by count | positive | `io.stdinBytes` with `max: 2` three times on `W` | the bytes of `x\n`, of `y`, and none (Q10) | 06 Standard input: "a second completed read returns the empty value" |
+| stdin text below a scalar | negative | `io.stdinText` with `max: 3` on `W` | `Err(unsupported)`; a later read with `max: 16` returns `x\ny` (Q30) | 06 Error types: "nothing was attempted" |
 | stdout order | positive | `io.stdoutText "a"`, `io.stdoutBytes [98]`, `io.stderrText "e"` | `output()` is `ab` and `e` | 06: "A write delivers its whole value, in invocation order" |
 | variable present, absent | positive, negative | `env.readVar "HOME"`; `"NOPE"` with both in `names` | `Ok("/home/vibra")`; `Err(notPresent)` | 06 Environment |
 | unholdable name | negative | `env.readVar ""` and `"A=B"`, both in `names` | `Err(notPresent)` | 06: "So is a name no environment can hold" |
@@ -158,9 +157,7 @@ links"; their evidence is steps 13, 31, and 33.
 
 ## Completion evidence
 
-- [ ] Each of the 43 rows that await no ruling is a test, named in the
-      report; the row marked *awaits Q10* is listed as open, or as a test
-      once the question is ruled.
+- [ ] Each of the 45 rows is a test, named in the report.
 - [ ] The random vector is derived in the report from the SplitMix64
       definition, not from the implementation's output.
 - [ ] `world.rs` names no item of `std::fs`, `std::env`, or `std::time`.

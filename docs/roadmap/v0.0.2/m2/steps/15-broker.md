@@ -73,7 +73,9 @@ Measured, Acquire, Action, ResourceId, DriverIdentity}`.
    applies the hard-link rule, where a replace with `links: None` is
    `unsupported`; reserves `Found::size` input bytes on every counter of
    the ancestry, where a size over a bound is `limitExceeded` and a size
-   above `request.room` is `HostFault::MemoryExhausted`. The broker keeps
+   above `request.room` is `HostFault::MemoryExhausted`. For a stream
+   read the reserved bytes are the smaller of the request's `max` and
+   `Found::size`, or `max` when the size is `None` (Q10). The broker keeps
    the gate's reason. Invariant: the gate has answered before the driver
    reads, creates, or changes anything, and a driver whose gate refused
    returns `Completion::Refused`; any other completion after a refusal is
@@ -112,9 +114,7 @@ answer, and each of its own steps (`read`, `create`, `truncate`,
 `root(I)` issues a root grant of interface `I` with policy `P0` = file
 rule `prefix: [] depth: @tree actions: [@read @replace @create] names:
 anyName`. "Completed" means the call returned a receipt; "no receipt"
-means no event is due. A row marked *awaits Q10* is written as option (a)
-of that question gives it, and is not implemented and not counted before
-the ruling.
+means no event is due.
 
 | Row | Kind | Input | Expected | Specification |
 | --- | --- | --- | --- | --- |
@@ -164,12 +164,13 @@ the ruling.
 | read of a hard link | positive | a read; `links: Some(2)` | `Ok` | 03: "Reading such a file is allowed" |
 | env name inside the set | positive | `names: ["HOME"]`; `env.readVar("HOME")` | the driver's value | 06 Environment: "reads one permitted name" |
 | env name outside the set | negative | `env.readVar("PATH")` | `Err(denied)`; no driver call (Q12) | 06: "Neither grant exposes anything outside its reviewed scope" |
-| stdin, known size, within | boundary, *awaits Q10* | `inputBytes: 3`; `io.stdinText` with `max: 3`; the driver reports `size: Some(3)` and holds `abc` | `Ok("abc")`; 3 charged | 06: "A read first learns the size of the opened object, reserves it" |
-| stdin, known size, over | negative, *awaits Q10* | `inputBytes: 2`; `max: 3`; `size: Some(3)` | `Err(limitExceeded)`; the driver's `read` step is not reached; a later unbounded read returns `abc` | 06 Standard input: "A rejection before dispatch" |
-| stdin, known size, empty at zero | boundary, *awaits Q10* | `inputBytes: 0`; `max: 1`; `size: Some(0)` | `Ok("")` | 06: "A read first learns the size of the opened object, reserves it" |
-| stdin, unsized, within the count | boundary, *awaits Q10* | `inputBytes: 10`; `max: 10`; `size: None`; the driver holds `abc` and completes with `input: Known(3)` | `Ok("abc")`; 10 reserved in step 3, 3 charged, 7 refunded | 06: "A limit MUST be reserved before an operation could exceed its count or byte bound" |
-| stdin, unsized, a short count | boundary, *awaits Q10* | `inputBytes: 2`; `max: 2`; `size: None`; the driver holds `abc` | `Ok("ab")`; 2 charged; the driver still holds `c` | the same |
-| stdin, unsized, over the bound | negative, *awaits Q10* | `inputBytes: 2`; `max: 3`; `size: None` | `Err(limitExceeded)` in step 3; no driver call; a later unbounded read returns `abc` | 06 Standard input: "A rejection before dispatch" |
+| stdin, known size, within | boundary | `inputBytes: 3`; `io.stdinBytes` with `max: 3`; the driver reports `size: Some(3)` and holds `abc` | `Ok` of the bytes `abc`; 3 charged | 06: "A read first learns the size of the opened object, reserves it" |
+| stdin, known size, over | negative | `inputBytes: 2`; `max: 3`; `size: Some(3)` | `Err(limitExceeded)`; the driver's `read` step is not reached; no receipt; a later unbounded read returns `abc` | 06 Standard input: "A rejection before dispatch" |
+| stdin, known size below the count | boundary | `inputBytes: 3`; `max: 10`; `size: Some(3)` | `Ok` of `abc`: the smaller of the two was reserved (Q10) | 06: "A read first learns the size of the opened object, reserves it" |
+| stdin, known size, empty at zero | boundary | `inputBytes: 0`; `max: 1`; `size: Some(0)` | `Ok` of no bytes (Q10) | the same |
+| stdin, unsized, within the count | boundary | `inputBytes: 10`; `max: 10`; `size: None`; the driver holds `abc` and completes with `input: Known(3)` | `Ok` of `abc`; 10 reserved at the gate, 3 charged, 7 refunded: a later read with `max: 7` is `Ok` | 06: "A limit MUST be reserved before an operation could exceed its count or byte bound" |
+| stdin, unsized, a short count | boundary | `inputBytes: 2`; `max: 2`; `size: None`; the driver holds `abc` | `Ok` of `ab`; 2 charged; the driver still holds `c` (Q10) | the same |
+| stdin, unsized, over the bound | negative | `inputBytes: 2`; `max: 3`; `size: None` | `Err(limitExceeded)`; the driver's `read` step is not reached; no receipt; a later unbounded read returns `abc` | 06 Standard input: "A rejection before dispatch" |
 | deep ancestry | boundary | 10,000 chained `limit` calls, then a read, on a 256 KiB thread | `Ok`, no overflow | architecture, risk 5 |
 | a call while an event is pending | negative | a completed call whose receipt is not committed, then a second call | `InvalidHostValue` for the second | 06 step 5: "Advance the continuation consistently with the completion, and then append the completed event" |
 | a receipt of another context | negative | `commit` with a receipt a second `Context` returned | `InvalidHostValue` | 06 Traps: "a boundary value that is invalid, stale, foreign, or of the wrong kind" |
@@ -197,8 +198,7 @@ with that seed.
 
 ## Stays unavailable
 
-Everything observable: no interpreter calls the broker until step 20. A
-bounded read of an unsized stream, until Q10 is ruled.
+Everything observable: no interpreter calls the broker until step 20.
 
 ## Excluded
 
@@ -206,9 +206,7 @@ The fake world (16); events (17); startup (28); real drivers (30, 31).
 
 ## Completion evidence
 
-- [ ] Each of the 51 rows that await no ruling is a test, named in the
-      report; the 6 rows marked *awaits Q10* are listed as open, or as
-      tests once the question is ruled.
+- [ ] Each of the 58 rows is a test, named in the report.
 - [ ] `Context::issue` is `pub(crate)`; `git grep -n "fn issue"
       crates/vibra-host/src` shows one definition.
 - [ ] No function of `broker.rs` caches a decision between calls, and a

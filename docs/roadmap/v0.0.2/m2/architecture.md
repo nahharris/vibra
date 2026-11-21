@@ -374,22 +374,28 @@ not live, or whose generation differs from the token's, is
 `InvalidHostValue`. So a descendant has no liveness of its own to keep.
 `Context::release` marks every lineage on the resource dead and bumps its
 generation, and only then calls `Driver::release`. The walk from a slot to
-its root is a loop over parent slots.
+its root is a loop over parent slots. Release is the shutdown of a
+resource, the one event that makes a lineage unusable; a program that
+drops a parent value releases nothing, so a child of it stays usable.
 
 **The gate.** The driver calls the gate with what it found before it
 reads, creates, or changes anything. The gate decides the policy on the
 real names and the found action, then the hard-link rule, then reserves
-the size. The broker keeps the gate's reason and maps it: a policy or hard-link refusal is a completed `denied`, with
-an event; a size over a byte limit and a missing fact the rule needs (no
-link count on a replace) are `limitExceeded` and `unsupported`, with no
-event ([Q29](spec-questions.md#q29-a-refusal-decided-after-the-adapter-opened-an-entry));
+the size. The broker keeps the gate's reason and maps it: a policy or
+hard-link refusal is a completed `denied`, with an event; a size over a
+byte limit and a missing fact the rule needs (no link count on a replace)
+are `limitExceeded` and `unsupported`, with no event
+([Q29](spec-questions.md#q29-a-refusal-decided-after-the-adapter-opened-an-entry));
 a size over `HostRequest::room` is `HostFault::MemoryExhausted`. A driver
 whose gate refused returns `Completion::Refused`. Any other completion
 after a refusal is `InvalidHostValue`: the driver acted against the gate.
 
-**Settlement.** Step 3 reserves one invocation and the encoded size of a
-write on the grant's counters and on every ancestor's, all or none; the
-gate reserves the size of a read the same way. When the driver returns,
+**Settlement.** Step 3 reserves one invocation and the bytes an operand
+fixes (the encoded size of a write, the count of random bytes) on the
+grant's counters and on every ancestor's, all or none. The gate reserves
+the bytes of a read the same way: the size of a file; for a stream read,
+the smaller of its `max` and the remaining size when the adapter knows
+it, else `max` (Q10). When the driver returns,
 the broker settles each byte reservation, on the grant and on every
 ancestor, from the completion:
 
@@ -471,7 +477,8 @@ pub struct Started {
 }
 ```
 
-`admit` makes two separate checks. The ceiling check compares rows: the
+`admit` validates the plan again, then makes two separate checks:
+conformance first, then the ceiling. The ceiling check compares rows: the
 entry's row and the row of each startup step are contained in `ceiling`. A
 leaf's interface is not a row: an entry may take a grant it never
 performs. The conformance check compares shapes: the plan's leaves are the
@@ -527,7 +534,7 @@ corpus. The step in brackets owns the case.
 | A10 | A foreign or released grant is unusable, and so is every grant narrowed from a released one | `Context::host`, step 1: context identity, and the liveness and generation of the slot's lineage, which a descendant shares with its root | `Context::release` kills the lineage before `Driver::release`; `Driver::call` receives a `ResourceId` the context resolved, never a token | `ATK-foreign-grant` [15], `ATK-stale-grant` [15], `ATK-stale-derived-grant` [15], `ATK-released-grant` [28], `ATK-released-derived-grant` [28] | a slot keeps a liveness of its own, or a generation is reused |
 | A11 | Implementing an operation interface makes no grant | dispatch: only `Repr::Grant` reaches a host body | the broker never receives a held model; an `impl` body is under A1 | `V2-GRANT-model-is-not-grant` [22], `V2-EFFECT-impl-forwards-wider` [09] | dispatch sends a model to a host body |
 | A12 | Only the embedded library binds a host symbol, with the registry's owner and signature | the reader (`@syntax.invalidSection`) and the library loader | `vibra-ir::effects`: a `Host` body is valid only on the member the registry row names, with its signature and the row `{owner}` | `V2-SRC-DECL-fn-external-outside-stdlib` (M1), `ATK-ir-host-body-wrong-owner` [03], `ATK-stdlib-host-signature` [19] | the registry itself is wrong; the snapshot test guards that |
-| A13 | Narrowing never adds a right, a resource, a driver, or a budget; the parent stays a conjunction | `vibra-host::broker`: a child is its parent plus one constraint, and no operation replaces a parent | `Context::host` walks the whole ancestry on every call; nothing caches an "effective" decision | `ATK-narrow-broader-policy` [15], `ATK-narrow-other-resource` [15], `V2-GRANT-restrict-keeps-parent` [22], `V2-GRANT-narrow-forward-limit` [22] | the ancestry walk stops early; for a value that is not a sealed grant the row awaits [Q1](spec-questions.md#q1-narrowing-members-on-a-value-that-is-not-a-sealed-grant) |
+| A13 | Narrowing a sealed grant never adds a right, a resource, a driver, or a budget; the parent stays a conjunction; narrowing another value runs that value's own member | `vibra-host::broker`: a child is its parent plus one constraint, and no operation replaces a parent | `Context::host` walks the whole ancestry on every call; nothing caches an "effective" decision; the checker requires the narrowing members of every `impl` | `ATK-narrow-broader-policy` [15], `ATK-narrow-other-resource` [15], `V2-GRANT-restrict-keeps-parent` [22], `V2-GRANT-narrow-forward-limit` [22], `V2-GRANT-impl-missing-limit` [19] | the ancestry walk stops early |
 | A14 | Copies and descendants share ancestor counters; known progress is charged and a known remainder refunded; uncertain progress and an unknown outcome are charged in full; a counter that would overflow denies | `vibra-host::broker`: reservation all or none across the ancestry, settlement from the driver's `Progress` | property test over random narrowing trees against a model; a `Known` above the reservation is `InvalidHostValue` | `ATK-counter-overflow` [15], `ATK-counter-refund-unknown` [15], `ATK-counter-partial-known` [15], `ATK-counter-partial-unknown` [15], `ATK-counter-reservation-all-or-none` [15], `V2-GRANT-limit-siblings-share` [22] | reservation is not atomic across the ancestry, or the broker settles from the reply instead of the progress record |
 | A15 | The fields of one rule stay together | `vibra-host::policy::permits`, one rule at a time | the gate evaluates the same function on the real name and the found action | `ATK-policy-rule-fields-crossed` [14], `V2-GRANT-rule-correlation` [22] | evaluation distributes over fields |
 | A16 | A policy over the size or depth limit is refused | `vibra-host::policy`, at decode and at `restrict` | `Context::host` never evaluates a policy that was not counted | `V2-GRANT-policy-4097-nodes` [26], `V2-GRANT-restrict-too-complex` [22] | the count is taken before normalization only |
@@ -577,13 +584,12 @@ interpreter.
   opened to check. The chapter's `denied` promises that no content is
   read, created, or changed; it does not promise that existence is hidden.
   Gate 34 reads this path.
-- **A value that is not a sealed grant.** Whether narrowing one narrows
-  anything is [Q1](spec-questions.md#q1-narrowing-members-on-a-value-that-is-not-a-sealed-grant).
-  Until it is ruled, A13 is an argument about sealed grants only.
-- **An unsized input under a byte limit.** How it is reserved is
-  [Q10](spec-questions.md#q10-reserving-a-read-whose-size-is-not-known).
-  Until it is ruled, A14 is an argument about writes and about inputs
-  whose size is known before content is read.
+- **A model that does not forward.** Narrowing a value that is not a
+  sealed grant runs that type's own member
+  ([Q1](spec-questions.md#q1-narrowing-members-on-a-value-that-is-not-a-sealed-grant)).
+  The checker requires the member; nothing requires that a model which
+  wraps a grant narrows it. Such a model keeps what it holds, and A13 is
+  an argument about sealed grants.
 
 ## 3. Fake and real drivers
 
@@ -660,12 +666,11 @@ three platforms and CI stays green there. The architecture test allows
    validator is written from the chapter by a different step (03) before
    the checker's analysis (09) exists, with hand-built IR; review gate 11
    reads both against the chapter.
-2. **Two rulings are awaited, and each can change a registry row.** Q1,
-   under its option (b), changes the signature of `grant.limit`; Q10,
-   under its option (a), changes the two standard-input rows. Mitigation:
-   both are ruled before step 02 freezes the snapshots; every row either
-   ruling changes carries a visible mark, and the questions list the rows
-   per option.
+2. **Two rulings are ahead of the chapters.** Q1 makes the narrowing
+   members abstract and Q10 gives the two standard-input rows a count;
+   the chapters do not say either yet. Mitigation: the questions name the
+   sections each ruling changes, and step 02 freezes the registry
+   snapshots from the revised sections.
 3. **The chapter does not yet name the run observation (Q17).** Every
    `workspaceRun` case waits on the name and the manifest key. Mitigation:
    the run API and its host tests land first (29); the rows are written as

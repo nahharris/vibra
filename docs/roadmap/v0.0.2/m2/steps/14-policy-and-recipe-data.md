@@ -54,7 +54,7 @@ RelativeNames}`; `vibra-host::recipe` as the architecture gives it, with
    remove duplicates, sort items by canonical bytes, remove single-item
    wrappers, sort sets; path components keep their order. Explicit stack.
 4. `policy::hash`: `sha256:` over the canonical bytes of the normal form.
-5. `policy::count`: nodes and entries, and depth, as Q9 recommends; the
+5. `policy::count`: nodes and entries, and depth, as Q9 rules; the
    limits 4,096 and 64 are constants of this module.
 6. `policy::permits(expr, request)`: one rule at a time; a file rule
    matches prefix, depth, action, and name together; a directory rule

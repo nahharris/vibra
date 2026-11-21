@@ -48,7 +48,7 @@ GrantProjection, OriginRecord, TRACE_FORMAT, encode, decode}`.
    `Context::uncommitted()` for the tests.
 3. The projection of a slot: `issuedBy` of its root; `policy` the hash of
    the normalized effective policy, or the empty string; `rights` the one
-   interface; `limits` the bounds that are set, as Q11 recommends; `root`
+   interface; `limits` the bounds that are set, as Q11 rules; `root`
    the root ordinal. Each projected policy is added to `policies`.
 4. `drivers`: every driver identity bound in the run, sorted by provider.
 5. `Context::startup_event(leaf, provider, status, grant, failure)` for
@@ -70,7 +70,7 @@ row is committed with its receipt unless the row says otherwise.
 | absent `parent` | positive | a startup read: phase `@startup`, no parent | the field is absent | 06: "absent for a startup read" |
 | denial before the adapter | negative | a policy refusal | `events` is empty | 06: "A refusal before the adapter is called … appends nothing" |
 | `limitExceeded` | negative | a grant at its bound | `events` is empty | the same |
-| size refusal at the gate | negative | `inputBytes: 4`; the driver finds 5 bytes | `Err(limitExceeded)`, no receipt; `events` is empty (Q29) | 06 Error types: "A limit would be exceeded; nothing was attempted" |
+| size refusal at the gate | negative | `inputBytes: 4`; the driver finds 5 bytes | `Err(limitExceeded)`, no receipt; `events` is empty (Q29) | 06 Error types: "nothing was dispatched" |
 | completed denial | positive | a gate refusal on the real name | one event whose `result` is `Err(denied)` | 06: "A typed denial returned by the adapter is a completed result and is recorded" |
 | `outcomeUnknown` | positive | the scripted driver answers `outcomeUnknown` | one event with that result | 06: "That typed result is recorded" |
 | order | positive | three calls on two grants | three events in completion order | 06: "in completion order" |

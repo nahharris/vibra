@@ -21,11 +21,11 @@ Crates: `vibra-interp`.
 | Existing | Symbol | Use |
 | --- | --- | --- |
 | `crates/vibra-interp/src/machine.rs:160` | `pub(crate) enum Kont` | gains `Await` |
-| `crates/vibra-interp/src/machine.rs:1159` | `pub(crate) fn invoke` | entered by an `await` exactly as by a call |
-| `crates/vibra-interp/src/machine.rs:2034` | `fn unavailable_plan` | deleted |
+| `crates/vibra-interp/src/machine.rs:1166` | `pub(crate) fn invoke` | entered by an `await` exactly as by a call |
+| `crates/vibra-interp/src/machine.rs:2044` | `fn unavailable_plan` | deleted |
 | `crates/vibra-interp/src/value.rs:26` | `pub(crate) enum Repr` | gains `Plan` |
-| `crates/vibra-interp/src/evaluate.rs:99` | `pub fn run` | unchanged; `run_test` gains the procedure context |
-| `crates/vibra-interp/src/lib.rs:186` | `pub enum RuntimeError` | `Unavailable` stays for a host body |
+| `crates/vibra-interp/src/evaluate.rs:100` | `pub fn run` | unchanged; `run_test` gains the procedure context |
+| `crates/vibra-interp/src/lib.rs:206` | `pub enum RuntimeError` | `Unavailable` stays for a host body |
 
 Proposed: `vibra-interp::plan` (`PlanVal`, building, awaiting,
 `Invocation`); `Instrumentation::{invocation_count,
@@ -95,7 +95,7 @@ that recurses without end.
 | operands in written order | positive | `Call(inc2, [a, b])` where both operands are observable intrinsic calls | evaluated a then b, at application | 06 Evaluation: written order |
 | `return await` in tail position | boundary | a `Proc` that tail-awaits itself 1,000 times, and the same 100,000 times | both complete; `tail_transfer_count` is the count; `max_activation_depth`, `max_continuation_depth`, and `peak_live_bytes` are equal in the two runs | 07 Required coverage 13: "`return await` reuse their activation for at least 100,000 transfers" |
 | tail await under a small budget | boundary | the 100,000 run with a memory budget of twice the `peak_live_bytes` of the 1,000 run | completes | 06: "A call in tail position MUST reuse its activation" |
-| a tail await has its parent | positive | body 1 awaits `p` (not in tail position); `p` tail-awaits `q`; `q` tail-awaits `r`; a test hook reads the current `Invocation` in `r`, and again in the body after the `await` | `{ordinal: 4, parent: 3}` in `r`; `{ordinal: 1, parent: none}` after | 06 Audit trace, Invocations: "the invocation whose body awaited it" |
+| a tail await has its parent | positive | body 1 awaits `p` (not in tail position); `p` tail-awaits `q`; `q` tail-awaits `r`; a test hook reads the current `Invocation` in `r`, and again in the body after the `await` | `{ordinal: 4, parent: 3}` in `r`; `{ordinal: 1, parent: none}` after | 06 Invocations: "whose parent is the invocation whose body performed it" |
 | non-tail await depth | boundary | 100,000 nested non-tail awaits, run on a 256 KiB host thread | completes within the default budget | 07 Required coverage 13: "no native stack frame per activation" |
 | unbounded await recursion | boundary | `Await(Call(spin, []))` | `RuntimeError::MemoryExhausted` | 06 Activations and memory: "Memory exhaustion is the host event" |
 | `ATK-interp-await-in-pure-frame` | negative | an `Await` in a `Pure` function, in a set made by the test-only unchecked constructor | the trap `@runtime.invalidCheckedProgram` | 06 Cold plans: "It never runs inside a `fn`" |
