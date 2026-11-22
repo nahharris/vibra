@@ -1,0 +1,16 @@
+# Q10: the world's stdin has a known size, and min(max 3, remaining 3) = 3 fits
+# the bound of 3. Were a reservation equal to the bound refused, the read would
+# be Err(limitExceeded) with no event.
+id = "V2-GRANT-limit-stdin-exact"
+rule = "V2-GRANT-limit-stdin-exact"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "06-runtime.md#closed-operation-semantics: a bound of three input bytes reads the three bytes abc with a count of 3 (Q10)"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

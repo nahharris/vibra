@@ -1,0 +1,13 @@
+id = "V2-GRANT-rule-correlation"
+rule = "V2-GRANT-rule-correlation"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "03-effects.md#meaning: a write grant restricted to create under in or replace under out cannot create under out: the adapter finds a create and the gate refuses it, a traced denied; the file stays absent"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

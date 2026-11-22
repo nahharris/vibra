@@ -1,0 +1,13 @@
+id = "V2-GRANT-file-rule-no-listing"
+rule = "V2-GRANT-file-rule-no-listing"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "03-effects.md#filesystem-policies: dir.list restricted to a file rule with read cannot list: a file rule grants no listing"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

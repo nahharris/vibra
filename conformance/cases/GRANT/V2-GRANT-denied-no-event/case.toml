@@ -1,0 +1,13 @@
+id = "V2-GRANT-denied-no-event"
+rule = "V2-GRANT-denied-no-event"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "06-runtime.md#audit-trace: a refusal before the adapter is called appends nothing: events is empty"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

@@ -1,0 +1,13 @@
+id = "V2-GRANT-bundle-field-only"
+rule = "V2-GRANT-bundle-field-only"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "03-effects.md#capability-values: passing on one field of the bundle passes on only that grant: readNote takes only r and performs only DirReadText"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

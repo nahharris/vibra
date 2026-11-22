@@ -2815,7 +2815,8 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
     }
 
     /// Reports `@type.functionNotEquatable` at each operand of an
-    /// `assert.equal` call whose type contains a callable.
+    /// `assert.equal` call whose type contains a callable, a plan, or a
+    /// grant.
     fn unequatable_operands(&mut self, state: &CallState<'a>) -> bool {
         let Callee::Function(index) = state.callee else {
             return false;
@@ -2842,7 +2843,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                 DiagnosticCode::TypeFunctionNotEquatable,
                 expr_span(&arg.value),
                 format!(
-                    "an operand of `assert.equal` has the type `{operand}`, which contains a callable"
+                    "an operand of `assert.equal` has the type `{operand}`, which contains a callable, a plan, or a grant"
                 ),
             );
         }

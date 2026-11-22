@@ -1,0 +1,13 @@
+id = "V2-GRANT-forward-model-reads"
+rule = "V2-GRANT-forward-model-reads"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "06-runtime.md#external-providers: a Forward model over dir.readText reads through the grant it holds: one event, whose projection is that of dir.readText"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

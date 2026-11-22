@@ -1,0 +1,24 @@
+id = "V2-GRANT-assert-equal-grant"
+rule = "V2-GRANT-assert-equal-grant"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "04-programs-and-packages.md#assertions: an assert.equal operand that is a grant is not equatable, once at each operand"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.functionNotEquatable"
+level = "@error"
+source = "tests/grants.vib"
+span = { start = 2319, end = 2331 }
+
+[[expect.diagnostics]]
+code = "@type.functionNotEquatable"
+level = "@error"
+source = "tests/grants.vib"
+span = { start = 2332, end = 2344 }

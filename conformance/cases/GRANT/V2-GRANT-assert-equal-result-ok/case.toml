@@ -1,0 +1,13 @@
+id = "V2-GRANT-assert-equal-result-ok"
+rule = "V2-GRANT-assert-equal-result-ok"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "03-effects.md#capability-values: the result of a read is an ordinary typed value, so assert.equal compares it"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

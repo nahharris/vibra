@@ -1,0 +1,29 @@
+# The guide expects one diagnostic, at the first operand. The chapter rejects
+# "an operand whose type contains" a grant, "once at each such operand", and
+# both operands have the type Option(DirReadText). A ruling that only an operand
+# whose own written expression holds a grant counts removes the second
+# diagnostic.
+id = "V2-GRANT-assert-equal-option-grant"
+rule = "V2-GRANT-assert-equal-option-grant"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "04-programs-and-packages.md#assertions: both operands of assert.equal have the type Option(DirReadText), which holds a grant: each is not equatable"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.functionNotEquatable"
+level = "@error"
+source = "tests/grants.vib"
+span = { start = 2319, end = 2351 }
+
+[[expect.diagnostics]]
+code = "@type.functionNotEquatable"
+level = "@error"
+source = "tests/grants.vib"
+span = { start = 2352, end = 2365 }

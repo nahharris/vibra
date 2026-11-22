@@ -1,0 +1,16 @@
+# Q11: every limit has counters of its own and each call reserves on every
+# ancestor. Were a child's bound alone to count, the third read would be Ok("A")
+# with a third event.
+id = "V2-GRANT-limit-siblings-share"
+rule = "V2-GRANT-limit-siblings-share"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "07-diagnostics-and-conformance.md#required-coverage: two children bounded at 5 of a parent bounded at 2 share the parent's two invocations: the third read is Err(limitExceeded) (Q11)"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

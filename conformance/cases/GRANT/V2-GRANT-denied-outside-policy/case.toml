@@ -1,0 +1,13 @@
+id = "V2-GRANT-denied-outside-policy"
+rule = "V2-GRANT-denied-outside-policy"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "03-effects.md#delivery-and-typed-outcomes: a read of b.bin through restrict(dir.readText textOnly) is refused: Err(denied)"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

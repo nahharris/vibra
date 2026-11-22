@@ -1,0 +1,3 @@
+use @std.fs.DirReadText enduse
+
+fn size takes {entries: Dict(DirReadText Str)} returns n: U64 do return 0u64 endfn

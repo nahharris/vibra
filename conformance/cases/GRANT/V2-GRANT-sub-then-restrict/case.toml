@@ -1,0 +1,16 @@
+# Q7: the policy of restrict is relative to the grant it restricts. Read against
+# the root, its prefix [] would be re-rooted nowhere and the effective policy
+# would differ.
+id = "V2-GRANT-sub-then-restrict"
+rule = "V2-GRANT-sub-then-restrict"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "03-effects.md#narrowing: a policy given to restrict on a sub grant is rooted at that grant: textOnly below sub reads s.txt (Q7)"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

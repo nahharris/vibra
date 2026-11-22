@@ -1,0 +1,13 @@
+id = "V2-GRANT-parent-stays-valid"
+rule = "V2-GRANT-parent-stays-valid"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "03-effects.md#narrowing: after a restrict, the original grant still reads b.bin"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

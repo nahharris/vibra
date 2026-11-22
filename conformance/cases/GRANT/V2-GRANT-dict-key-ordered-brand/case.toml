@@ -1,0 +1,18 @@
+id = "V2-GRANT-dict-key-ordered-brand"
+rule = "V2-GRANT-dict-key-ordered-brand"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#capability-values: a declared type over a grant is no dict key even when it implements Ordered: Dict(Key Str) is an invalid key at the key type"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.invalidDictKey"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 450, end = 453 }

@@ -1,0 +1,13 @@
+id = "V2-GRANT-model-is-not-grant"
+rule = "V2-GRANT-model-is-not-grant"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "03-effects.md#operation-interfaces: a Memory model passed to countLines runs its own read: implementing an interface makes no grant, and the trace has no event"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

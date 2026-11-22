@@ -1,0 +1,13 @@
+id = "V2-GRANT-limit-keeps-smaller"
+rule = "V2-GRANT-limit-keeps-smaller"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "03-effects.md#narrowing: limit(limit(r 1) 5) keeps the smaller bound: the second read is Err(limitExceeded)"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

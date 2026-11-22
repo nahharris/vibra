@@ -1,0 +1,16 @@
+# Q10: a stream read asks for a count and consumes exactly what it returns. Were
+# a read to take all remaining input, the bounded read would be
+# Err(limitExceeded) and the parent would read abc.
+id = "V2-GRANT-limit-stdin-count"
+rule = "V2-GRANT-limit-stdin-count"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "06-runtime.md#closed-operation-semantics: a bound of two input bytes reads ab with a count of 2; the parent then reads c (Q10)"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

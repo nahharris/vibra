@@ -1,0 +1,16 @@
+# Q7: each sub contributes its prefix in root coordinates: ["sub"], then ["sub"
+# "inner"]. Were the projection to hash the root policy, its policy would be the
+# hash of the root rule alone and policies would hold only that document.
+id = "V2-GRANT-sub-projection"
+rule = "V2-GRANT-sub-projection"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "06-runtime.md#audit-trace: a read through sub(sub(r [\"sub\"]) [\"inner\"]) projects the hash of the effective policy in root coordinates (Q7)"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

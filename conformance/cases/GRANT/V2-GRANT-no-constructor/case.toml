@@ -1,0 +1,18 @@
+id = "V2-GRANT-no-constructor"
+rule = "V2-GRANT-no-constructor"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#capability-values: a record shaped like a path is no grant: passing it where a DirReadText is expected is an argument mismatch at the argument"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.argumentMismatch"
+level = "@error"
+source = "tests/grants.vib"
+span = { start = 2218, end = 2229 }

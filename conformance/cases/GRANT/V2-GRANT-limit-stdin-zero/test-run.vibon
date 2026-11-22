@@ -1,0 +1,7 @@
+{
+  format: @testRun.v2
+  result: @command.ok
+  tests: [
+    {name: "@tests.grants::\"zero\"" result: @test.passed auditTrace: {format: @auditTrace.v2 revision: "sha256:a623e9e71cc4a8808f27b3c009ef86e4df2c08d386490ac7220cfa2340e40116" drivers: [{provider: @hostWorld.v2 version: "0.0.2"}] policies: [:] redaction: @none events: [{kind: @host invocation: 3u64 parent: 1u64 phase: @entry op: "io.stdinBytes" driver: {provider: @hostWorld.v2 version: "0.0.2"} origin: {sourceId: "tests/grants.vib" start: 2007u64 end: 2042u64} grant: {issuedBy: {kind: @testWorld} policy: "" rights: [{path: @std.io.StdinBytes seed: "sha256:9a354d0533eb9d9db68409c5ed7df510c4aa6880a5cb89cb4509e66963d8be2e"}] limits: {inputBytes: 0u64} root: 3u64} args: [1u64] result: {kind: @enum typeInfo: {kind: @declared path: @std.result.Result seed: "sha256:b138394632da413ed9cb78cdc2c9b874f324077f447ccd5f5c9e455a066af761" arguments: [{kind: @declared path: @std.bytes.Bytes seed: "sha256:93cb84f713458f71d001c5b92c43a22486c841b0fd05f299236318de5a5c4b4c" arguments: []} {kind: @declared path: @std.io.IoError seed: "sha256:689c34661aa1cd1407260035a1176aa73fe1b050e15c0a0c58bcc84a14cdd79c" arguments: []}]} variant: @ok payload: {value: {kind: @bytes values: []}}}}]}}
+  ]
+}

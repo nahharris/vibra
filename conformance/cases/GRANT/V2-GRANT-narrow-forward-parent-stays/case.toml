@@ -1,0 +1,13 @@
+id = "V2-GRANT-narrow-forward-parent-stays"
+rule = "V2-GRANT-narrow-forward-parent-stays"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "03-effects.md#narrowing: after the limited child of a Forward is exhausted, two reads through the original Forward give Ok(\"A\")"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

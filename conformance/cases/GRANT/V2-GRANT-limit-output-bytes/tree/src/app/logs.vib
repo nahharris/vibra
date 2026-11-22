@@ -1,0 +1,29 @@
+use @std.fs.DirWriteText enduse
+
+use @std.fs.FsError enduse
+
+use @std.fs.RelativePath enduse
+
+// A directory for logs: only this module wraps a grant as one.
+type LogDir of DirWriteText
+  visibility @public
+  representation @private
+endtype
+
+fn wrap
+  takes {writer: DirWriteText}
+  returns dir: LogDir
+  visibility @public
+  do
+    return LogDir(writer)
+endfn
+
+proc append
+  takes {dir: LogDir at: RelativePath text: Str}
+  returns outcome: Result(Void FsError)
+  performs {DirWriteText}
+  visibility @public
+  do
+    let LogDir(writer) be dir endlet
+    return await DirWriteText.write(writer at text)
+endproc
