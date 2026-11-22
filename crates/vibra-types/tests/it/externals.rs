@@ -4,7 +4,7 @@
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 use vibra_ir::external::CompilerIntrinsic;
-use vibra_ir::external::host::host_row;
+use vibra_ir::external::host::{host_row, test_world_row};
 use vibra_syntax::parse_source_with;
 use vibra_syntax::source::{SourceOptions, module};
 use vibra_types::{check_externals, load_stdlib};
@@ -63,7 +63,10 @@ fn every_embedded_external_is_a_registry_row_of_its_owner() {
         );
     }
     for symbol in stdlib.host_symbols() {
-        assert!(host_row(symbol).is_some(), "`{symbol}` is not a host row");
+        assert!(
+            host_row(symbol).is_some() || test_world_row(symbol).is_some(),
+            "`{symbol}` is not a host row or a test-world row"
+        );
     }
     assert!(stdlib.native_symbols().is_empty());
 }
@@ -95,7 +98,11 @@ fn the_bound_symbols_are_the_manifest_s_lists() {
     host.sort();
     assert_eq!(compiler, stdlib.compiler_symbols());
     assert_eq!(host, stdlib.host_symbols());
-    assert_eq!(host.len(), 17, "each host row is bound exactly once");
+    assert_eq!(
+        host.len(),
+        23,
+        "each host row and test-world row is bound exactly once"
+    );
 }
 
 #[test]

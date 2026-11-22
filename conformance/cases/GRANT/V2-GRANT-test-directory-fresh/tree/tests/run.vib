@@ -1,0 +1,22 @@
+use @std.assert enduse
+
+use @std.test.TestWorld enduse
+
+use @std.fs.DirReadText enduse
+
+use @std.fs.DirWriteText enduse
+
+use @std.fs.FsError enduse
+
+use @std.fs.RelativePath enduse
+
+test "fresh"
+  takes {world: TestWorld}
+  performs {TestWorld DirReadText DirWriteText}
+  do
+    let Result.ok(value: note) be RelativePath(["n.txt"]) endlet
+    let {writeText: writer} be await TestWorld.directory(world) endlet
+    let {readText: reader} be await TestWorld.directory(world) endlet
+    assert.equal(Result.ok(value: void) await DirWriteText.write(writer note "x"))
+    assert.equal(Result.err(error: FsError.notFound()) await DirReadText.read(reader note))
+endtest

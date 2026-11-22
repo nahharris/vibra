@@ -246,7 +246,25 @@ fn a_test_reaching_an_anonymous_proc_through_the_library_runs() -> Result<(), St
     Ok(())
 }
 #[test]
-fn a_test_that_takes_a_world_is_unavailable_over_the_test() -> Result<(), String> {
+fn a_test_takes_one_test_world_under_any_name() -> Result<(), String> {
+    let tests = "use @std.assert enduse\n\n\
+                 use @std.test.TestWorld enduse\n\n\
+                 test \"world\" takes {sandbox: TestWorld} do endtest\n\n\
+                 test \"plain\" do assert.true(true) endtest\n";
+    let result = check(MATH, &[("@tests.math", tests)], &["@tests"])?;
+    assert_eq!(faults(&result), []);
+    let names = result
+        .tests()
+        .iter()
+        .map(|test| (test.name(), test.function().is_some()))
+        .collect::<Vec<_>>();
+    assert_eq!(names, [("world", true), ("plain", true)]);
+    Ok(())
+}
+
+#[test]
+fn a_test_that_takes_another_type_is_an_invalid_form_at_the_section()
+-> Result<(), String> {
     let tests = "use @std.assert enduse\n\n\
                  type World of I32 endtype\n\n\
                  test \"world\" takes {world: World} do endtest\n\n\
@@ -255,16 +273,12 @@ fn a_test_that_takes_a_world_is_unavailable_over_the_test() -> Result<(), String
     assert_eq!(
         faults(&result),
         [(
-            DiagnosticCode::ToolUnavailable,
-            at(tests, "test \"world\" takes {world: World} do endtest", 0)
+            DiagnosticCode::SyntaxInvalidForm,
+            at(tests, "takes {world: World}", 0)
         )]
     );
-    let names = result
-        .tests()
-        .iter()
-        .map(|test| (test.name(), test.function().is_some()))
-        .collect::<Vec<_>>();
-    assert_eq!(names, [("world", false), ("plain", true)]);
+    // An error makes every test invalid: none is lowered.
+    assert!(result.tests().iter().all(|test| test.function().is_none()));
     Ok(())
 }
 

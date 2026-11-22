@@ -1,0 +1,18 @@
+id = "V2-GRANT-test-without-world"
+rule = "V2-GRANT-test-without-world"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "04-programs-and-packages.md#test-worlds-and-grants: a test without takes receives no grant, so the name world resolves to nothing"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@name.unknownSymbol"
+level = "@error"
+source = "tests/run.vib"
+span = { start = 101, end = 106 }

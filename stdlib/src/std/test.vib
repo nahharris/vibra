@@ -1,0 +1,99 @@
+// The test world: the operation interface `TestWorld`, whose sealed root
+// grant the test runner hands a test that takes it. Each member binds a row
+// of the test-world registry with `external @host`: it takes the world, takes
+// its fixture data as labelled parameters with constant defaults, performs
+// only `TestWorld`, and cannot fail. No provider issues a `TestWorld`, so no
+// target can obtain one.
+
+use @std.fs.DirReadBytes enduse
+
+use @std.fs.DirReadText enduse
+
+use @std.fs.DirList enduse
+
+use @std.fs.DirWriteBytes enduse
+
+use @std.fs.DirWriteText enduse
+
+use @std.fs.DirStat enduse
+
+use @std.fs.RelativePath enduse
+
+use @std.io.StdinText enduse
+
+use @std.io.StdinBytes enduse
+
+use @std.io.StdoutText enduse
+
+use @std.io.StdoutBytes enduse
+
+use @std.io.StderrText enduse
+
+use @std.io.StderrBytes enduse
+
+use @std.env.EnvReadVar enduse
+
+use @std.env.EnvReadArgs enduse
+
+use @std.time.WallClock enduse
+
+use @std.time.MonotonicClock enduse
+
+use @std.random.RandomBytes enduse
+
+interface TestWorld
+  visibility @public
+  proc directory
+    takes {world: Self}
+    labelled {files: Dict(RelativePath Str) be [:]}
+    returns grants: {
+      readBytes: DirReadBytes
+      readText: DirReadText
+      list: DirList
+      writeBytes: DirWriteBytes
+      writeText: DirWriteText
+      stat: DirStat
+    }
+    external @host
+    symbol "testWorld.directory"
+  endproc
+  proc streams
+    takes {world: Self}
+    labelled {stdin: Str be ""}
+    returns grants: {
+      stdinText: StdinText
+      stdinBytes: StdinBytes
+      stdoutText: StdoutText
+      stdoutBytes: StdoutBytes
+      stderrText: StderrText
+      stderrBytes: StderrBytes
+    }
+    external @host
+    symbol "testWorld.streams"
+  endproc
+  proc environment
+    takes {world: Self}
+    labelled {variables: Dict(Str Str) be [:] arguments: List(Str) be []}
+    returns grants: {variables: EnvReadVar arguments: EnvReadArgs}
+    external @host
+    symbol "testWorld.environment"
+  endproc
+  proc clocks
+    takes {world: Self}
+    returns grants: {wall: WallClock monotonic: MonotonicClock}
+    external @host
+    symbol "testWorld.clocks"
+  endproc
+  proc random
+    takes {world: Self}
+    returns grant: RandomBytes
+    external @host
+    symbol "testWorld.random"
+  endproc
+  proc output
+    takes {world: Self}
+    returns written: {stdout: Bytes stderr: Bytes}
+    external @host
+    symbol "testWorld.output"
+  endproc
+endinterface

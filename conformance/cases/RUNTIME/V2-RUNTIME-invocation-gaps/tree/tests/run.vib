@@ -1,0 +1,27 @@
+use @std.assert enduse
+
+use @std.test.TestWorld enduse
+
+use @std.fs.DirReadText enduse
+
+use @std.fs.FsError enduse
+
+use @std.fs.FsPolicy enduse
+
+use @std.fs.RelativePath enduse
+
+test "gaps"
+  takes {world: TestWorld}
+  performs {TestWorld DirReadText}
+  do
+    let _ be await TestWorld.clocks(world) endlet
+    let Result.ok(value: note) be RelativePath(["n.txt"]) endlet
+    let {readText: reader} be await TestWorld.directory(world files: [note: "x"]) endlet
+    match DirReadText.restrict(reader FsPolicy.none())
+      case Result.ok(value: narrowed)
+        assert.equal(Result.err(error: FsError.denied()) await DirReadText.read(narrowed note))
+      case Result.err(error: _)
+        assert.true(false)
+    endmatch
+    assert.equal(Result.ok(value: "x") await DirReadText.read(reader note))
+endtest

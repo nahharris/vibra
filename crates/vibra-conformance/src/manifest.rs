@@ -13,6 +13,7 @@ use std::str::FromStr;
 
 use serde::Deserialize;
 use vibra_diagnostics::{ByteSpan, DiagnosticCode, FixCapability, Level};
+use vibra_workspace::{HostWorld, decode_world};
 
 use crate::profile::{ConformanceOperation, ConformanceProfile};
 use crate::rules::{is_suffix, parse_identity};
@@ -492,6 +493,31 @@ fn validate_host_world(
     Ok(())
 }
 
+/// Decodes the `hostWorld` input `source_id` of a case, whose bytes are
+/// `bytes`, as the `@hostWorld.v2` document a `workspaceRun` or
+/// `workspaceTest` runs in.
+///
+/// # Errors
+///
+/// [`ManifestError::Invalid`], with every diagnostic of the decoder, for a
+/// document that is not a host world.
+pub(crate) fn decode_host_world(
+    source_id: &str,
+    bytes: &[u8],
+) -> Result<HostWorld, ManifestError> {
+    decode_world(Some(source_id), bytes).map_err(|diagnostics| {
+        let faults = diagnostics
+            .iter()
+            .map(|diagnostic| {
+                format!("{} {}", diagnostic.code().as_atom(), diagnostic.message())
+            })
+            .collect::<Vec<_>>();
+        ManifestError::Invalid(format!(
+            "hostWorld input `{source_id}` is not a host world: {}",
+            faults.join("; ")
+        ))
+    })
+}
 fn is_declared_input(inputs: &CaseInputs, source_id: &str) -> bool {
     inputs.source.as_deref() == Some(source_id)
         || inputs.project.as_deref() == Some(source_id)

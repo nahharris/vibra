@@ -1,0 +1,19 @@
+use @std.assert enduse
+
+use @std.test.TestWorld enduse
+
+use @std.fs.DirReadText enduse
+
+use @std.fs.RelativePath enduse
+
+use @hello.notes enduse
+
+test "counts the lines of a note"
+  takes {world: TestWorld}
+  performs {TestWorld DirReadText}
+  do
+    let Result.ok(value: path) be RelativePath(["a.txt"]) endlet
+    let {readText: reader} be await TestWorld.directory(world files: [path: "x\ny"])
+    endlet
+    assert.equal(Result.ok(value: 2u64) await notes.countLines(reader path))
+endtest

@@ -1,0 +1,13 @@
+id = "V2-RUNTIME-trace-test-world-no-event"
+rule = "V2-RUNTIME-trace-test-world-no-event"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "04-programs-and-packages.md#test-worlds-and-grants: a call of a TestWorld member appends no event"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

@@ -1,0 +1,17 @@
+use @std.assert enduse
+
+use @std.test.TestWorld enduse
+
+use @std.io.StdinBytes enduse
+
+use @std.io.StderrBytes enduse
+
+test "bytes"
+  takes {world: TestWorld}
+  performs {TestWorld StdinBytes StderrBytes}
+  do
+    let {stdinBytes: input stderrBytes: err} be await TestWorld.streams(world stdin: "ab") endlet
+    assert.equal(Result.ok(value: Bytes([97u8 98u8])) await StdinBytes.read(input 65536u64))
+    assert.equal(Result.ok(value: void) await StderrBytes.write(err Bytes([1u8])))
+    assert.equal({stdout: Bytes([]) stderr: Bytes([1u8])} await TestWorld.output(world))
+endtest

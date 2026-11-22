@@ -20,9 +20,10 @@
 //! default, or an anonymous callable written there; its operand MUST be a
 //! plan.
 //!
-//! A test with no `takes` runs in a procedure context with its written
-//! row, which MUST resolve as a `proc`'s does. It is never given a `Proc`
-//! type: it is not applicable, and nothing builds a plan of it.
+//! A test runs in a procedure context with its written row, which MUST
+//! resolve as a `proc`'s does. It is never given a `Proc` type: it is not
+//! applicable, and nothing builds a plan of it. A test that takes a world
+//! has one parameter, of the type `TestWorld`, which the runner supplies.
 //!
 //! A `proc` is not a certified function (`docs/spec/02-type-system.md`,
 //! "Predicates"): its application builds a plan, so it is never read
@@ -35,14 +36,14 @@
 //! A `proc` named as a value has its `Proc` type, and applying a value of a
 //! `Proc` type builds a plan of its row. Each `await` is recorded with its
 //! plan's type and the call it runs, and [`super::analysis`] checks the rows
-//! they perform against the ceiling. Step 21 lifts a test that takes a
-//! world.
+//! they perform against the ceiling.
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
+use vibra_ir::external::host::TEST_WORLD_OWNER;
 use vibra_ir::{
     BodyContext, Expr as IrExpr, FnType, IntentType, Node, ProcType, Row, Type,
 };
-use vibra_syntax::source::{Callable, CallableKind, Expr};
+use vibra_syntax::source::{Callable, CallableKind, Expr, Pattern};
 
 use super::rows;
 use crate::check::declare::{
@@ -369,20 +370,32 @@ pub(crate) fn lower(program: &Program<'_>, data: &FnData<'_>) -> BodyContext {
 }
 
 /// The fault of the header of the test `test`, with no source, when its
-/// body is not checked; `None` when it is. A test with no `takes` whose
-/// row resolves, written or not, is checked. A row that does not resolve
-/// has its fault; a test that takes a world is `@tool.unavailable` over
-/// the test until step 21.
+/// body is not checked; `None` when it is. A test whose `takes`, if any,
+/// is the one world parameter and whose row resolves, written or not, is
+/// checked. A `takes` whose one type does not resolve to `TestWorld` of
+/// `@std.test` is `@syntax.invalidForm` at the section, as the reader
+/// reports any other parameter list (`docs/spec/01-source-language.md`,
+/// "`test`"); a type with a fault of its own has that fault. A row that
+/// does not resolve has its fault.
 pub(crate) fn test_header(
     program: &Program<'_>,
     test: &TestData<'_>,
 ) -> Option<Diagnostic> {
-    if test.view.takes().is_some() {
-        return Some(Diagnostic::new(
-            DiagnosticCode::ToolUnavailable,
-            test.view.construct().span(),
-            "a test that takes a world is not supported by this checker yet",
-        ));
+    if let Some((_, written)) = test.view.takes() {
+        match program.written(test.module, written, Scope::default()) {
+            Ok(ty) if is_test_world(program, &ty) => {}
+            Err(NoType::Fault(diagnostic)) => return Some(*diagnostic),
+            Ok(_) | Err(NoType::Unsupported | NoType::Unresolved) => {
+                return Some(Diagnostic::new(
+                    DiagnosticCode::SyntaxInvalidForm,
+                    test.view
+                        .takes_section()
+                        .unwrap_or_else(|| test.view.construct().span()),
+                    "a test's `takes` admits exactly one parameter, of the type \
+                     `TestWorld` of `@std.test`",
+                ));
+            }
+        }
     }
     match rows::resolve(program, test.module, test.view.performs(), None) {
         Ok(_) => None,
@@ -393,6 +406,37 @@ pub(crate) fn test_header(
             "a test whose row names an interface this checker does not support is not supported by this checker yet",
         )),
     }
+}
+
+/// Whether `ty` is `TestWorld`, the operation interface of the embedded
+/// module `@std.test`.
+fn is_test_world(program: &Program<'_>, ty: &Type) -> bool {
+    let Type::Interface(id, arguments, _) = ty else {
+        return false;
+    };
+    arguments.is_empty()
+        && program.interfaces.iter().any(|data| {
+            data.name == TEST_WORLD_OWNER.name
+                && data.id.as_ref() == Some(id)
+                && program.modules.get(data.module).is_some_and(|module| {
+                    module.embedded && module.path == TEST_WORLD_OWNER.module
+                })
+        })
+}
+
+/// The parameter of the test `test` when it takes a world that
+/// [`test_header`] admits: its pattern and its type, `TestWorld`. `None`
+/// for a test with no `takes`.
+pub(crate) fn test_world<'a>(
+    program: &Program<'_>,
+    test: &TestData<'a>,
+) -> Option<(Pattern<'a>, Type)> {
+    let (pattern, written) = test.view.takes()?;
+    let ty = program
+        .written(test.module, written, Scope::default())
+        .ok()
+        .filter(|ty| is_test_world(program, ty))?;
+    Some((pattern, ty))
 }
 
 /// The context the lowered body of the test `test` of `program` runs in: a

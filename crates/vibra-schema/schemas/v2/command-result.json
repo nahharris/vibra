@@ -450,9 +450,9 @@
           "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/trapRecord" }]
         },
         "auditTrace": {
-          "description": "The audit events the test completed. This version publishes no event kind, so the trace is empty.",
+          "description": "The events of the test's @auditTrace.v2 document, in completion order. A test completes only host calls under its own world, so each is a @host event of phase @entry.",
           "type": "array",
-          "maxItems": 0
+          "items": { "$ref": "#/$defs/hostEvent" }
         },
         "diagnostics": {
           "description": "The code of every envelope diagnostic attributed to the item.",
@@ -557,6 +557,92 @@
       },
       "then": { "properties": { "observationError": { "type": "null" } } },
       "else": { "properties": { "observationError": { "type": "object" } } }
+    },
+    "hostEvent": {
+      "description": "A @host event of the audit trace: each field its own member, an atom a string keeping its @, an argument and the result their canonical VIBON text inside a string.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "invocation", "parent", "phase", "op", "driver", "origin", "grant", "args", "result"],
+      "properties": {
+        "kind": { "const": "@host" },
+        "invocation": { "type": "integer", "minimum": 0 },
+        "parent": { "oneOf": [{ "type": "null" }, { "type": "integer", "minimum": 0 }] },
+        "phase": { "const": "@entry" },
+        "op": { "type": "string", "minLength": 1 },
+        "driver": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["provider", "version"],
+          "properties": {
+            "provider": { "type": "string", "pattern": "^@" },
+            "version": { "type": "string" }
+          }
+        },
+        "origin": {
+          "oneOf": [{ "type": "null" }, { "$ref": "urn:vibra:schema:v2:diagnostic#/$defs/span" }]
+        },
+        "grant": { "$ref": "#/$defs/grantProjection" },
+        "args": { "type": "array", "items": { "type": "string" } },
+        "result": { "type": "string" }
+      }
+    },
+    "grantProjection": {
+      "description": "A grant as data: where its authority began, the hash of its normalized policy, the one interface it permits, its bounds, and the ordinal of its root.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["issuedBy", "policy", "rights", "limits", "root"],
+      "properties": {
+        "issuedBy": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["kind"],
+              "properties": { "kind": { "const": "@testWorld" } }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["kind", "leaf"],
+              "properties": {
+                "kind": { "const": "@binding" },
+                "leaf": { "type": "string", "pattern": "^@" }
+              }
+            }
+          ]
+        },
+        "policy": { "type": "string" },
+        "rights": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "seed"],
+            "properties": {
+              "path": { "type": "string", "pattern": "^@" },
+              "seed": { "type": "string" }
+            }
+          }
+        },
+        "limits": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["invocations", "inputBytes", "outputBytes"],
+              "properties": {
+                "invocations": { "oneOf": [{ "type": "null" }, { "type": "integer", "minimum": 0 }] },
+                "inputBytes": { "oneOf": [{ "type": "null" }, { "type": "integer", "minimum": 0 }] },
+                "outputBytes": { "oneOf": [{ "type": "null" }, { "type": "integer", "minimum": 0 }] }
+              }
+            }
+          ]
+        },
+        "root": { "type": "integer", "minimum": 0 }
+      }
     },
     "trapRecord": {
       "description": "TrapRecord: one of the two defect traps, and the source origin of the trapping operation when it is known.",

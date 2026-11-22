@@ -24,15 +24,16 @@
 //!    item: the item is `@test.exhausted`, the limit `memory` is reached,
 //!    and the observation is incomplete. It is not a trap.
 
+use serde_json::Value as Json;
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode, LineIndex};
 use vibra_schema::{
-    CommandOutcome, ObservationError, ObservationErrorCode, Payload, SpanDocument,
-    Status, TestFailure, TestFailureKind, TestItem as ItemRecord, TestPayload,
-    TestResult, TrapRecord,
+    AuditEvent, CommandOutcome, ObservationError, ObservationErrorCode, Payload,
+    SpanDocument, Status, TestFailure, TestFailureKind, TestItem as ItemRecord,
+    TestPayload, TestResult, TrapRecord,
 };
 use vibra_workspace::{
-    Discovery, FailureKind, MemoryBudget, PROJECT_FILE_NAME, SourceOrigin, SuiteResult,
-    TestAssertionFailure, TestOutcome, TestSelector, WorkspaceCapture,
+    AuditTrace, Discovery, FailureKind, MemoryBudget, PROJECT_FILE_NAME, SourceOrigin,
+    SuiteResult, TestAssertionFailure, TestOutcome, TestSelector, WorkspaceCapture,
     observation_type, run_tests,
 };
 
@@ -82,6 +83,7 @@ pub fn run(invocation: &Invocation) -> Response {
             &mut response,
             SuiteResult::Diagnostics,
             Vec::new(),
+            Vec::new(),
             capture.diagnostics(),
         );
         return response;
@@ -101,9 +103,14 @@ pub fn run(invocation: &Invocation) -> Response {
         .iter()
         .map(|item| (item.selector().to_string(), item.outcome().clone()))
         .collect::<Vec<_>>();
+    let traces = run
+        .items()
+        .iter()
+        .map(|item| audit_events(item.trace(), &response))
+        .collect::<Vec<_>>();
     let mut result = run.result();
     inject(&mut items, &mut result);
-    finish(&mut response, result, items, run.diagnostics());
+    finish(&mut response, result, items, traces, run.diagnostics());
     response
 }
 
@@ -200,6 +207,7 @@ fn finish(
     response: &mut Response,
     result: SuiteResult,
     items: Vec<(String, TestOutcome)>,
+    traces: Vec<Vec<AuditEvent>>,
     diagnostics: &[Diagnostic],
 ) {
     let mut envelope = diagnostics.to_vec();
@@ -227,7 +235,8 @@ fn finish(
     let tests = items
         .into_iter()
         .zip(attributed)
-        .map(|((name, outcome), attributed)| ItemRecord {
+        .zip(traces)
+        .map(|(((name, outcome), attributed), audit_trace)| ItemRecord {
             name,
             result: test_result(&outcome),
             failure: match &outcome {
@@ -245,7 +254,7 @@ fn finish(
                 }),
                 _ => None,
             },
-            audit_trace: Vec::new(),
+            audit_trace,
             diagnostics: envelope
                 .iter()
                 .filter(|diagnostic| attributed.contains(diagnostic))
@@ -282,6 +291,20 @@ fn span_document(origin: &SourceOrigin, response: &Response) -> SpanDocument {
     SpanDocument::render(origin.span(), &LineIndex::new(text), Some(source_id))
 }
 
+/// The JSON projection of the events of `trace`, a known origin as its
+/// `SpanDocument`. A test's trace holds only `@host` events, which every
+/// projection covers.
+fn audit_events(trace: &AuditTrace, response: &Response) -> Vec<AuditEvent> {
+    let span = |origin: &SourceOrigin| {
+        serde_json::to_value(span_document(origin, response)).unwrap_or(Json::Null)
+    };
+    trace
+        .events
+        .iter()
+        .filter_map(|event| event.json(&span))
+        .map(AuditEvent)
+        .collect()
+}
 /// The `TestItem.failure` of a failed assertion.
 fn failure_record(failure: &TestAssertionFailure, response: &Response) -> TestFailure {
     let observation = matches!(failure.kind, FailureKind::Observation { .. });

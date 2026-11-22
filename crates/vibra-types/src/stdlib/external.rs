@@ -32,11 +32,12 @@
 //! (`@external.unknownSymbol` at the symbol); the interface that encloses it,
 //! by module and name, MUST be the row's owner (`@external.ownerMismatch` at
 //! the symbol, related to the owner); its name MUST be the owner's member
-//! that the row names, it MUST be a `proc`, and for a host row its written
-//! signature MUST be the row's with `Self` first and no `performs`, so that
-//! its complete row is `{owner}` (each `@external.signatureMismatch` at the
-//! declaration, the row's signature in a note). The signature of a
-//! test-world row is not compared here: `@std.test` does not exist yet.
+//! that the row names, it MUST be a `proc`, and its written signature MUST
+//! be the row's with `Self` first and no `performs`, so that its complete
+//! row is `{owner}` (each `@external.signatureMismatch` at the declaration,
+//! the row's signature in a note). A test-world row's signature takes the
+//! world as `Self` and its fixture data as the row's labelled parameters,
+//! in order, and returns the row's result.
 //!
 //! The three narrowing rows `grant.restrict`, `grant.sub`, and `grant.limit`
 //! are bound in the standard operation interfaces with their generic `G` read
@@ -46,7 +47,9 @@
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 use vibra_ir::Library;
-use vibra_ir::external::host::{HostInterface, HostRow, host_row, test_world_row};
+use vibra_ir::external::host::{
+    HostInterface, HostRow, TestWorldRow, host_row, test_world_row,
+};
 use vibra_ir::external::{CompilerIntrinsic, FloatOp, IntegerOp, RowType};
 use vibra_syntax::SyntaxKind;
 use vibra_syntax::source::{
@@ -315,16 +318,21 @@ fn check(
                 ));
                 return;
             }
-            if let Some(row) = operation
-                && !host_signature_fits(callable, row, scope)
-            {
+            let mismatch = match (operation, test_world_row(&symbol)) {
+                (Some(row), _) => (!host_signature_fits(callable, row, scope))
+                    .then(|| row.signature()),
+                (None, Some(row)) => (!test_world_signature_fits(callable, row, scope))
+                    .then(|| row.signature()),
+                (None, None) => None,
+            };
+            if let Some(expected) = mismatch {
                 found.push(
                     Diagnostic::new(
                         DiagnosticCode::ExternalSignatureMismatch,
                         declaration_span,
                         format!("the signature differs from the host row `{symbol}`"),
                     )
-                    .with_note(format!("expected {}", row.signature())),
+                    .with_note(format!("expected {expected}")),
                 );
             }
         }
@@ -490,6 +498,49 @@ fn host_signature_fits(
         && takes.iter().zip(&expected).all(|((_, written), expected)| {
             expected.is_some() && scope.read(written) == *expected
         })
+        && result.is_some()
+        && callable
+            .result()
+            .is_some_and(|(_, written)| scope.read(&written) == result)
+}
+
+/// Whether the written signature of `callable` is the signature of the
+/// test-world row `row`: a `proc` with no bound, guard, type parameter, or
+/// `performs`, whose one parameter is `Self`, whose labelled parameters
+/// are the row's in order, and whose result is the row's. Its complete row
+/// is then `{TestWorld}`.
+fn test_world_signature_fits(
+    callable: &Callable<'_>,
+    row: &TestWorldRow,
+    scope: &Scope<'_>,
+) -> bool {
+    let has_bound = callable
+        .given()
+        .is_some_and(|given| !given.entries().is_empty());
+    if has_bound
+        || callable.performs().is_some()
+        || callable.requires().is_some()
+        || callable.ensures().is_some()
+        || scope.binder_count() != 0
+    {
+        return false;
+    }
+    let takes = callable.takes();
+    let labelled = callable.labelled();
+    let world = matches!(takes.as_slice(), [(_, written)]
+        if scope.read(written) == Some(Written::SelfType));
+    let fixtures = labelled.len() == row.labelled.len()
+        && labelled
+            .iter()
+            .zip(row.labelled)
+            .all(|((name, written, _), expected)| {
+                name.text() == expected.name
+                    && Written::of_host(expected.ty)
+                        .is_some_and(|expected| scope.read(written) == Some(expected))
+            });
+    let result = Written::of_host(row.result);
+    world
+        && fixtures
         && result.is_some()
         && callable
             .result()
@@ -781,10 +832,43 @@ mod tests {
         );
     }
 
+    /// The `TestWorld` interface whose one member `environment` binds its
+    /// row with the labelled section `labelled` and the result `returns`.
+    fn environment(labelled: &str, returns: &str) -> String {
+        format!(
+            "use @std.env.EnvReadVar enduse\n\nuse @std.env.EnvReadArgs enduse\n\n\
+             interface TestWorld\n  visibility @public\n  proc environment\n    \
+             takes {{world: Self}}\n    labelled {{{labelled}}}\n    \
+             returns grants: {returns}\n    external @host\n    \
+             symbol \"testWorld.environment\"\n  endproc\nendinterface\n"
+        )
+    }
+
+    const VARIABLES: &str =
+        "variables: Dict(Str Str) be [:] arguments: List(Str) be []";
+
     #[test]
     fn a_test_world_row_on_test_world_is_accepted() {
-        let source = interface("TestWorld", "directory", "testWorld.directory");
+        let source =
+            environment(VARIABLES, "{arguments: EnvReadArgs variables: EnvReadVar}");
         assert_eq!(check("@std.test", &source), Vec::new());
+    }
+
+    #[test]
+    fn another_test_world_signature_is_a_signature_mismatch() {
+        let mismatch = vec![DiagnosticCode::ExternalSignatureMismatch];
+        let grants = "{variables: EnvReadVar arguments: EnvReadArgs}";
+        let swapped = environment(
+            "arguments: List(Str) be [] variables: Dict(Str Str) be [:]",
+            grants,
+        );
+        assert_eq!(codes(check("@std.test", &swapped)), mismatch);
+        let missing = environment("variables: Dict(Str Str) be [:]", grants);
+        assert_eq!(codes(check("@std.test", &missing)), mismatch);
+        let result = environment(VARIABLES, "{variables: EnvReadVar}");
+        assert_eq!(codes(check("@std.test", &result)), mismatch);
+        let grant = interface("TestWorld", "directory", "testWorld.directory");
+        assert_eq!(codes(check("@std.test", &grant)), mismatch);
     }
 
     #[test]

@@ -323,3 +323,39 @@ fn a_refused_test_and_the_tool_trap_have_the_empty_payload() {
         "a run carries its payload"
     );
 }
+
+#[test]
+fn a_test_item_carries_its_host_events() {
+    let mut item = passed();
+    item.audit_trace = vec![vibra_schema::AuditEvent(json!({
+        "kind": "@host",
+        "invocation": 2,
+        "parent": 1,
+        "phase": "@entry",
+        "op": "fs.readText",
+        "driver": {"provider": "@hostWorld.v2", "version": "0.0.2"},
+        "origin": null,
+        "grant": {
+            "issuedBy": {"kind": "@testWorld"},
+            "policy": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+            "rights": [{"path": "@std.fs.DirReadText", "seed": "sha256:00"}],
+            "limits": null,
+            "root": 3
+        },
+        "args": ["[\"note.txt\"]"],
+        "result": "{kind: @enum}"
+    }))];
+    let good = run(CommandOutcome::Ok, Status::Passed, vec![item]);
+    validate_command_result(&good).expect("a host event validates");
+    let edits: [(&str, Value); 4] = [
+        ("/payload/tests/0/auditTrace/0/kind", json!("@startup")),
+        ("/payload/tests/0/auditTrace/0/args", json!([["note.txt"]])),
+        ("/payload/tests/0/auditTrace/0/grant/rights", json!([])),
+        ("/payload/tests/0/auditTrace/0/phase", json!("@startup")),
+    ];
+    for (pointer, replacement) in edits {
+        let mut bad = good.clone();
+        *bad.pointer_mut(pointer).expect("the field") = replacement;
+        assert!(validate_command_result(&bad).is_err(), "{pointer}");
+    }
+}

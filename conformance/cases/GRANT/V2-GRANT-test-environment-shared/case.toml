@@ -1,0 +1,13 @@
+id = "V2-GRANT-test-environment-shared"
+rule = "V2-GRANT-test-environment-shared"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "04-programs-and-packages.md#test-worlds-and-grants: environment sets the one environment of the world on each call"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

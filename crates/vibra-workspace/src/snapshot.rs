@@ -36,7 +36,7 @@ use vibra_syntax::is_reserved_word;
 
 use crate::discovery::DiscoveredProject;
 use crate::project::{PROJECT_FILE_NAME, TargetKind};
-use crate::revision::{RevisionKind, RevisionRecord};
+use crate::revision::{RevisionKind, RevisionRecord, embedded_toolchain_record};
 
 /// The name of the test unit's root directory, and its source identity.
 pub const TESTS_ROOT: &str = "tests";
@@ -213,10 +213,30 @@ impl SourceSnapshot {
         Some(replaced)
     }
 
-    /// The `project` and `source` records of the workspace revision, over the
-    /// exact captured bytes.
+    /// The records of the workspace revision: the `project` and `source`
+    /// records over the exact captured bytes, and the one `toolchain`
+    /// record of this toolchain.
     #[must_use]
     pub fn revision_records(&self) -> Vec<RevisionRecord> {
+        let mut records = self.input_records();
+        records.extend(embedded_toolchain_record());
+        records
+    }
+
+    /// The records of the workspace revision with `toolchain` as the one
+    /// `toolchain` record, as a toolchain embedding another library has.
+    #[must_use]
+    pub fn revision_records_with(
+        &self,
+        toolchain: RevisionRecord,
+    ) -> Vec<RevisionRecord> {
+        let mut records = self.input_records();
+        records.push(toolchain);
+        records
+    }
+
+    /// The `project` and `source` records, over the exact captured bytes.
+    fn input_records(&self) -> Vec<RevisionRecord> {
         let mut records = vec![RevisionRecord::new(
             RevisionKind::Project,
             PROJECT_FILE_NAME,

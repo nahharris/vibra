@@ -14,25 +14,34 @@
 //! module's import closure before any runs: an ordinary error makes every
 //! item `@test.invalid`, and a test whose declaration closure reaches a form
 //! this toolchain does not implement is `@test.unavailable` while the
-//! others run. Each test runs in a new interpreter, so module values start
-//! fresh and the audit trace is empty. A test body runs in a procedure
-//! context with the empty row and no host context: it may `await` the
-//! plans of the program's procedures, and one that reaches a host-bound
-//! member is `@test.unavailable`.
+//! others run. Each test runs in a new interpreter over a fresh copy of the
+//! host world, a case's `@hostWorld.v2` or the default one, with a new
+//! broker context, so module values start fresh and the audit trace is
+//! empty. A test that takes its world receives the context's test root and
+//! derives every grant from it; one without `takes` receives nothing. The
+//! world is the fake world's driver only, so no test reaches a real host
+//! resource. Each item carries its test's `@auditTrace.v2`, with no
+//! `target`.
 
 use std::collections::BTreeSet;
 use std::fmt;
 use std::sync::Arc;
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode, Level};
+use vibra_host::broker::Context;
+use vibra_host::driver::DriverIdentity;
+use vibra_host::trace::{self, AuditTrace, StdlibIdentity, TraceHeader};
+use vibra_host::world::{DRIVER_VERSION, HostWorld, WORLD_FORMAT, WorldDriver};
 use vibra_interp::{
     FailureKind, Instrumentation, MemoryBudget, RuntimeError, TestAssertionFailure,
     run_test,
 };
-use vibra_ir::{CheckedModuleSet, CheckedProgram, SourceOrigin, Trap, encode_type};
+use vibra_ir::{
+    CheckedModuleSet, CheckedProgram, SourceOrigin, Trap, Type, encode_type,
+};
 use vibra_syntax::source::Declaration;
 use vibra_syntax::{canonical_string, decode_string, parse_source};
-use vibra_types::{CheckResult, check_workspace};
+use vibra_types::{CheckResult, check_workspace, load_stdlib};
 
 use crate::resolve::resolve_input_of;
 use crate::revision::workspace_revision;
@@ -40,15 +49,6 @@ use crate::snapshot::{SourceFile, SourceSnapshot, UnitKind};
 
 /// The format atom of the observation.
 pub const TEST_RUN_FORMAT: &str = "@testRun.v2";
-
-/// The format atom of each test's audit trace.
-const AUDIT_TRACE_FORMAT: &str = "@auditTrace.v2";
-
-/// The provider of the default fake world each test runs in.
-const WORLD_PROVIDER: &str = "@hostWorld.v2";
-
-/// The version of that world's driver.
-const WORLD_DRIVER_VERSION: &str = "0.0.2";
 
 /// The unit every test module belongs to, and the prefix of a selector's
 /// module.
@@ -189,6 +189,7 @@ pub struct TestItem {
     selector: TestSelector,
     outcome: TestOutcome,
     instrumentation: Option<Instrumentation>,
+    trace: AuditTrace,
 }
 
 impl TestItem {
@@ -209,6 +210,14 @@ impl TestItem {
     #[must_use]
     pub const fn instrumentation(&self) -> Option<&Instrumentation> {
         self.instrumentation.as_ref()
+    }
+
+    /// The test's audit trace: every event its body's host calls
+    /// committed, in completion order; no event for a test that did not
+    /// run.
+    #[must_use]
+    pub const fn trace(&self) -> &AuditTrace {
+        &self.trace
     }
 }
 
@@ -361,13 +370,7 @@ impl TestRun {
             }
             _ => {}
         }
-        fields.push(format!(
-            "auditTrace: {{format: {AUDIT_TRACE_FORMAT} revision: {} drivers: \
-             [{{provider: {WORLD_PROVIDER} version: {}}}] policies: [:] redaction: @none \
-             events: []}}",
-            canonical_string(&self.revision),
-            canonical_string(WORLD_DRIVER_VERSION)
-        ));
+        fields.push(format!("auditTrace: {}", trace::encode(&item.trace)));
         format!("{{{}}}", fields.join(" "))
     }
 }
@@ -427,7 +430,7 @@ struct Discovered {
 }
 
 /// Runs the tests of `snapshot` that `selector` selects, every test with no
-/// selector, each under `budget`.
+/// selector, each under `budget` in a fresh copy of the default host world.
 ///
 /// # Errors
 ///
@@ -436,6 +439,20 @@ struct Discovered {
 pub fn run_tests(
     snapshot: &SourceSnapshot,
     selector: Option<&TestSelector>,
+    budget: MemoryBudget,
+) -> Result<TestRun, InvalidSelection> {
+    run_tests_in(snapshot, selector, &HostWorld::default(), budget)
+}
+
+/// [`run_tests`], each test in a fresh copy of `world`.
+///
+/// # Errors
+///
+/// As [`run_tests`].
+pub fn run_tests_in(
+    snapshot: &SourceSnapshot,
+    selector: Option<&TestSelector>,
+    world: &HostWorld,
     budget: MemoryBudget,
 ) -> Result<TestRun, InvalidSelection> {
     let revision = workspace_revision(&snapshot.revision_records()).unwrap_or_default();
@@ -481,6 +498,25 @@ pub fn run_tests(
             return Err(InvalidSelection::Unknown(selector.to_string()));
         }
     }
+    let library = match load_stdlib() {
+        Ok(stdlib) => StdlibIdentity {
+            package: stdlib.package_name().to_owned(),
+            version: stdlib.package_version().to_owned(),
+        },
+        Err(error) => {
+            return Ok(TestRun {
+                result: SuiteResult::Diagnostics,
+                items: Vec::new(),
+                diagnostics: vec![error.diagnostic().clone()],
+                revision,
+            });
+        }
+    };
+    let header = TraceHeader {
+        revision: revision.clone(),
+        target: None,
+        library,
+    };
     let (check, diagnostics) = match check_selection(snapshot, selector, &modules) {
         Ok(check) => {
             let diagnostics = check.diagnostics().to_vec();
@@ -499,14 +535,24 @@ pub fn run_tests(
                     selector: test.selector,
                     outcome: TestOutcome::Invalid,
                     instrumentation: None,
+                    trace: world_trace(&header),
                 };
             };
-            let (outcome, instrumentation) =
-                run_one(check, &test.selector, index, budget);
+            let (outcome, instrumentation, trace) = run_one(
+                check,
+                &test.selector,
+                index,
+                &World {
+                    world,
+                    header: &header,
+                },
+                budget,
+            );
             TestItem {
                 selector: test.selector,
                 outcome,
                 instrumentation,
+                trace,
             }
         })
         .collect::<Vec<_>>();
@@ -523,6 +569,28 @@ pub fn run_tests(
     })
 }
 
+/// What every test of a run starts from: the world it copies and the
+/// header of its trace.
+struct World<'w> {
+    world: &'w HostWorld,
+    header: &'w TraceHeader,
+}
+
+/// The identity of the fake world's driver.
+fn world_driver() -> DriverIdentity {
+    DriverIdentity {
+        provider: WORLD_FORMAT.to_owned(),
+        version: DRIVER_VERSION.to_owned(),
+    }
+}
+
+/// The trace of a test with no event: the world's driver is bound to every
+/// test, run or not.
+fn world_trace(header: &TraceHeader) -> AuditTrace {
+    let mut trace = AuditTrace::new(header.clone());
+    trace.bind_driver(world_driver());
+    trace
+}
 /// The test modules a run needs, sorted by module path bytes: every module
 /// of `@tests`, or the selector's module and the test modules it reaches
 /// through `use`.
@@ -617,13 +685,15 @@ fn check_selection(
     Ok(check_workspace(&input, &units))
 }
 
-/// Runs the checked test `selector`, the `index`-th selected.
+/// Runs the checked test `selector`, the `index`-th selected, in a fresh
+/// copy of the run's world.
 fn run_one(
     check: &CheckResult,
     selector: &TestSelector,
     index: usize,
+    world: &World<'_>,
     budget: MemoryBudget,
-) -> (TestOutcome, Option<Instrumentation>) {
+) -> (TestOutcome, Option<Instrumentation>, AuditTrace) {
     let checked = check
         .tests()
         .iter()
@@ -636,10 +706,15 @@ fn run_one(
                 format!("the test `{selector}` was not checked"),
             )),
             None,
+            world_trace(world.header),
         );
     };
     if let Some(diagnostic) = checked.unavailable() {
-        return (TestOutcome::Unavailable(diagnostic.clone()), None);
+        return (
+            TestOutcome::Unavailable(diagnostic.clone()),
+            None,
+            world_trace(world.header),
+        );
     }
     let (Some(function), Some(set)) = (checked.function(), check.test_set()) else {
         return (
@@ -649,14 +724,16 @@ fn run_one(
                 format!("the test `{selector}` was not lowered"),
             )),
             None,
+            world_trace(world.header),
         );
     };
-    outcome(execute(set, function, index, budget))
+    let (ended, trace) = execute(set, function, index, world, budget);
+    let (outcome, instrumentation) = outcome(ended);
+    (outcome, instrumentation, trace)
 }
 
 /// How a test whose execution ended as `ended` ends. A form the
-/// interpreter does not run, such as a host-bound member reached with no
-/// host context, makes the test `@test.unavailable`.
+/// interpreter does not run makes the test `@test.unavailable`.
 fn outcome(
     ended: Result<vibra_interp::TestExecution, RuntimeError>,
 ) -> (TestOutcome, Option<Instrumentation>) {
@@ -679,33 +756,74 @@ fn outcome(
     }
 }
 
-/// One execution of the test function `function` in a new interpreter.
+/// Whether the test function `function` takes its world: its one
+/// parameter is the `TestWorld`.
+fn takes_world(set: &CheckedModuleSet, function: usize) -> bool {
+    set.functions().get(function).is_some_and(|function| {
+        matches!(
+            function.signature.type_info(),
+            Type::Fn(signature) if !signature.parameters.is_empty()
+        )
+    })
+}
+
+/// One execution of the test function `function` in a new interpreter,
+/// over a new `WorldDriver` copying the run's world and a new broker
+/// context, and the test's trace.
 ///
-/// The body runs in the procedure context its checked function states,
-/// with the empty row: it may `await` plans of the program's own
-/// procedures. The runner passes no world and no host context, so a body
-/// that reaches a host-bound member is `@tool.unavailable`, and the test
-/// `@test.unavailable` (step 21 gives a test its `TestWorld`).
+/// The body runs in the procedure context its checked function states. A
+/// test that takes its world receives the context's test root; every grant
+/// it uses descends from it.
 fn execute(
     set: &Arc<CheckedModuleSet>,
     function: usize,
     index: usize,
+    world: &World<'_>,
     budget: MemoryBudget,
-) -> Result<vibra_interp::TestExecution, RuntimeError> {
+) -> (
+    Result<vibra_interp::TestExecution, RuntimeError>,
+    AuditTrace,
+) {
     if let Some(error) = injected(index) {
-        return Err(error);
+        return (Err(error), world_trace(world.header));
     }
-    let program =
-        CheckedProgram::for_entry(Arc::clone(set), function).map_err(|error| {
-            RuntimeError::Trap {
-                trap: Trap::InvalidCheckedProgram,
-                origin: None,
-                message: format!("a test is not a valid entry: {error}"),
+    let program = match CheckedProgram::for_entry(Arc::clone(set), function) {
+        Ok(program) => program,
+        Err(error) => {
+            return (
+                Err(RuntimeError::Trap {
+                    trap: Trap::InvalidCheckedProgram,
+                    origin: None,
+                    message: format!("a test is not a valid entry: {error}"),
+                }),
+                world_trace(world.header),
+            );
+        }
+    };
+    let mut driver = WorldDriver::new(world.world);
+    let mut context = Context::for_world(&mut driver, world.header.clone());
+    let root = if takes_world(set, function) {
+        match context.test_root() {
+            Ok(root) => Some(root),
+            Err(fault) => {
+                return (
+                    Err(RuntimeError::Trap {
+                        trap: Trap::InvalidHostValue,
+                        origin: None,
+                        message: format!("the test root was not issued: {fault:?}"),
+                    }),
+                    world_trace(world.header),
+                );
             }
-        })?;
-    run_test(&program, None, None, budget)
+        }
+    } else {
+        None
+    };
+    let ended = run_test(&program, root, Some(&mut context), budget);
+    let mut trace = context.trace().clone();
+    trace.bind_driver(world_driver());
+    (ended, trace)
 }
-
 #[cfg(test)]
 thread_local! {
     /// The fault-injection hook of the trap-isolation test: the first

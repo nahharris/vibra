@@ -1,0 +1,13 @@
+id = "V2-GRANT-test-variables"
+rule = "V2-GRANT-test-variables"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "07-diagnostics-and-conformance.md#required-coverage: a present variable is its value and an absent one notPresent"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

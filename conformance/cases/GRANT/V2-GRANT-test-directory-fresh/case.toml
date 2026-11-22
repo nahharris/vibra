@@ -1,0 +1,13 @@
+id = "V2-GRANT-test-directory-fresh"
+rule = "V2-GRANT-test-directory-fresh"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "04-programs-and-packages.md#test-worlds-and-grants: each directory call makes a new directory"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

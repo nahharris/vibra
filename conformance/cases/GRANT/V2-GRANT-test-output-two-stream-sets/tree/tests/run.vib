@@ -1,0 +1,16 @@
+use @std.assert enduse
+
+use @std.test.TestWorld enduse
+
+use @std.io.StdoutText enduse
+
+test "two sets"
+  takes {world: TestWorld}
+  performs {TestWorld StdoutText}
+  do
+    let {stdoutText: first} be await TestWorld.streams(world) endlet
+    let {stdoutText: second} be await TestWorld.streams(world) endlet
+    assert.equal(Result.ok(value: void) await StdoutText.write(first "a"))
+    assert.equal(Result.ok(value: void) await StdoutText.write(second "b"))
+    assert.equal({stdout: Bytes([97u8 98u8]) stderr: Bytes([])} await TestWorld.output(world))
+endtest

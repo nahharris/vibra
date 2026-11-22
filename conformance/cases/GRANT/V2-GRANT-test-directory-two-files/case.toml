@@ -1,0 +1,13 @@
+id = "V2-GRANT-test-directory-two-files"
+rule = "V2-GRANT-test-directory-two-files"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "04-programs-and-packages.md#test-worlds-and-grants: a multi-name path of the fixture implies its parent directory"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

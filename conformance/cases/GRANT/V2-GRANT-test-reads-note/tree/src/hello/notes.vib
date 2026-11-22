@@ -1,0 +1,30 @@
+use @std.fs.DirReadText enduse
+
+use @std.fs.FsError enduse
+
+use @std.fs.RelativePath enduse
+
+fn newlines
+  takes {text: Str}
+  returns count: U64
+  do
+    let Option.some(value: {first rest}) be Iter.next(text) else
+      return 0u64
+    endlet
+    match first
+      case '\n'
+        return U64.add(1u64 newlines(rest))
+      case _
+        return newlines(rest)
+    endmatch
+endfn
+
+proc countLines
+  takes {reader: DirReadText path: RelativePath}
+  returns count: Result(U64 FsError)
+  performs {DirReadText}
+  visibility @public
+  do
+    let text be try await DirReadText.read(reader path) endlet
+    return Result.ok(value: U64.add(1u64 newlines(text)))
+endproc

@@ -1,0 +1,20 @@
+use @std.assert enduse
+
+use @std.test.TestWorld enduse
+
+use @std.time.WallClock enduse
+
+use @std.time.MonotonicClock enduse
+
+test "steps"
+  takes {world: TestWorld}
+  performs {TestWorld WallClock MonotonicClock}
+  do
+    let {wall: wallA monotonic: monoA} be await TestWorld.clocks(world) endlet
+    let {wall: wallB monotonic: monoB} be await TestWorld.clocks(world) endlet
+    assert.equal(Result.ok(value: 5i64) await WallClock.read(wallA))
+    assert.equal(Result.ok(value: 5i64) await WallClock.read(wallB))
+    assert.equal(Result.ok(value: 10u64) await MonotonicClock.read(monoA))
+    assert.equal(Result.ok(value: 13u64) await MonotonicClock.read(monoB))
+    assert.equal(Result.ok(value: 16u64) await MonotonicClock.read(monoA))
+endtest

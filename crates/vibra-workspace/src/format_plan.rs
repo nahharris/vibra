@@ -60,8 +60,8 @@ impl WorkspaceCapture {
     /// Discovers the project of `workspace` and captures its snapshot.
     ///
     /// The revision is that of the snapshot. When the walk fails, it covers
-    /// the project record alone, the only input admitted; when discovery
-    /// fails there is none.
+    /// the project record, the only input admitted, and the toolchain record;
+    /// when discovery fails there is none.
     #[must_use]
     pub fn capture(workspace: &Path, discovery: Discovery) -> Self {
         let discovered = match discovery {
@@ -90,11 +90,12 @@ impl WorkspaceCapture {
                 }
             }
             Err(diagnostics) => {
-                let records = [crate::revision::RevisionRecord::new(
+                let mut records = vec![crate::revision::RevisionRecord::new(
                     crate::revision::RevisionKind::Project,
                     crate::project::PROJECT_FILE_NAME,
                     project.bytes(),
                 )];
+                records.extend(crate::revision::embedded_toolchain_record());
                 Self {
                     revision: workspace_revision(&records).ok(),
                     project: Some(project),

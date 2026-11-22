@@ -392,7 +392,7 @@ fn a_bare_requires_is_discharged_where_the_plan_is_built() -> Result<(), String>
 }
 
 #[test]
-fn what_stays_unavailable() -> Result<(), String> {
+fn plans_and_worlds_are_checked() -> Result<(), String> {
     // An `await` of a plan whose row is not empty is checked against the
     // ceiling (step 09), and is no longer unavailable.
     let log = "interface Log proc append takes {log: Self entry: Str} returns d: Void \
@@ -416,31 +416,19 @@ fn what_stays_unavailable() -> Result<(), String> {
          Log.append endlet return 1i32 endfn\n"
     );
     assert_eq!(faults(&source), []);
-    // A test that takes a world is unavailable over the test, and the other
-    // test still runs.
+    // A test that takes a world is checked and lowered beside the others.
     let test = "use @std.assert enduse\n\
-                type World of I32 endtype\n\
-                test \"world\" takes {world: World} do assert.true(true) endtest\n\
+                use @std.test.TestWorld enduse\n\
+                test \"world\" takes {world: TestWorld} do assert.true(true) endtest\n\
                 test \"plain\" do assert.true(true) endtest\n";
     let result = in_tests("", test)?;
-    assert_eq!(
-        codes_at(&result),
-        [(
-            DiagnosticCode::ToolUnavailable,
-            at(
-                test,
-                "test \"world\" takes {world: World} do assert.true(true) endtest",
-                0
-            )
-        )]
-    );
-    assert!(result.only_unavailable());
+    assert_eq!(codes_at(&result), []);
     let lowered = result
         .tests()
         .iter()
         .map(|test| (test.name(), test.function().is_some()))
         .collect::<Vec<_>>();
-    assert_eq!(lowered, [("world", false), ("plain", true)]);
+    assert_eq!(lowered, [("world", true), ("plain", true)]);
     Ok(())
 }
 

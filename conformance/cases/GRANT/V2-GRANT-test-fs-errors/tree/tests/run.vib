@@ -1,0 +1,32 @@
+use @std.assert enduse
+
+use @std.test.TestWorld enduse
+
+use @std.fs.DirReadText enduse
+
+use @std.fs.DirList enduse
+
+use @std.fs.DirWriteBytes enduse
+
+use @std.fs.FsError enduse
+
+use @std.fs.RelativePath enduse
+
+test "errors"
+  takes {world: TestWorld}
+  performs {TestWorld DirReadText DirList DirWriteBytes}
+  do
+    let Result.ok(value: deep) be RelativePath(["d" "a.txt"]) endlet
+    let Result.ok(value: file) be RelativePath(["f.txt"]) endlet
+    let Result.ok(value: missing) be RelativePath(["missing.txt"]) endlet
+    let Result.ok(value: directory) be RelativePath(["d"]) endlet
+    let Result.ok(value: raw) be RelativePath(["raw"]) endlet
+    let {list: lister readText: reader writeBytes: writer} be await TestWorld.directory(
+      world files: [deep: "1" file: "2"]
+    ) endlet
+    assert.equal(Result.err(error: FsError.notFound()) await DirReadText.read(reader missing))
+    assert.equal(Result.err(error: FsError.notAFile()) await DirReadText.read(reader directory))
+    assert.equal(Result.err(error: FsError.notADirectory()) await DirList.entries(lister file))
+    assert.equal(Result.ok(value: void) await DirWriteBytes.write(writer raw Bytes([255u8])))
+    assert.equal(Result.err(error: FsError.invalidText()) await DirReadText.read(reader raw))
+endtest

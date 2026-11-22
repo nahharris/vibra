@@ -322,11 +322,12 @@ pub(crate) fn type_arguments(
 
 /// The function `data` lowered when it is the default function of an
 /// interface member bound with `external @host`: its body is the binding,
-/// its signature record `record`, and its context the one of its `Proc`
-/// type. `None` for any other function.
+/// its signature record `record`, its labelled defaults `defaults`, and
+/// its context the one of its `Proc` type. `None` for any other function.
 pub(crate) fn host_function(
     data: &FnData<'_>,
     record: SignatureRecord,
+    defaults: Vec<(String, vibra_ir::Constant)>,
     origin: SourceOrigin,
 ) -> Option<CheckedFunction> {
     if data.contract.is_none() || data.view.external()?.tag()?.text() != "@host" {
@@ -342,7 +343,7 @@ pub(crate) fn host_function(
     Some(CheckedFunction {
         name: data.qualified.clone(),
         signature: record,
-        defaults: Vec::new(),
+        defaults,
         body: FunctionBody::Host(binding),
         entry_guard: None,
         exit_guard: None,

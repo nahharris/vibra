@@ -52,6 +52,15 @@
 //! refusal of the gate, have no receipt and record nothing. A pending event
 //! that is never committed is dropped with the context
 //! ([`Context::uncommitted`]).
+//!
+//! # The test world
+//!
+//! A context made by [`Context::for_world`] is over a fake world, and
+//! [`Context::test_root`] issues its one test root: the `TestWorld` grant a
+//! test receives. The root is no slot of the table, so no host operation
+//! and no narrowing accepts it. [`HostContext::test_world`] accepts only
+//! it, runs the member on the world (`crate::test_world`), and issues the
+//! member's roots; it appends no event.
 
 use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -74,10 +83,12 @@ use crate::policy::{
     Join, NameTest, Policy, Request,
 };
 use crate::recipe::{LeafName, Limits, PROVIDERS, Provider};
+use crate::test_world::{self, Made, Root};
 use crate::trace::{
     self, AuditTrace, Event, GrantOrigin, GrantProjection, HostEvent, Phase,
     StartupEvent, StartupFailure, StartupStatus, StdlibIdentity, TraceHeader,
 };
+use crate::world::WorldDriver;
 
 /// The identity of the next context; each [`Context::new`] takes one.
 static NEXT_CONTEXT: AtomicU64 = AtomicU64::new(1);
@@ -750,11 +761,38 @@ fn provider_of(interface: HostInterface) -> Option<Provider> {
         .map(|row| row.provider)
 }
 
+/// The slot index of a test root: no slot of the table has it, since
+/// `Context::add` refuses it.
+const TEST_ROOT: u32 = u32::MAX;
+
+/// The driver a context calls: any driver, or the fake world of a test,
+/// whose `TestWorld` members only the test root reaches.
+enum Bound<'d> {
+    Any(&'d mut dyn Driver),
+    World(&'d mut WorldDriver),
+}
+
+impl Bound<'_> {
+    fn get(&self) -> &dyn Driver {
+        match self {
+            Self::Any(driver) => &**driver,
+            Self::World(world) => &**world,
+        }
+    }
+
+    fn get_mut(&mut self) -> &mut dyn Driver {
+        match self {
+            Self::Any(driver) => &mut **driver,
+            Self::World(world) => &mut **world,
+        }
+    }
+}
+
 /// The run's broker: the grant table, the counters, the pending event, and
 /// the trace, over one driver.
 pub struct Context<'d> {
     identity: u64,
-    driver: &'d mut dyn Driver,
+    driver: Bound<'d>,
     library: StdlibIdentity,
     slots: Vec<Slot>,
     lineages: Vec<Lineage>,
@@ -762,6 +800,8 @@ pub struct Context<'d> {
     pending: Option<Pending>,
     serial: u64,
     trace: AuditTrace,
+    /// Whether the test root of the world was issued.
+    test_root: bool,
 }
 
 impl fmt::Debug for Context<'_> {
@@ -781,6 +821,10 @@ impl<'d> Context<'d> {
     /// A context over `driver`, with an empty grant table, an identity no
     /// other context of the process has, and the empty trace of `header`.
     pub fn new(driver: &'d mut dyn Driver, header: TraceHeader) -> Self {
+        Self::over(Bound::Any(driver), header)
+    }
+
+    fn over(driver: Bound<'d>, header: TraceHeader) -> Self {
         Self {
             identity: NEXT_CONTEXT.fetch_add(1, Ordering::Relaxed),
             driver,
@@ -791,7 +835,33 @@ impl<'d> Context<'d> {
             pending: None,
             serial: 0,
             trace: AuditTrace::new(header),
+            test_root: false,
         }
+    }
+
+    /// A context over the fake world `world`, as a test runs in: as
+    /// [`Context::new`], and the test root can be issued.
+    pub fn for_world(world: &'d mut WorldDriver, header: TraceHeader) -> Self {
+        Self::over(Bound::World(world), header)
+    }
+
+    /// Issues the test root: the sealed `TestWorld` grant a test that
+    /// takes its world receives. It is no slot of the table, has no
+    /// ordinal, and reaches only the members of `TestWorld`.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidHostValue` for a context that is not over a fake world, or
+    /// one whose test root was already issued.
+    pub fn test_root(&mut self) -> Result<GrantToken, HostFault> {
+        if !matches!(self.driver, Bound::World(_)) {
+            return Err(invalid("only a context over a fake world has a test root"));
+        }
+        if self.test_root {
+            return Err(invalid("the test root was already issued"));
+        }
+        self.test_root = true;
+        Ok(GrantToken::new(self.identity, TEST_ROOT, 0))
     }
 
     /// The run's trace: every committed event, in completion order.
@@ -818,16 +888,9 @@ impl<'d> Context<'d> {
     /// [`HostFault::MemoryExhausted`] when the table cannot grow;
     /// `InvalidHostValue` when the driver has no identity for the provider
     /// of the root's interface.
-    #[cfg_attr(
-        not(feature = "testing"),
-        expect(
-            dead_code,
-            reason = "the test world (step 21) and startup (step 28) call it"
-        )
-    )]
     pub(crate) fn issue(&mut self, root: RootGrant) -> Result<GrantToken, HostFault> {
         let driver = provider_of(root.interface)
-            .and_then(|provider| self.driver.identity(provider))
+            .and_then(|provider| self.driver.get().identity(provider))
             .ok_or_else(|| {
                 invalid(format!(
                     "no driver is bound for a `{}` grant",
@@ -990,7 +1053,7 @@ impl<'d> Context<'d> {
                 lineage.generation = lineage.generation.wrapping_add(1);
             }
         }
-        self.driver.release(resource);
+        self.driver.get_mut().release(resource);
     }
 
     /// Adds a slot; the token carries `generation`.
@@ -1002,8 +1065,10 @@ impl<'d> Context<'d> {
         lineage: usize,
         generation: u32,
     ) -> Result<GrantToken, HostFault> {
-        let index =
-            u32::try_from(self.slots.len()).map_err(|_| HostFault::MemoryExhausted)?;
+        let index = u32::try_from(self.slots.len())
+            .ok()
+            .filter(|index| *index != TEST_ROOT)
+            .ok_or(HostFault::MemoryExhausted)?;
         self.slots
             .try_reserve(1)
             .map_err(|_| HostFault::MemoryExhausted)?;
@@ -1734,7 +1799,7 @@ impl HostContext for Context<'_> {
             answer: None,
             twice: false,
         };
-        let completion = self.driver.call(resource, &action, &mut gate);
+        let completion = self.driver.get_mut().call(resource, &action, &mut gate);
         let (answer, twice) = (gate.answer, gate.twice);
         let reserved = Charge {
             input: fixed
@@ -1801,14 +1866,47 @@ impl HostContext for Context<'_> {
     fn test_world(
         &mut self,
         op: TestWorldOp,
-        _world: GrantToken,
-        _arguments: &[Value],
+        world: GrantToken,
+        arguments: &[Value],
         _invocation: u64,
     ) -> Result<Issued, HostFault> {
-        Err(invalid(format!(
-            "`{}` has no test world in this context",
-            op.symbol()
-        )))
+        if !self.test_root || world != GrantToken::new(self.identity, TEST_ROOT, 0) {
+            return Err(invalid(format!(
+                "`{}` takes the test root of its own context",
+                op.symbol()
+            )));
+        }
+        if self.pending.is_some() {
+            return Err(invalid("the event of the previous call is not committed"));
+        }
+        let Bound::World(driver) = &mut self.driver else {
+            return Err(invalid("only a context over a fake world has a test root"));
+        };
+        match test_world::member(op, driver, arguments)? {
+            Made::Roots(mut roots) => {
+                roots.sort_by(|left, right| left.0.as_bytes().cmp(right.0.as_bytes()));
+                let mut grants = Vec::with_capacity(roots.len());
+                for (name, root) in roots {
+                    grants.push((name, self.issue(test_grant(root))?));
+                }
+                Ok(Issued::Bundle(grants))
+            }
+            Made::Root(root) => self.issue(test_grant(root)).map(Issued::Grant),
+            Made::Output { stdout, stderr } => Ok(Issued::Output { stdout, stderr }),
+        }
+    }
+}
+
+/// The root grant of a `TestWorld` member's root: origin
+/// `{kind: @testWorld}`, every name of the environment, and no limits.
+fn test_grant(root: Root) -> RootGrant {
+    RootGrant {
+        interface: root.interface,
+        resource: root.resource,
+        origin: GrantOrigin::TestWorld,
+        policy: root.policy,
+        variables: None,
+        limits: Limits::default(),
     }
 }
 

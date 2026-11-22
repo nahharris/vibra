@@ -115,12 +115,13 @@ pub struct TrapRecord {
     pub origin: Option<SpanDocument>,
 }
 
-/// One event of a test's audit trace.
-///
-/// This version publishes no event kind: a test in the pure language
-/// completes no host call, so every trace is empty.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-pub enum AuditEvent {}
+/// One event of a test's audit trace, as the JSON projection of the runtime
+/// chapter (`docs/spec/06-runtime.md`, "Audit trace") gives it: each field of
+/// the event its own member, an atom a string keeping its `@`, and a VIBON
+/// value such as an argument or a result its canonical text inside a string.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(transparent)]
+pub struct AuditEvent(pub serde_json::Value);
 
 /// `TestItem`: one selected test and how it ended.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -134,7 +135,8 @@ pub struct TestItem {
     pub failure: Option<TestFailure>,
     /// The defect trap, for `@test.trap`.
     pub trap: Option<TrapRecord>,
-    /// The audit events the test completed.
+    /// The events of the test's `@auditTrace.v2` document, in completion
+    /// order.
     pub audit_trace: Vec<AuditEvent>,
     /// The code of every envelope diagnostic attributed to the item, in the
     /// envelope's order.

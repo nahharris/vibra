@@ -1,0 +1,13 @@
+use @std.assert enduse
+
+use @std.test.TestWorld enduse
+
+use @std.env.EnvReadArgs enduse
+
+test "arguments"
+  takes {world: TestWorld}
+  performs {TestWorld EnvReadArgs}
+  do
+    let {arguments: reader} be await TestWorld.environment(world arguments: ["a" "--" "-b"]) endlet
+    assert.equal(Result.ok(value: ["a" "--" "-b"]) await EnvReadArgs.read(reader))
+endtest

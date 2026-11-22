@@ -1,0 +1,15 @@
+use @std.assert enduse
+
+use @std.test.TestWorld enduse
+
+use @std.env.EnvReadVar enduse
+
+use @std.env.EnvError enduse
+
+test "any name"
+  takes {world: TestWorld}
+  performs {TestWorld EnvReadVar}
+  do
+    let {variables: reader} be await TestWorld.environment(world) endlet
+    assert.equal(Result.err(error: EnvError.notPresent()) await EnvReadVar.read(reader "PATH"))
+endtest

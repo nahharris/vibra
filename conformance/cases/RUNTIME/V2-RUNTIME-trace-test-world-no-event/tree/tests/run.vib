@@ -1,0 +1,15 @@
+use @std.assert enduse
+
+use @std.test.TestWorld enduse
+
+test "members"
+  takes {world: TestWorld}
+  performs {TestWorld}
+  do
+    let _ be await TestWorld.directory(world) endlet
+    let _ be await TestWorld.streams(world) endlet
+    let _ be await TestWorld.environment(world) endlet
+    let _ be await TestWorld.clocks(world) endlet
+    let _ be await TestWorld.random(world) endlet
+    assert.equal({stdout: Bytes([]) stderr: Bytes([])} await TestWorld.output(world))
+endtest

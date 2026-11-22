@@ -13,24 +13,25 @@
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 use vibra_interp::MemoryBudget;
 use vibra_workspace::{
-    SourceSnapshot, SuiteResult, TestOutcome, discover_project_at, run_tests,
+    HostWorld, SourceSnapshot, SuiteResult, TestOutcome, discover_project_at,
+    run_tests_in,
 };
 
 use crate::corpus::Case;
-use crate::manifest::Verdict;
+use crate::manifest::{Verdict, decode_host_world};
 use crate::profile::{
     CaseObservation, ConformanceOperation, HandlerError, ProfileHandler,
 };
 
 /// The `workspaceTest` handler: captures the declared tree as a project
-/// root, searching no ancestor, and runs every test in the default world.
+/// root, searching no ancestor, and runs every test in a fresh copy of the
+/// case's `hostWorld`, or of the default world when it declares none.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct WorkspaceTestHandler;
 
 impl ProfileHandler for WorkspaceTestHandler {
     fn can_run(&self, case: &Case) -> bool {
         case.manifest().operation == ConformanceOperation::WorkspaceTest
-            && case.manifest().inputs.host_world.is_none()
     }
 
     fn run(&self, case: &Case) -> Result<CaseObservation, HandlerError> {
@@ -49,7 +50,17 @@ impl ProfileHandler for WorkspaceTestHandler {
                     return Ok(observation);
                 }
             };
-        let run = run_tests(&snapshot, None, MemoryBudget::DEFAULT)
+        let world = match case.manifest().inputs.host_world.as_deref() {
+            Some(source_id) => {
+                let bytes = case
+                    .read_bytes(source_id)
+                    .map_err(|error| HandlerError::new(error.to_string()))?;
+                decode_host_world(source_id, &bytes)
+                    .map_err(|error| HandlerError::new(error.to_string()))?
+            }
+            None => HostWorld::default(),
+        };
+        let run = run_tests_in(&snapshot, None, &world, MemoryBudget::DEFAULT)
             .map_err(|error| HandlerError::new(error.to_string()))?;
         let mut observation = CaseObservation::new(verdict(run.result()));
         observation.diagnostics = run.diagnostics().to_vec();

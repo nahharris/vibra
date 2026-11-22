@@ -1,0 +1,18 @@
+use @std.assert enduse
+
+use @std.test.TestWorld enduse
+
+use @std.fs.DirList enduse
+
+use @std.fs.RelativePath enduse
+
+test "two files"
+  takes {world: TestWorld}
+  performs {TestWorld DirList}
+  do
+    let Result.ok(value: a) be RelativePath(["b.txt"]) endlet
+    let Result.ok(value: b) be RelativePath(["d" "a.txt"]) endlet
+    let Result.ok(value: root) be RelativePath([]) endlet
+    let {list: lister} be await TestWorld.directory(world files: [a: "1" b: "2"]) endlet
+    assert.equal(Result.ok(value: ["b.txt" "d"]) await DirList.entries(lister root))
+endtest

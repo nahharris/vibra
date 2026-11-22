@@ -2,8 +2,6 @@ use @std.assert enduse
 
 use @app.math enduse
 
-type World of I32 endtype
-
-test "world" takes {world: World} do endtest
+test "static" do let _ be math endlet endtest
 
 test "plain" do assert.equal(3i32 math.add(1i32 2i32)) endtest

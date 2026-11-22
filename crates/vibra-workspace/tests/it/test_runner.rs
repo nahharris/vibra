@@ -221,3 +221,20 @@ fn a_project_without_tests_is_an_empty_passing_suite() {
         "{format: @testRun.v2 result: @command.ok tests: []}"
     );
 }
+
+/// ATK-test-runner-no-system-driver: the runner builds each test's world
+/// from the fake world's driver only, so its source names no real driver.
+#[test]
+fn atk_test_runner_no_system_driver() {
+    let source = include_str!("../../src/test_runner.rs");
+    for forbidden in ["SystemDriver", "Launch::System", "vibra_host::system"] {
+        assert!(
+            !source.contains(forbidden),
+            "the test runner names `{forbidden}`"
+        );
+    }
+    assert!(
+        source.contains("WorldDriver::new"),
+        "the runner builds a fake world"
+    );
+}

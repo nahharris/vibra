@@ -1,0 +1,14 @@
+id = "V2-GRANT-test-clock-steps"
+rule = "V2-GRANT-test-clock-steps"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "07-diagnostics-and-conformance.md#required-coverage: the fake clocks of the world step, and two clocks calls share them"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+hostWorld = "world.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

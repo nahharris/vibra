@@ -1,0 +1,18 @@
+id = "V2-PROJECT-test-takes-two"
+rule = "V2-PROJECT-test-takes-two"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "01-lexical-and-syntax.md#declarations: a test takes at most one parameter"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@syntax.invalidForm"
+level = "@error"
+source = "tests/run.vib"
+span = { start = 67, end = 100 }

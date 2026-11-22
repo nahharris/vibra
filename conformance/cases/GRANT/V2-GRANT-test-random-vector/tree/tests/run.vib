@@ -1,0 +1,14 @@
+use @std.assert enduse
+
+use @std.test.TestWorld enduse
+
+use @std.random.RandomBytes enduse
+
+test "vector"
+  takes {world: TestWorld}
+  performs {TestWorld RandomBytes}
+  do
+    let random be await TestWorld.random(world) endlet
+    assert.equal(Result.ok(value: Bytes([149u8 110u8 235u8])) await RandomBytes.generate(random 3u64))
+    assert.equal(Result.ok(value: Bytes([3u8 241u8 102u8 178u8 51u8 227u8 239u8 40u8])) await RandomBytes.generate(random 8u64))
+endtest

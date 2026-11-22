@@ -25,7 +25,7 @@ use std::sync::OnceLock;
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 use vibra_ir::external::CompilerIntrinsic;
 use vibra_ir::external::compiler::NarrowingType;
-use vibra_ir::external::host::host_row;
+use vibra_ir::external::host::{host_row, test_world_row};
 use vibra_ir::{IrError, Library, LibraryTypes, TypeId};
 use vibra_resolve::{EmbeddedUnit, PackageId, PreludeBinding, SourceModule};
 use vibra_syntax::source::{Declaration, Module, SourceOptions, TypeBody, module};
@@ -96,7 +96,7 @@ const EMBEDDED_MANIFEST: &[u8] = include_bytes!("../../../stdlib/manifest.vibon"
 
 /// Every module compiled into the toolchain, by module path atom, in
 /// manifest order.
-const EMBEDDED_MODULES: [(&str, &[u8]); 16] = [
+const EMBEDDED_MODULES: [(&str, &[u8]); 17] = [
     (
         "@std.assert",
         include_bytes!("../../../stdlib/src/std/assert.vib"),
@@ -150,6 +150,10 @@ const EMBEDDED_MODULES: [(&str, &[u8]); 16] = [
     (
         "@std.str",
         include_bytes!("../../../stdlib/src/std/str.vib"),
+    ),
+    (
+        "@std.test",
+        include_bytes!("../../../stdlib/src/std/test.vib"),
     ),
     (
         "@std.time",
@@ -849,11 +853,14 @@ fn manifest_faults(manifest: &Manifest) -> Vec<Fault> {
         }
     }
     for symbol in &manifest.host {
-        if host_row(&symbol.text).is_none() {
+        if host_row(&symbol.text).is_none() && test_world_row(&symbol.text).is_none() {
             faults.push(Fault::at(
                 MANIFEST_SOURCE_ID,
                 symbol.span,
-                format!("`{}` is not a row of the host registry", symbol.text),
+                format!(
+                    "`{}` is not a row of the host registry or of the test-world registry",
+                    symbol.text
+                ),
             ));
         }
     }

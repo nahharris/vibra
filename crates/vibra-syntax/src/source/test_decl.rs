@@ -9,7 +9,9 @@
 //!
 //! A `@test` node holds its name string, `takes` and its `@params` node,
 //! its `@performs` node, and `do` and its `@body`. `takes` admits exactly
-//! one parameter; the shaping is in the source shaper.
+//! one bare-name parameter; the shaping is in the source shaper.
+
+use vibra_diagnostics::ByteSpan;
 
 use super::callable::{params_of, performs_row};
 use super::construct::is_trivia;
@@ -74,6 +76,20 @@ impl<'a> Test<'a> {
             [param] => Some(*param),
             _ => None,
         }
+    }
+
+    /// The `takes` section: from the keyword through the end of its
+    /// parameters.
+    #[must_use]
+    pub fn takes_section(&self) -> Option<ByteSpan> {
+        let contents = self.construct().contents();
+        let keyword = contents
+            .iter()
+            .find(|child| child.kind().is_leaf() && child.text(self.text) == "takes")?;
+        let params = contents
+            .iter()
+            .find(|child| child.kind() == SyntaxKind::Params)?;
+        Some(ByteSpan::new(keyword.span().start(), params.span().end()))
     }
 
     /// The `performs` row.

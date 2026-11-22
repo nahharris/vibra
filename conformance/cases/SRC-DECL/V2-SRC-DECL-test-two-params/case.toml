@@ -2,7 +2,7 @@ id = "V2-SRC-DECL-test-two-params"
 rule = "V2-SRC-DECL-test-two-params"
 profile = "readerV2"
 operation = "reader"
-description = "01-source-language.md#test: a test takes exactly one parameter; two is an invalid form over the test"
+description = "01-source-language.md#test: a test takes exactly one bare-name parameter; two is an invalid form at the takes section (Q15)"
 
 [inputs]
 source = "input.vib"
@@ -13,4 +13,4 @@ verdict = "refuted"
 [[expect.diagnostics]]
 code = "@syntax.invalidForm"
 level = "@error"
-span = { start = 0, end = 55 }
+span = { start = 9, end = 26 }

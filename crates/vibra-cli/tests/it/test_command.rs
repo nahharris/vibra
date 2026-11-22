@@ -20,10 +20,9 @@ const ADDS: &str = "test \"adds\" do assert.equal(3i32 math.add(1i32 2i32)) endt
 const ADDS_WRONG: &str =
     "test \"adds\" do assert.equal(4i32 math.add(1i32 2i32)) endtest\n";
 
-/// A test that takes a world, which stays unavailable over the test until
-/// step 21.
-const UNAVAILABLE: &str = "test \"world\" takes {world: World} do endtest\n\
-                           type World of I32 endtype\n";
+/// A test that names the module `math` as a value, a form this checker does
+/// not support: `math` is 26 bytes into the test.
+const UNAVAILABLE: &str = "test \"static\" do let _ be math endlet endtest\n";
 
 /// A library project with `src/app/math.vib` and `files`.
 fn project(label: &str, files: &[(&str, &str)]) -> TempDir {
@@ -361,14 +360,14 @@ fn test_unavailable_item() {
     assert_eq!(code, 4, "{document}");
     assert_eq!(document["result"], "@command.unavailable");
     assert_eq!(document["status"], "unsupported");
-    // The whole first test, bytes 46..90.
+    // `math` in the first test, bytes 72..76.
     assert_eq!(codes(&document), ["@tool.unavailable"]);
     let span = &document["diagnostics"][0]["primarySpan"];
     assert_eq!(span["sourceId"], "tests/math.vib");
-    assert_eq!((&span["start"], &span["end"]), (&json!(46), &json!(90)));
+    assert_eq!((&span["start"], &span["end"]), (&json!(72), &json!(76)));
     assert_eq!(counts(&document), (2, 1, 1));
     let items = &document["payload"]["tests"];
-    assert_eq!(items[0]["name"], "@tests.math::\"world\"");
+    assert_eq!(items[0]["name"], "@tests.math::\"static\"");
     assert_eq!(items[0]["result"], "@test.unavailable");
     assert_eq!(items[0]["status"], "unsupported");
     assert_eq!(items[0]["diagnostics"], json!(["@tool.unavailable"]));

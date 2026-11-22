@@ -1,0 +1,13 @@
+id = "V2-GRANT-test-fs-errors"
+rule = "V2-GRANT-test-fs-errors"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "07-diagnostics-and-conformance.md#required-coverage: each typed filesystem error of a test directory is a completed, traced call"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

@@ -1,0 +1,14 @@
+use @std.assert enduse
+
+use @std.test.TestWorld enduse
+
+use @std.env.EnvReadVar enduse
+
+test "shared"
+  takes {world: TestWorld}
+  performs {TestWorld EnvReadVar}
+  do
+    let {variables: first} be await TestWorld.environment(world variables: ["K": "1"]) endlet
+    let _ be await TestWorld.environment(world variables: ["K": "2"]) endlet
+    assert.equal(Result.ok(value: "2") await EnvReadVar.read(first "K"))
+endtest

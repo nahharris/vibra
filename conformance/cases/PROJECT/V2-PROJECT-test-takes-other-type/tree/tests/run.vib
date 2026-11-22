@@ -1,0 +1,3 @@
+use @std.assert enduse
+
+test "other" takes {world: Str} do assert.true(true) endtest

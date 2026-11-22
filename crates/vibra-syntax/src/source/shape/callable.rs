@@ -200,8 +200,9 @@ struct Parts<'t> {
     external: bool,
     /// Whether a `symbol` section was accepted.
     symbol: bool,
-    /// The number of parameters of a test's `takes`.
-    test_params: Option<usize>,
+    /// A test's `takes` section: its span, from the keyword to the end of
+    /// its parameters, and whether it is exactly one bare-name parameter.
+    test_takes: Option<(ByteSpan, bool)>,
     /// Whether the form was already reported `@syntax.invalidForm` over its
     /// span by the generic section rules.
     reported: bool,
@@ -217,16 +218,16 @@ fn closed_as_missing(node: &CstNode) -> bool {
             .is_some_and(|last| last.kind() == SyntaxKind::Missing)
 }
 
-/// The number of entries of a parameter brace before shaping: one `:` at its
-/// top level per entry.
-fn param_count(brace: &CstNode, text: &str) -> usize {
-    brace
-        .children()
-        .iter()
-        .filter(|child| {
-            child.kind() == SyntaxKind::Punctuation && child.text(text) == ":"
-        })
-        .count()
+/// Whether a parameter brace before shaping is exactly one bare-name
+/// parameter: a name, `:`, and a type, with no other `:` at its top level.
+fn one_bare_param(brace: &CstNode, text: &str) -> bool {
+    let entries = crate::source::expr::group_entries(brace);
+    let mark = |child: &CstNode| {
+        child.kind() == SyntaxKind::Punctuation && child.text(text) == ":"
+    };
+    matches!(entries.as_slice(), [name, colon, _, ..]
+        if name.kind() == SyntaxKind::Identifier && mark(colon))
+        && entries.iter().filter(|child| mark(child)).count() == 1
 }
 
 /// Reads one `fn`, `proc`, or `test` construct in `form`: the kind it takes,
@@ -279,8 +280,15 @@ pub(super) fn visit_form(
             }
         }
         Form::Test => {
-            incomplete |=
-                !parts.body || parts.test_params.is_some_and(|count| count != 1);
+            incomplete |= !parts.body;
+            if let Some((section, false)) = parts.test_takes {
+                sink.push(Diagnostic::new(
+                    DiagnosticCode::SyntaxInvalidForm,
+                    section,
+                    "a test's `takes` admits exactly one bare-name parameter, such as \
+                     `{world: TestWorld}`",
+                ));
+            }
         }
     }
     if incomplete && !parts.reported {
@@ -702,6 +710,7 @@ impl<'t> Level<'t> {
     /// in the test.
     fn test_takes(&mut self, out: &mut Vec<Slot>, parts: &mut Parts<'t>) {
         let section = self.peek_sig().and_then(|item| item.section);
+        let keyword = self.peek_sig().map(|item| item.node.span());
         self.push_next(out);
         let brace = self
             .peek_in(section)
@@ -709,7 +718,11 @@ impl<'t> Level<'t> {
         if brace {
             self.trivia(out);
             if let Some(node) = self.bump() {
-                parts.test_params = Some(param_count(&node, self.text));
+                let start = keyword.map_or(node.span().start(), |span| span.start());
+                parts.test_takes = Some((
+                    ByteSpan::new(start, node.span().end()),
+                    one_bare_param(&node, self.text),
+                ));
                 out.push(Slot::Visit(node, Role::Params));
             }
         } else {

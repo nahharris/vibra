@@ -70,6 +70,9 @@ pub(crate) struct Pass {
     /// own declaration, in the interface's module and at the span given,
     /// has an error.
     unchecked: Vec<(Diagnostic, usize, ByteSpan)>,
+    /// The labelled defaults of each interface member bound with
+    /// `external @host`, which has no body to hold them, by program index.
+    host_defaults: BTreeMap<usize, Vec<(String, vibra_ir::Constant)>>,
 }
 
 fn layout(program: &Program<'_>) -> Layout {
@@ -116,10 +119,15 @@ fn check_bodies(
         errors: BTreeMap::new(),
         sites: Vec::new(),
         unchecked: Vec::new(),
+        host_defaults: BTreeMap::new(),
     };
     invariants(program, documents, layout, &mut pass);
     for (index, data) in program.functions.iter().enumerate() {
         if !program.supported_fn(index) || data.external.is_some() {
+            continue;
+        }
+        if let Some(defaults) = host_defaults(program, documents, layout, data) {
+            pass.host_defaults.insert(index, defaults);
             continue;
         }
         let (Some(signature), Some(body), Some(text)) = (
@@ -251,7 +259,8 @@ fn check_bodies(
             continue;
         };
         let mut checker = BodyChecker::new(program, layout, data.module, text);
-        let checked = checker.test_body(body);
+        let checked =
+            checker.test_body(body, effects::procs::test_world(program, data));
         pass.tests.insert(index, checked);
         pass.sites.extend(
             checker
@@ -411,6 +420,40 @@ fn scope_at(program: &Program<'_>, module: usize, span: ByteSpan) -> CallableSco
         },
         None => CallableScope::default(),
     }
+}
+
+/// The labelled defaults of the function `data` when it is an interface
+/// member bound with `external @host` that has labelled parameters, checked
+/// as a contract member's are with `Self` open. `None` for any other
+/// function.
+fn host_defaults(
+    program: &Program<'_>,
+    documents: &[Document],
+    layout: &Layout,
+    data: &FnData<'_>,
+) -> Option<Vec<(String, vibra_ir::Constant)>> {
+    let labelled = data.view.labelled();
+    if labelled.is_empty() || data.view.external()?.tag()?.text() != "@host" {
+        return None;
+    }
+    let signature = data.signature.as_ref()?;
+    let text = documents.get(data.module).and_then(Document::text)?;
+    let mut checker = BodyChecker::new(program, layout, data.module, text);
+    let patterns = data
+        .view
+        .takes()
+        .into_iter()
+        .map(|(pattern, _)| pattern)
+        .collect::<Vec<_>>();
+    let scope = CallableScope {
+        binders: data.binders.clone(),
+        bounds: data.bounds.clone(),
+        self_type: Some(Type::SelfType),
+        associated: data.associated.clone(),
+        self_interface: data.contract,
+        result_span: None,
+    };
+    Some(checker.contract_defaults(signature, &patterns, &labelled, scope))
 }
 
 /// The diagnostics of the labelled defaults of every abstract member of an
@@ -1349,6 +1392,7 @@ fn assemble(
             None if let Some(host) = effects::members::host_function(
                 data,
                 record.clone(),
+                pass.host_defaults.get(&index).cloned().unwrap_or_default(),
                 origin.clone(),
             ) =>
             {
@@ -1430,7 +1474,13 @@ fn assemble(
                 program,
                 &[],
                 &[],
-                FnType::new(Vec::new(), Type::Void),
+                FnType::new(
+                    effects::procs::test_world(program, data)
+                        .map(|(_, world)| world)
+                        .into_iter()
+                        .collect(),
+                    Type::Void,
+                ),
             )?,
             defaults: Vec::new(),
             body: FunctionBody::Expr(Box::new(body)),

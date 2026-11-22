@@ -78,6 +78,11 @@
       languageRoles: [@str]
     }
     {
+      path: @std.test
+      digest: "sha256:3257a5da98318c9dc6bbd3cc7275b7db28540d3c09cffc926c0c8d23598d66d7"
+      languageRoles: []
+    }
+    {
       path: @std.time
       digest: "sha256:47f80f2efc8b93b78437dff06921f804782ca30a1d743652f3c4d55c0c73ab1a"
       languageRoles: []
@@ -338,6 +343,12 @@
       "io.stdoutBytes"
       "io.stdoutText"
       "random.generateBytes"
+      "testWorld.clocks"
+      "testWorld.directory"
+      "testWorld.environment"
+      "testWorld.output"
+      "testWorld.random"
+      "testWorld.streams"
       "time.nowMonotonic"
       "time.nowWall"
     ]

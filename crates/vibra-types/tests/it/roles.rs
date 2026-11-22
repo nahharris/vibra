@@ -34,6 +34,7 @@ fn every_role_is_claimed_exactly_once() {
             ("@std.random", vec![]),
             ("@std.result", vec![Role::Result]),
             ("@std.str", vec![Role::Str]),
+            ("@std.test", vec![]),
             ("@std.time", vec![]),
         ]
     );

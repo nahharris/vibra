@@ -18,8 +18,10 @@
 //! [`check_snapshot`] checks the targets it covers, and [`plan_format`]
 //! formats one confined document, checking a captured module's candidate
 //! text in place of its bytes. [`run_tests`] discovers, checks, and runs the
-//! tests of a snapshot, and [`TestRun::document`] is its `@testRun.v2`
-//! observation.
+//! tests of a snapshot, each in a fresh copy of the default host world or,
+//! with [`run_tests_in`], of a [`HostWorld`] that [`decode_world`] reads,
+//! and [`TestRun::document`] is its `@testRun.v2` observation, with the
+//! [`AuditTrace`] of each test.
 //!
 //! # Position in the architecture
 //!
@@ -53,17 +55,26 @@ pub use project::{
     Package, Project, Target, TargetKind, decode_project, project_schema,
 };
 pub use resolve::resolve_input;
-pub use revision::{DuplicateRecord, RevisionKind, RevisionRecord, workspace_revision};
+pub use revision::{
+    RevisionError, RevisionKind, RevisionRecord, TOOLCHAIN_SOURCE_ID,
+    embedded_toolchain_record, toolchain_document, toolchain_record,
+    workspace_revision,
+};
 pub use semantic::{WorkspaceCheck, check_snapshot};
 pub use snapshot::{SourceFile, SourceSnapshot, SourceUnit, TESTS_ROOT, UnitKind};
 pub use source_graph::{GRAPH_FORMAT, GraphDependency, SourceGraph};
 pub use test_runner::{
     InvalidSelection, SuiteResult, TEST_RUN_FORMAT, TestItem, TestOutcome, TestRun,
-    TestSelector, observation_type, run_tests,
+    TestSelector, observation_type, run_tests, run_tests_in,
 };
 // The types the runner's outcomes are made of, so that a consumer of
 // `run_tests` reads them without depending on the interpreter or the IR.
 pub use vibra_interp::{FailureKind, MemoryBudget, TestAssertionFailure};
+// The host world a test runs in and the trace it records, so that a
+// consumer of `run_tests_in` builds the one and reads the other without
+// depending on the host.
+pub use vibra_host::trace::AuditTrace;
+pub use vibra_host::world::{HostWorld, decode_world};
 pub use vibra_ir::{SourceOrigin, Trap};
 // The obligation records a check found, so that a consumer of a
 // WorkspaceCheck reads them without depending on the checker.

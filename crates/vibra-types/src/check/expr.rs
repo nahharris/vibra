@@ -1136,7 +1136,13 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
 
     /// Checks the body of a test: a body of type `Void` outside any callable,
     /// so that a `return` or a `try` written directly in it is reported.
-    pub(crate) fn test_body(&mut self, body: Body<'a>) -> Checked {
+    /// A test that takes a world binds its one bare-name parameter `world`,
+    /// of its type, to the first slot.
+    pub(crate) fn test_body(
+        &mut self,
+        body: Body<'a>,
+        world: Option<(Pattern<'a>, Type)>,
+    ) -> Checked {
         self.locals.clear();
         self.slots.clear();
         self.frames.clear();
@@ -1145,6 +1151,13 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         self.reset_scope();
         self.result = None;
         self.test = true;
+        if let Some((pattern, ty)) = world {
+            let _ = self.bind_parameters(
+                &FnType::new(vec![ty], Type::Void),
+                &[pattern],
+                &[],
+            );
+        }
         let out = self.run(Task::Body(Box::new(
             self.body_state(body, BodyMode::Branch(Ctx::Stmt)),
         )));

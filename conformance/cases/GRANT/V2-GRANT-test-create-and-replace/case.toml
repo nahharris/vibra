@@ -1,0 +1,13 @@
+id = "V2-GRANT-test-create-and-replace"
+rule = "V2-GRANT-test-create-and-replace"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "07-diagnostics-and-conformance.md#required-coverage: a write creates a file and a second write replaces it"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

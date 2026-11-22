@@ -1,0 +1,14 @@
+use @std.assert enduse
+
+use @std.test.TestWorld enduse
+
+use @std.io.StdinText enduse
+
+test "stdin"
+  takes {world: TestWorld}
+  performs {TestWorld StdinText}
+  do
+    let {stdinText: input} be await TestWorld.streams(world stdin: "x\ny") endlet
+    assert.equal(Result.ok(value: "x\ny") await StdinText.read(input 65536u64))
+    assert.equal(Result.ok(value: "") await StdinText.read(input 65536u64))
+endtest

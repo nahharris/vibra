@@ -1,0 +1,19 @@
+id = "V2-EFFECT-test-row-missing-test-world"
+rule = "V2-EFFECT-test-row-missing-test-world"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "04-programs-and-packages.md#test-worlds-and-grants: TestWorld must appear in the row of a test that awaits its members"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@effect.outsideCeiling"
+level = "@error"
+source = "tests/run.vib"
+span = { start = 178, end = 207 }
+related = [{ source = "tests/run.vib", span = { start = 184, end = 207 } }]

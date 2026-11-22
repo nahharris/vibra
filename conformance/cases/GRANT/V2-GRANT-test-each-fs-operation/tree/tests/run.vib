@@ -1,0 +1,47 @@
+use @std.assert enduse
+
+use @std.test.TestWorld enduse
+
+use @std.fs.DirReadBytes enduse
+
+use @std.fs.DirReadText enduse
+
+use @std.fs.DirList enduse
+
+use @std.fs.DirWriteBytes enduse
+
+use @std.fs.DirWriteText enduse
+
+use @std.fs.DirStat enduse
+
+use @std.fs.FsError enduse
+
+use @std.fs.FsKind enduse
+
+use @std.fs.FsMetadata enduse
+
+use @std.fs.RelativePath enduse
+
+test "each"
+  takes {world: TestWorld}
+  performs {TestWorld DirReadBytes DirReadText DirList DirWriteBytes DirWriteText DirStat}
+  do
+    let Result.ok(value: note) be RelativePath(["n.txt"]) endlet
+    let Result.ok(value: raw) be RelativePath(["b.bin"]) endlet
+    let Result.ok(value: text) be RelativePath(["t.txt"]) endlet
+    let Result.ok(value: root) be RelativePath([]) endlet
+    let {
+      list: lister
+      readBytes: bytesReader
+      readText: textReader
+      stat: statter
+      writeBytes: bytesWriter
+      writeText: textWriter
+    } be await TestWorld.directory(world files: [note: "hi"]) endlet
+    assert.equal(Result.ok(value: Bytes([104u8 105u8])) await DirReadBytes.read(bytesReader note))
+    assert.equal(Result.ok(value: "hi") await DirReadText.read(textReader note))
+    assert.equal(Result.ok(value: ["n.txt"]) await DirList.entries(lister root))
+    assert.equal(Result.ok(value: void) await DirWriteBytes.write(bytesWriter raw Bytes([1u8])))
+    assert.equal(Result.ok(value: void) await DirWriteText.write(textWriter text "t"))
+    assert.equal(Result.ok(value: FsMetadata(kind: FsKind.directory() size: 0u64)) await DirStat.stat(statter root))
+endtest

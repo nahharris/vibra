@@ -1,0 +1,13 @@
+id = "V2-GRANT-env-test-any-name"
+rule = "V2-GRANT-env-test-any-name"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "06-runtime.md#closed-operation-semantics: the variable grant of a test permits every name, so an absent one is notPresent, not denied"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

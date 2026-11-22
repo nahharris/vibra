@@ -1,0 +1,13 @@
+id = "V2-GRANT-test-reads-note"
+rule = "V2-GRANT-test-reads-note"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "04-programs-and-packages.md#tests: the chapter's test reads its note through the readText grant of its directory, and the one event projects the origin @testWorld"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"
