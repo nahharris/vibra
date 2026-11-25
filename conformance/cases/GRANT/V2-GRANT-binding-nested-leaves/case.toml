@@ -1,0 +1,12 @@
+id = "V2-GRANT-binding-nested-leaves"
+rule = "V2-GRANT-binding-nested-leaves"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "04-programs-and-packages.md#targets: a nested record field's leaf is named by the parameter and each field"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

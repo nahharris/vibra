@@ -1,0 +1,12 @@
+id = "V2-GRANT-binding-each-provider"
+rule = "V2-GRANT-binding-each-provider"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "04-programs-and-packages.md#targets: one leaf for each grant type of the provider table, with each resource kind; the two startup reads are in effects"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

@@ -55,7 +55,7 @@ pub use format_plan::{
 pub use library::library_source;
 pub use project::{
     Availability, Dependency, DependencyKind, PROJECT_FILE_NAME, PROJECT_FORMAT,
-    Package, Project, Target, TargetKind, decode_project, project_schema,
+    Package, Project, Recipe, Target, TargetKind, decode_project, project_schema,
 };
 pub use resolve::resolve_input;
 pub use revision::{

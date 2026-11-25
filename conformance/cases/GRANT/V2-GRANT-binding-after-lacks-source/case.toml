@@ -1,0 +1,36 @@
+id = "V2-GRANT-binding-after-lacks-source"
+rule = "V2-GRANT-binding-after-lacks-source"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "04-programs-and-packages.md#targets: after MUST contain the recipe's source leaf: @grant.invalidBinding at after"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@grant.invalidBinding"
+level = "@error"
+source = "project.vibon"
+span = { start = 572, end = 574 }
+
+[[expect.diagnostics]]
+code = "@contract.unusedEffect"
+level = "@warning"
+source = "src/app/main.vib"
+span = { start = 248, end = 259 }
+
+[[expect.diagnostics]]
+code = "@contract.unusedEffect"
+level = "@warning"
+source = "src/app/main.vib"
+span = { start = 260, end = 271 }
+
+[[expect.diagnostics]]
+code = "@contract.unusedEffect"
+level = "@warning"
+source = "src/app/main.vib"
+span = { start = 272, end = 282 }

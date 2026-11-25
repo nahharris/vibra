@@ -198,10 +198,10 @@ fn each_interface_outside_the_ceiling_is_reported_once() {
 }
 
 #[test]
-fn a_recipe_keeps_a_leafless_entry_unavailable() {
-    // The entry takes no grant, and `grants` still holds a recipe nobody
-    // checks yet: the target stays unavailable, and no unused effect is
-    // decided while a recipe could be a startup step.
+fn a_recipe_for_a_leafless_entry_is_an_extra_key() {
+    // The entry takes no grant, so `@out` is an extra key; a recipe is no
+    // startup step unless it reads the process, so `StdoutText` in the list
+    // is performed by nothing.
     let document = "{format: @project.v2 package: {name: \"hello\" version: \"0.1.0\"} targets: \
                     [{name: @app kind: @bin root: \"src/app\" entry: @app.main.main \
                     effects: [@std.io.StdoutText] \
@@ -212,15 +212,19 @@ fn a_recipe_keeps_a_leafless_entry_unavailable() {
         document,
         "[@out: {provider: @host.io.stdout resource: {kind: @processStream} after: []}]",
     );
+    let project_file = Some("project.vibon".to_owned());
     assert_eq!(
         found(&result),
-        [(
-            DiagnosticCode::ToolUnavailable,
-            Some("project.vibon".to_owned()),
-            grants
-        )]
+        [
+            (
+                DiagnosticCode::ContractUnusedEffect,
+                project_file.clone(),
+                at(document, "@std.io.StdoutText")
+            ),
+            (DiagnosticCode::GrantInvalidBinding, project_file, grants),
+        ]
     );
-    assert!(result.only_unavailable());
+    assert!(result.entries().is_empty());
 }
 
 #[test]

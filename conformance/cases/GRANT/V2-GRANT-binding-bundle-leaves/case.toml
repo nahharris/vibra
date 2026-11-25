@@ -1,0 +1,12 @@
+id = "V2-GRANT-binding-bundle-leaves"
+rule = "V2-GRANT-binding-bundle-leaves"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "04-programs-and-packages.md#targets: a record parameter has one leaf for each field, named by the parameter and the field"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

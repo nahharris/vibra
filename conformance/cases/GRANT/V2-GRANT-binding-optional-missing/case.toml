@@ -1,0 +1,19 @@
+id = "V2-GRANT-binding-optional-missing"
+rule = "V2-GRANT-binding-optional-missing"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "04-programs-and-packages.md#targets: a missing recipe fails the build for an optional leaf too"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@grant.invalidBinding"
+level = "@error"
+source = "project.vibon"
+span = { start = 154, end = 157 }
+related = [{ source = "src/app/main.vib", span = { start = 82, end = 85 } }]

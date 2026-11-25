@@ -1,0 +1,30 @@
+id = "V2-GRANT-policy-4096-nodes-recipe"
+rule = "V2-GRANT-policy-4096-nodes-recipe"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#the-wire-form: a recipe policy counted at 4,096 nodes and entries is accepted (Q9)"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+
+[[expect.diagnostics]]
+code = "@contract.unusedEffect"
+level = "@warning"
+source = "src/app/main.vib"
+span = { start = 248, end = 259 }
+
+[[expect.diagnostics]]
+code = "@contract.unusedEffect"
+level = "@warning"
+source = "src/app/main.vib"
+span = { start = 260, end = 271 }
+
+[[expect.diagnostics]]
+code = "@contract.unusedEffect"
+level = "@warning"
+source = "src/app/main.vib"
+span = { start = 272, end = 282 }

@@ -146,9 +146,9 @@ fn check_bin_target_passed() {
 }
 
 #[test]
-fn check_bin_target_unsupported() {
-    // The entry takes a grant leaf, and recipes are not checked yet: the
-    // target is unavailable at its `grants` field.
+fn check_bin_target_missing_recipe() {
+    // The entry takes a grant leaf and `grants` has no recipe for it: the
+    // target is refuted at its `grants` field, related to the parameter.
     let entry = "use @std.io.StdoutText enduse\n\nuse @std.process.ExitCode enduse\n\n\
                  proc main takes {out: StdoutText} returns code: ExitCode do return ExitCode(0u8) endproc\n";
     let root = TempDir::project(
@@ -157,14 +157,20 @@ fn check_bin_target_unsupported() {
         &[("src/app/main.vib", VALID), ("src/hello/main.vib", entry)],
     );
     let (code, document) = check(&root, &[]);
-    assert_eq!(code, 4, "{document}");
-    assert_eq!(document["status"], "unsupported");
-    assert_eq!(codes(&document), ["@tool.unavailable"]);
-    let span = &document["diagnostics"][0]["primarySpan"];
+    assert_eq!(code, 1, "{document}");
+    assert_eq!(document["status"], "refuted");
+    assert_eq!(codes(&document), ["@grant.invalidBinding"]);
+    let diagnostic = &document["diagnostics"][0];
+    let span = &diagnostic["primarySpan"];
     assert_eq!(span["sourceId"], "project.vibon");
     let start = BINARY_AND_LIBRARY.find("grants: [:]").expect("the grants") + 8;
     assert_eq!(span["start"], start);
     assert_eq!(span["end"], start + "[:]".len());
+    let related = &diagnostic["related"][0]["span"];
+    assert_eq!(related["sourceId"], "src/hello/main.vib");
+    let parameter = entry.find("out: StdoutText").expect("the parameter");
+    assert_eq!(related["start"], parameter);
+    assert_eq!(related["end"], parameter + "out".len());
 }
 
 #[test]

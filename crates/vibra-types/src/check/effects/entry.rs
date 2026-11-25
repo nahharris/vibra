@@ -193,6 +193,7 @@ pub struct EntrySignature {
     declaration: ByteSpan,
     row: Vec<RowEntry>,
     parameters: Vec<(String, GrantShape)>,
+    parameter_spans: Vec<ByteSpan>,
 }
 
 impl EntrySignature {
@@ -232,6 +233,17 @@ impl EntrySignature {
     #[must_use]
     pub fn parameters(&self) -> &[(String, GrantShape)] {
         &self.parameters
+    }
+
+    /// Where the parameter `name` is written in the entry's declaration, in
+    /// [`Self::source_id`].
+    #[must_use]
+    pub fn parameter_span(&self, name: &str) -> Option<ByteSpan> {
+        self.parameters
+            .iter()
+            .zip(&self.parameter_spans)
+            .find(|((parameter, _), _)| parameter == name)
+            .map(|(_, span)| *span)
     }
 
     /// Every grant leaf, in parameter order and then in canonical field
@@ -558,15 +570,16 @@ pub(crate) fn entry_signature(
         ));
     }
     let mut parameters = Vec::new();
+    let mut parameter_spans = Vec::new();
     for ((pattern, _), ty) in data.view.takes().iter().zip(&signature.parameters) {
         let parameter = match pattern.form() {
             PatternForm::Path(path) => match path.segments().as_slice() {
-                [only] => Some(only.text().to_owned()),
+                [only] => Some((only.text().to_owned(), only.span())),
                 _ => None,
             },
             _ => None,
         };
-        let Some(parameter) = parameter else {
+        let Some((parameter, parameter_span)) = parameter else {
             return Err(invalid(data.module, name, "every parameter is a bare name"));
         };
         let Some(shape) = grant_shape(program, ty, 0) else {
@@ -578,6 +591,7 @@ pub(crate) fn entry_signature(
             ));
         };
         parameters.push((parameter, shape));
+        parameter_spans.push(parameter_span);
     }
     if !is_exit_code(program, &signature.result) {
         return Err(invalid(
@@ -616,6 +630,7 @@ pub(crate) fn entry_signature(
         declaration: name,
         row,
         parameters,
+        parameter_spans,
     }))
 }
 

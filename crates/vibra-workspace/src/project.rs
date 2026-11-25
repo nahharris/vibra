@@ -9,9 +9,12 @@
 //! dependency is decoded and marked unavailable (path dependencies until M2,
 //! Git dependencies throughout this release).
 //!
-//! The grant binding's `resource` and `policy` are opaque here: their schemas
-//! depend on the provider and are the effects chapter's, checked with the
-//! binary target's recipes.
+//! The grant binding's `resource` is a closed union selected by its `kind`:
+//! `kind`, then the fields the provider table names for that kind, all
+//! required. Whether a provider accepts the kind is checked with the binary
+//! target's recipes ([`crate::binding`]). The `policy` is opaque here: it is
+//! a `@scopePolicy.v1` document of the effects chapter, decoded with the
+//! recipes.
 
 use vibra_diagnostics::{ByteSpan, Diagnostic};
 use vibra_syntax::{
@@ -96,7 +99,7 @@ impl Package {
 }
 
 /// One local target.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Target {
     span: ByteSpan,
     name: String,
@@ -108,7 +111,7 @@ pub struct Target {
 }
 
 /// What a `@bin` target writes beside its name, kind, and root.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 struct Binary {
     /// The `entry` atom and its value's span.
     entry: (String, ByteSpan),
@@ -116,6 +119,45 @@ struct Binary {
     effects: (ByteSpan, Vec<(String, ByteSpan)>),
     /// The `grants` dict's value span, and each key with its span.
     grants: (ByteSpan, Vec<(String, ByteSpan)>),
+    /// The recipes of `grants`, in dict order.
+    recipes: Vec<Recipe>,
+}
+
+/// One entry of a binary target's `grants` dict: the leaf atom it is keyed
+/// by and its decoded grant binding record.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Recipe {
+    key: String,
+    key_span: ByteSpan,
+    binding: TypedNode,
+}
+
+impl Recipe {
+    /// The leaf atom the recipe is keyed by, `@` included.
+    #[must_use]
+    pub fn key(&self) -> &str {
+        &self.key
+    }
+
+    /// Where the key is written.
+    #[must_use]
+    pub const fn key_span(&self) -> ByteSpan {
+        self.key_span
+    }
+
+    /// The decoded grant binding record: `provider`, the closed `resource`
+    /// record, the opaque `policy`, `limits`, and `after`, each with where it
+    /// is written.
+    #[must_use]
+    pub const fn binding(&self) -> &TypedNode {
+        &self.binding
+    }
+
+    /// Where the grant binding record is written: the recipe.
+    #[must_use]
+    pub const fn span(&self) -> ByteSpan {
+        self.binding.span()
+    }
 }
 
 impl Target {
@@ -194,6 +236,15 @@ impl Target {
         self.binary
             .as_ref()
             .map_or(&[], |binary| binary.grants.1.as_slice())
+    }
+
+    /// The recipes of a binary's `grants` dict, in dict order; empty for a
+    /// library.
+    #[must_use]
+    pub fn recipes(&self) -> &[Recipe] {
+        self.binary
+            .as_ref()
+            .map_or(&[], |binary| binary.recipes.as_slice())
     }
 }
 
@@ -400,11 +451,50 @@ fn git_revision(rev: &str) -> Option<&'static str> {
     (!valid).then_some("a revision is 40 lower-case hexadecimal digits")
 }
 
+/// The resource record of a grant binding: `kind`, then the fields the
+/// provider table names for that kind, in its order, all required.
+fn resource() -> Slot {
+    let case = |kind: &'static str, fields: Vec<FieldSchema>| {
+        let mut all = vec![FieldSchema::required("kind", Slot::AtomOf(vec![kind]))];
+        all.extend(fields);
+        (kind, RecordSchema::new(all))
+    };
+    let source = || FieldSchema::required("source", Slot::Atom(None));
+    Slot::Variant(VariantSchema::new(
+        "kind",
+        vec![
+            case(
+                "@fixedPath",
+                vec![FieldSchema::required("path", Slot::Str(None))],
+            ),
+            case(
+                "@argumentPath",
+                vec![
+                    FieldSchema::required("index", Slot::Integer(IntegerSuffix::U64)),
+                    source(),
+                ],
+            ),
+            case(
+                "@variablePath",
+                vec![FieldSchema::required("name", Slot::Str(None)), source()],
+            ),
+            case("@processStream", Vec::new()),
+            case(
+                "@variableSet",
+                vec![FieldSchema::required("names", Slot::list(Slot::Str(None)))],
+            ),
+            case("@processArguments", Vec::new()),
+            case("@systemClock", Vec::new()),
+            case("@systemRandom", Vec::new()),
+        ],
+    ))
+}
+
 fn grant_binding() -> Slot {
     let bound = || Slot::Integer(IntegerSuffix::U64);
     Slot::Record(RecordSchema::new(vec![
         FieldSchema::required("provider", Slot::Atom(None)),
-        FieldSchema::required("resource", Slot::Opaque),
+        FieldSchema::required("resource", resource()),
         FieldSchema::optional("policy", Slot::Opaque),
         FieldSchema::optional(
             "limits",
@@ -532,10 +622,22 @@ fn binary(target: &TypedNode) -> Binary {
             )
         },
     );
+    let recipes = target
+        .get("grants")
+        .and_then(TypedNode::as_entries)
+        .unwrap_or_default()
+        .iter()
+        .map(|entry| Recipe {
+            key: text_of(Some(entry.key())),
+            key_span: entry.key().span(),
+            binding: entry.value().clone(),
+        })
+        .collect();
     Binary {
         entry,
         effects,
         grants,
+        recipes,
     }
 }
 

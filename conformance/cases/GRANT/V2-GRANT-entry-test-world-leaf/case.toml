@@ -1,0 +1,18 @@
+id = "V2-GRANT-entry-test-world-leaf"
+rule = "V2-GRANT-entry-test-world-leaf"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "04-programs-and-packages.md#test-worlds-and-grants: no binding recipe can name TestWorld: @grant.invalidBinding at provider (Q20)"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@grant.invalidBinding"
+level = "@error"
+source = "project.vibon"
+span = { start = 174, end = 189 }

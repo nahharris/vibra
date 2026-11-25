@@ -11,36 +11,48 @@
 //! - the entry's written `performs` row MUST be contained in `effects`: an
 //!   interface outside it is `@effect.outsideCeiling` at the `effects`
 //!   field, related to the entry's `performs` entry, once per interface;
-//! - an interface in `effects` that the entry does not perform is the
-//!   warning `@contract.unusedEffect` at that entry of the list. A startup
-//!   step may perform it too, and only the recipes say which, so the warning
-//!   is decided for a target with no grant leaf and no recipe only.
+//! - the row of every startup step ([`crate::binding::StartupStep`]) MUST be
+//!   contained in it as well: a step outside it is `@effect.outsideCeiling`
+//!   at the `effects` field, related to the recipe, once per step;
+//! - an interface in `effects` that neither the entry nor a startup step
+//!   performs is the warning `@contract.unusedEffect` at that entry of the
+//!   list. A grant the entry takes is no row, so it needs no entry of the
+//!   list.
 //!
-//! The recipes of `grants` are not validated here. A target whose entry
-//! takes a grant leaf, or whose `grants` holds a recipe, is
-//! `@tool.unavailable` at its `grants` field, so no target is accepted with
-//! a recipe nobody checked. The list grants nothing, and naming an entry
-//! makes no import edge and changes no visibility.
+//! The recipes of `grants` are validated by [`crate::binding::check`] once
+//! the entry has its signature. The facts of a target are withheld unless
+//! its entry, its ceiling, and its recipes all check. The list grants
+//! nothing, and naming an entry makes no import edge and changes no
+//! visibility.
 //!
 //! The span of a field (`entry`, `effects`, `grants`) is its value, as the
 //! decoder reports "the `format` field".
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
+use vibra_host::recipe::BindingPlan;
 use vibra_ir::{EntityRef, Row};
 use vibra_types::{DataReference, EntryLeaf, EntrySignature, TargetCheck, TargetEntry};
 
+use crate::binding;
 use crate::project::{Project, Target};
 
-/// What admission needs of a checked binary target: its entry and its
-/// ceiling.
+/// What admission needs of a checked binary target: its entry, its ceiling,
+/// and its validated binding plan.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EntryFacts {
     target: String,
     signature: EntrySignature,
     ceiling: Vec<(EntityRef, ByteSpan)>,
+    plan: BindingPlan,
 }
 
 impl EntryFacts {
+    /// The validated binding plan of the target's recipes.
+    #[must_use]
+    pub const fn plan(&self) -> &BindingPlan {
+        &self.plan
+    }
+
     /// The target's unit name, `@` included.
     #[must_use]
     pub fn target(&self) -> &str {
@@ -137,7 +149,8 @@ pub fn check_target(
     diagnostics.extend(found.diagnostics().iter().cloned());
     let mut facts = None;
     if let Some(signature) = found.signature() {
-        let leaves = signature.leaves();
+        let binding = binding::check(project, target, signature);
+        diagnostics.extend(binding.diagnostics().iter().cloned());
         if let Some(ceiling) = found.ceiling() {
             let effects = target.effects_span().unwrap_or(target.span());
             let mut contained = true;
@@ -162,42 +175,53 @@ pub fn check_target(
                     );
                 }
             }
-            if leaves.is_empty() && target.grant_keys().is_empty() {
-                for (root, span) in ceiling {
-                    if !signature
-                        .row_entries()
-                        .iter()
-                        .any(|entry| entry.interface() == root)
-                    {
-                        diagnostics.push(
-                            Diagnostic::new(
-                                DiagnosticCode::ContractUnusedEffect,
-                                *span,
-                                format!(
-                                    "neither the entry nor a startup step performs `@{}`",
-                                    root.path()
-                                ),
-                            )
-                            .with_source_id(source_id),
-                        );
-                    }
+            for step in binding.startup() {
+                if !ceiling.iter().any(|(root, _)| root == step.interface()) {
+                    contained = false;
+                    diagnostics.push(
+                        Diagnostic::new(
+                            DiagnosticCode::EffectOutsideCeiling,
+                            effects,
+                            format!(
+                                "the startup read of `{}` performs `@{}`, which the target's `effects` does not list",
+                                step.leaf(),
+                                step.interface().path()
+                            ),
+                        )
+                        .with_source_id(source_id)
+                        .with_related(step.recipe(), "the recipe"),
+                    );
                 }
             }
-            facts = contained.then(|| EntryFacts {
+            for (root, span) in ceiling {
+                let performed = signature
+                    .row_entries()
+                    .iter()
+                    .any(|entry| entry.interface() == root)
+                    || binding
+                        .startup()
+                        .iter()
+                        .any(|step| step.interface() == root);
+                if !performed {
+                    diagnostics.push(
+                        Diagnostic::new(
+                            DiagnosticCode::ContractUnusedEffect,
+                            *span,
+                            format!(
+                                "neither the entry nor a startup step performs `@{}`",
+                                root.path()
+                            ),
+                        )
+                        .with_source_id(source_id),
+                    );
+                }
+            }
+            facts = binding.plan().filter(|_| contained).map(|plan| EntryFacts {
                 target: target.name().to_owned(),
                 signature: signature.clone(),
                 ceiling: ceiling.to_vec(),
+                plan: plan.clone(),
             });
-        }
-        if !leaves.is_empty() || !target.grant_keys().is_empty() {
-            diagnostics.push(
-                Diagnostic::new(
-                    DiagnosticCode::ToolUnavailable,
-                    target.grants_span().unwrap_or(target.span()),
-                    "the binding recipes of a target are not supported by this checker yet",
-                )
-                .with_source_id(source_id),
-            );
         }
     }
     diagnostics.sort_by_key(|diagnostic| {

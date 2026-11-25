@@ -5,9 +5,8 @@
 //! module of the embedded standard library. With no target named, every
 //! local target and the `@tests` unit are covered; a named target covers
 //! that target only. A binary target's entry and admission ceiling are
-//! checked with its unit ([`crate::entry`]); its recipes are not supported
-//! yet, so a target with a grant leaf is `@tool.unavailable` at its
-//! `grants` field.
+//! checked with its unit ([`crate::entry`]), and its recipes against the
+//! entry's leaves ([`crate::binding`]).
 
 use vibra_diagnostics::{Diagnostic, DiagnosticCode, Level};
 use vibra_types::{CheckResult, check_targets};

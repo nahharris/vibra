@@ -25,5 +25,5 @@ V2-PROJECT-entry-requires-else	active	06-runtime.md#entry-outcome
 V2-PROJECT-entry-result-not-exit-code	active	04-programs-and-packages.md#targets
 V2-PROJECT-entry-type-member	active	04-programs-and-packages.md#targets
 V2-PROJECT-entry-unknown	active	04-programs-and-packages.md#targets
-V2-TOOL-unavailable-entry-record-leaves	active	07-diagnostics-and-conformance.md#availability-discovery-and-resolution
-V2-TOOL-unavailable-entry-with-grants	active	07-diagnostics-and-conformance.md#availability-discovery-and-resolution
+V2-TOOL-unavailable-entry-record-leaves	retired	07-diagnostics-and-conformance.md#availability-discovery-and-resolution
+V2-TOOL-unavailable-entry-with-grants	retired	07-diagnostics-and-conformance.md#availability-discovery-and-resolution

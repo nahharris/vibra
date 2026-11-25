@@ -1,0 +1,5 @@
+use @std.fs.DirReadText enduse
+
+use @std.process.ExitCode enduse
+
+proc main takes {a: DirReadText b: DirReadText} returns code: ExitCode do return ExitCode(0u8) endproc
