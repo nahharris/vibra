@@ -128,12 +128,33 @@ fn check_test_takes_another_type() {
     assert_eq!(span["end"], 84);
     assert_eq!(document["payload"]["accepted"], false);
 }
+
+#[test]
+fn check_bin_target_passed() {
+    // An entry that takes no grant needs no recipe, so its target checks.
+    let entry = "use @std.process.ExitCode enduse\n\n\
+                 proc main returns code: ExitCode do return ExitCode(0u8) endproc\n";
+    let root = TempDir::project(
+        "check-bin-passed",
+        BINARY_AND_LIBRARY,
+        &[("src/app/main.vib", VALID), ("src/hello/main.vib", entry)],
+    );
+    let (code, document) = check(&root, &[]);
+    assert_eq!(code, 0, "{document}");
+    assert_eq!(document["status"], "passed");
+    assert!(codes(&document).is_empty());
+}
+
 #[test]
 fn check_bin_target_unsupported() {
+    // The entry takes a grant leaf, and recipes are not checked yet: the
+    // target is unavailable at its `grants` field.
+    let entry = "use @std.io.StdoutText enduse\n\nuse @std.process.ExitCode enduse\n\n\
+                 proc main takes {out: StdoutText} returns code: ExitCode do return ExitCode(0u8) endproc\n";
     let root = TempDir::project(
         "check-bin",
         BINARY_AND_LIBRARY,
-        &[("src/app/main.vib", VALID), ("src/hello/main.vib", VALID)],
+        &[("src/app/main.vib", VALID), ("src/hello/main.vib", entry)],
     );
     let (code, document) = check(&root, &[]);
     assert_eq!(code, 4, "{document}");
@@ -141,10 +162,9 @@ fn check_bin_target_unsupported() {
     assert_eq!(codes(&document), ["@tool.unavailable"]);
     let span = &document["diagnostics"][0]["primarySpan"];
     assert_eq!(span["sourceId"], "project.vibon");
-    let record = "{name: @hello kind: @bin root: \"src/hello\" entry: @hello.main.main effects: [] grants: [:]}";
-    let start = BINARY_AND_LIBRARY.find(record).expect("the record");
+    let start = BINARY_AND_LIBRARY.find("grants: [:]").expect("the grants") + 8;
     assert_eq!(span["start"], start);
-    assert_eq!(span["end"], start + record.len());
+    assert_eq!(span["end"], start + "[:]".len());
 }
 
 #[test]

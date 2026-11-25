@@ -818,6 +818,7 @@ const ACCEPTED_EFFECT_CASES: &[(&str, &[CaseModule])] = &[
     case!("V2-EFFECT-ceiling-exact": app "main"),
     case!("V2-EFFECT-ceiling-transitive": app "main"),
     case!("V2-EFFECT-default-proc-member": app "main"),
+    case!("V2-EFFECT-entry-ceiling-equal": app "main"),
     case!("V2-EFFECT-fn-member-pure": app "main"),
     case!("V2-EFFECT-generic-operation-interface": app "main"),
     case!("V2-EFFECT-impl-host-member-supplied": app "main"),

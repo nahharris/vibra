@@ -1,0 +1,18 @@
+id = "V2-PROJECT-entry-outside-target"
+rule = "V2-PROJECT-entry-outside-target"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "04-programs-and-packages.md#targets: the first part of entry is the target's own name"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@project.entryOutsideTarget"
+level = "@error"
+source = "project.vibon"
+span = { start = 119, end = 135 }

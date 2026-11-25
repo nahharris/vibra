@@ -1,0 +1,19 @@
+id = "V2-PROJECT-entry-result-not-exit-code"
+rule = "V2-PROJECT-entry-result-not-exit-code"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "04-programs-and-packages.md#targets: the result type of an entry is ExitCode"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@project.invalidEntrySignature"
+level = "@error"
+source = "project.vibon"
+span = { start = 119, end = 133 }
+related = [{ source = "src/app/main.vib", span = { start = 5, end = 9 } }]

@@ -1,0 +1,1 @@
+proc main returns code: U8 do return 0u8 endproc

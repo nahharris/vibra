@@ -3,14 +3,15 @@
 //! `docs/spec/04-programs-and-packages.md`, "Project file", gives the record
 //! table: `project`, `package`, `target`, `grant binding`, `limits`,
 //! `path dependency`, and `Git dependency`. The decoder reads one document's
-//! bytes and no path. A `@bin` target is decoded and marked unavailable for
-//! checking (its entry, ceiling, and grants are validated in M2); every
+//! bytes and no path. Every target is available for checking: a `@bin`
+//! target keeps its `entry`, its `effects` list, and its `grants` dict with
+//! where each is written, for the checks of [`crate::entry`]. Every
 //! dependency is decoded and marked unavailable (path dependencies until M2,
 //! Git dependencies throughout this release).
 //!
 //! The grant binding's `resource` and `policy` are opaque here: their schemas
 //! depend on the provider and are the effects chapter's, checked with the
-//! binary target in M2.
+//! binary target's recipes.
 
 use vibra_diagnostics::{ByteSpan, Diagnostic};
 use vibra_syntax::{
@@ -64,12 +65,12 @@ impl DependencyKind {
     }
 }
 
-/// Whether this release can check a decoded target or deliver a dependency.
+/// Whether this release can deliver a dependency.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Availability {
-    /// Checked or delivered.
+    /// Delivered.
     Available,
-    /// Decoded, and unavailable for checking or delivery.
+    /// Decoded, and unavailable for delivery.
     Unavailable,
 }
 
@@ -103,7 +104,18 @@ pub struct Target {
     kind: TargetKind,
     root: String,
     root_span: ByteSpan,
-    availability: Availability,
+    binary: Option<Binary>,
+}
+
+/// What a `@bin` target writes beside its name, kind, and root.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Binary {
+    /// The `entry` atom and its value's span.
+    entry: (String, ByteSpan),
+    /// The `effects` list's value span, and each entry with its span.
+    effects: (ByteSpan, Vec<(String, ByteSpan)>),
+    /// The `grants` dict's value span, and each key with its span.
+    grants: (ByteSpan, Vec<(String, ByteSpan)>),
 }
 
 impl Target {
@@ -143,10 +155,45 @@ impl Target {
         self.root_span
     }
 
-    /// A library is available for checking; a binary is not until M2.
+    /// The `entry` atom of a binary, `@` included, and where its value is
+    /// written; `None` for a library.
     #[must_use]
-    pub const fn availability(&self) -> Availability {
-        self.availability
+    pub fn entry(&self) -> Option<(&str, ByteSpan)> {
+        self.binary
+            .as_ref()
+            .map(|binary| (binary.entry.0.as_str(), binary.entry.1))
+    }
+
+    /// Where the `effects` list of a binary is written; `None` for a
+    /// library.
+    #[must_use]
+    pub fn effects_span(&self) -> Option<ByteSpan> {
+        self.binary.as_ref().map(|binary| binary.effects.0)
+    }
+
+    /// The entries of a binary's `effects` list, in written order, each
+    /// with where it is written; empty for a library.
+    #[must_use]
+    pub fn effects(&self) -> &[(String, ByteSpan)] {
+        self.binary
+            .as_ref()
+            .map_or(&[], |binary| binary.effects.1.as_slice())
+    }
+
+    /// Where the `grants` dict of a binary is written; `None` for a
+    /// library.
+    #[must_use]
+    pub fn grants_span(&self) -> Option<ByteSpan> {
+        self.binary.as_ref().map(|binary| binary.grants.0)
+    }
+
+    /// The leaf keys of a binary's `grants` dict, in dict order, each with
+    /// where it is written; empty for a library.
+    #[must_use]
+    pub fn grant_keys(&self) -> &[(String, ByteSpan)] {
+        self.binary
+            .as_ref()
+            .map_or(&[], |binary| binary.grants.1.as_slice())
     }
 }
 
@@ -447,6 +494,51 @@ fn text_of(node: Option<&TypedNode>) -> String {
         .to_owned()
 }
 
+/// The atom of `node`, when it is one, with where it is written.
+fn atom_of(node: &TypedNode) -> (String, ByteSpan) {
+    (text_of(Some(node)), node.span())
+}
+
+/// The fields a validated `@bin` target record writes beside its name,
+/// kind, and root. A field the schema requires is present in a validated
+/// document; the target's own span stands in where one is not.
+fn binary(target: &TypedNode) -> Binary {
+    let entry = target
+        .get("entry")
+        .map_or_else(|| (String::new(), target.span()), atom_of);
+    let effects = target.get("effects").map_or_else(
+        || (target.span(), Vec::new()),
+        |list| {
+            (
+                list.span(),
+                list.as_list()
+                    .unwrap_or_default()
+                    .iter()
+                    .map(atom_of)
+                    .collect(),
+            )
+        },
+    );
+    let grants = target.get("grants").map_or_else(
+        || (target.span(), Vec::new()),
+        |dict| {
+            (
+                dict.span(),
+                dict.as_entries()
+                    .unwrap_or_default()
+                    .iter()
+                    .map(|entry| atom_of(entry.key()))
+                    .collect(),
+            )
+        },
+    );
+    Binary {
+        entry,
+        effects,
+        grants,
+    }
+}
+
 /// Decodes one `project.vibon`, read as `source_id`, with no discovery and
 /// no path read.
 pub fn decode_project(
@@ -485,10 +577,7 @@ pub fn decode_project(
                 kind,
                 root: text_of(root),
                 root_span: root.map_or(target.span(), TypedNode::span),
-                availability: match kind {
-                    TargetKind::Lib => Availability::Available,
-                    TargetKind::Bin => Availability::Unavailable,
-                },
+                binary: (kind == TargetKind::Bin).then(|| binary(target)),
             }
         })
         .collect();

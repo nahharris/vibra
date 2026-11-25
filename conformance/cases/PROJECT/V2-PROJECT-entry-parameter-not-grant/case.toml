@@ -1,0 +1,19 @@
+id = "V2-PROJECT-entry-parameter-not-grant"
+rule = "V2-PROJECT-entry-parameter-not-grant"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "04-programs-and-packages.md#targets: every parameter type of an entry is a grant shape"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@project.invalidEntrySignature"
+level = "@error"
+source = "project.vibon"
+span = { start = 119, end = 133 }
+related = [{ source = "src/app/main.vib", span = { start = 39, end = 43 } }]

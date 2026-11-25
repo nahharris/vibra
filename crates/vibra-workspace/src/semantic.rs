@@ -4,14 +4,16 @@
 //! check covers a target's units and their import closure, plus every
 //! module of the embedded standard library. With no target named, every
 //! local target and the `@tests` unit are covered; a named target covers
-//! that target only. A target whose kind this checker does not support yet
-//! (`@bin`) still decodes: it is reported `@tool.unavailable` at its target
-//! record, and the other targets are checked.
+//! that target only. A binary target's entry and admission ceiling are
+//! checked with its unit ([`crate::entry`]); its recipes are not supported
+//! yet, so a target with a grant leaf is `@tool.unavailable` at its
+//! `grants` field.
 
 use vibra_diagnostics::{Diagnostic, DiagnosticCode, Level};
-use vibra_types::{CheckResult, check_workspace};
+use vibra_types::{CheckResult, check_targets};
 
-use crate::project::TargetKind;
+use crate::entry::{EntryFacts, check_target, target_entry};
+use crate::project::{Target, TargetKind};
 use crate::resolve::resolve_input;
 use crate::snapshot::{SourceSnapshot, UnitKind};
 
@@ -20,11 +22,12 @@ use crate::snapshot::{SourceSnapshot, UnitKind};
 pub struct WorkspaceCheck {
     diagnostics: Vec<Diagnostic>,
     check: Option<CheckResult>,
+    entries: Vec<EntryFacts>,
 }
 
 impl WorkspaceCheck {
-    /// Every diagnostic: the targets reported unavailable first, then the
-    /// check's.
+    /// Every diagnostic: those of the project file first, in the order of
+    /// their spans, then the check's.
     #[must_use]
     pub fn diagnostics(&self) -> &[Diagnostic] {
         &self.diagnostics
@@ -60,6 +63,13 @@ impl WorkspaceCheck {
     pub fn types_document(&self) -> Option<&str> {
         self.check.as_ref().and_then(CheckResult::types_document)
     }
+
+    /// The entry and the ceiling of each covered binary target whose entry
+    /// and `effects` list check, in project order.
+    #[must_use]
+    pub fn entries(&self) -> &[EntryFacts] {
+        &self.entries
+    }
 }
 
 /// Checks `snapshot`: every local target and the `@tests` unit when
@@ -71,27 +81,20 @@ pub fn check_snapshot(
     target: Option<&str>,
 ) -> WorkspaceCheck {
     let project = snapshot.project().project();
-    let mut diagnostics = Vec::new();
-    let mut units = Vec::new();
-    for declared in project.targets() {
-        if target.is_some_and(|name| name != declared.name()) {
-            continue;
-        }
-        match declared.kind() {
-            TargetKind::Lib => units.push(declared.name().to_owned()),
-            TargetKind::Bin => diagnostics.push(
-                Diagnostic::new(
-                    DiagnosticCode::ToolUnavailable,
-                    declared.span(),
-                    format!(
-                        "the binary target `{}` is not supported by this checker yet",
-                        declared.name()
-                    ),
-                )
-                .with_source_id(project.source_id()),
-            ),
-        }
-    }
+    let covered = project
+        .targets()
+        .iter()
+        .filter(|declared| target.is_none_or(|name| name == declared.name()))
+        .collect::<Vec<_>>();
+    let mut units = covered
+        .iter()
+        .map(|declared| declared.name().to_owned())
+        .collect::<Vec<_>>();
+    let binaries = covered
+        .iter()
+        .copied()
+        .filter(|declared| declared.kind() == TargetKind::Bin)
+        .collect::<Vec<&Target>>();
     if target.is_none() {
         units.extend(
             snapshot
@@ -101,20 +104,42 @@ pub fn check_snapshot(
                 .map(|unit| unit.name().to_owned()),
         );
     }
+    let mut diagnostics = Vec::new();
     let input = match resolve_input(snapshot) {
         Ok(input) => input,
         Err(error) => {
+            for binary in &binaries {
+                diagnostics.extend(check_target(project, binary, None).0);
+            }
             diagnostics.push(error.diagnostic().clone());
             return WorkspaceCheck {
                 diagnostics,
                 check: None,
+                entries: Vec::new(),
             };
         }
     };
-    let check = check_workspace(&input, &units);
+    let requests = binaries
+        .iter()
+        .map(|binary| target_entry(project, binary))
+        .collect::<Vec<_>>();
+    let check = check_targets(&input, &units, &requests);
+    let mut entries = Vec::new();
+    for (index, binary) in binaries.iter().enumerate() {
+        let (found, facts) = check_target(project, binary, check.targets().get(index));
+        diagnostics.extend(found);
+        entries.extend(facts);
+    }
+    diagnostics.sort_by_key(|diagnostic| {
+        (
+            diagnostic.primary_span().start(),
+            diagnostic.primary_span().end(),
+        )
+    });
     diagnostics.extend(check.diagnostics().iter().cloned());
     WorkspaceCheck {
         diagnostics,
         check: Some(check),
+        entries,
     }
 }

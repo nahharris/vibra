@@ -1,0 +1,19 @@
+id = "V2-EFFECT-target-effects-repeat"
+rule = "V2-EFFECT-target-effects-repeat"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "04-programs-and-packages.md#targets: a later repeat in effects is @effect.duplicateRoot, related to the first"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@effect.duplicateRoot"
+level = "@error"
+source = "project.vibon"
+span = { start = 158, end = 171 }
+related = [{ source = "project.vibon", span = { start = 144, end = 157 } }]

@@ -3,9 +3,10 @@
 //! `docs/spec/05-tooling.md`, "Command surface": without a target, `check`
 //! covers every local target and the `@tests` unit; with one, that target
 //! only. A target is an atom, never a path, and one that names no local
-//! target is invalid input. A target whose kind the profile does not support
-//! is `@tool.unavailable` at its target record, and the other targets are
-//! still checked. The work is the workspace engine's [`check_snapshot`].
+//! target is invalid input. A binary target's entry and `effects` list are
+//! checked with its unit; one whose recipes the checker does not support
+//! yet is `@tool.unavailable` at its `grants` field, and the other targets
+//! are still checked. The work is the workspace engine's [`check_snapshot`].
 //!
 //! "Versioned envelope and results" fixes the status: the result fixes it,
 //! except that a reached limit or a bare guard that is not established make

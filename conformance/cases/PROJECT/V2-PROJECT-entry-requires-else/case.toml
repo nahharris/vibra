@@ -1,0 +1,12 @@
+id = "V2-PROJECT-entry-requires-else"
+rule = "V2-PROJECT-entry-requires-else"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "06-runtime.md#entry-outcome: a requires with else behaves on the entry as on any proc"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

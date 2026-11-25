@@ -78,18 +78,46 @@ fn a_library_project_decodes_to_one_available_library_target() {
     assert_eq!(target.kind(), TargetKind::Lib);
     assert_eq!(target.root(), "src/app");
     assert_eq!(target.root_span(), at(LIBRARY, "\"src/app\""));
-    assert_eq!(target.availability(), Availability::Available);
+    assert_eq!(target.entry(), None);
     assert!(project.dependencies().is_empty());
 }
 
 #[test]
-fn the_chapters_binary_project_decodes_and_is_unavailable_for_checking() {
+fn the_chapters_binary_project_keeps_its_entry_effects_and_grants() {
     let project = decode_project("project.vibon", BINARY.as_bytes()).expect("accepted");
     let [target] = project.targets() else {
         panic!("one target");
     };
     assert_eq!(target.kind(), TargetKind::Bin);
-    assert_eq!(target.availability(), Availability::Unavailable);
+    assert_eq!(
+        target.entry(),
+        Some(("@hello.main.main", at(BINARY, "@hello.main.main")))
+    );
+    let effects = "[@std.env.EnvReadArgs @std.fs.DirReadText @std.io.StdoutText]";
+    assert_eq!(target.effects_span(), Some(at(BINARY, effects)));
+    assert_eq!(
+        target
+            .effects()
+            .iter()
+            .map(|(path, span)| (path.as_str(), *span))
+            .collect::<Vec<_>>(),
+        [
+            ("@std.env.EnvReadArgs", at(BINARY, "@std.env.EnvReadArgs")),
+            ("@std.fs.DirReadText", at(BINARY, "@std.fs.DirReadText")),
+            ("@std.io.StdoutText", at(BINARY, "@std.io.StdoutText")),
+        ]
+    );
+    let grants = target.grants_span().expect("the grants");
+    assert_eq!(BINARY.get(grants.start()..=grants.start()), Some("["));
+    assert_eq!(BINARY.get(grants.end() - 1..grants.end()), Some("]"));
+    assert_eq!(
+        target
+            .grant_keys()
+            .iter()
+            .map(|(key, _)| key.as_str())
+            .collect::<Vec<_>>(),
+        ["@args", "@notes", "@out"]
+    );
 }
 
 #[test]

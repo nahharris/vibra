@@ -44,6 +44,10 @@ use vibra_resolve::{
 
 use crate::stdlib::{PRELUDE, Stdlib, load_stdlib};
 use declare::{BuildInputs, PackageName, Program, Source, parse_all};
+pub use effects::entry::{
+    DataReference, EntryLeaf, EntrySignature, GrantShape, LeafType, RowEntry,
+    TargetCheck, TargetEntry,
+};
 pub use obligation::{Obligation, ObligationKind, ObligationStatus};
 
 /// The package of a source checked alone.
@@ -72,6 +76,8 @@ pub struct CheckResult {
     /// The faults the contract review found in the embedded library's own
     /// declarations, which [library_faults] hands the loader.
     library_faults: Vec<Diagnostic>,
+    /// What [`check_targets`] found of each target it was given.
+    targets: Vec<TargetCheck>,
 }
 
 /// One test of a covered module of `@tests`: the function its body was
@@ -125,7 +131,15 @@ impl CheckResult {
             test_set: None,
             obligations: Vec::new(),
             library_faults: Vec::new(),
+            targets: Vec::new(),
         }
+    }
+
+    /// What [`check_targets`] found of each binary target it was given, in
+    /// order; empty when resolution failed or no target was given.
+    #[must_use]
+    pub fn targets(&self) -> &[TargetCheck] {
+        &self.targets
     }
 
     /// The tests of the covered modules of `@tests`, in the order of their
@@ -236,8 +250,21 @@ impl CheckResult {
 /// (`@tests.math`), which covers that module and its imports.
 #[must_use]
 pub fn check_workspace(input: &ResolveInput, units: &[String]) -> CheckResult {
+    check_targets(input, units, &[])
+}
+
+/// [`check_workspace`], which also resolves the `entry` and the `effects`
+/// list of each binary target of `targets` against the checked program
+/// ([`CheckResult::targets`]): `docs/spec/04-programs-and-packages.md`,
+/// "Targets".
+#[must_use]
+pub fn check_targets(
+    input: &ResolveInput,
+    units: &[String],
+    targets: &[TargetEntry],
+) -> CheckResult {
     match load_stdlib() {
-        Ok(stdlib) => check_with(input, units, &stdlib),
+        Ok(stdlib) => check_with(input, units, &stdlib, targets),
         Err(error) => CheckResult::rejected(vec![error.diagnostic().clone()]),
     }
 }
@@ -253,11 +280,16 @@ pub(crate) fn library_faults(stdlib: &Stdlib) -> Vec<Diagnostic> {
         Vec::new(),
         stdlib.overlay().embedded_unit(),
     );
-    check_with(&input, &[], stdlib).library_faults
+    check_with(&input, &[], stdlib, &[]).library_faults
 }
 
-/// [`check_workspace`] with the loaded library `stdlib`.
-fn check_with(input: &ResolveInput, units: &[String], stdlib: &Stdlib) -> CheckResult {
+/// [`check_targets`] with the loaded library `stdlib`.
+fn check_with(
+    input: &ResolveInput,
+    units: &[String],
+    stdlib: &Stdlib,
+    targets: &[TargetEntry],
+) -> CheckResult {
     let resolution = resolve(input);
     let mut diagnostics = resolution.diagnostics().to_vec();
     if resolution.has_errors() {
@@ -287,7 +319,9 @@ fn check_with(input: &ResolveInput, units: &[String], stdlib: &Stdlib) -> CheckR
     let documents = parse_all(&sources);
     let inputs = build_inputs(input, stdlib, units);
     let program = Program::build(&sources, &documents, &inputs);
+    let targets = effects::entry::check_targets(&program, targets);
     let mut result = lower::check_program(program, &documents);
+    result.targets = targets;
     diagnostics.append(&mut result.diagnostics);
     result.diagnostics = diagnostics;
     if result.has_errors() {

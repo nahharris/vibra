@@ -1,0 +1,5 @@
+use @std.process.ExitCode enduse
+
+proc main returns code: ExitCode do return ExitCode(0u8) endproc
+
+type Main of U8 endtype

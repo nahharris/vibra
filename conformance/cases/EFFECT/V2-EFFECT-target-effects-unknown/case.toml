@@ -1,0 +1,18 @@
+id = "V2-EFFECT-target-effects-unknown"
+rule = "V2-EFFECT-target-effects-unknown"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "04-programs-and-packages.md#targets: an effects entry that resolves to nothing is @effect.invalidReference"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@effect.invalidReference"
+level = "@error"
+source = "project.vibon"
+span = { start = 144, end = 156 }
