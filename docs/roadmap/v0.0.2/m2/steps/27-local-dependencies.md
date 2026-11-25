@@ -22,8 +22,8 @@ Crates: `vibra-workspace`, `conformance/cases`.
 
 | Existing | Symbol | Use |
 | --- | --- | --- |
-| `crates/vibra-workspace/src/project.rs:208` | `/// Dependencies are unavailable in this release.` | a `@path` dependency becomes available |
-| `crates/vibra-workspace/src/project.rs:397` | `fn dependency` | the dependency schema |
+| `crates/vibra-workspace/src/project.rs:255` | `/// Dependencies are unavailable in this release.` | a `@path` dependency becomes available |
+| `crates/vibra-workspace/src/project.rs:444` | `fn dependency` | the dependency schema |
 | `crates/vibra-workspace/src/snapshot.rs:126` | `pub struct SourceSnapshot` | gains the dependency's files and fingerprint |
 | `crates/vibra-workspace/src/source_graph.rs:79` | `pub struct SourceGraph` | gains the dependency's unit |
 

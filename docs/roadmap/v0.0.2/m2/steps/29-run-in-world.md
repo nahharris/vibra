@@ -23,12 +23,12 @@ Crates: `vibra-workspace`, `vibra-conformance`.
 
 | Existing | Symbol | Use |
 | --- | --- | --- |
-| `crates/vibra-workspace/src/semantic.rs:69` | `pub fn check_snapshot` | the check a run starts with |
-| `crates/vibra-ir/src/program.rs:91` | `pub fn for_entry` | the reachable program of the entry |
+| `crates/vibra-workspace/src/semantic.rs:79` | `pub fn check_snapshot` | the check a run starts with |
+| `crates/vibra-ir/src/program.rs:113` | `pub fn for_entry` | the reachable program of the entry |
 | `crates/vibra-conformance/src/profile.rs:170` | `WorkspaceRun` | the operation, declared and unhandled |
 | `crates/vibra-conformance/src/standard.rs:192` | `pub fn standard_dispatcher` | registers the handler |
-| `crates/vibra-conformance/src/manifest.rs:170` | `pub struct CaseExpectations` | gains `targetRun` |
-| `crates/vibra-conformance/src/workspace_test.rs:28` | `pub struct WorkspaceTestHandler` | the model for the handler |
+| `crates/vibra-conformance/src/manifest.rs:171` | `pub struct CaseExpectations` | gains `targetRun` |
+| `crates/vibra-conformance/src/workspace_test.rs:32` | `pub struct WorkspaceTestHandler` | the model for the handler |
 
 From step 20: `run_entry`. From step 26: `binding::plan_of`. From step
 28: `startup::{admit, start, release}`.

@@ -74,26 +74,26 @@ this one in the dependency graph; no two of them own one file.
 | 06 | [interp-plans-and-await](steps/06-interp-plans-and-await.md) | vertical | 03 | 04, 05, 13, 14, 15, 16, 17, 18 | `vibra-interp` | [list](steps/06-interp-plans-and-await.md#files-owned) | landed |
 | 07 | [procedures-run](steps/07-procedures-run.md) | vertical | 05, 06 | 13, 14, 15, 16, 17, 18 | `vibra-types`, `vibra-workspace`, `conformance/cases` | [list](steps/07-procedures-run.md#files-owned) | landed |
 | 08 | [operation-interfaces](steps/08-operation-interfaces.md) | vertical | 07 | 13, 14, 15, 16, 17, 18 | `vibra-types`, `conformance/cases` | [list](steps/08-operation-interfaces.md#files-owned) | landed |
-| 09 | [ceilings](steps/09-ceilings.md) | vertical | 08 | 13, 14, 15, 16, 17, 18 | `vibra-types`, `conformance/cases` | [list](steps/09-ceilings.md#files-owned) | planned |
-| 10 | [callable-rows](steps/10-callable-rows.md) | vertical | 09 | 13, 14, 15, 16, 17, 18 | `vibra-types`, `conformance/cases` | [list](steps/10-callable-rows.md#files-owned) | planned |
-| 11 | [review-rows](steps/11-review-rows.md) | evidence | 10 | 13, 14, 15, 16, 17, 18 | none | [list](steps/11-review-rows.md#files-owned) | planned |
-| 12 | [fix-rows](steps/12-fix-rows.md) | evidence | 11 | 13, 14, 15, 16, 17, 18 | `vibra-ir`, `vibra-interp`, `vibra-types`, `conformance/cases` | [list](steps/12-fix-rows.md#files-owned) | planned |
+| 09 | [ceilings](steps/09-ceilings.md) | vertical | 08 | 13, 14, 15, 16, 17, 18 | `vibra-types`, `conformance/cases` | [list](steps/09-ceilings.md#files-owned) | landed |
+| 10 | [callable-rows](steps/10-callable-rows.md) | vertical | 09 | 13, 14, 15, 16, 17, 18 | `vibra-types`, `conformance/cases` | [list](steps/10-callable-rows.md#files-owned) | landed |
+| 11 | [review-rows](steps/11-review-rows.md) | evidence | 10 | 13, 14, 15, 16, 17, 18 | none | [list](steps/11-review-rows.md#files-owned) | landed |
+| 12 | [fix-rows](steps/12-fix-rows.md) | evidence | 11 | 13, 14, 15, 16, 17, 18 | `vibra-ir`, `vibra-interp`, `vibra-types`, `conformance/cases` | [list](steps/12-fix-rows.md#files-owned) | landed |
 | 13 | [fs-scope-complete](steps/13-fs-scope-complete.md) | infrastructure | 01 | 02, 03, 04, 05, 06, 07, 08, 09, 10, 11, 12, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30 | `vibra-fs-scope` | [list](steps/13-fs-scope-complete.md#files-owned) | landed |
 | 14 | [policy-and-recipe-data](steps/14-policy-and-recipe-data.md) | infrastructure | 02 | 03, 04, 05, 06, 07, 08, 09, 10, 11, 12, 13, 18, 19, 20 | `vibra-host` | [list](steps/14-policy-and-recipe-data.md#files-owned) | landed |
 | 15 | [broker](steps/15-broker.md) | vertical | 03, 14 | 04, 05, 06, 07, 08, 09, 10, 11, 12, 13, 18, 19, 20 | `vibra-host`, `vibra-conformance` | [list](steps/15-broker.md#files-owned) | landed |
 | 16 | [host-world](steps/16-host-world.md) | vertical | 15 | 04, 05, 06, 07, 08, 09, 10, 11, 12, 13, 17, 18, 19, 20 | `vibra-host` | [list](steps/16-host-world.md#files-owned) | landed |
 | 17 | [audit-trace](steps/17-audit-trace.md) | vertical | 15 | 04, 05, 06, 07, 08, 09, 10, 11, 12, 13, 16, 18, 19, 20 | `vibra-host` | [list](steps/17-audit-trace.md#files-owned) | landed |
 | 18 | [stdlib-policy-types](steps/18-stdlib-policy-types.md) | vertical | 01 | 02, 03, 04, 05, 06, 07, 08, 09, 10, 11, 12, 13, 14, 15, 16, 17, 20 | `stdlib`, `conformance/cases` | [list](steps/18-stdlib-policy-types.md#files-owned) | landed |
-| 19 | [stdlib-operations](steps/19-stdlib-operations.md) | vertical | 02, 12, 18 | 13, 14, 15, 16, 17, 20 | `stdlib`, `vibra-types`, `conformance/cases` | [list](steps/19-stdlib-operations.md#files-owned) | planned |
-| 20 | [interp-host-dispatch](steps/20-interp-host-dispatch.md) | vertical | 06, 12 | 13, 14, 15, 16, 17, 18, 19 | `vibra-interp` | [list](steps/20-interp-host-dispatch.md#files-owned) | planned |
-| 21 | [test-world](steps/21-test-world.md) | vertical | 16, 17, 19, 20 | 13 | `stdlib`, `vibra-host`, `vibra-types`, `vibra-workspace`, `vibra-schema`, `vibra-conformance`, `conformance/cases` | [list](steps/21-test-world.md#files-owned) | planned |
-| 22 | [grant-values](steps/22-grant-values.md) | vertical | 21 | 13 | `vibra-types`, `conformance/cases` | [list](steps/22-grant-values.md#files-owned) | planned |
-| 23 | [review-grants](steps/23-review-grants.md) | evidence | 22 | 13 | none | [list](steps/23-review-grants.md#files-owned) | planned |
-| 24 | [fix-grants](steps/24-fix-grants.md) | evidence | 23 | 13 | `vibra-host`, `vibra-interp`, `vibra-types`, `stdlib`, `conformance/cases` | [list](steps/24-fix-grants.md#files-owned) | planned |
-| 25 | [entry-and-admission](steps/25-entry-and-admission.md) | vertical | 24 | 13, 28, 30, 31 | `vibra-types`, `vibra-workspace`, `conformance/cases` | [list](steps/25-entry-and-admission.md#files-owned) | planned |
+| 19 | [stdlib-operations](steps/19-stdlib-operations.md) | vertical | 02, 12, 18 | 13, 14, 15, 16, 17, 20 | `stdlib`, `vibra-types`, `conformance/cases` | [list](steps/19-stdlib-operations.md#files-owned) | landed |
+| 20 | [interp-host-dispatch](steps/20-interp-host-dispatch.md) | vertical | 06, 12 | 13, 14, 15, 16, 17, 18, 19 | `vibra-interp` | [list](steps/20-interp-host-dispatch.md#files-owned) | landed |
+| 21 | [test-world](steps/21-test-world.md) | vertical | 16, 17, 19, 20 | 13 | `stdlib`, `vibra-host`, `vibra-types`, `vibra-workspace`, `vibra-schema`, `vibra-conformance`, `conformance/cases` | [list](steps/21-test-world.md#files-owned) | landed |
+| 22 | [grant-values](steps/22-grant-values.md) | vertical | 21 | 13 | `vibra-types`, `conformance/cases` | [list](steps/22-grant-values.md#files-owned) | landed |
+| 23 | [review-grants](steps/23-review-grants.md) | evidence | 22 | 13 | none | [list](steps/23-review-grants.md#files-owned) | landed |
+| 24 | [fix-grants](steps/24-fix-grants.md) | evidence | 23 | 13 | `vibra-host`, `vibra-interp`, `vibra-types`, `stdlib`, `conformance/cases` | [list](steps/24-fix-grants.md#files-owned) | landed |
+| 25 | [entry-and-admission](steps/25-entry-and-admission.md) | vertical | 24 | 13, 28, 30, 31 | `vibra-types`, `vibra-workspace`, `conformance/cases` | [list](steps/25-entry-and-admission.md#files-owned) | landed |
 | 26 | [binding-recipes](steps/26-binding-recipes.md) | vertical | 14, 25 | 13, 28, 30, 31 | `vibra-workspace`, `conformance/cases` | [list](steps/26-binding-recipes.md#files-owned) | planned |
 | 27 | [local-dependencies](steps/27-local-dependencies.md) | vertical | 26 | 13, 28, 29, 30, 31, 32, 33 | `vibra-workspace`, `conformance/cases` | [list](steps/27-local-dependencies.md#files-owned) | planned |
-| 28 | [startup-and-release](steps/28-startup-and-release.md) | vertical | 16, 17, 24 | 13, 25, 26, 27 | `vibra-host` | [list](steps/28-startup-and-release.md#files-owned) | planned |
+| 28 | [startup-and-release](steps/28-startup-and-release.md) | vertical | 16, 17, 24 | 13, 25, 26, 27 | `vibra-host` | [list](steps/28-startup-and-release.md#files-owned) | landed |
 | 29 | [run-in-world](steps/29-run-in-world.md) | vertical | 20, 21, 26, 28 | 13, 27, 30, 31 | `vibra-workspace`, `vibra-conformance` | [list](steps/29-run-in-world.md#files-owned) | planned |
 | 30 | [system-drivers](steps/30-system-drivers.md) | vertical | 24, 28 | 13, 25, 26, 27, 29 | `vibra-host` | [list](steps/30-system-drivers.md#files-owned) | planned |
 | 31 | [system-fs-driver](steps/31-system-fs-driver.md) | vertical | 13, 30 | 25, 26, 27, 29 | `vibra-host` | [list](steps/31-system-fs-driver.md#files-owned) | planned |

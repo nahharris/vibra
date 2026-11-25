@@ -126,10 +126,10 @@ narrowing members the same way unless its row says otherwise.
 | `V2-GRANT-narrowing-types` | positive | `fn f takes {d: DirReadText p: FsPolicy l: GrantLimits} returns r: Result(DirReadText ScopeError) do let n be DirReadText.limit(d l) endlet return DirReadText.restrict(n p) endfn` | accepted: narrowing is pure | 03 Narrowing: "They perform nothing and open nothing" |
 | `V2-GRANT-restrict-on-stream` | negative | `StdoutText.restrict(out p)` | `@name.unknownSymbol` at `restrict` | 03 Narrowing, the table: "the six `Dir…` interfaces" |
 | `V2-GRANT-sub-result-is-fallible` | negative | `let d2: DirReadText be DirReadText.sub(d p) endlet` | `@type.mismatch` at the initializer | 03: `sub` returns `Result(Self ScopeError)` |
-| `V2-SRC-DECL-host-outside-std` | negative | a project interface with `proc p takes {s: Self} returns r: Void external @host "io.stdoutText" endproc` | `@syntax.invalidSection` at the section | 03: "Only the embedded standard library declares members bound to the host" |
+| `V2-SRC-DECL-host-outside-std` | negative | a project interface with `proc p takes {s: Self} returns r: Void external @host symbol "io.stdoutText" endproc` | `@syntax.invalidSection` at the section | 03: "Only the embedded standard library declares members bound to the host" |
 | `ATK-stdlib-host-signature` | negative, loader test | `fs.vib` with `DirReadText.read` declared `at: Str` | `@external.signatureMismatch` | 03: "a wrong signature `@external.signatureMismatch`" |
 | loader: wrong owner | negative, loader test | `fs.readText` bound on `DirList` | `@external.ownerMismatch` | 03: "A wrong owner is `@external.ownerMismatch`" |
-| loader: unknown symbol | negative, loader test | `external @host "fs.remove"` | `@external.unknownSymbol` | 03: "an unknown symbol `@external.unknownSymbol`" |
+| loader: unknown symbol | negative, loader test | `external @host symbol "fs.remove"` | `@external.unknownSymbol` | 03: "an unknown symbol `@external.unknownSymbol`" |
 | loader: `performs` on a bound member | negative, loader test | a bound member with `performs {StdoutText}` | rejected at load | 03: "Such a member has no body and no `performs`" |
 | loader: the shipped library | positive, loader test | the embedded modules | every `@host` member matches; 17 symbols bound once each | 04: "every `external` declaration against the registry's signature and owner" |
 

@@ -90,7 +90,7 @@ step 09, with `Sink` abbreviating `Proc({Str} Void {Log})`.
 | `V2-EFFECT-intent-row-mismatch` | negative | `let plan: Intent(Void {}) be Log.append(m "x") endlet` | `@type.mismatch` at the initializer | the same |
 | `V2-EFFECT-fn-for-proc` | negative | a `fn` value where `Proc({Str} Void {})` is expected | `@type.argumentMismatch` | 02 Functions as values: `Fn` and `Proc` are distinct types |
 | `V2-EFFECT-proc-for-fn` | negative | `double` of step 05 where `Fn({I32} I32)` is expected | `@type.argumentMismatch` | the same |
-| `V2-EFFECT-outside-ceiling-callback` | negative | `emit` with the empty row on itself | `@effect.outsideCeiling` at `await sink(line)`; the related hop is indirect, `performs Log via sink` | 07: "a hop through a callback or interface member is marked indirect" |
+| `V2-EFFECT-outside-ceiling-callback` | negative | `emit` with the empty row on itself | `@effect.outsideCeiling` at `await sink(line)`; the related hop is indirect, `performs Log via sink` | 07: "a callback (a procedure value bound to a name, which the note names)" |
 | `V2-EFFECT-named-proc-value` | positive | `emit("x" appendTo)` where `proc appendTo takes {line: Str} returns d: Void performs {Log}` | accepted | 02 Functions as values |
 | `V2-EFFECT-named-proc-value-bare-requires` | negative | the same where `appendTo` has a bare `requires` | `@contract.obligationLost` at the conversion | 02 Guards and callable types: "otherwise the conversion is `@contract.obligationLost`" |
 | `V2-EFFECT-anon-proc-row-invalid` | negative | `proc … performs {Shown} do … endproc` | `@effect.invalidReference` at `Shown` | 03 Effect ceilings |

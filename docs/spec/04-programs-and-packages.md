@@ -362,8 +362,10 @@ Anything else, and a bare `requires` on the entry, which no call site could
 discharge, is `@project.invalidEntrySignature`; a path that resolves to
 another kind of entity is `@name.wrongEntityKind`. The entry need not be
 public or named `main`. Naming it in `entry` creates no import edge and does
-not change its visibility. An `entry` on a library is
-`@project.entryOnLibrary`.
+not change its visibility. A library's target record has no `entry`
+field, so an `entry` on a library is an unknown field of that closed
+record shape, `@data.invalidShape` at the field name, as
+[Project file](#project-file) states.
 
 ```vibra
 use @std.env.EnvReadArgs enduse
@@ -882,9 +884,13 @@ assertion row, as a callee or as a value, is
 | `assert.false` | `Fn({Bool} Void)` | the operand is `false` |
 | `assert.equal(T)` | `Fn({T T} Void)`, expected then actual | both operands have the same canonical value encoding |
 
-An operand of `assert.equal` whose type contains a callable, plan, or grant type
-is `@type.functionNotEquatable`, once at each such operand. The comparison uses
-the canonical value encoding and gives ordinary code no equality.
+An operand of `assert.equal` whose type contains a callable or plan type,
+or [holds a grant](03-effects.md#capability-values), is
+`@type.functionNotEquatable`, once at each such operand. In
+`assert.equal(Option.some(value: reader) Option.none())` with
+`reader: DirReadText`, both operands have the type `Option(DirReadText)`,
+so both are reported. The comparison uses the canonical value
+encoding and gives ordinary code no equality.
 
 A false assertion records one structured failure, with the assertion's name,
 the canonical encodings of the expected and actual values, and the call's

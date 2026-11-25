@@ -408,8 +408,6 @@ diagnostic_registry! {
         "package dependencies form a cycle";
     ProjectEntryOutsideTarget => "@project.entryOutsideTarget", Project, Error, None,
         "a target `entry` does not start with the target's name";
-    ProjectEntryOnLibrary => "@project.entryOnLibrary", Project, Error, None,
-        "a library target has an `entry`";
     ProjectInvalidEntrySignature => "@project.invalidEntrySignature", Project, Error, None,
         "an `entry` is not a module-level `proc` with an entry signature";
     ProjectAmbiguousDependencyTarget => "@project.ambiguousDependencyTarget", Project, Error, None,
@@ -494,7 +492,7 @@ mod tests {
     use std::collections::BTreeSet;
 
     /// The count of the specification table.
-    const REGISTERED_CODES: usize = 120;
+    const REGISTERED_CODES: usize = 119;
 
     #[test]
     fn the_registry_has_every_code_in_the_specification_table() {

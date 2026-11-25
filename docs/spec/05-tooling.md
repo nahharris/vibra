@@ -372,7 +372,7 @@ in the
 | `CommandCapability` | one per line of the command surface, in its order: `command`, the command name; `operations`: string[], the [case operations](07-diagnostics-and-conformance.md#case-operations-and-inputs) whose observation a supported command produces, and its own name for `help`; `profiles`: string[], the profiles of those operations in the [profile table](07-diagnostics-and-conformance.md#conformance-profiles), and `toolingV2`, whose CLI contract covers it, for `help`; `supported`: boolean; `schemaIds`: exact published identifiers of the documents it emits. The three lists are empty for an unsupported command |
 | `TargetSummary` | `name`; `kind`; `root`; `entry` (nullable); `bindingStatus`: `exact`, `recovered`, or `unavailable` |
 | `DependencySummary` | `alias`; `kind`; `source`; `target` (nullable); `status`: `captured`, `verified`, `unavailable`, or `refuted`; `identity` (nullable) |
-| `TestItem` | `name`, the selector; `result`, the `@test.*` atom; `failure` (nullable); `trap` (nullable); `auditTrace`: `AuditEvent[]`, the test's events; `diagnostics`: string[], the codes of the envelope's diagnostics attributed to the item; `status`, that of the command result the item's result corresponds to: `passed` for `@test.passed`, `refuted` for `@test.assertionFailed` and `@test.invalid`, `unknown` for `@test.trap` and `@test.exhausted`, and `unsupported` for `@test.unavailable` |
+| `TestItem` | `name`, the selector; `result`, the `@test.*` atom; `failure` (nullable); `trap` (nullable); `auditTrace`: `AuditEvent[]`, the test's events in completion order, each a `@host` event of phase `@entry`, since a test completes only host calls under its own world and has no startup; `diagnostics`: string[], the codes of the envelope's diagnostics attributed to the item; `status`, that of the command result the item's result corresponds to: `passed` for `@test.passed`, `refuted` for `@test.assertionFailed` and `@test.invalid`, `unknown` for `@test.trap` and `@test.exhausted`, and `unsupported` for `@test.unavailable` |
 | `TestItem.failure` | `kind`: `assertion` or `observation`; `assertion`, `expected`, `actual`: canonical text or null; `primarySpan`: `SpanDocument`; `observationError`: null for an assertion |
 | `TrapRecord` | `trapCode`; `origin`: the `SpanDocument` of the trapping operation's [source origin](06-runtime.md#audit-trace), or null |
 | `ObservationError` | `code`: `"@tool.unsupportedValue"`, the observation error; `type`: the canonical `@type.v2` text of the operand's type, or null; `origin`: the `SpanDocument` of the observed expression's source origin, or null |
@@ -457,8 +457,10 @@ Every snapshot has exactly one `toolchain` record, whose bytes are the
 canonical bytes of this document, so a revision changes with the toolchain
 and with its embedded library even when no project byte changes. Every
 field but `stdlib` is a name fixed by the toolchain release: those of the
-example are the names of the release `0.0.2`, and its `stdlib` is the
-digest of the manifest it embeds. A revision written in an expected
+example are the names of the release `0.0.2`. A toolchain's `stdlib` is the
+digest of the manifest it embeds, so it changes with every change to the
+embedded library; the `stdlib` value of the example is an example digest,
+not that of any particular build. A revision written in an expected
 observation, such as the `revision` of an audit trace, is computed with
 this record.
 
@@ -694,7 +696,7 @@ having a consequence never makes its predicate `passed`.
 ### Effect and authority projections
 
 The `effects` value is `{enclosing, application, target, authority}`, plus
-`witnesses` under `--expand effect-witnesses`.
+`witnesses` under `--expand effectWitnesses`.
 
 | Field | Content |
 | --- | --- |

@@ -99,7 +99,6 @@ its level MUST agree with it.
 | `@project.staleLock` | `@error` |
 | `@project.dependencyCycle` | `@error` |
 | `@project.entryOutsideTarget` | `@error` |
-| `@project.entryOnLibrary` | `@error` |
 | `@project.invalidEntrySignature` | `@error` |
 | `@project.ambiguousDependencyTarget` | `@error` |
 | `@project.reservedUnitName` | `@error` |
@@ -226,7 +225,6 @@ command-line context.
 | a path whose unit is not visible to the importing module, or that reaches no module | `@module.unknownPath`, the reference |
 | a lock whose `project` digest or dependency set differs from the project; a missing vendor directory or vendored content whose content hash differs from the lock | `@project.staleLock`, the lock's `format` field or the lock entry |
 | a target `entry` whose first part is not the target's name | `@project.entryOutsideTarget`, the `entry` field |
-| an `entry` on a library target | `@project.entryOnLibrary`, the `entry` field |
 | an `entry` that is not a module-level `proc` with an entry signature, or that has a bare `requires` | `@project.invalidEntrySignature`, the `entry` field, related to the declaration |
 | a dependency without `target` on a package with several library targets | `@project.ambiguousDependencyTarget`, the dependency entry |
 | access to a private declaration, a static member reached through its type included | `@name.privateAccess`, the reference, or the member's name in the path, related to the declaration |
@@ -311,8 +309,8 @@ Every row is an error with no automatic fix.
 | a repeated section; a section the declaration does not admit | `@syntax.duplicateSection`, the keyword of the later section; `@syntax.invalidSection`, the section |
 | a `let` or parameter pattern that can fail, with no `else` | `@pattern.refutableBinding`, the pattern |
 | a `let … else` whose pattern cannot fail | `@pattern.irrefutableLetElse`, the pattern |
-| an `else` of a `let` that can complete normally | `@type.mismatch`, the `else` body |
-| an expression statement whose type is neither `Void` nor `Never` and is not fallible, such as a plan whose `await` was forgotten | `@type.mismatch`, the statement |
+| an `else` of a `let` that can complete normally | `@type.mismatch`, the `else` body; an `else` that is one expression statement already reported by the next row at the same span is not reported again |
+| an expression statement whose type is neither `Void` nor `Never` and is not fallible, such as a plan whose `await` was forgotten, its value unused as [Bodies and statements](01-source-language.md#bodies-and-statements) defines | `@type.mismatch`, the statement |
 | a callable body that can run off its end | `@type.missingReturn`, the body; an empty body is the zero-width span right after `do` |
 | a `return` operand of the wrong type | `@type.mismatch`, the operand |
 | a `return` outside a callable, in a module value, or directly in a test | `@type.invalidReturn`, the `return` |
@@ -352,7 +350,7 @@ Every row is an error with no automatic fix.
 | a row entry or an `effects` entry that is not an operation interface, one that resolves to nothing included | `@effect.invalidReference`, the entry |
 | a body performs an interface outside its ceiling | `@effect.outsideCeiling`, the first `await` that contributes it |
 | `await` outside a `proc` or test, or of a value that is not a plan; an `await` that is both is reported once, and its operand never as `@type.mismatch` | `@effect.invalidAwait`, the `await` |
-| a ceiling written on a body (a `proc`, an anonymous `proc`, a `test`, or the additive `performs` of a default member) names an interface the body cannot perform | `@contract.unusedEffect` (warning), the entry |
+| a ceiling written on a body (a `proc`, an anonymous `proc`, a `test`, or the additive `performs` of a default member) names an interface the body cannot perform, except where [Effect ceilings](03-effects.md#effect-ceilings) withholds the warning | `@contract.unusedEffect` (warning), the entry |
 | the result operand of a written `Proc` or `Intent` type whose row is omitted is a tuple of at least one component, each an operation interface | `@type.suspiciousRow` (warning), the type |
 | an `external` section outside the embedded library | `@syntax.invalidSection`, the section |
 | an external symbol not in the registry | `@external.unknownSymbol`, the symbol |
@@ -368,10 +366,30 @@ Every row is an error with no automatic fix.
 | a policy over the size or depth limit | `@grant.policyTooComplex`, the policy |
 
 An `@effect.outsideCeiling` is reported once per body and interface. Its
-related spans are the shortest remaining chain of calls, ties in source
-order, each with the note `performs <root> via <callee>`; a hop through a
-callback or interface member is marked indirect. The query expansion
-`effectWitnesses` returns the same chain.
+related spans are its **witness chain**: the shortest chain of calls from
+the reporting `await` to an operation member of the interface, ties in
+source order. Each hop is one related span with the note
+`performs <root> via <callee>`. The first hop is the operand of the
+reporting `await`; each later hop is an awaited operand in the body of the
+callee before it.
+
+- A hop whose callee is not statically known is marked indirect: its note
+  ends with ` (indirect)`. Such a callee is a callback (a procedure value
+  bound to a name, which the note names), a stored plan or any other plan
+  value, or an interface member applied at an open or `Self` receiver or
+  through an interface value. A member applied at a closed receiver is
+  statically resolved and is not marked.
+- An operand that has an error of its own is one indirect hop at the
+  operand.
+- A chain that reaches no operation member of the interface ends at the
+  first hop it cannot follow: a plan value or a callback, which the chain
+  never traces back to where the plan was built, a member of another
+  interface, or a `proc` whose body performs the interface nowhere.
+- A chain that meets only cycles keeps its hops up to and including the
+  first repeated one.
+- The chain is never empty.
+
+The query expansion `effectWitnesses` returns the same chain.
 
 A grant that denies a request at run time returns the operation's typed
 error. That is never a diagnostic and never a trap. A check-time failure of
@@ -736,9 +754,12 @@ of its path.
 There is one obligation for each site where a bare guard must be
 discharged: each call of a callable with a bare `requires`, each
 construction of a type with a bare `where`, and the bare `ensures` of each
-callable, one for its predicate. An obligation record has the fields of this
-table. The [`check` payload](05-tooling.md#command-payloads) carries the same
-record as JSON, field for field, under the JSON name.
+callable, one for its predicate. Only a bare guard has one: a guard with
+`else`, a `where … else` construction included, writes no obligation
+record, even where `GUARD-1` evaluates its predicate. An obligation record
+has the fields of this table. The
+[`check` payload](05-tooling.md#command-payloads) carries the same record
+as JSON, field for field, under the JSON name.
 
 | Field | JSON name | Type | Content |
 | --- | --- | --- | --- |

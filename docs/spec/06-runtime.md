@@ -352,9 +352,13 @@ operation interface: `Fn({G FsPolicy} Result(G ScopeError))`,
 `Fn({G RelativePath} Result(G ScopeError))`, and `Fn({G GrantLimits} G)`.
 They are rows of 2.0, with `since` 0. Bound in an interface, each is the
 implementation of a sealed grant only, which the broker provides; it
-performs no host operation and appends no event. An `impl` supplies its own
-narrowing members, as the
-[effects chapter](03-effects.md#operation-interfaces) states.
+performs no host operation and appends no event. A refusal the broker gives
+for a narrowing that [Narrowing](03-effects.md#narrowing) says the member
+never returns, such as `foreignRoot`, `unsupportedVersion`, or
+`invalidPath` from `restrict`, any case but `policyTooComplex` from `sub`,
+or any refusal from `limit`, is the defect trap
+`@runtime.invalidHostValue`. An `impl` supplies its own narrowing members,
+as the [effects chapter](03-effects.md#operation-interfaces) states.
 
 A row may be marked **total**: it is pure, it is defined for every value of
 its parameter types, and it cannot fault, so a function of the library bound
@@ -1214,10 +1218,13 @@ the runtime MUST do the following, in order:
    size that would overflow a counter is `denied`. Every other refusal of
    this step holds the invocation step 3 reserved, among them `unsupported`
    for an action whose rule needs a fact the platform does not report and
-   for a text read whose `max` is below one scalar. Only the adapter's
-   `denied` is a completed call; `limitExceeded`, `unsupported`, and the
-   `denied` of an overflow are not. Keep three outcomes distinct: known not
-   submitted, completed, and may have run.
+   for a text read whose `max` is below one scalar. Of the refusals this
+   step's checks make, only the adapter's `denied` is a completed call;
+   `limitExceeded`, `unsupported`, and the `denied` of an overflow are not.
+   A driver may also answer `denied` as known not submitted: that is a
+   refusal, with no event, its bytes refunded and its invocation held.
+   Keep three outcomes distinct: known not submitted, completed, and may
+   have run.
 5. **Advance the continuation** consistently with the completion, and then
    append the completed event, if one is due. A refusal in steps 1 to 3
    appends nothing.
@@ -1229,15 +1236,23 @@ what the caller's memory budget, under
 reservation of a read in step 4, after its bounds are checked. A call that
 does not fit is memory exhaustion, a host event, and reserves nothing. For
 a read of unknown size the reservation is compared, not the input that is
-there, so a large `max` exhausts memory even on a short input. Issuing or
+there, so a large `max` exhausts memory even on a short input. When the
+reply arrives, every part of it, each entry of a list and each text or
+bytes value in it included, is counted against the room the request was
+given before the reply is accepted; a reply that does not fit is memory
+exhaustion, and the call appends no event. Issuing or
 narrowing a grant that the broker has no room left to record is memory
 exhaustion as well.
 
 **Driver faults.** A driver that breaks this protocol is the defect trap
 `@runtime.invalidHostValue`: it acts after a refusal, reports a refusal no
 check made, answers with a case of another error type, asks for step 4's
-check twice, finds an action its operation cannot perform, or reads an
-object whose size it does not report. No event is appended for the call.
+check twice, finds an action its operation cannot perform, reads an
+object whose size it does not report, or answers with a completion class
+and an error case that disagree: `outcomeUnknown` as known not submitted,
+or `limitExceeded` or `unsupported` as completed. No event is appended for
+the call, and the whole reservation is charged, since what the driver did
+may have happened.
 
 **Suspension.** Suspending and resuming around a submitted host instruction
 MUST NOT submit it again. The first, sequential protocol treats a
@@ -1305,6 +1320,10 @@ worlds, with fake sealed grants.
 
 - A test receives the root grant of its own world as a `TestWorld` and
   derives every other fake grant from it.
+- The runtime's host interface is the trusted embedding boundary: checked
+  source cannot reach it. Only a test runner issues the root grant of a
+  test world, and no target can obtain one, since no binding recipe names
+  `TestWorld`.
 - A model target MUST contain no real driver or grant, directly or
   transitively.
 - Every executor and every test gets a fresh copy of the world. Effects
@@ -1432,8 +1451,8 @@ steps that came before them. Its persistent format is `@auditTrace.v2`:
 | `format` | `@auditTrace.v2` | required |
 | `revision` | `Str` | the workspace revision of the source that ran |
 | `target` | optional atom | the binary target; absent for a test or an evaluation |
-| `drivers` | list of `{provider: Atom version: Str}` sorted by the UTF-8 bytes of the provider's spelling, then of the version, each pair once | every driver bound in the run; `provider` is `@hostWorld.v2` for a fake world's driver; `version` is the release of the toolchain that ships the driver, the fake world's included |
-| `policies` | dict from `Str` policy hash to the normalized `@scopePolicy.v1` document | every policy a grant projection refers to |
+| `drivers` | list of `{provider: Atom version: Str}` sorted by the UTF-8 bytes of the provider's spelling, then of the version, each pair once | every driver bound in the run; `provider` is `@hostWorld.v2` for a fake world's driver; `version` is the release of the toolchain that ships the driver, the fake world's included. The trace of every test item lists the world driver, whether or not the test ran |
+| `policies` | dict from `Str` [policy hash](03-effects.md#the-wire-form) to the normalized `@scopePolicy.v1` document | every policy a grant projection refers to |
 | `redaction` | atom | `@none`, or the redaction profile applied |
 | `events` | list of event records | in completion order |
 
@@ -1609,7 +1628,10 @@ placeholders:
 **When an event is appended.**
 
 - One `@host` event is appended after each completed call, after its
-  continuation has advanced.
+  continuation has advanced: the event is committed once the `await` has
+  taken the value, before the next node is evaluated. A trap or exhaustion
+  before then, such as a reply that does not fit the memory budget, drops
+  the event; one in a later node keeps it.
 - A typed denial returned by the adapter is a completed result and is
   recorded.
 - A driver that returns `outcomeUnknown` has completed its adapter call.

@@ -378,8 +378,11 @@ the type as a dict key, and it is the implementation `Ordered.compare` and
 `Equatable.equal` dispatch to for such a type. `Void`, `Never`, `F32`,
 `F64`, callable types, `List`, `Dict`, and `Option` are not admissible keys.
 A declared type is admissible only through its own `Ordered`
-implementation. An inadmissible key type is `@type.invalidDictKey`; a
-callable key is `@type.functionNotEquatable`.
+implementation. A type that
+[holds a grant](03-effects.md#capability-values) is not admissible, even a
+declared type with its own `Ordered` implementation. An inadmissible key
+type is `@type.invalidDictKey`; a callable key is
+`@type.functionNotEquatable`.
 
 Canonical key order is the only order in which a dict is traversed, rendered,
 or iterated: `false` before `true`; numeric order for integers; scalar value
@@ -1290,7 +1293,10 @@ lists when the rule is used:
    was discharged where the plan is built. A plan that reaches `await` any
    other way, through a binding, a parameter, a field, a callable value, an
    anonymous `proc`, or a member through an interface value, gives no fact.
-   Each `await` is its own run, and building a plan gives no fact.
+   A call of a contract member gives no fact at any receiver, a closed one
+   included: neither a `fn` member's result nor the awaited result of a
+   `proc` member's plan. Each `await` is its own run, and building a plan
+   gives no fact.
 
 An obligation is formed by substituting the actual arguments into the
 predicate; that substitution is not a rule use. A fact the body's own

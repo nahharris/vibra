@@ -129,6 +129,12 @@ endproc
   default `proc` member, or for a `Proc` or `Intent` type. Building a plan
   performs nothing, so a `proc` that only builds plans of an interface and
   returns them does not perform it.
+- The warning is not reported for a body whose declaration has an error,
+  since its `await` nodes may not all be known; an error of an anonymous
+  `proc` the declaration holds is an error of the declaration. A body's
+  own `@effect.outsideCeiling` is the exception: it leaves that body's
+  `await` nodes known, so that body keeps its own warnings. A module of the
+  embedded standard library gets no such warning.
 - Callable types compare rows exactly. A `Proc({Str} Void {DirWriteText})`
   parameter accepts only a procedure with exactly that row. There are no row
   variables, no row subtyping, and no relation between roots.
@@ -215,7 +221,15 @@ with its relatives.
 No source expression makes a grant. A path, a policy value, a wrapper type,
 an `impl`, and decoded data are not grants and cannot become one. A grant has
 no encoding: it cannot be written to a file, compared, or used as a dict key.
-A grant from another world, or one released at shutdown, is unusable.
+A type **holds a grant** when it is an operation interface value type, or
+holds one through a record, a tuple, a list, an `Option`, a wrapper, the
+representation of a declared type, or the type arguments of a declared
+type; a callable type holds none on its own account. A type that holds a
+grant is no dict key, as the
+[type chapter](02-type-system.md#dict-keys-equality-and-order) states, no
+operand of `assert.equal`, as
+[Assertions](04-programs-and-packages.md#assertions) states, and no
+labelled default, since a default is a constant. A grant from another world, or one released at shutdown, is unusable.
 Checked source cannot reach either, so the runtime treats a use of one as a
 defect, as [host calls](06-runtime.md#host-calls) state.
 
@@ -322,7 +336,13 @@ That binding is the broker's narrowing, the implementation of a sealed
 grant; an `impl` supplies the three members as it supplies any abstract
 member, as [Operation interfaces](#operation-interfaces) states. A model
 that wraps a grant forwards the narrowing to it; a model that holds only
-memory returns itself or keeps bounds of its own.
+memory returns itself or keeps bounds of its own. Forwarding is the
+author's contract, not a checked rule, as [Two mechanisms](#two-mechanisms)
+says. It cannot amplify authority: a model can hand back only grants it
+already holds, the ancestry of a sealed grant is the broker's alone, and
+the [audit trace](06-runtime.md#audit-trace) projects the grant actually
+used, with its real root, policy, and limits, so no event shows a
+narrowing that did not happen.
 
 ### Brands
 
@@ -463,8 +483,11 @@ A policy is normalized before it is hashed or shown: nested `allOf` or
 sorted by their canonical bytes, single-item wrappers removed, and sets
 sorted, each element kept once. The `actions` sort by their atoms and the
 `names` of `@exact` in `Str` order, by Unicode scalar. Sequences such as
-path components keep their order. The hash identifies this normal form; two
-policies with the same meaning may hash differently.
+path components keep their order. A policy's hash is `sha256:` followed by
+the lower-case hexadecimal SHA-256 of the canonical bytes of the normalized
+`@scopePolicy.v1` document, with no prefix bytes: the document's `format`
+field is its domain tag. The hash identifies this normal form; two policies
+with the same meaning may hash differently.
 
 A policy has at most 4,096 nodes and entries in total and a depth of at most
 64, counting ancestors acquired by restriction. A larger one is
@@ -504,9 +527,11 @@ selects directories: `self` is `prefix` itself, `children` one name further,
   names the directory the grant holds. No file rule selects that directory,
   so a policy permits a file operation on the empty path only if it
   permits every request, as an empty `allOf` does; otherwise the request is
-  `denied` before any driver is asked. A request that reaches the driver,
-  such as one through a `TestWorld` directory grant that was never
-  restricted, is `notAFile`. A name is non-empty and is
+  `denied` before any driver is asked. The file rule of a `TestWorld`
+  directory grant selects a positive number of names, so a file request on
+  the empty path through one is `denied` before the driver, restricted or
+  not. A file request the policy permits that reaches a directory is
+  `notAFile`. A name is non-empty and is
   rejected if it is `.` or `..`, contains `/`, `\`, `:`, NUL, or a control
   character, ends in a dot or a space, or is a reserved device name.
   Absolute, drive-relative, UNC, and device paths cannot be represented.

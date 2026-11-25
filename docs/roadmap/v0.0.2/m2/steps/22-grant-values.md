@@ -45,8 +45,9 @@ check_equatable, check_dict_key}`.
    `@type.functionNotEquatable`, once per such operand, as for a callable.
 3. A dict key type that contains a grant is `@type.invalidDictKey` at the
    key type.
-4. A module value whose type contains a grant cannot be initialized: the
-   rule is the existing constant rule; this step adds its case.
+4. A module value whose type contains a grant is accepted: its initializer
+   is pure, so it can hold a model and never a grant. This step adds the
+   positive case `V2-GRANT-module-value-holds-model`.
 5. No new rule for "no constructor", brands, or shapes: they follow from
    interface value types and private representations. This step adds
    their cases.
@@ -71,7 +72,7 @@ holding the text `"M"`, whose narrowing members return it. `Forward` is
 the grant-backed model of Q1: a type over `{inner: DirReadText}` whose
 `read` awaits `inner`, whose `limit` returns a `Forward` over
 `DirReadText.limit(self.inner limits)`, and whose `restrict` and `sub`
-do the same under `try`. `in` is the `stdinBytes` grant of
+do the same under `try`. `input` is the `stdinBytes` grant of
 `TestWorld.streams(w stdin: "abc")`.
 
 | Case id | Kind | Input | Expected | Specification |
@@ -80,12 +81,12 @@ do the same under `try`. `in` is the `stdinBytes` grant of
 | `V2-GRANT-model-is-not-grant` | positive | a `Memory` passed to `notes.countLines` | `@test.passed`; the trace has no event | 03 Operation interfaces: "Implementing an interface makes no grant" |
 | `V2-GRANT-forward-model-reads` | positive | `Forward(inner: dir.readText)` passed where a `DirReadText` is expected; read `a.txt` | `Ok("A")`; one event, whose grant projection is that of `dir.readText` | 06: "A source implementation may model an interface using grants it holds" |
 | `V2-GRANT-assert-equal-grant` | negative, `workspaceCheck` | `assert.equal(dir.readText dir.readText)` | `@type.functionNotEquatable` at each operand | 07: "an `assert.equal` operand whose type contains a callable, plan, or grant" |
-| `V2-GRANT-assert-equal-option-grant` | negative, `workspaceCheck` | `assert.equal(Option.some(value: dir.readText) Option.none())` | `@type.functionNotEquatable` at the first operand | the same |
+| `V2-GRANT-assert-equal-option-grant` | negative, `workspaceCheck` | `assert.equal(Option.some(value: dir.readText) Option.none())` | `@type.functionNotEquatable` at each operand: both have the type `Option(DirReadText)` | the same |
 | `V2-GRANT-assert-equal-result-ok` | positive | `assert.equal(Result.ok(value: "A") await DirReadText.read(dir.readText aTxt))` | `@test.passed` | 03: "ordinary typed results" |
 | `V2-GRANT-dict-key-grant` | negative, `workspaceCheck` | a parameter of type `Dict(DirReadText Str)` | `@type.invalidDictKey` at the key type | 03: "cannot be … used as a dict key" |
 | `V2-GRANT-required-optional-bundle` | positive | the chapter's `report` shape with `DirReadText`, `Option(StdoutText)`, and `{reader writer}`, called with `Option.none()` | `@test.passed` | 03 Capability values, the three shapes |
 | `V2-GRANT-bundle-field-only` | positive | `let {readText: r} be dir endlet`; a `proc` taking only `r` | `@test.passed`; that `proc` has no `DirWriteText` in scope | 03: "Passing on one field passes on only that grant" |
-| `V2-GRANT-view-does-not-narrow` | negative, `workspaceCheck` | `DirWriteText.write(dir.readText aTxt "x")` | `@type.argumentMismatch` at the receiver | 03: "Viewing a value as an interface never reduces what the value can do" |
+| `V2-GRANT-view-does-not-narrow` | negative, `workspaceCheck` | `DirWriteText.write(dir.readText aTxt "x")` | `@type.unsatisfiedBound` at the receiver operand, related to the interface: the receiver selects no implementation | 03: "Viewing a value as an interface never reduces what the value can do" |
 | `V2-GRANT-brand` | positive | a module declaring `type LogDir of DirWriteText` with a private representation and a `wrap` function; another module calls a `proc` taking `LogDir` | `@test.passed` | 03 Brands |
 | `V2-GRANT-brand-forged` | negative, `workspaceCheck` | the other module writes `LogDir(dir.writeText)` | `@name.inaccessibleRepresentation` at the construction | 03: "Only the module that declares `LogDir` can construct one" |
 | `V2-GRANT-denied-outside-policy` | positive | `restrict(dir.readText textOnly)`, read `b.bin` | `Err(denied)` | 03 `denied`: "The request was refused" |
@@ -105,8 +106,8 @@ do the same under `try`. `in` is the `stdinBytes` grant of
 | `V2-GRANT-sub-missing-directory` | positive | `sub(r ["nope"])` | `Result.ok`; a read is `Err(notFound)` | 03: "It does not check that the directory exists" |
 | `V2-GRANT-restrict-empty-suffix` | positive | `restrict` with `NameTest.suffix(value: "")` | `Err(ScopeError.invalidPolicy)` (Q8) | 03 Names: "An empty suffix is invalid" |
 | `V2-GRANT-restrict-empty-actions` | positive | `restrict` with `actions: []`, then a read | `Result.ok`; the read is `Err(denied)` (Q8) | 03 Meaning |
-| `V2-GRANT-restrict-too-complex` | positive | 65 chained `restrict` calls, built by a recursive `fn` | the 65th is `Err(ScopeError.policyTooComplex)` (Q9) | 03: "counting ancestors acquired by restriction" |
-| `V2-GRANT-policy-4096-nodes` | boundary | a source policy counted at 4,096 | `Result.ok` (Q9) | 03: "at most 4,096 nodes and entries in total" |
+| `V2-GRANT-restrict-too-complex` | positive | 62 chained `restrict` calls, built by a recursive `fn` | the first 61 succeed and the 62nd is `Err(ScopeError.policyTooComplex)`: the effective conjunction has depth 3, and each `restrict` adds one (Q9) | 03: "counting ancestors acquired by restriction" |
+| `V2-GRANT-policy-4096-nodes` | boundary | a `restrict` whose prefix has 4,089 names, so that the effective conjunction counts 4,096 | `Result.ok`; with 4,090 names (4,097) it is `Err(ScopeError.policyTooComplex)` (Q9) | 03: "at most 4,096 nodes and entries in total" |
 | `V2-GRANT-limit-exceeded-is-value` | positive | `limit(r invocations: some(1))`, two reads | `Ok`, then `Err(limitExceeded)`; one event | 03: "Exhaustion is the typed error `limitExceeded`" |
 | `V2-GRANT-limit-keeps-smaller` | positive | `limit(limit(r 1) 5)`, two reads | the second is `limitExceeded` | 03: "`limit` keeps the smaller of each bound" |
 | `V2-GRANT-limit-siblings-share` | positive | `p = limit(r 2)`; `a = limit(p 5)`, `b = limit(p 5)`; read through `a`, `b`, `a` | the third is `limitExceeded` (Q11) | 07 Required coverage 11: "shared counters under siblings" |
@@ -114,10 +115,10 @@ do the same under `try`. `in` is the `stdinBytes` grant of
 | `V2-GRANT-limit-projection` | positive | a read through `limit(limit(r inv 5) inputBytes 9)` | `limits: {invocations: 5u64 inputBytes: 9u64}` (Q11) | 06: "a record of the bounds that are set" |
 | `V2-GRANT-limit-input-bytes` | positive | `limit(r inputBytes: some(1))`; read `a.txt` (1 byte), then again | `Ok("A")`, then `limitExceeded`; one event (Q29) | 03 Limits: "Input bytes are the bytes read for the program" |
 | `V2-GRANT-limit-output-bytes` | positive | `limit(dir.writeText outputBytes: some(2))`; write `"abc"` | `Err(limitExceeded)`; the file is absent | 06: "A write reserves the encoded size of its argument before it sends" |
-| `V2-GRANT-limit-stdin-exact` | boundary | `limit(in inputBytes: some(3))`; `StdinBytes.read(… 3u64)` | `Ok` of the bytes `abc` (Q10) | 06 Closed operation semantics |
-| `V2-GRANT-limit-stdin-over` | positive | `limit(in inputBytes: some(2))`; `StdinBytes.read(… 3u64)`; then `in` reads with `3u64` | `limitExceeded`, then `Ok` of `abc`; one event (Q10) | 06 Standard input: "consumes nothing" |
-| `V2-GRANT-limit-stdin-zero` | boundary | empty stdin; `limit(in inputBytes: some(0))`; `StdinBytes.read(… 1u64)` | `Ok` of no bytes (Q10) | the same |
-| `V2-GRANT-limit-stdin-count` | positive | `limit(in inputBytes: some(2))`; `StdinBytes.read(… 2u64)`; then `in` reads with `3u64` | `Ok` of `ab`, then `Ok` of `c` (Q10) | 06 Closed operation semantics |
+| `V2-GRANT-limit-stdin-exact` | boundary | `limit(input inputBytes: some(3))`; `StdinBytes.read(… 3u64)` | `Ok` of the bytes `abc` (Q10) | 06 Closed operation semantics |
+| `V2-GRANT-limit-stdin-over` | positive | `limit(input inputBytes: some(2))`; `StdinBytes.read(… 3u64)`; then `input` reads with `3u64` | `limitExceeded`, then `Ok` of `abc`; one event (Q10) | 06 Standard input: "consumes nothing" |
+| `V2-GRANT-limit-stdin-zero` | boundary | empty stdin; `limit(input inputBytes: some(0))`; `StdinBytes.read(… 1u64)` | `Ok` of no bytes (Q10) | the same |
+| `V2-GRANT-limit-stdin-count` | positive | `limit(input inputBytes: some(2))`; `StdinBytes.read(… 2u64)`; then `input` reads with `3u64` | `Ok` of `ab`, then `Ok` of `c` (Q10) | 06 Closed operation semantics |
 | `V2-GRANT-narrow-model-limit` | positive | `DirReadText.limit(memory limits)` with `invocations: some(1)`, on a `Memory` viewed as a `DirReadText`; two reads | `Ok("M")` twice: the model's own `limit` ran; no event (Q1) | 03 Narrowing |
 | `V2-GRANT-narrow-model-restrict` | positive | `DirReadText.restrict(memory textOnly)`; read `b.bin` | `Result.ok`; the read is `Ok("M")`; no event (Q1) | the same |
 | `V2-GRANT-narrow-model-sub` | positive | `DirReadText.sub(memory p)` | `Result.ok`; no event (Q1) | the same |
