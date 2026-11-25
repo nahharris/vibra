@@ -578,8 +578,11 @@ impl Run<'_, '_, '_> {
         };
         let token = match self.bound.get(source) {
             Some(Some(token)) => *token,
+            // No source provider can refuse, so a source leaf is never bound
+            // absent; if one were, its read could not happen, and that is a
+            // failure, never an absence.
             Some(None) => {
-                return Ok(Read::Refused(format!(
+                return Ok(Read::Failed(format!(
                     "the source leaf `{source}` was bound absent"
                 )));
             }

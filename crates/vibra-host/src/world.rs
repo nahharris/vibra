@@ -1230,9 +1230,10 @@ impl WorldDriver {
                 };
                 match self.random.bytes(count) {
                     Some(bytes) => Answer::Ok(HostOk::Bytes(bytes), moved(count, 0)),
-                    // Nothing was drawn: the generator could not hold the
-                    // bytes.
-                    None => Answer::NotSubmitted("unavailable"),
+                    // Nothing was drawn: the host could not hold the bytes.
+                    // `unavailable`, a case of the row's own type, would be
+                    // a completed call.
+                    None => Answer::NotSubmitted("unsupported"),
                 }
             }
             _ => Answer::NotSubmitted("unsupported"),

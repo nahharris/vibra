@@ -1249,10 +1249,15 @@ exhaustion as well.
 check made, answers with a case of another error type, asks for step 4's
 check twice, finds an action its operation cannot perform, reads an
 object whose size it does not report, or answers with a completion class
-and an error case that disagree: `outcomeUnknown` as known not submitted,
-or `limitExceeded` or `unsupported` as completed. No event is appended for
-the call, and the whole reservation is charged, since what the driver did
-may have happened.
+and an error case that disagree. The classes partition the cases: a
+refusal (`denied`, `limitExceeded`, `unsupported`) may be known not
+submitted, and `denied` may also be completed; a case of the operation's
+own error type, such as `notFound` or `invalidText`, is always completed,
+since the driver observed the world; `outcomeUnknown` is completed and
+never known not submitted. So `outcomeUnknown` or an operation's own case
+as known not submitted, and `limitExceeded` or `unsupported` as completed,
+are faults. No event is appended for the call, and the whole reservation
+is charged, since what the driver did may have happened.
 
 **Suspension.** Suspending and resuming around a submitted host instruction
 MUST NOT submit it again. The first, sequential protocol treats a

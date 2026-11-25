@@ -506,10 +506,9 @@ row. Anything the row does not list as acquired or refused is a failure:
 | `@host.env.vars`, `@host.env.args`, `@host.time.wall`, `@host.time.monotonic`, `@host.random` | never | the operating system cannot provide the resource |
 
 - **Acquired.** The leaf is bound to its grant.
-- **Refused.** A leaf whose `source` leaf was bound absent is refused as
-  well, because its read cannot happen. A refused optional leaf is bound to
-  `Option.none()` and the sequence continues. A refused required leaf stops
-  the sequence: startup fails with `@grant.requiredUnavailable`.
+- **Refused.** A refused optional leaf is bound to `Option.none()` and the
+  sequence continues. A refused required leaf stops the sequence: startup
+  fails with `@grant.requiredUnavailable`.
 - **Failed.** A failure stops the sequence for a required and an optional
   leaf alike: startup fails with `@grant.acquisitionFailed`. A failure never
   becomes an absence.

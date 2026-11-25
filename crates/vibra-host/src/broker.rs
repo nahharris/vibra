@@ -1349,8 +1349,8 @@ impl<'d> Context<'d> {
                     return Err(self.charge_all(
                         slot,
                         reserved,
-                        "the driver reported as not submitted an outcome that may \
-                         have run",
+                        "the driver reported as not submitted a case that is no \
+                         refusal",
                     ));
                 }
                 self.refund_bytes(slot, reserved);
@@ -1495,17 +1495,19 @@ impl<'d> Context<'d> {
 }
 
 /// Whether a driver may report `case` as known not submitted. 06 "Host
-/// calls" keeps "known not submitted, completed, and may have run" apart,
-/// and `outcomeUnknown`, which may have run, "MUST NOT be reported as
-/// rejected before submission". Every other case may be known not
-/// submitted.
+/// calls" partitions the cases between the classes: only a refusal
+/// (`denied`, `limitExceeded`, `unsupported`) is known not submitted. A
+/// case of the operation's own error type says the driver observed the
+/// world, so it is a completed call; `outcomeUnknown` "MUST NOT be reported
+/// as rejected before submission".
 fn known_not_submitted(case: &HostErrorCase) -> bool {
-    case.case() != "outcomeUnknown"
+    matches!(case.case(), "denied" | "limitExceeded" | "unsupported")
 }
 
-/// Whether a driver may report `case` as the reply of a completed call. Of
-/// `limitExceeded` and `unsupported`, 06 "Audit trace" says "wherever they
-/// are decided, these two refusals are not completed calls".
+/// Whether a driver may report `case` as the reply of a completed call:
+/// every case but `limitExceeded` and `unsupported`, of which 06 "Audit
+/// trace" says "wherever they are decided, these two refusals are not
+/// completed calls".
 fn completed_case(case: &HostErrorCase) -> bool {
     !matches!(case.case(), "limitExceeded" | "unsupported")
 }

@@ -844,77 +844,162 @@ fn atk_counter_refund_unknown() {
     );
 }
 
-/// Row `ATK-driver-completion-class` (F1 of the review of grants): a
-/// completion whose class disagrees with its error case is a driver fault.
-/// 06 "Host calls" keeps three outcomes apart, "known not submitted,
-/// completed, and may have run": `outcomeUnknown` "MUST NOT be reported as
-/// rejected before submission" (06 "Host error cases"), and of
-/// `limitExceeded` and `unsupported` "wherever they are decided, these two
-/// refusals are not completed calls" (06 "Audit trace"). Each pairing is
-/// `@runtime.invalidHostValue` with no event, and the whole reservation
-/// stays charged: what the driver did may have happened. A `denied` the
-/// driver reports as not submitted is not among them: the chapter does not
-/// settle it (the `denied` of an overflow is not a completed call either),
-/// and it stays accepted.
+/// Row `ATK-driver-completion-class` (F1 of the review of grants, and the
+/// ruling on completion classes for step 30): the classes partition the
+/// cases, over every case of every host error type. A refusal (`denied`,
+/// `limitExceeded`, `unsupported`) may be known not submitted; `denied` may
+/// also be completed (the adapter's gate); a case of the operation's own
+/// error type is always completed, since the driver observed the world;
+/// `outcomeUnknown` is never known not submitted (06 "Host calls"), and
+/// `limitExceeded` and `unsupported` are never completed (06 "Audit
+/// trace"). Every other pairing is `@runtime.invalidHostValue` with no
+/// event, and the whole reservation stays charged: what the driver did may
+/// have happened.
 #[test]
 fn atk_driver_completion_class() {
-    let inconsistent = [
+    use vibra_ir::external::host::HostErrorType;
+    // One operation of each error type, its interface, its operands, and
+    // what the call reserves, at step 3 and at the gate (the two bytes of the
+    // variable `HOME`): invocations, input, output.
+    let operations: [(HostErrorType, HostOp, HostInterface, [u64; 3]); 5] = [
         (
-            "not submitted, outcomeUnknown",
-            Completion::NotSubmitted(
-                HostErrorCase::new(HostOp::FsWriteText.row().error, "outcomeUnknown")
-                    .expect("a case"),
-            ),
+            HostErrorType::Io,
+            HostOp::IoStdoutBytes,
+            HostInterface::StdoutBytes,
+            [1, 0, 6],
         ),
         (
-            "completed, limitExceeded",
-            completed(
-                err(HostOp::FsWriteText, "limitExceeded"),
-                Measured::Known(0),
-                Measured::Known(0),
-            ),
+            HostErrorType::Fs,
+            HostOp::FsWriteText,
+            HostInterface::DirWriteText,
+            [1, 0, 6],
         ),
         (
-            "completed, unsupported",
-            completed(
-                err(HostOp::FsWriteText, "unsupported"),
-                Measured::Known(0),
-                Measured::Known(0),
-            ),
+            HostErrorType::Env,
+            HostOp::EnvReadVar,
+            HostInterface::EnvReadVar,
+            [1, 2, 0],
+        ),
+        (
+            HostErrorType::Time,
+            HostOp::TimeNowWall,
+            HostInterface::WallClock,
+            [1, 0, 0],
+        ),
+        (
+            HostErrorType::Random,
+            HostOp::RandomGenerateBytes,
+            HostInterface::RandomBytes,
+            [1, 6, 0],
         ),
     ];
-    for (pairing, completion) in inconsistent {
-        let script = Scripted::new();
-        let mut driver = script.clone();
-        let mut cx = Context::new(&mut driver, header());
-        let out = bounded(
-            &mut cx,
-            HostInterface::DirWriteText,
-            limits(None, None, Some(10)),
-        );
-        script.tweak(Tweak {
-            completion: Some(completion),
-            ..Tweak::default()
-        });
-        assert!(
-            invalid(write(&mut cx, out, &["a.txt"], "sixsix")),
-            "{pairing}: a driver fault"
-        );
-        assert_eq!(used(&cx, out), [1, 0, 6], "{pairing}: the whole charge");
-        assert_eq!(
-            counters(&cx, out).output_bytes().reserved(),
-            0,
-            "{pairing}: nothing stays reserved"
-        );
-        assert!(cx.trace().events.is_empty(), "{pairing}: no event");
+    assert_eq!(operations.len(), HostErrorType::ALL.len());
+    let at = names(&["a.txt"]);
+    let mut pairings = 0;
+    for (error, op, interface, reserved) in operations {
+        assert_eq!(op.row().error, error);
+        let arguments = match op {
+            HostOp::IoStdoutBytes => vec![HostArgument::Bytes(b"sixsix")],
+            HostOp::FsWriteText => {
+                vec![HostArgument::Path(&at), HostArgument::Text("sixsix")]
+            }
+            HostOp::EnvReadVar => vec![HostArgument::Text("HOME")],
+            HostOp::RandomGenerateBytes => vec![HostArgument::Count(6)],
+            _ => Vec::new(),
+        };
+        for name in error.cases() {
+            let case = HostErrorCase::new(error, name).expect("a case");
+            let refusal = matches!(name, "denied" | "limitExceeded" | "unsupported");
+            for submitted in [false, true] {
+                pairings += 1;
+                let (completion, allowed) = if submitted {
+                    (
+                        completed(
+                            HostReply::Err(case),
+                            Measured::Known(0),
+                            Measured::Known(0),
+                        ),
+                        !matches!(name, "limitExceeded" | "unsupported"),
+                    )
+                } else {
+                    (Completion::NotSubmitted(case), refusal)
+                };
+                let pairing = format!(
+                    "{} {name}, {}",
+                    error.name(),
+                    if submitted {
+                        "completed"
+                    } else {
+                        "not submitted"
+                    }
+                );
+                let script = Scripted::new();
+                script
+                    .state()
+                    .env
+                    .insert("HOME".to_owned(), "/h".to_owned());
+                let mut driver = script.clone();
+                let mut cx = Context::new(&mut driver, header());
+                let policy = (interface == HostInterface::DirWriteText).then(p0);
+                let grant = cx
+                    .root_for_tests(grant(
+                        interface,
+                        policy,
+                        limits(None, Some(10), Some(10)),
+                    ))
+                    .expect("a root");
+                script.tweak(Tweak {
+                    completion: Some(completion),
+                    ..Tweak::default()
+                });
+                let result = run(&mut cx, op, grant, &arguments);
+                if allowed {
+                    let charged = if name == "outcomeUnknown" {
+                        reserved
+                    } else {
+                        [1, 0, 0]
+                    };
+                    assert_eq!(
+                        result,
+                        Ok((HostReply::Err(case), submitted)),
+                        "{pairing}"
+                    );
+                    assert_eq!(used(&cx, grant), charged, "{pairing}: the charge");
+                    assert_eq!(
+                        cx.trace().events.len(),
+                        usize::from(submitted),
+                        "{pairing}: the events"
+                    );
+                } else {
+                    assert!(invalid(result), "{pairing}: a driver fault");
+                    assert_eq!(
+                        used(&cx, grant),
+                        reserved,
+                        "{pairing}: the whole charge"
+                    );
+                    assert!(cx.trace().events.is_empty(), "{pairing}: no event");
+                }
+                let counters = counters(&cx, grant);
+                assert_eq!(
+                    [
+                        counters.input_bytes().reserved(),
+                        counters.output_bytes().reserved()
+                    ],
+                    [0, 0],
+                    "{pairing}: nothing stays reserved"
+                );
+            }
+        }
     }
+    // Two classes of the 4 shared cases and the 3, 7, 2, 1, and 1 cases of
+    // the five types' own.
+    assert_eq!(pairings, 2 * (5 * 4 + 3 + 7 + 2 + 1 + 1));
 }
 
 /// The control of `atk_driver_completion_class`: the pairings the chapters
-/// allow keep their class. A case known not submitted (`unsupported`,
-/// `limitExceeded`, or an operation's own case) refunds the bytes and
-/// records nothing; a completed `denied`, `outcomeUnknown`, or own case is
-/// one event.
+/// allow keep their class. A refusal known not submitted (`unsupported`,
+/// `limitExceeded`, `denied`) refunds the bytes and records nothing; a
+/// completed `denied`, `outcomeUnknown`, or own case is one event.
 #[test]
 fn consistent_completions_keep_their_class() {
     let not_submitted = |name: &str| {
@@ -942,12 +1027,7 @@ fn consistent_completions_keep_their_class() {
             false,
             [1, 0, 0],
         ),
-        (
-            not_submitted("permissionDenied"),
-            "permissionDenied",
-            false,
-            [1, 0, 0],
-        ),
+        (not_submitted("denied"), "denied", false, [1, 0, 0]),
         (done("denied"), "denied", true, [1, 0, 0]),
         (done("outcomeUnknown"), "outcomeUnknown", true, [1, 0, 6]),
         (

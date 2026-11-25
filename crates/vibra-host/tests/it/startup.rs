@@ -769,6 +769,29 @@ fn a_refusal_of_a_never_refusing_issuer_is_a_failure() {
     );
 }
 
+/// 04 "Startup order": no source provider can refuse, so a source leaf is
+/// never bound absent. An optional `@args` whose issuer refuses anyway is a
+/// failure that stops startup there: the optional `@notes` that reads its
+/// path through `@args` is never processed, so it is neither refused nor
+/// bound absent.
+#[test]
+fn a_source_leaf_is_never_bound_absent() {
+    let mut rig = Rig::new(&w());
+    rig.script
+        .borrow_mut()
+        .by_provider
+        .insert(Provider::EnvArgs, Answer::Refuse);
+    let plan = plan(vec![args_leaf(true, Limits::default()), notes_leaf(true)]);
+    let ran = run(&plan, &mut rig);
+    assert_eq!(status_of(&ran.started, "@args"), BindingStatus::Failed);
+    assert!(!has_startup_event(&ran.trace, "@notes"));
+    assert_eq!(processed(&ran.started), ["@args"]);
+    let failure = ran.started.failure.expect("a failure");
+    assert_eq!(failure.binding, name("@args"));
+    assert_eq!(failure.code, FailureCode::AcquisitionFailed);
+    assert_eq!(ran.bindings, None);
+}
+
 #[test]
 fn unlisted_read_error() {
     let mut rig = Rig::new(&world(&[], &[("NOTES", "/notes")]));

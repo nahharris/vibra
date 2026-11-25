@@ -336,6 +336,34 @@ fn the_host_reads_ambient_state_only_in_its_system_drivers() {
     );
 }
 
+/// The rule above is not vacuous: the system drivers of `vibra-host` are
+/// where its reads are. Each API the drivers of the streams, the
+/// environment, the clocks, and random need is named under `src/system/`.
+#[test]
+fn the_host_system_drivers_read_the_process() {
+    let sources = host_sources(&workspace_root());
+    let named = sources
+        .iter()
+        .filter(|(path, _)| path.starts_with(HOST_SYSTEM_DIRECTORY))
+        .flat_map(|(_, source)| ambient_references(source))
+        .map(|(_, pattern)| pattern)
+        .collect::<BTreeSet<_>>();
+    for api in [
+        "std::env",
+        "SystemTime",
+        "Instant::now",
+        "getrandom",
+        "io::stdin(",
+        "io::stdout(",
+        "io::stderr(",
+    ] {
+        assert!(
+            named.contains(api),
+            "`vibra-host` no longer reads through `{api}` under `src/system/`: {named:?}"
+        );
+    }
+}
+
 #[test]
 fn atk_ambient_read_outside_system() {
     let file = |path: &str, source: &str| (path.to_owned(), source.to_owned());
