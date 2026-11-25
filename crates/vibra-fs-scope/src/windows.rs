@@ -166,7 +166,9 @@ struct Opened {
 impl ScopedDir {
     /// Acquires `path` as a root. The path itself is opened through the
     /// ordinary Win32 path rules, once; the directory it names must not be a
-    /// reparse point.
+    /// reparse point. A volume that does not report normalized names or link
+    /// counts for the root is [`ScopeError::Unsupported`], since no entry
+    /// below it could be checked.
     pub fn open_root(path: &Path) -> Result<Self, ScopeError> {
         let root = OpenOptions::new()
             .access_mode(
@@ -189,6 +191,10 @@ impl ScopedDir {
         if kind_of(info) != EntryKind::Directory {
             return Err(ScopeError::NotADirectory);
         }
+        if let Err(ScopeError::Unsupported) = real_name(root.as_handle()) {
+            return Err(ScopeError::Unsupported);
+        }
+        standard(root.as_handle())?;
         Ok(Self { root })
     }
 

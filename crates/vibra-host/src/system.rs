@@ -1,5 +1,5 @@
 //! The drivers over the process: the standard streams, the environment, the
-//! arguments, the clocks, and the random source.
+//! arguments, the clocks, the random source, and the scoped directories.
 //!
 //! `docs/spec/06-runtime.md`, "Closed operation semantics", fixes what each
 //! adapter does, and `docs/spec/04-programs-and-packages.md`, "Startup
@@ -7,18 +7,20 @@
 //! [`Driver`] over the process; the broker of [`crate::broker::Context`]
 //! runs it exactly as it runs the driver of a host world.
 //!
-//! Every read of the process is in the four submodules: `streams`, `env`,
-//! `clock`, and `random`. This module names no ambient API; it dispatches a
-//! call to the adapter of the resource it holds.
+//! Every read of the process is in the five submodules: `streams`, `env`,
+//! `clock`, `random`, and `fs`. This module names no ambient API; it
+//! dispatches a call to the adapter of the resource it holds.
 //!
 //! **Construction reads nothing.** [`SystemDriver::new`] keeps its
 //! [`SystemInputs`]; a stream of the process is opened when its provider
-//! first acquires it, and a monotonic clock takes its origin when it is
-//! acquired.
+//! first acquires it, a monotonic clock takes its origin when it is
+//! acquired, and a directory is opened once, when it is acquired.
 //!
-//! **No directory driver.** `@host.fs.directory` has no driver here yet:
-//! [`Driver::identity`] answers `None` for it, so admission refuses a target
-//! that binds it as `@tool.unavailable` before anything is acquired.
+//! **Directories on Windows only.** `@host.fs.directory` is the file-scope
+//! adapter of `vibra-fs-scope`, which exists on Windows. On every other
+//! platform [`Driver::identity`] answers `None` for it, so admission refuses
+//! a target that binds it as `@tool.unavailable` before anything is
+//! acquired.
 //!
 //! **No adapter ends the process.** An operating-system error becomes a typed
 //! reply, a refusal, or a failure to acquire; no adapter calls an exit
@@ -26,13 +28,16 @@
 
 mod clock;
 mod env;
+mod fs;
 mod random;
 mod streams;
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::fmt;
+use std::rc::Rc;
 
+use vibra_fs_scope::ScopedDir;
 use vibra_ir::authority::{HostErrorCase, HostOk, HostReply};
 use vibra_ir::external::host::HostOp;
 
@@ -42,6 +47,8 @@ use crate::driver::{
 };
 use crate::recipe::Provider;
 use crate::world::DRIVER_VERSION;
+
+use self::fs as directory;
 
 pub use streams::{InputSource, OutputSink, WriteFailure};
 
@@ -148,16 +155,20 @@ enum Held {
     Wall,
     Monotonic(clock::Monotonic),
     Random,
+    /// A held directory: the root handle, closed when the resource is
+    /// released.
+    Directory(Rc<ScopedDir>),
 }
 
-/// The driver over the process for the eight providers of the streams, the
-/// environment, the arguments, the clocks, and random.
+/// The driver over the process for the nine providers of the streams, the
+/// environment, the arguments, the clocks, random, and the directories.
 pub struct SystemDriver {
     arguments: Vec<OsString>,
     variables: Variables,
     stdin: Stream<streams::Reader>,
     stdout: Stream<Box<dyn OutputSink>>,
     stderr: Stream<Box<dyn OutputSink>>,
+    directories: directory::Directories,
     held: BTreeMap<ResourceId, Held>,
     next: u64,
 }
@@ -167,6 +178,7 @@ impl fmt::Debug for SystemDriver {
         f.debug_struct("SystemDriver")
             .field("arguments", &self.arguments.len())
             .field("held", &self.held)
+            .field("file_reads", &self.directories.reads)
             .finish_non_exhaustive()
     }
 }
@@ -214,6 +226,7 @@ impl SystemDriver {
             stdin,
             stdout: output(inputs.stdout),
             stderr: output(inputs.stderr),
+            directories: directory::Directories::default(),
             held: BTreeMap::new(),
             next: 0,
         }
@@ -277,8 +290,27 @@ impl SystemDriver {
             (Held::Random, HostOp::RandomGenerateBytes) => {
                 random::generate(action.operand)
             }
+            (Held::Directory(root), _) => self.directories.call(root, action, gate),
             _ => Answer::NotSubmitted("unsupported"),
         }
+    }
+}
+
+/// Test hooks of the directory driver.
+#[cfg(feature = "testing")]
+impl SystemDriver {
+    /// From now on every call of the directory adapter that reports the
+    /// names the filesystem gives, the acquisition of a root included,
+    /// answers as a volume that does not report normalized names: the
+    /// adapter's `Unsupported`, before it opens anything.
+    pub fn fail_name_queries_for_tests(&mut self) {
+        self.directories.names_unsupported = true;
+    }
+
+    /// The number of times the directory driver read a file's contents.
+    #[must_use]
+    pub const fn file_reads_for_tests(&self) -> u64 {
+        self.directories.reads
     }
 }
 
@@ -319,7 +351,7 @@ fn length(bytes: usize) -> u64 {
 
 impl Driver for SystemDriver {
     fn identity(&self, provider: Provider) -> Option<DriverIdentity> {
-        if provider == Provider::FsDirectory {
+        if provider == Provider::FsDirectory && !directory::SUPPORTED {
             return None;
         }
         Some(DriverIdentity {
@@ -350,6 +382,10 @@ impl Driver for SystemDriver {
             (Provider::Random, Resolved::SystemRandom) => random::probe()
                 .map(|()| Held::Random)
                 .map_err(Acquire::Failed),
+            (Provider::FsDirectory, Resolved::Directory { path }) => self
+                .directories
+                .open_root(path)
+                .map(|root| Held::Directory(Rc::new(root))),
             (provider, _) => Err(Acquire::Failed(format!(
                 "the system driver does not issue `{}` for this resource",
                 provider.atom()

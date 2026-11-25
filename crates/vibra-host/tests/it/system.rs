@@ -17,7 +17,9 @@ use std::io;
 use std::path::Path;
 use std::rc::Rc;
 
-use vibra_diagnostics::{ByteSpan, DiagnosticCode};
+use vibra_diagnostics::ByteSpan;
+#[cfg(not(windows))]
+use vibra_diagnostics::DiagnosticCode;
 use vibra_host::broker::{Context, Counters, RootGrant};
 use vibra_host::driver::{
     Acquire, Action, Completion, Driver, DriverIdentity, Found, Gate, Refused,
@@ -27,7 +29,9 @@ use vibra_host::policy;
 use vibra_host::recipe::{
     self, BindingPlan, Leaf, LeafName, Limits, Provider, Resource,
 };
-use vibra_host::startup::{AdmissionRefusal, EntryLeaf, EntryShape, admit};
+#[cfg(not(windows))]
+use vibra_host::startup::AdmissionRefusal;
+use vibra_host::startup::{EntryLeaf, EntryShape, admit};
 use vibra_host::system::{
     Input, InputSource, Output, OutputSink, SystemDriver, SystemInputs, Variables,
     WriteFailure,
@@ -982,7 +986,8 @@ const SYSTEM_PROVIDERS: [Provider; 8] = [
     Provider::Random,
 ];
 
-/// Row "identities" (Q24); the directory provider has no driver yet.
+/// Row "identities" (Q24); the directory provider has a driver on Windows
+/// only (step 31).
 #[test]
 fn identities() {
     let driver = SystemDriver::new(inputs());
@@ -995,7 +1000,11 @@ fn identities() {
             })
         );
     }
-    assert_eq!(driver.identity(Provider::FsDirectory), None);
+    let directory = cfg!(windows).then(|| DriverIdentity {
+        provider: "@host.fs.directory".to_owned(),
+        version: "0.0.2".to_owned(),
+    });
+    assert_eq!(driver.identity(Provider::FsDirectory), directory);
 }
 
 /// Nothing is read at construction: a driver over the process's own
@@ -1056,11 +1065,9 @@ fn leaf(
     }
 }
 
-/// Row `ATK-driver-absent-at-admission`: admission refuses a target that
-/// binds `@host.fs.directory` as `@tool.unavailable`. `admit` holds the
-/// driver shared, so it cannot acquire; the watch confirms no call either.
-#[test]
-fn atk_driver_absent_at_admission() {
+/// A target that binds a directory and the standard output, its entry
+/// shape, and its row, which is also its ceiling.
+fn directory_target() -> (BindingPlan, EntryShape, Row) {
     let plan = BindingPlan {
         target: "@app".to_owned(),
         leaves: vec![
@@ -1094,6 +1101,18 @@ fn atk_driver_absent_at_admission() {
             })
             .collect(),
     };
+    (plan, shape, row)
+}
+
+/// Row `ATK-driver-absent-at-admission`: where the platform has no
+/// directory driver, admission refuses a target that binds
+/// `@host.fs.directory` as `@tool.unavailable`. `admit` holds the driver
+/// shared, so it cannot acquire; the watch confirms no call either. From
+/// step 31 this is Linux and macOS only.
+#[cfg(not(windows))]
+#[test]
+fn atk_driver_absent_at_admission() {
+    let (plan, shape, row) = directory_target();
     let (driver, watch) = watched(inputs());
     let refusal = admit(&plan, &shape, &row, &driver).expect_err("refused");
     assert_eq!(
@@ -1101,6 +1120,18 @@ fn atk_driver_absent_at_admission() {
         AdmissionRefusal::Unavailable(vec![Provider::FsDirectory])
     );
     assert_eq!(refusal.code(), DiagnosticCode::ToolUnavailable);
+    assert_eq!(watch.borrow().acquires, 0, "nothing acquired");
+    assert_eq!(watch.borrow().calls, 0);
+}
+
+/// On Windows the directory driver exists, so the same target passes the
+/// drivers check of admission; admission still acquires nothing.
+#[cfg(windows)]
+#[test]
+fn the_directory_driver_passes_admission_on_windows() {
+    let (plan, shape, row) = directory_target();
+    let (driver, watch) = watched(inputs());
+    assert!(admit(&plan, &shape, &row, &driver).is_ok());
     assert_eq!(watch.borrow().acquires, 0, "nothing acquired");
     assert_eq!(watch.borrow().calls, 0);
 }
