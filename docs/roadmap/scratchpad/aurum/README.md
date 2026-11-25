@@ -8,10 +8,11 @@ prospectus (draft 0.1, 25 November 2026) is kept outside this repository.
 The prospectus names Vibra as the source language at the top of its stack.
 
 These notes record the literature research behind that idea and work out
-what an Aurum target would mean for Vibra. They are research. They change no
-specification chapter and no release roadmap, and the prospectus itself asks
-that experimental features stay out of the language roadmap until evidence
-justifies them.
+what an Aurum target would mean for Vibra, and what an operating system, a
+shell, and an interface for such a machine could be. They are research.
+They change no specification chapter and no release roadmap, and the
+prospectus itself asks that experimental features stay out of the language
+roadmap until evidence justifies them.
 
 | Note | Question it answers |
 | --- | --- |
@@ -19,6 +20,9 @@ justifies them.
 | [Execution models and their evidence](execution-models.md) | What has been built and measured for each model the prospectus considers |
 | [Number systems](number-systems.md) | Whether the prospectus's arithmetic holds up, and how numeric domains reach Vibra |
 | [Resources, determinism, and verification](correctness.md) | Where linearity and proofs can live, given the charter, and what verified stacks have cost |
+| [An operating system for the fabric](operating-system.md) | What is left for an operating system to do when isolation, authority, and determinism come from the machine and the language |
+| [A shell for the fabric](shell.md) | How launching, naming, piping, and job control change when the command language is Vibra |
+| [Interaction](interaction.md) | Which conventions of using a computer lose their cause, what a person can perceive instead, and how little of it needs the fabric |
 | [Open questions](open-questions.md) | Every undecided point, each with a recommendation |
 | [Bibliography](bibliography.md) | Every source, with how far it was checked |
 
@@ -82,6 +86,35 @@ hardware built for the model changes the cost, and for that question there
 is no evidence in either direction: no interaction-net machine in an FPGA or
 in silicon was found. [Details](execution-models.md#interaction-nets).
 
+**Strict evaluation has to be enforced on a net.** A net lowered naively
+can return, or perform a host operation, while an operand the interpreter
+would still be waiting for is running. The target note adds a
+[completion rule](vibra-target.md#what-an-aurum-run-may-change) for it.
+
+**The operating system is small, and it shares the fabric in space.**
+Isolation is connectivity, authority is a grant on a wire, and determinism
+is confluence, so what remains is to allot the fabric, guard the boundary,
+keep a store of values, and admit programs. A task is a region, a world,
+and a budget. Nothing takes turns, so a scheduler divides area, and two
+counters the fabric can read, live nodes and active pairs, say how little a
+task fits in and how much it can use.
+[Details](operating-system.md#what-an-operating-system-is-for).
+
+**The shell is Vibra, and a session is a document.** The specification
+excludes a REPL, live redefinition, permission prompts, and dynamic
+loading, and a shell needs none of them: a session is a module whose
+values are derived and cached, with a log of the runs that touched the
+world. A plan is shown before it runs and can be rehearsed against a fork
+of the user's data. [Details](shell.md#a-session-is-a-document-and-a-log).
+
+**Most of the new interaction needs Vibra and not Aurum.** Plans before
+effects, authority handed over as an argument, one history, replay, and
+exact numbers follow from the language and can be tried on today's
+executors. The fabric adds what is new to interaction design: computations
+with a shape and no sequence, room in place of priority, and running work
+that can be paused, moved, and put away.
+[Details](interaction.md#what-needs-the-fabric).
+
 ## Relation to the charter
 
 | Prospectus | Charter | Consequence |
@@ -94,6 +127,7 @@ in silicon was found. [Details](execution-models.md#interaction-nets).
 | Many numeric domains | A fixed scalar set and a library-first core | Library types |
 | Automatic parallelism | Determinism for fixed source, inputs, and ordered host responses | Allowed for pure code, where order is unobservable; never for the order of host events |
 | A new architecture | A language for command-line programs, libraries, and small services | Outside the mission; justified only as an experiment that also tests the specification |
+| A native shell and desktop | Permission prompts, dynamic loading, runtime plugins, and language-level budgets are excluded | Tools around the toolchain that need none of them; nothing a program can name |
 
 ## The hypotheses, and what to expect
 
@@ -126,6 +160,12 @@ scheduled work.
 
 Stages 1 and 2 are small, need no hardware, and are worth doing even if
 Aurum goes no further, because both report on Vibra.
+
+The operating environment is a second track with the same property. A
+session, a store, a memo table, replay, and rehearsal can be built on the
+interpreter, hosted on an ordinary operating system, before stage 3
+exists. [Where that work lives](open-questions.md#35-where-this-work-lives)
+is an open question.
 
 [Taelin24]: bibliography.md#interaction-nets-optimal-reduction-and-their-implementations
 [Bend2]: bibliography.md#interaction-nets-optimal-reduction-and-their-implementations

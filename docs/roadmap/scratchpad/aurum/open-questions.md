@@ -201,5 +201,140 @@ and exit gates. The prerequisite that matters is the native cutover in
 v0.0.3, because the co-processor mode builds on its value store and its
 ownership analysis.
 
+## The operating environment
+
+These come from the [operating-system](operating-system.md),
+[shell](shell.md), and [interaction](interaction.md) notes.
+
+### 23. Where a session's authority comes from
+
+The charter allows two roots of authority: a binding the project target
+declares, and the root grant the test runner issues. A shell that hands
+grants to tools at a prompt looks like a third.
+
+**Recommendation.** No third root. A session is a project, its resources
+are the binding recipes of its target, and the shell is a driver around the
+toolchain in the way `vibra run` is. To run a plan, the shell writes an
+ordinary entry `proc` into the session's source that receives the target's
+grants, narrows them, and awaits the plan. The generated entry is visible,
+checked, and approved like any other.
+
+**Settled by** whether a prototype needs anything the target file cannot
+express. The first candidate is a typed result: an entry returns `ExitCode`
+only, so a run can report a value only by writing it somewhere.
+
+### 24. Revocation
+
+The effects chapter excludes revoking a single grant, and a long session
+will want to take authority back.
+
+**Recommendation.** Keep the exclusion. The unit of withdrawal is the
+world: each run gets its own, and ending the run makes its grants unusable.
+A session that wants finer control runs smaller plans.
+
+### 25. A document or a prompt
+
+**Recommendation.** A [document and a log](shell.md#a-session-is-a-document-and-a-log).
+A prompt that accumulates bindings needs live redefinition, which the
+tooling chapter excludes, and it produces sessions that cannot be
+reproduced from what is on screen.
+
+### 26. A command syntax
+
+**Recommendation.** None. The command language is Vibra as written, and
+the cost in keystrokes is met by an agent or by the editor. A second
+syntax is a second thing to check and to learn, and the charter prefers
+one canonical way.
+
+**Settled by** how much of a session people write by hand, and how often
+they give up on small tasks.
+
+### 27. Rehearsal needs a world the user can choose
+
+"The shipped launcher has no user-selectable world or replay switch", and
+rehearsal is exactly a run against a chosen world.
+
+**Recommendation.** A profile of its own, in the operating-environment
+project, built on the mechanism the conformance harness already has. The
+shipped launcher stays as it is.
+
+### 28. Replay from the audit trace
+
+**Recommendation.** Try it on the interpreter before anything else. The
+trace records the arguments and the complete result of every host call, so
+replay should need nothing more. If it does, that is a finding about the
+runtime chapter's claim of determinism for "ordered host responses". An
+unredacted trace holds everything a program read, and has to be treated as
+sensitive.
+
+### 29. Compensation
+
+Undoing an external effect by a declared inverse would need each operation
+to name its inverse, which is a change to the operation registry.
+
+**Recommendation.** Not yet. Rehearsal and holding cover a first
+environment. Revisit when there are operations on resources that other
+parties hold, which the standard inventory does not have today.
+
+### 30. Net images
+
+**Recommendation.** A [net image](operating-system.md#the-store) is a
+cache tied to the program's witness identities and the net-IR version, and
+never the only copy of anything. The consequence to accept: after a
+toolchain change, a suspended run with effects cannot be resumed. It is
+ended, and its log says how far it got.
+
+### 31. Where hashing happens, and at what grain
+
+**Recommendation.** At the boundary with the store, for whole arguments of
+coarse calls. Interning nodes on the fabric needs a global table.
+
+**Settled by** memo hit rates and hashing cost on the tooling workloads.
+
+### 32. Budgets
+
+The charter excludes "a language-level budget for time, memory, or host
+operations".
+
+**Recommendation.** Budgets are limit profiles of the environment, never
+something a program can read or name. Reaching one pauses the task, as a
+scheduler quota does, and the user decides whether to add budget or drop
+it.
+
+### 33. The cost of the completion rule
+
+The [completion rule](vibra-target.md#what-an-aurum-run-may-change) adds a
+signal to every evaluation the interpreter would have waited for.
+
+**Recommendation.** Adopt it; the alternative is an executor that disagrees
+with the interpreter on programs that diverge. Count the added nodes in
+stage 2, and omit the signal wherever the toolchain already knows an
+evaluation terminates.
+
+**Settled by** the measured overhead on the conformance corpus.
+
+### 34. Where protection lives
+
+**Recommendation.** In two places: the net-IR verifier at admission, and a
+hardware check at region boundaries. The first is trusted software, as the
+compiler already is. The second protects against a faulty element and not
+against a hostile program. Claim no information-flow security.
+
+### 35. Where this work lives
+
+**Recommendation.** In its own project, hosted on an ordinary operating
+system, using the toolchain's machine contracts and no private interface.
+[Most of the environment needs no fabric](interaction.md#what-needs-the-fabric).
+Nothing enters the Vibra roadmap. What the project owes Vibra is a list of
+what the contracts lacked: so far, a typed result from a run, a world the
+user can select, and whether the audit trace suffices for replay.
+
+### 36. Who the first user is
+
+**Recommendation.** An agent, through the existing server. The view for a
+person is a rendering of the same facts and can follow. This matches the
+charter's account of who writes Vibra, and it lets the environment be
+tested before any interface is designed.
+
 [MADAR26]: bibliography.md#dataflow-spatial-and-statically-scheduled-machines
 [TinyTapeout]: bibliography.md#fabrication-access

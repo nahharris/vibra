@@ -147,6 +147,83 @@ found by its title and venue.
 | Egglog23 | Y. Zhang, Y. R. Wang, O. Flatt, D. Cao, P. Zucker, E. Rosenthal, Z. Tatlock, M. Willsey. *Better together: unifying Datalog and equality saturation.* PLDI 2023. | recalled | E-graphs with relational analysis |
 | ROVER24 | S. Coward, T. Drane, G. Constantinides. *ROVER: RTL optimization via verified e-graph rewriting.* arXiv:2406.12421, 2024. | abstract | Up to 63% less datapath area, with a checkable certificate |
 
+## Operating systems, capabilities, and persistence
+
+| Key | Source | Checked | Used for |
+| --- | --- | --- | --- |
+| Ingalls81 | D. Ingalls. *Design principles behind Smalltalk.* BYTE 6(8), 1981. | recalled | An operating system as what does not fit into a language |
+| DennisVanHorn66 | J. Dennis, E. Van Horn. *Programming semantics for multiprogrammed computations.* Communications of the ACM 9(3), 1966. | recalled | Capabilities |
+| Miller06 | M. Miller. *Robust composition: towards a unified approach to access control and concurrency control.* PhD thesis, Johns Hopkins University, 2006. | recalled | The object-capability model: authority is reachability |
+| Exokernel95 | D. Engler, M. F. Kaashoek, J. O'Toole. *Exokernel: an operating system architecture for application-level resource management.* SOSP 1995. | recalled | Separating protection from management |
+| Singularity07 | G. Hunt, J. Larus. *Singularity: rethinking the software stack.* ACM SIGOPS Operating Systems Review 41(2), 2007. | recalled | Isolation by verified code in place of hardware address spaces |
+| Barrelfish09 | A. Baumann et al. *The multikernel: a new OS architecture for scalable multicore systems.* SOSP 2009. | recalled | A heterogeneous machine treated as a distributed system |
+| KeyKOS92 | A. Bomberger et al. *The KeyKOS nanokernel architecture.* USENIX Workshop on Micro-kernels and Other Kernel Architectures, 1992. | recalled | Meters and space banks; a persistent capability system in production |
+| EROS99 | J. Shapiro, J. Smith, D. Farber. *EROS: a fast capability system.* SOSP 1999. | recalled | Orthogonal persistence with capabilities |
+| ECOSystem02 | H. Zeng, C. Ellis, A. Lebeck, A. Vahdat. *ECOSystem: managing energy as a first class operating system resource.* ASPLOS 2002. | recalled | Energy as an accounted resource |
+| Determinator10 | A. Aviram, S.-C. Weng, S. Hu, B. Ford. *Efficient system-enforced deterministic parallelism.* OSDI 2010. arXiv:1005.3450. | abstract | An operating system that enforces determinism with shared-nothing spaces and deterministic communication |
+| Schneider90 | F. Schneider. *Implementing fault-tolerant services using the state machine approach: a tutorial.* ACM Computing Surveys 22(4), 1990. | recalled | A deterministic machine as a function of its input log |
+| AtkinsonMorrison95 | M. Atkinson, R. Morrison. *Orthogonally persistent object systems.* VLDB Journal 4(3), 1995. | recalled | Persistence independent of type |
+| Twizzler20 | D. Bittman, P. Alvaro, P. Mehra, D. Long, E. Miller. *Twizzler: a data-centric OS for non-volatile memory.* USENIX ATC 2020. | abstract | Persistent object-relative pointers; the benchmark figures |
+| Venti02 | S. Quinlan, S. Dorward. *Venti: a new approach to archival storage.* FAST 2002. | recalled | Content-addressed storage |
+| Nix06 | E. Dolstra. *The purely functional software deployment model.* PhD thesis, Utrecht University, 2006. | recalled | Content identity for deployed software |
+| Unison | *The Unison language*, project documentation. | recalled | Definitions identified by content hash |
+| BuildSystems18 | A. Mokhov, N. Mitchell, S. Peyton Jones. *Build systems à la carte.* ICFP 2018. | recalled | A store with a memo table as a build system |
+| Waldo94 | J. Waldo, G. Wyant, A. Wollrath, S. Kendall. *A note on distributed computing.* Sun Microsystems Laboratories TR-94-29, 1994. | recalled | Partial failure defeats location transparency |
+| Hardy88 | N. Hardy. *The confused deputy (or why capabilities might have been invented).* ACM SIGOPS Operating Systems Review 22(4), 1988. | recalled | What ambient authority does to a well-meaning program |
+| Sagas87 | H. Garcia-Molina, K. Salem. *Sagas.* SIGMOD 1987. | recalled | Undoing a long activity by compensating steps |
+
+## Sharing reconfigurable and dataflow hardware
+
+| Key | Source | Checked | Used for |
+| --- | --- | --- | --- |
+| Bazargan00 | K. Bazargan, R. Kastner, M. Sarrafzadeh. *Fast template placement for reconfigurable computing systems.* IEEE Design & Test of Computers 17(1), 2000. | recalled | Online placement as packing |
+| RuggieroSargeant87 | C. Ruggiero, J. Sargeant. *Control of parallelism in the Manchester dataflow machine.* FPCA 1987. | recalled | Throttling a dataflow machine |
+| CullerArvind88 | D. Culler, Arvind. *Resource requirements of dataflow programs.* ISCA 1988. | recalled | Parallel expansion can exhaust storage |
+| BORPH08 | H. So, R. Brodersen. *A unified hardware/software runtime environment for FPGA-based reconfigurable computers using BORPH.* ACM Transactions on Embedded Computing Systems 7(2), 2008. | recalled | Hardware tasks as operating-system processes |
+| AmorphOS18 | A. Khawaja, J. Landgraf, R. Prakash, M. Wei, E. Schkufza, C. Rossbach. *Sharing, protection, and compatibility for reconfigurable fabric with AmorphOS.* OSDI 2018. | abstract | Protected sharing of an FPGA; the throughput figures |
+| Coyote20 | D. Korolija, T. Roscoe, G. Alonso. *Do OS abstractions make sense on FPGAs?* OSDI 2020. | recalled | Operating-system abstractions on an FPGA |
+| EPOCH25 | A. Malik, E. Karabulut, A. Aysu. *EPOCH: enabling preemption operation for context saving in heterogeneous FPGA systems.* arXiv:2501.16205, 2025. | read | The cost and difficulty of reading FPGA state back |
+| Mestra26 | A. Kyriazis, P. Miliadis, D. Theodoropoulos, N. Koziris, D. Pnevmatikatos. *Mestra: exploring migration on virtualized CGRAs.* arXiv:2604.04694, 2026. | read | Spatial sharing, fragmentation, and stateful migration, with figures |
+
+## Shells and composition
+
+| Key | Source | Checked | Used for |
+| --- | --- | --- | --- |
+| RitchieThompson74 | D. Ritchie, K. Thompson. *The UNIX time-sharing system.* Communications of the ACM 17(7), 1974. | recalled | Pipes and the shell |
+| Oberon89 | N. Wirth, J. Gutknecht. *The Oberon system.* Software: Practice and Experience 19(9), 1989. | recalled | Exported procedures as commands, activated from text |
+| Genera87 | J. Walker, D. Moon, D. Weinreb, M. McMahon. *The Symbolics Genera programming environment.* IEEE Software 4(6), 1987. | recalled | One language through the whole environment; presentations |
+| Monad02 | J. Snover. *Monad manifesto.* Microsoft, 2002. | recalled | A shell that passes objects, the design behind PowerShell |
+| Nushell | *Nushell*, project documentation. | recalled | A shell that passes structured data |
+| Try | *try*, a command-line tool that runs a command over an overlay file system and lets the user inspect and commit its effects. Known here only through its description in [ShellVis26](#shells-and-composition). | abstract | Rehearsing a command before it changes the system |
+| Plan9Names92 | R. Pike, D. Presotto, K. Thompson, H. Trickey, P. Winterbottom. *The use of name spaces in Plan 9.* ACM SIGOPS European Workshop, 1992. | recalled | A namespace per context, not a global one |
+| Shill14 | S. Moore, C. Dimoulas, D. King, S. Chong. *SHILL: a secure shell scripting language.* OSDI 2014. | abstract | Scripts that receive capabilities only from their invoker |
+| PaSh21 | N. Vasilakis, K. Kallas, K. Mamouras, A. Benetopoulos, L. Cvetković. *PaSh: light-touch data-parallel shell processing.* EuroSys 2021. DOI 10.1145/3447786.3456228. arXiv:2007.09436. | read | Pipelines as dataflow graphs; 0.89 to 61.1 times speedup, 6.7 on average, over 44 scripts; commands need hand-written parallelizability annotations |
+| hS23 | G. Liargkovas, K. Kallas, M. Greenberg, N. Vasilakis. *Executing shell scripts in the wrong order, correctly.* HotOS 2023. DOI 10.1145/3593856.3595891. | abstract | Speculative out-of-order execution of commands in isolation |
+| ShellVis26 | J. Horowitz, J. Heer. *ShellVis: sandboxed live programming for shell scripts.* arXiv:2609.11000, 2026. | read | Live feedback made safe by running effects in an overlay; only the file system is sandboxed; seven participants |
+
+## Interaction, live environments, and agents
+
+| Key | Source | Checked | Used for |
+| --- | --- | --- | --- |
+| Shneiderman83 | B. Shneiderman. *Direct manipulation: a step beyond programming languages.* IEEE Computer 16(8), 1983. | recalled | Visible objects and rapid, reversible actions |
+| Tanimoto90 | S. Tanimoto. *VIVA: a visual language for image processing.* Journal of Visual Languages & Computing 1(2), 1990. | recalled | Levels of liveness |
+| ElliottHudak97 | C. Elliott, P. Hudak. *Functional reactive animation.* ICFP 1997. | recalled | A display as a function of time-varying values |
+| Elm13 | E. Czaplicki, S. Chong. *Asynchronous functional reactive programming for GUIs.* PLDI 2013. | recalled | An interactive program as a function from state and event to state |
+| SelfAdjusting02 | U. Acar, G. Blelloch, R. Harper. *Adaptive functional programming.* POPL 2002. | recalled | Incremental recomputation from a recorded trace, and its memory cost |
+| Adapton14 | M. Hammer, K. Y. Phang, M. Hicks, J. Foster. *Adapton: composable, demand-driven incremental computation.* PLDI 2014. | recalled | Demand-driven incremental computation |
+| DBSP23 | M. Budiu, T. Chajed, F. McSherry, L. Ryzhyk, V. Tannen. *DBSP: automatic incremental view maintenance for rich query languages.* VLDB 2023. | recalled | Incremental maintenance of queries |
+| Lenses07 | J. N. Foster, M. Greenwald, J. Moore, B. Pierce, A. Schmitt. *Combinators for bidirectional tree transformations: a linguistic approach to the view-update problem.* ACM Transactions on Programming Languages and Systems 29(3), 2007. | recalled | Editable views with laws |
+| Yee02 | K.-P. Yee. *User interaction design for secure systems.* ICICS 2002. | recalled | Designating an object as the act that authorizes access to it |
+| Nardi93 | B. Nardi. *A Small Matter of Programming: Perspectives on End User Computing.* MIT Press, 1993. | recalled | Spreadsheets as programming that ordinary users do |
+| Whyline04 | A. Ko, B. Myers. *Designing the Whyline: a debugging interface for asking questions about program behavior.* CHI 2004. | recalled | Asking a running program why |
+| CLIM91 | S. McKay. *CLIM: the Common Lisp Interface Manager.* Communications of the ACM 34(9), 1991. | recalled | Presentation types: what is shown remembers the object it shows |
+| Raskin00 | J. Raskin. *The Humane Interface.* Addison-Wesley, 2000. | recalled | An environment without applications; the Canon Cat |
+| Hazel19 | C. Omar, I. Voysey, R. Chugh, M. Hammer. *Live functional programming with typed holes.* POPL 2019. | recalled | Incomplete programs that still check and run |
+| Boehm20 | H.-J. Boehm. *Towards an API for the real numbers.* PLDI 2020. | abstract | Exact real arithmetic in a mass-market calculator, with equality decidable in the common cases |
+| Malleable25 | G. Litt, J. Horowitz, P. van Hardenberg, T. Matthews. *Malleable software: restoring user agency in a world of locked-down apps.* Ink & Switch, 2025. <https://www.inkandswitch.com/essay/malleable-software/> | abstract | Tools the user can reshape, and the history of that idea |
+| Planarian26 | J. Guo, H. Chen, K. Vaswani, A. Paverd, P. Pietzuch. *Planarian: managing agent state with statepoints.* arXiv:2609.35366, 2026. | read | Snapshot, rollback, and fork over local and remote state for agents; compensating actions; 1% to 3% overhead |
+| AgenticOS26 | Z. Zhao et al. *AgenticOS: an intent-oriented secure operating system architecture for autonomous AI agents.* arXiv:2606.21129, 2026. | read | A conceptual architecture that replaces resource primitives with declared intents and manifests |
+
 ## Fabrication access
 
 | Key | Source | Checked | Used for |
@@ -172,3 +249,11 @@ gives the topic, not the title.
 | arXiv:2410.02418 | Gaussian and Eisenstein integer digit sets | Complex bases beyond −1+i |
 | arXiv:2208.14610 | The Sparse Abstract Machine | Dataflow abstractions for sparse tensor algebra |
 | arXiv:2312.16300 | Calyx with static and dynamic control | Mixing statically timed and handshaking hardware |
+| arXiv:2012.15422 | An order-aware dataflow model for Unix pipelines | The formal model under [PaSh21](#shells-and-composition) |
+| arXiv:1907.05308 | An executable formal semantics for the POSIX shell | What a byte-stream shell means, stated precisely |
+| arXiv:2307.09553 | Stream types | Types for the streams a pipeline would carry |
+| arXiv:2007.11112 | DBOS, a data-centric operating system | Operating-system state kept in a database |
+| arXiv:2209.04410 | Preemptive FPGA scheduling with partial reconfiguration | Time-sharing a fabric, the alternative to allotting it in space |
+| arXiv:2611.32255 | A live forking sandbox for agent exploration | Forked worlds for rehearsal |
+| arXiv:2610.20100 | A task-state virtual machine for recoverable GUI agents | Recovery of an agent's run from recorded state |
+| arXiv:2606.30697 | A semantic operating-system layer for accessibility-grounded agents | Structure exposed to agents and to assistive views alike |

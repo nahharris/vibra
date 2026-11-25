@@ -186,9 +186,10 @@ ways.
 2. **Traps.** No operation traps on user data. The two remaining traps are
    toolchain defects.
 3. **Divergence.** Evaluation is strict, so a call whose operand diverges
-   diverges in written order and in parallel order alike. The two orders
-   differ only if the fabric evaluates something the interpreter would
-   never have evaluated.
+   diverges in written order and in parallel order alike, provided the
+   fabric waits for the operand as the interpreter does. The two orders
+   then differ only if the fabric evaluates something the interpreter
+   would never have evaluated.
 4. **Resource limits.** Peak memory and the work counted against a tool
    limit both depend on the order.
 
@@ -196,6 +197,17 @@ From this the rules for an Aurum executor follow.
 
 - **Independent operands may be evaluated in any order or together.** This
   is the parallelism the fabric exists for, and it is unobservable.
+- **Strictness is enforced, not assumed.** A net does not wait for an
+  operand by nature: a call whose body ignores an argument can finish while
+  that argument is still being reduced. If the argument diverges, the
+  interpreter never returns, and a net lowered naively would return, or
+  would perform a host operation the interpreter never reaches. The
+  **completion rule** closes the gap: every evaluation the interpreter
+  would have finished first produces a completion signal, and the final
+  result and the sequencing wire at each `await` are held until those
+  signals arrive. Inside pure code the net may still run ahead, because
+  nothing observable leaves it early. An unused operand is run to
+  completion before it is erased.
 - **No speculation into an arm that is not selected.** The specification
   says of `match` that "no other arm's body is evaluated". A fabric that
   starts both arms can diverge or exhaust memory where the interpreter
@@ -215,8 +227,9 @@ From this the rules for an Aurum executor follow.
 
 Totality would remove the third item altogether, and the
 [paradigm notes](../blue-sky/paradigms.md) already list it as worth adding.
-Aurum does not need to wait for it: without speculation, the fabric
-evaluates exactly the subterms the interpreter evaluates.
+Aurum does not need to wait for it: without speculation the fabric
+evaluates exactly the subterms the interpreter evaluates, and with the
+completion rule it releases nothing before the interpreter would.
 
 ## Parallelism the programmer has to write
 
