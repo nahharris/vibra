@@ -1342,6 +1342,14 @@ impl<'d> Context<'d> {
                         "the driver answered with a case of another error type",
                     ));
                 }
+                if !known_not_submitted(&case) {
+                    return Err(self.charge_all(
+                        slot,
+                        reserved,
+                        "the driver reported as not submitted an outcome that may \
+                         have run",
+                    ));
+                }
                 self.refund_bytes(slot, reserved);
                 Ok(HostCompletion {
                     reply: HostReply::Err(case),
@@ -1355,6 +1363,14 @@ impl<'d> Context<'d> {
                             slot,
                             reserved,
                             "the driver answered with a case of another error type",
+                        ));
+                    }
+                    HostReply::Err(case) if !completed_case(case) => {
+                        return Err(self.charge_all(
+                            slot,
+                            reserved,
+                            "the driver reported as completed a refusal that is no \
+                             completed call",
                         ));
                     }
                     HostReply::Err(case) => case.case() == "outcomeUnknown",
@@ -1473,6 +1489,22 @@ impl<'d> Context<'d> {
         self.child(slot, Constraint::Limits(counters))
             .map(Narrowed::Grant)
     }
+}
+
+/// Whether a driver may report `case` as known not submitted. 06 "Host
+/// calls" keeps "known not submitted, completed, and may have run" apart,
+/// and `outcomeUnknown`, which may have run, "MUST NOT be reported as
+/// rejected before submission". Every other case may be known not
+/// submitted.
+fn known_not_submitted(case: &HostErrorCase) -> bool {
+    case.case() != "outcomeUnknown"
+}
+
+/// Whether a driver may report `case` as the reply of a completed call. Of
+/// `limitExceeded` and `unsupported`, 06 "Audit trace" says "wherever they
+/// are decided, these two refusals are not completed calls".
+fn completed_case(case: &HostErrorCase) -> bool {
+    !matches!(case.case(), "limitExceeded" | "unsupported")
 }
 
 /// The policy a `sub` with the whole prefix `names` contributes: a file rule

@@ -1581,6 +1581,174 @@ fn memory_fault() {
     assert_eq!(host.commits(), 0);
 }
 
+/// `main(r)` whose continuation of `R.read`, `advance`, runs on the reply
+/// before anything else, and which then returns `read_refused()`.
+fn advance_then_refuse(advance: impl FnOnce(Node) -> Node) -> CheckedFunction {
+    main_over_r(
+        let_in(
+            1,
+            advance(read(var(0, r_type()), &["notes.txt"])),
+            ret(read_refused()),
+        ),
+        2,
+    )
+}
+
+/// F7 of the review of grants: a trap on each side of the commit. 06 "Audit
+/// trace": the event is appended "after its continuation has advanced", and
+/// "a trap … appends no completed success". Between the adapter's return
+/// and the commit, the reply is checked against the row, accounted, and
+/// handed to the `await` that waits for it; a reply of another shape traps
+/// there, `@runtime.invalidHostValue`, and its receipt is dropped. Once the
+/// `await` has the value the event is committed, and a trap in the next
+/// node, here a match with no arm for `Err(notFound)` (a continuation the
+/// checker never builds, `@runtime.invalidCheckedProgram`), keeps that one
+/// event: it neither drops it nor adds another.
+#[test]
+fn atk_trap_on_each_side_of_the_commit() {
+    let mut host = Recording::default();
+    host.replies.push_back(Ok(HostReply::Ok(HostOk::U64(1))));
+    let outcome = run_main(
+        vec![advance_then_refuse(|reply| reply)],
+        Vec::new(),
+        Vec::new(),
+        vec![EntryArgument::Grant(token(1))],
+        &mut host,
+    );
+    assert_trap(outcome, Trap::InvalidHostValue);
+    assert_eq!(host.requests().len(), 1);
+    assert_eq!(host.commits(), 0, "a trap in the window drops the receipt");
+    let only_ok = |reply: Node| {
+        node(Expr::Match {
+            subject: Box::new(reply),
+            arms: vec![MatchArm {
+                pattern: Pattern::Case {
+                    case: "ok".to_owned(),
+                    fields: vec![("value".to_owned(), Pattern::Discard)],
+                },
+                body: read_refused(),
+            }],
+            value_type: read_result(),
+        })
+    };
+    let mut host = Recording::default();
+    host.replies.push_back(Ok(HostReply::Err(
+        HostErrorCase::new(HostErrorType::Fs, "notFound").unwrap(),
+    )));
+    let outcome = run_main(
+        vec![advance_then_refuse(only_ok)],
+        Vec::new(),
+        Vec::new(),
+        vec![EntryArgument::Grant(token(1))],
+        &mut host,
+    );
+    assert_trap(outcome, Trap::InvalidCheckedProgram);
+    assert_eq!(host.requests().len(), 1);
+    assert_eq!(host.commits(), 1, "a trap after the window keeps the event");
+    // The same continuation on an `ok` reply runs to the end, one commit.
+    let mut host = Recording::default();
+    run_main(
+        vec![advance_then_refuse(only_ok)],
+        Vec::new(),
+        Vec::new(),
+        vec![EntryArgument::Grant(token(1))],
+        &mut host,
+    )
+    .unwrap();
+    assert_eq!(host.commits(), 1);
+}
+
+/// F7 of the review of grants: memory exhaustion in the window between the
+/// adapter's return and the commit. With 100 bytes of room left, the reply
+/// is a 100,000-byte text, which is accounted when the `await` takes it:
+/// the run is the host event `@runtime.memoryExhausted`, and 06 "Audit
+/// trace" appends no event, since "a host event … appends no completed
+/// success". The request was made; its receipt is dropped uncommitted.
+#[test]
+fn atk_exhaustion_in_the_window_before_the_commit() {
+    let run = |budget: MemoryBudget, reply: &str| {
+        let mut host = Recording::default();
+        host.replies
+            .push_back(Ok(HostReply::Ok(HostOk::Text(reply.to_owned()))));
+        let outcome = run_main_from(
+            vec![advance_then_refuse(|reply| reply)],
+            Vec::new(),
+            Vec::new(),
+            vec![EntryArgument::Grant(token(1))],
+            1,
+            &mut host,
+            budget,
+        );
+        (outcome, host)
+    };
+    let (first, host) = run(MemoryBudget::DEFAULT, "");
+    first.unwrap();
+    let live = MemoryBudget::DEFAULT.bytes - host.requests()[0].room;
+    let (outcome, host) = run(MemoryBudget::new(live + 100), &"x".repeat(100_000));
+    assert!(
+        matches!(outcome, Err(RuntimeError::MemoryExhausted { .. })),
+        "{outcome:?}"
+    );
+    assert_eq!(host.requests().len(), 1);
+    assert_eq!(host.commits(), 0);
+}
+
+/// F7 of the review of grants: memory exhaustion after the commit. The
+/// continuation, once the `await` has the reply, builds a 200,000-byte
+/// text. Over every budget from below the request to above the whole run,
+/// a run that made the request committed its event exactly once, whether
+/// it was then exhausted or completed: the event of a completed call is
+/// appended "after its continuation has advanced" (06 "Audit trace"), and
+/// an exhaustion that follows neither drops it nor adds another. Both
+/// outcomes are reached.
+#[test]
+fn an_exhaustion_after_the_commit_keeps_the_event() {
+    let big = "y".repeat(200_000);
+    let run = |budget: MemoryBudget| {
+        let mut host = Recording::default();
+        host.replies
+            .push_back(Ok(HostReply::Ok(HostOk::Text(String::new()))));
+        let main = main_over_r(
+            let_in(
+                1,
+                read(var(0, r_type()), &["notes.txt"]),
+                seq(vec![text(&big), ret(read_refused())]),
+            ),
+            2,
+        );
+        let outcome = run_main_from(
+            vec![main],
+            Vec::new(),
+            Vec::new(),
+            vec![EntryArgument::Grant(token(1))],
+            1,
+            &mut host,
+            budget,
+        );
+        (outcome, host)
+    };
+    let (first, host) = run(MemoryBudget::DEFAULT);
+    first.unwrap();
+    let live = MemoryBudget::DEFAULT.bytes - host.requests()[0].room;
+    let (mut exhausted, mut completed) = (0, 0);
+    for bytes in (live.saturating_sub(1_024)..live + 400_000).step_by(997) {
+        let (outcome, host) = run(MemoryBudget::new(bytes));
+        if host.requests().is_empty() {
+            continue;
+        }
+        assert_eq!(host.commits(), 1, "budget {bytes}: {outcome:?}");
+        match outcome {
+            Err(RuntimeError::MemoryExhausted { .. }) => exhausted += 1,
+            Ok(_) => completed += 1,
+            other => panic!("budget {bytes}: {other:?}"),
+        }
+    }
+    assert!(
+        exhausted > 0,
+        "some budget exhausts the run after the commit"
+    );
+    assert!(completed > 0, "some budget completes the run");
+}
 /// `FsError.<first case>`, as a fallback `Result.err` of `R.read`.
 fn read_refused() -> Node {
     case(
@@ -2264,22 +2432,97 @@ const AMBIENT_PATTERNS: &[&str] = &[
     "eprint!(",
 ];
 
-/// The ambient APIs `source` names outside comments and its unit-test
-/// module, which is host-language test code and runs no program.
+/// The attribute that gates host-language test code.
+const TEST_GATE: &str = "#[cfg(test)]";
+
+/// Whether `text`, trimmed, opens a module: `mod name`, with or without a
+/// visibility.
+fn opens_module(text: &str) -> bool {
+    let text = text.trim_start();
+    let text = ["pub(crate) ", "pub(super) ", "pub "]
+        .iter()
+        .find_map(|visibility| text.strip_prefix(visibility))
+        .unwrap_or(text);
+    text.starts_with("mod ")
+}
+
+/// The lines of `source`, numbered from one, that are not in a
+/// `#[cfg(test)]` module: the attribute, the `mod` it gates, and that
+/// module's block, matched brace by brace, are left out. A `#[cfg(test)]`
+/// field, function, or other item is kept, and so is every line after the
+/// module.
+fn outside_test_modules(source: &str) -> Vec<(usize, &str)> {
+    let lines = source.lines().collect::<Vec<_>>();
+    let mut kept = Vec::new();
+    let mut index = 0;
+    while let Some(line) = lines.get(index) {
+        let trimmed = line.trim_start();
+        let Some(rest) = trimmed.strip_prefix(TEST_GATE) else {
+            kept.push((index + 1, *line));
+            index += 1;
+            continue;
+        };
+        // The gated item: on the attribute's line, or on the next line that
+        // is neither an attribute nor a comment.
+        let mut item = index;
+        if rest.trim().is_empty() {
+            item += 1;
+            while lines.get(item).is_some_and(|text| {
+                let text = text.trim_start();
+                text.starts_with("#[") || text.starts_with("//")
+            }) {
+                item += 1;
+            }
+        }
+        let opens = lines.get(item).is_some_and(|text| {
+            let text = if item == index { rest } else { text };
+            opens_module(text)
+        });
+        if !opens {
+            kept.push((index + 1, *line));
+            index += 1;
+            continue;
+        }
+        // Skip through the line that closes the module's block, or through
+        // `mod name;`.
+        let mut depth: i64 = 0;
+        let mut opened = false;
+        let mut end = item;
+        while let Some(text) = lines.get(end) {
+            let text = if end == index { rest } else { text };
+            let code = text.split("//").next().unwrap_or(text);
+            for character in code.chars() {
+                match character {
+                    '{' => {
+                        depth += 1;
+                        opened = true;
+                    }
+                    '}' => depth -= 1,
+                    _ => {}
+                }
+            }
+            end += 1;
+            if (opened && depth <= 0) || (!opened && code.trim_end().ends_with(';')) {
+                break;
+            }
+        }
+        index = end;
+    }
+    kept
+}
+
+/// The ambient APIs `source` names outside comments and its `#[cfg(test)]`
+/// modules, which are host-language test code and run no program.
 fn ambient_references(source: &str) -> Vec<(usize, &'static str)> {
     let mut found = Vec::new();
-    for (index, line) in source.lines().enumerate() {
-        let trimmed = line.trim_start();
-        if trimmed.starts_with("#[cfg(test)]") {
-            break;
-        }
-        if trimmed.starts_with("//") {
+    for (number, line) in outside_test_modules(source) {
+        if line.trim_start().starts_with("//") {
             continue;
         }
         let code = line.split("//").next().unwrap_or(line);
         for pattern in AMBIENT_PATTERNS {
             if code.contains(pattern) {
-                found.push((index + 1, *pattern));
+                found.push((number, *pattern));
             }
         }
     }
@@ -2314,6 +2557,42 @@ fn atk_ambient_read_in_interp() {
     assert_eq!(
         ambient_references("let now = std::time::SystemTime::now();"),
         [(1, "SystemTime")]
+    );
+}
+
+/// F3 of the review of grants: the scan skips only a `#[cfg(test)]`
+/// module, never the rest of a file after a `#[cfg(test)]` field or item,
+/// and the delivery observer of `src/host.rs` is such a field.
+#[test]
+fn atk_ambient_read_after_a_test_only_field() {
+    let field = "struct Slot {\n    #[cfg(test)]\n    delivered: u8,\n}\n\
+                 fn read() { let _ = std::fs::read(\"x\"); }\n";
+    assert_eq!(ambient_references(field), [(5, "std::fs"), (5, "fs::")]);
+    let module = "#[cfg(test)]\nmod tests {\n    fn f() { std::env::args(); }\n}\n\n\
+                  fn after() { let _ = std::env::var(\"X\"); }\n";
+    assert_eq!(
+        ambient_references(module),
+        [(6, "std::env"), (6, "env::var")]
+    );
+    let source = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("host.rs"),
+    )
+    .unwrap();
+    let lines = source.lines().collect::<Vec<_>>();
+    let field = lines
+        .iter()
+        .position(|line| line.trim_start().starts_with("pub(crate) delivered:"))
+        .expect("the delivery observer");
+    assert_eq!(
+        lines[..field]
+            .iter()
+            .rev()
+            .map(|line| line.trim())
+            .find(|line| !line.starts_with("///")),
+        Some("#[cfg(test)]"),
+        "the delivery observer exists only in the unit tests"
     );
 }
 

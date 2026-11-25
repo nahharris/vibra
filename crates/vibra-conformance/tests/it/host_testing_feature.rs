@@ -8,9 +8,14 @@
 //! runner's world and startup to do. So no manifest of the workspace but
 //! `vibra-host`'s own `[dev-dependencies]` names the feature, and every hook
 //! is compiled only under it.
+//!
+//! A hook is a function whose name ends in `_for_tests`. The inventory is
+//! found by scanning `vibra-host/src`, never listed by hand: every function
+//! under the gate is a hook, and every hook is under the gate.
 
 use crate::support::{rust_sources, workspace_root};
 
+use std::collections::BTreeSet;
 use std::path::Path;
 
 /// The feature that compiles the hooks.
@@ -23,14 +28,8 @@ const GATE: &str = "#[cfg(feature = \"testing\")]";
 /// dev-dependency on itself.
 const ALLOWED: (&str, &str) = ("crates/vibra-host/Cargo.toml", "dev-dependencies");
 
-/// The hooks the feature compiles.
-const HOOKS: [&str; 5] = [
-    "root_for_tests",
-    "release_for_tests",
-    "counters_for_tests",
-    "preset_for_tests",
-    "slot_for_tests",
-];
+/// The suffix of a hook's name.
+const HOOK_SUFFIX: &str = "_for_tests";
 
 /// The dependency tables of a manifest, by their dotted names: the three
 /// kinds at the top, under each `target`, and the workspace's.
@@ -149,44 +148,100 @@ fn unexpected(manifests: &[(String, toml::Table)]) -> Vec<(String, String)> {
         .collect()
 }
 
-/// The hooks `source` defines outside an item gated by the feature: a hook
-/// is gated when the attribute is among the attributes and doc comments
-/// directly above its `fn`, or above the top-level item that holds it.
-fn ungated(source: &str) -> Vec<String> {
-    let lines = source.lines().collect::<Vec<_>>();
-    let gated_above = |index: usize| {
-        lines
-            .get(..index)
-            .unwrap_or_default()
-            .iter()
-            .rev()
-            .map(|line| line.trim())
-            .take_while(|line| line.starts_with("#[") || line.starts_with("///"))
-            .any(|line| line == GATE)
-    };
-    let mut found = Vec::new();
-    for (index, line) in lines.iter().enumerate() {
-        let Some(hook) = HOOKS
-            .iter()
-            .find(|hook| line.contains(&format!("fn {hook}(")))
-        else {
-            continue;
-        };
-        // The top-level item holding the hook: the nearest line above it
-        // that starts in the first column and opens an item.
-        let item = (0..index).rev().find(|&above| {
-            lines.get(above).is_some_and(|text| {
-                !text.is_empty()
-                    && !text.starts_with([' ', '\t', '}', '#', '/'])
-                    && !text.starts_with("//")
-            })
-        });
-        let gated = gated_above(index) || item.is_some_and(gated_above);
-        if !gated {
-            found.push(format!("{}: `{hook}` is not gated", index + 1));
+/// The name of the function `line` defines, if it defines one.
+fn defined(line: &str) -> Option<&str> {
+    if line.trim_start().starts_with("//") {
+        return None;
+    }
+    let (before, after) = line.split_once("fn ")?;
+    // `fn` is a word of its own: at the start, or after a space.
+    if !(before.is_empty() || before.ends_with(' ')) {
+        return None;
+    }
+    let end = after
+        .find(|character: char| !(character.is_alphanumeric() || character == '_'))
+        .unwrap_or(after.len());
+    let name = after.get(..end)?;
+    (!name.is_empty() && after.get(end..)?.starts_with(['(', '<'])).then_some(name)
+}
+
+/// The index one past the last line of the item that starts at `start`:
+/// its block, matched brace by brace, or the line that ends it with `;`.
+fn item_end(lines: &[&str], start: usize) -> usize {
+    let mut depth: i64 = 0;
+    let mut opened = false;
+    let mut end = start;
+    while let Some(text) = lines.get(end) {
+        let code = text.split("//").next().unwrap_or(text);
+        for character in code.chars() {
+            match character {
+                '{' => {
+                    depth += 1;
+                    opened = true;
+                }
+                '}' => depth -= 1,
+                _ => {}
+            }
+        }
+        end += 1;
+        if (opened && depth <= 0) || (!opened && code.trim_end().ends_with(';')) {
+            break;
         }
     }
-    found
+    end
+}
+
+/// The line ranges of `source` that the feature gates: each item whose
+/// attributes and doc comments, directly above it, hold the gate.
+fn gated_ranges(lines: &[&str]) -> Vec<std::ops::Range<usize>> {
+    let mut ranges = Vec::new();
+    let mut index = 0;
+    while let Some(line) = lines.get(index) {
+        if line.trim() != GATE {
+            index += 1;
+            continue;
+        }
+        let mut item = index + 1;
+        while lines.get(item).is_some_and(|text| {
+            let text = text.trim_start();
+            text.starts_with("#[") || text.starts_with("//")
+        }) {
+            item += 1;
+        }
+        let end = item_end(lines, item);
+        ranges.push(item..end);
+        index = end.max(index + 1);
+    }
+    ranges
+}
+
+/// The functions `source` defines under the gate, by line number from one.
+fn gated(source: &str) -> Vec<(usize, String)> {
+    let lines = source.lines().collect::<Vec<_>>();
+    gated_ranges(&lines)
+        .into_iter()
+        .flatten()
+        .filter_map(|index| {
+            let name = defined(lines.get(index)?)?;
+            Some((index + 1, name.to_owned()))
+        })
+        .collect()
+}
+
+/// The hooks `source` defines outside an item the feature gates. A hook is
+/// a function whose name ends in `_for_tests`, wherever it is defined.
+fn ungated(source: &str) -> Vec<String> {
+    let lines = source.lines().collect::<Vec<_>>();
+    let ranges = gated_ranges(&lines);
+    lines
+        .iter()
+        .enumerate()
+        .filter_map(|(index, line)| {
+            let hook = defined(line).filter(|name| name.ends_with(HOOK_SUFFIX))?;
+            (!ranges.iter().any(|range| range.contains(&index)))
+                .then(|| format!("{}: `{hook}` is not gated", index + 1))
+        })
+        .collect()
 }
 
 #[test]
@@ -221,19 +276,35 @@ fn the_test_hooks_are_compiled_only_under_the_feature() {
         .join("src");
     let mut sources = Vec::new();
     rust_sources(&source_root, &mut sources);
-    let mut defined = 0;
+    let mut inventory = Vec::new();
     let mut found = Vec::new();
     for path in sources {
         let source = std::fs::read_to_string(&path).expect("readable source");
-        defined += HOOKS
-            .iter()
-            .filter(|hook| source.contains(&format!("fn {hook}(")))
-            .count();
+        for (line, name) in gated(&source) {
+            if !name.ends_with(HOOK_SUFFIX) {
+                found.push(format!(
+                    "{}:{line}: `{name}` is gated but not named as a hook",
+                    path.display()
+                ));
+            }
+            inventory.push(name);
+        }
         for fault in ungated(&source) {
             found.push(format!("{}:{fault}", path.display()));
         }
     }
-    assert_eq!(defined, HOOKS.len(), "every hook is defined once");
+    let distinct = inventory.iter().collect::<BTreeSet<_>>();
+    assert_eq!(
+        distinct.len(),
+        inventory.len(),
+        "every hook is defined once"
+    );
+    assert!(
+        inventory
+            .iter()
+            .any(|name| name == "startup_event_for_tests"),
+        "the scan finds the gated hooks: {inventory:?}"
+    );
     assert!(
         found.is_empty(),
         "hooks outside the feature:\n{}",
@@ -285,4 +356,32 @@ fn atk_second_testing_enabler() {
     assert!(ungated(gated).is_empty());
     let open = "impl Context<'_> {\n    pub fn root_for_tests(&mut self) {}\n}\n";
     assert_eq!(ungated(open), ["2: `root_for_tests` is not gated"]);
+}
+
+/// F2 of the review of grants: a hook added beside the six, outside the
+/// gate, is reported, whatever its name.
+#[test]
+fn atk_seventh_hook_outside_the_gate() {
+    let source = "#[cfg(feature = \"testing\")]\nimpl Context<'_> {\n    \
+                  pub fn root_for_tests(&mut self) {}\n}\n\n\
+                  impl Context<'_> {\n    pub fn seventh_for_tests(&mut self) {}\n}\n";
+    assert_eq!(ungated(source), ["7: `seventh_for_tests` is not gated"]);
+    let gated_names = gated(source)
+        .into_iter()
+        .map(|(_, name)| name)
+        .collect::<Vec<_>>();
+    assert_eq!(gated_names, ["root_for_tests"]);
+    // A gated function directly under the attribute, and one nested in a
+    // gated module, are both found.
+    let nested = "#[cfg(feature = \"testing\")]\npub fn a_for_tests() {}\n\
+                  /// Doc.\n#[cfg(feature = \"testing\")]\nmod hooks {\n    \
+                  pub fn b_for_tests() {\n        let _ = 1;\n    }\n}\n";
+    assert!(ungated(nested).is_empty());
+    assert_eq!(
+        gated(nested)
+            .into_iter()
+            .map(|(_, name)| name)
+            .collect::<Vec<_>>(),
+        ["a_for_tests", "b_for_tests"]
+    );
 }

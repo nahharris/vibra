@@ -1,0 +1,17 @@
+# F5b of the review of grants: model forwarding is an author contract. The read
+# goes through the grant the model holds, dir.readText, whose projection is its
+# own: root 3, the root policy alone, no limits. No event claims the textOnly
+# narrowing, which did not happen.
+id = "V2-GRANT-model-restrict-keeps-itself"
+rule = "V2-GRANT-model-restrict-keeps-itself"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "03-effects.md#narrowing: a model whose restrict returns its held grant unchanged runs: b.bin, outside textOnly, is Ok(\"B\"), and the one event projects dir.readText itself"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

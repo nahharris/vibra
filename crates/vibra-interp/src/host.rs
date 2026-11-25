@@ -14,7 +14,8 @@
 //! An awaited host-bound member makes one request through
 //! [`HostContext::host`], with the current invocation, the source origin of
 //! the `await`, and the room the memory budget has left. The reply is
-//! accepted at the types of the member's registry row and accounted, the
+//! accepted at the types of the member's registry row and accounted, every
+//! part of it against the room, the
 //! value goes to the continuation, and only then is the receipt committed
 //! ([`Machine::commit`], called from `Machine::execute` once the
 //! continuation has taken the value). A reply of the wrong shape and a
@@ -25,6 +26,7 @@
 //! With no context, a host body and a narrowing are
 //! [`crate::RuntimeError::Unavailable`].
 
+use std::collections::HashSet;
 use std::fmt;
 use std::rc::Rc;
 
@@ -62,15 +64,18 @@ pub(crate) struct HostSlot<'a> {
     pub(crate) context: Option<&'a mut dyn HostContext>,
     pub(crate) pending: Option<Receipt>,
     /// Called each time the value of a completed host call has reached its
-    /// continuation, before the receipt is committed. Only the unit tests
-    /// of this module set it, to see that order.
+    /// continuation, before the receipt is committed. It exists only in the
+    /// unit tests of this module, which set it to see that order.
+    #[cfg(test)]
     pub(crate) delivered: Option<Box<dyn FnMut() + 'a>>,
 }
 
 impl HostSlot<'_> {
     /// Reports that the value of the call whose receipt is pending has
-    /// reached its continuation.
+    /// reached its continuation: to the unit tests' observer, and to no one
+    /// in any other build.
     pub(crate) fn deliver(&mut self) {
+        #[cfg(test)]
         if let Some(delivered) = &mut self.delivered {
             delivered();
         }
@@ -79,13 +84,45 @@ impl HostSlot<'_> {
 
 impl fmt::Debug for HostSlot<'_> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("HostSlot")
-            .field("context", &self.context.is_some())
-            .field("pending", &self.pending)
-            .field("delivered", &self.delivered.is_some())
-            .finish()
+        let mut slot = formatter.debug_struct("HostSlot");
+        slot.field("context", &self.context.is_some())
+            .field("pending", &self.pending);
+        #[cfg(test)]
+        slot.field("delivered", &self.delivered.is_some());
+        slot.finish()
     }
+}
+
+/// The bytes of every part of `value`, a reply the host built whole, each
+/// shared part counted once, as the memory accounting counts them.
+fn reply_bytes(value: &Val<'_>) -> u64 {
+    let mut seen = HashSet::new();
+    let mut parts = vec![value.clone()];
+    let mut total: u64 = 0;
+    while let Some(part) = parts.pop() {
+        if let Some((address, bytes)) = part.storage() {
+            if !seen.insert(address) {
+                continue;
+            }
+            total = total.saturating_add(u64::try_from(bytes).unwrap_or(u64::MAX));
+        }
+        match &part.0 {
+            Repr::Case(case) => {
+                parts.extend(case.fields.iter().map(|(_, field)| field.clone()))
+            }
+            Repr::Record(fields) => {
+                parts.extend(fields.iter().map(|(_, field)| field.clone()))
+            }
+            Repr::List(items) | Repr::Tuple(items) => {
+                parts.extend(items.iter().cloned())
+            }
+            Repr::Opt(Some(inner)) | Repr::Wrapper(inner) => {
+                parts.push(Val::clone(inner))
+            }
+            _ => {}
+        }
+    }
+    total
 }
 
 /// The grant `token`, which the context handed back: a narrowed grant or
@@ -392,6 +429,13 @@ impl<'a> Machine<'a> {
             .ok_or_else(|| Halt::Unavailable("no host context".to_owned()))?;
         let completion = context.host(request).map_err(fault)?;
         let value = reply_value(&row, completion.reply)?;
+        // 06 "Memory": the bytes a call hands the program are compared with
+        // what the budget can still account, which is the room measured
+        // for the request; nothing has run since. The host built the reply
+        // whole, so every part of it counts, not only its top.
+        if reply_bytes(&value) > room {
+            return Err(Halt::Memory);
+        }
         self.allocated(&value)?;
         self.host.pending = completion.receipt;
         Ok(Step::Ret(value))

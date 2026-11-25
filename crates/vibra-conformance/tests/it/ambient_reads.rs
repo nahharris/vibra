@@ -110,6 +110,85 @@ fn scanned_crates(root: &Path) -> BTreeSet<String> {
         .collect()
 }
 
+/// The attribute that gates host-language test code.
+const TEST_GATE: &str = "#[cfg(test)]";
+
+/// Whether `text`, trimmed, opens a module: `mod name`, with or without a
+/// visibility.
+fn opens_module(text: &str) -> bool {
+    let text = text.trim_start();
+    let text = ["pub(crate) ", "pub(super) ", "pub "]
+        .iter()
+        .find_map(|visibility| text.strip_prefix(visibility))
+        .unwrap_or(text);
+    text.starts_with("mod ")
+}
+
+/// The lines of `source`, numbered from one, that are not in a
+/// `#[cfg(test)]` module: the attribute, the `mod` it gates, and that
+/// module's block, matched brace by brace, are left out. A `#[cfg(test)]`
+/// field, function, or other item is kept, and so is every line after the
+/// module.
+fn outside_test_modules(source: &str) -> Vec<(usize, &str)> {
+    let lines = source.lines().collect::<Vec<_>>();
+    let mut kept = Vec::new();
+    let mut index = 0;
+    while let Some(line) = lines.get(index) {
+        let trimmed = line.trim_start();
+        let Some(rest) = trimmed.strip_prefix(TEST_GATE) else {
+            kept.push((index + 1, *line));
+            index += 1;
+            continue;
+        };
+        // The gated item: on the attribute's line, or on the next line that
+        // is neither an attribute nor a comment.
+        let mut item = index;
+        if rest.trim().is_empty() {
+            item += 1;
+            while lines.get(item).is_some_and(|text| {
+                let text = text.trim_start();
+                text.starts_with("#[") || text.starts_with("//")
+            }) {
+                item += 1;
+            }
+        }
+        let opens = lines.get(item).is_some_and(|text| {
+            let text = if item == index { rest } else { text };
+            opens_module(text)
+        });
+        if !opens {
+            kept.push((index + 1, *line));
+            index += 1;
+            continue;
+        }
+        // Skip through the line that closes the module's block, or through
+        // `mod name;`.
+        let mut depth: i64 = 0;
+        let mut opened = false;
+        let mut end = item;
+        while let Some(text) = lines.get(end) {
+            let text = if end == index { rest } else { text };
+            let code = text.split("//").next().unwrap_or(text);
+            for character in code.chars() {
+                match character {
+                    '{' => {
+                        depth += 1;
+                        opened = true;
+                    }
+                    '}' => depth -= 1,
+                    _ => {}
+                }
+            }
+            end += 1;
+            if (opened && depth <= 0) || (!opened && code.trim_end().ends_with(';')) {
+                break;
+            }
+        }
+        index = end;
+    }
+    kept
+}
+
 /// The `patterns` `source` names outside of comments and `#[cfg(test)]`
 /// modules, which are host-language test code and run no program.
 fn references<'p>(
@@ -117,19 +196,14 @@ fn references<'p>(
     patterns: impl Iterator<Item = &'p &'static str> + Clone,
 ) -> Vec<(usize, &'static str)> {
     let mut found = Vec::new();
-    for (index, line) in source.lines().enumerate() {
-        let trimmed = line.trim_start();
-        // Everything from the unit-test module on is test code.
-        if trimmed.starts_with("#[cfg(test)]") {
-            break;
-        }
-        if trimmed.starts_with("//") {
+    for (number, line) in outside_test_modules(source) {
+        if line.trim_start().starts_with("//") {
             continue;
         }
         let code = line.split("//").next().unwrap_or(line);
         for pattern in patterns.clone() {
             if code.contains(pattern) {
-                found.push((index + 1, *pattern));
+                found.push((number, *pattern));
             }
         }
     }
@@ -357,6 +431,39 @@ fn an_ambient_read_is_reported_and_comments_and_test_modules_are_not() {
     );
     assert!(
         ambient_references("let x = 1; // std::fs in a trailing comment").is_empty()
+    );
+}
+
+/// F3 of the review of grants: only a `#[cfg(test)]` module is skipped. A
+/// read after a `#[cfg(test)]` field, function, or other item is found, and
+/// so is a read after a `#[cfg(test)]` module that is not the last item.
+#[test]
+fn atk_read_after_a_test_only_item() {
+    let field = "struct Slot {\n    #[cfg(test)]\n    delivered: u8,\n}\n\
+                 fn read() { let _ = std::fs::read(\"x\"); }\n";
+    assert_eq!(ambient_references(field), [(5, "std::fs"), (5, "fs::")]);
+    let item =
+        "#[cfg(test)]\nfn hook() {}\n\nfn now() { let _ = std::env::var(\"X\"); }\n";
+    assert_eq!(ambient_references(item), [(4, "std::env"), (4, "env::var")]);
+    let module = "#[cfg(test)]\nmod tests {\n    fn f() { std::env::args(); }\n}\n\n\
+                  fn after() { let _ = std::env::var(\"X\"); }\n";
+    assert_eq!(
+        ambient_references(module),
+        [(6, "std::env"), (6, "env::var")]
+    );
+    let inline =
+        "#[cfg(test)] mod tests { use std::fs; }\nfn after() { getrandom(); }\n";
+    assert_eq!(ambient_references(inline), [(2, "getrandom")]);
+    let out_of_line = "#[cfg(test)]\nmod tests;\nfn after() { getrandom(); }\n";
+    assert_eq!(ambient_references(out_of_line), [(3, "getrandom")]);
+    let files = [(
+        "broker.rs".to_owned(),
+        "struct Slot {\n    #[cfg(test)]\n    seen: u8,\n}\nuse std::time::Duration;\n"
+            .to_owned(),
+    )];
+    assert_eq!(
+        host_reads_outside_system(&files),
+        ["src/broker.rs:5 names `std::time`"]
     );
 }
 

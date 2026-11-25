@@ -1,0 +1,18 @@
+# F5b of the review of grants. The first read goes through sub(dir.readText
+# ["sub"]): root 3, the policy allOf(root, sub ["sub"]), the path as written.
+# The restrict returns a model over dir.readText, so the second read projects
+# dir.readText: root 3, the root policy alone. Neither event claims the textOnly
+# narrowing.
+id = "V2-GRANT-model-restrict-swaps-grant"
+rule = "V2-GRANT-model-restrict-swaps-grant"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "03-effects.md#narrowing: a model whose restrict returns a model over another held grant runs: each event projects the grant the read went through"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

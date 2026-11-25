@@ -1,0 +1,28 @@
+# F7 of the review of grants: every observation a generic can make of a value
+# goes through a bound, and no bound but Any admits a grant.
+id = "V2-GRANT-generic-bound"
+rule = "V2-GRANT-generic-bound"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#generics: a grant fixes no type parameter bounded by Equatable or Ordered: an interface value type satisfies only Any, so each call is an unsatisfied bound at the argument that fixes it, related to the bound"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.unsatisfiedBound"
+level = "@error"
+source = "tests/grants.vib"
+span = { start = 2648, end = 2660 }
+related = [{ source = "tests/grants.vib", span = { start = 1821, end = 1830 } }]
+
+[[expect.diagnostics]]
+code = "@type.unsatisfiedBound"
+level = "@error"
+source = "tests/grants.vib"
+span = { start = 2703, end = 2715 }
+related = [{ source = "tests/grants.vib", span = { start = 1954, end = 1961 } }]

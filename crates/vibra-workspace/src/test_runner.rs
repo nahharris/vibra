@@ -819,7 +819,15 @@ fn execute(
     } else {
         None
     };
-    let ended = run_test(&program, root, Some(&mut context), budget);
+    let ended = {
+        #[cfg(test)]
+        let mut faulting = isolation::Faulting::new(&mut context, index);
+        #[cfg(test)]
+        let host: &mut dyn vibra_ir::authority::HostContext = &mut faulting;
+        #[cfg(not(test))]
+        let host: &mut dyn vibra_ir::authority::HostContext = &mut context;
+        run_test(&program, root, Some(host), budget)
+    };
     let mut trace = context.trace().clone();
     trace.bind_driver(world_driver());
     (ended, trace)
@@ -848,3 +856,369 @@ const fn injected(_index: usize) -> Option<RuntimeError> {
 
 #[cfg(test)]
 mod tests;
+
+/// The fault-injection seam of the isolation tests, and the tests that need
+/// the broker behind an interpreter entry.
+#[cfg(test)]
+mod isolation {
+    use std::cell::Cell;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
+    use vibra_host::broker::Context;
+    use vibra_host::trace::{
+        AuditTrace, Event, HostEvent, StdlibIdentity, TraceHeader,
+    };
+    use vibra_host::world::{HostWorld, WorldDriver};
+    use vibra_interp::{EntryArgument, MemoryBudget, RuntimeError, run_entry};
+    use vibra_ir::authority::{
+        GrantToken, HostCompletion, HostContext, HostFault, HostRequest, Issued,
+        NarrowRequest, Narrowed, Receipt,
+    };
+    use vibra_ir::external::host::{HostOp, TestWorldOp};
+    use vibra_ir::{CheckedProgram, Trap, Value};
+    use vibra_types::load_stdlib;
+
+    use super::{TestOutcome, check_selection, run_tests, test_modules};
+    use crate::discovery::discover_project_at;
+    use crate::snapshot::SourceSnapshot;
+
+    thread_local! {
+        /// The selected test, by index, and its host call, counted from one,
+        /// that the seam answers with a driver fault instead of the broker.
+        static FAULT_AT: Cell<Option<(usize, u64)>> = const { Cell::new(None) };
+    }
+
+    /// The host context of one test: its broker context, with the host
+    /// call [`FAULT_AT`] names, if any, faulting.
+    pub(super) struct Faulting<'c, 'd> {
+        context: &'c mut Context<'d>,
+        fault_at: Option<u64>,
+        calls: u64,
+    }
+
+    impl<'c, 'd> Faulting<'c, 'd> {
+        /// The seam over `context` for the `index`-th selected test.
+        pub(super) fn new(context: &'c mut Context<'d>, index: usize) -> Self {
+            let fault_at = FAULT_AT
+                .get()
+                .filter(|(test, _)| *test == index)
+                .map(|(_, call)| call);
+            Self {
+                context,
+                fault_at,
+                calls: 0,
+            }
+        }
+    }
+
+    impl HostContext for Faulting<'_, '_> {
+        fn host(
+            &mut self,
+            request: HostRequest<'_>,
+        ) -> Result<HostCompletion, HostFault> {
+            self.calls += 1;
+            if self.fault_at == Some(self.calls) {
+                return Err(HostFault::InvalidHostValue(
+                    "an injected driver fault".to_owned(),
+                ));
+            }
+            self.context.host(request)
+        }
+
+        fn commit(&mut self, receipt: Receipt) -> Result<(), HostFault> {
+            self.context.commit(receipt)
+        }
+
+        fn narrow(
+            &mut self,
+            request: NarrowRequest<'_>,
+        ) -> Result<Narrowed, HostFault> {
+            self.context.narrow(request)
+        }
+
+        fn test_world(
+            &mut self,
+            op: TestWorldOp,
+            world: GrantToken,
+            arguments: &[Value],
+            invocation: u64,
+        ) -> Result<Issued, HostFault> {
+            self.context.test_world(op, world, arguments, invocation)
+        }
+    }
+
+    const PROJECT: &str = "{format: @project.v2 package: {name: \"hello\" version: \
+                           \"0.1.0\"} targets: [{name: @app kind: @lib root: \
+                           \"src/app\"}] dependencies: [:]}";
+
+    const MAIN: &str = "use @std.io.StdoutText enduse\n\n\
+                        use @std.io.IoError enduse\n\n\
+                        proc emit\n  takes {grant: StdoutText}\n  \
+                        returns outcome: Result(Void IoError)\n  \
+                        performs {StdoutText}\n  visibility @public\n  do\n    \
+                        return await StdoutText.write(grant \"x\")\nendproc\n";
+
+    const TESTS: &str = "use @std.assert enduse\n\n\
+                         use @std.test.TestWorld enduse\n\n\
+                         use @std.io.StdoutText enduse\n\n\
+                         test \"traps\"\n  takes {world: TestWorld}\n  \
+                         performs {TestWorld StdoutText}\n  do\n    \
+                         let {stdoutText: out} be await TestWorld.streams(world) endlet\n    \
+                         let _ be await StdoutText.write(out \"a\") endlet\n    \
+                         let _ be await StdoutText.write(out \"b\") endlet\n\
+                         endtest\n\n\
+                         test \"writes\"\n  takes {world: TestWorld}\n  \
+                         performs {TestWorld StdoutText}\n  do\n    \
+                         let {stdoutText: out} be await TestWorld.streams(world) endlet\n    \
+                         let _ be await StdoutText.write(out \"c\") endlet\n\
+                         endtest\n";
+
+    /// The tests of the entry tree: one test reaches `emit`, so that it is
+    /// lowered.
+    const ENTRY_TESTS: &str = "use @std.assert enduse\n\n\
+                               use @std.test.TestWorld enduse\n\n\
+                               use @std.io.StdoutText enduse\n\n\
+                               use @app.main enduse\n\n\
+                               test \"emits\"\n  takes {world: TestWorld}\n  \
+                               performs {TestWorld StdoutText}\n  do\n    \
+                               let {stdoutText: out} be await TestWorld.streams(world) endlet\n    \
+                               let _ be await main.emit(out) endlet\n\
+                               endtest\n";
+
+    /// A project tree in its own temporary directory, removed on drop.
+    struct Tree(PathBuf);
+
+    impl Tree {
+        fn new(prefix: &str, tests: &str) -> Result<Self, String> {
+            let root =
+                std::env::temp_dir().join(format!("{prefix}-{}", std::process::id()));
+            let _ = fs::remove_dir_all(&root);
+            let write = |relative: &str, text: &str| {
+                let path = root.join(relative);
+                if let Some(parent) = path.parent() {
+                    fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+                }
+                fs::write(path, text).map_err(|error| error.to_string())
+            };
+            write("project.vibon", PROJECT)?;
+            write("src/app/main.vib", MAIN)?;
+            write("tests/run.vib", tests)?;
+            Ok(Self(root))
+        }
+
+        fn snapshot(&self) -> Result<SourceSnapshot, String> {
+            let root = fs::canonicalize(&self.0).map_err(|error| error.to_string())?;
+            let project =
+                discover_project_at(&root).map_err(|faults| format!("{faults:?}"))?;
+            SourceSnapshot::capture(project).map_err(|faults| format!("{faults:?}"))
+        }
+    }
+
+    impl Drop for Tree {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// The host events of `trace`.
+    fn host_events(trace: &AuditTrace) -> Vec<&HostEvent> {
+        trace
+            .events
+            .iter()
+            .filter_map(|event| match event {
+                Event::Host(event) => Some(event),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// `(invocation, parent, root)` of each host event of `trace`.
+    fn ordinals(trace: &AuditTrace) -> Vec<(u64, Option<u64>, u64)> {
+        host_events(trace)
+            .iter()
+            .map(|event| (event.invocation, event.parent, event.grant.root))
+            .collect()
+    }
+
+    /// F7 of the review of grants: a defect trap ends only its own test,
+    /// after host calls, and the next test runs in a fresh world. The first
+    /// test writes `a` to its standard output and then meets a driver fault
+    /// on its second write: `@runtime.invalidHostValue` (06 "Driver
+    /// faults"), and its trace keeps the one completed write, invocation 3
+    /// (the test is 1, `TestWorld.streams` is 2), parent 1, through
+    /// `stdoutText`, the sixth root `streams` issues. The second test starts
+    /// over: its write is again invocation 3, parent 1, root 6, and it
+    /// passes (04 "Test worlds and grants": each test has its own world).
+    #[test]
+    fn a_defect_trap_after_host_calls_ends_only_its_own_test() -> Result<(), String> {
+        let tree = Tree::new("vibra-runner-defect-isolation", TESTS)?;
+        let snapshot = tree.snapshot()?;
+        let control = run_tests(&snapshot, None, MemoryBudget::DEFAULT)
+            .map_err(|error| error.to_string())?;
+        FAULT_AT.set(Some((0, 2)));
+        let run = run_tests(&snapshot, None, MemoryBudget::DEFAULT);
+        FAULT_AT.set(None);
+        let run = run.map_err(|error| error.to_string())?;
+        let [first, second] = run.items() else {
+            return Err(format!("two tests: {}", run.document()));
+        };
+        assert!(
+            matches!(
+                first.outcome(),
+                TestOutcome::Trap {
+                    trap: Trap::InvalidHostValue,
+                    ..
+                }
+            ),
+            "{:?}",
+            first.outcome()
+        );
+        assert_eq!(ordinals(first.trace()), [(3, Some(1), 6)]);
+        assert_eq!(
+            host_events(first.trace())
+                .iter()
+                .map(|event| event.op)
+                .collect::<Vec<_>>(),
+            [HostOp::IoStdoutText]
+        );
+        assert_eq!(second.outcome(), &TestOutcome::Passed);
+        assert_eq!(ordinals(second.trace()), [(3, Some(1), 6)]);
+        // Without the fault, the first test makes both writes, and the
+        // second test's trace is the same as with it.
+        let [control_first, control_second] = control.items() else {
+            return Err(format!("two tests: {}", control.document()));
+        };
+        assert_eq!(control_first.outcome(), &TestOutcome::Passed);
+        assert_eq!(
+            ordinals(control_first.trace()),
+            [(3, Some(1), 6), (4, Some(1), 6)]
+        );
+        assert_eq!(control_second.trace(), second.trace());
+        Ok(())
+    }
+
+    /// The header of a trace of the default world.
+    fn header() -> Result<TraceHeader, String> {
+        let stdlib = load_stdlib().map_err(|error| format!("{error:?}"))?;
+        Ok(TraceHeader {
+            revision: String::new(),
+            target: None,
+            library: StdlibIdentity {
+                package: stdlib.package_name().to_owned(),
+                version: stdlib.package_version().to_owned(),
+            },
+        })
+    }
+
+    /// The test root of `context`, issued once, and the `stdoutText` grant
+    /// of the streams it issues from that root.
+    fn stdout_of(
+        context: &mut Context<'_>,
+    ) -> Result<(GrantToken, GrantToken), String> {
+        let root = context.test_root().map_err(|fault| format!("{fault:?}"))?;
+        match context.test_world(
+            TestWorldOp::Streams,
+            root,
+            &[Value::Str(String::new())],
+            1,
+        ) {
+            Ok(Issued::Bundle(fields)) => fields
+                .iter()
+                .find(|(name, _)| *name == "stdoutText")
+                .map(|(_, token)| (root, *token))
+                .ok_or_else(|| format!("no stdoutText in {fields:?}")),
+            other => Err(format!("streams issued {other:?}")),
+        }
+    }
+
+    /// The bytes the world's standard output holds.
+    fn stdout_bytes(
+        context: &mut Context<'_>,
+        root: GrantToken,
+    ) -> Result<Vec<u8>, String> {
+        match context.test_world(TestWorldOp::Output, root, &[], 9) {
+            Ok(Issued::Output { stdout, .. }) => Ok(stdout),
+            other => Err(format!("output issued {other:?}")),
+        }
+    }
+
+    /// F7 of the review of grants: `run_entry` with a token its context
+    /// never issued, and with a token another context issued. The entry
+    /// `emit(grant: StdoutText)` writes `x` through its grant; the broker
+    /// validates the token at use (06 "Host calls", step 1), so each run is
+    /// the defect trap `@runtime.invalidHostValue`, with no event and
+    /// nothing written. The same entry with the context's own `stdoutText`
+    /// writes `x` and appends one event.
+    #[test]
+    fn run_entry_with_a_token_the_context_never_issued() -> Result<(), String> {
+        let tree = Tree::new("vibra-runner-entry-tokens", ENTRY_TESTS)?;
+        let snapshot = tree.snapshot()?;
+        let modules =
+            test_modules(&snapshot, None).map_err(|error| error.to_string())?;
+        let check = check_selection(&snapshot, None, &modules)
+            .map_err(|error| format!("{error:?}"))?;
+        let set = check
+            .module_set()
+            .ok_or_else(|| format!("checked: {:?}", check.diagnostics()))?;
+        let emit = check
+            .functions()
+            .iter()
+            .find(|(name, _)| name.ends_with("emit"))
+            .map(|(_, index)| *index)
+            .ok_or_else(|| format!("no emit in {:?}", check.functions()))?;
+        let program = CheckedProgram::for_entry(Arc::clone(set), emit)
+            .map_err(|error| error.to_string())?;
+        let world = HostWorld::default();
+        let header = header()?;
+        // `token` makes the grant the entry receives from the run's own
+        // `stdoutText`: every run has a new context.
+        let run = |token: &dyn Fn(GrantToken) -> GrantToken| -> Result<_, String> {
+            let mut driver = WorldDriver::new(&world);
+            let mut context = Context::for_world(&mut driver, header.clone());
+            let (root, own) = stdout_of(&mut context)?;
+            let given = token(own);
+            let ended = run_entry(
+                &program,
+                vec![EntryArgument::Grant(given)],
+                2,
+                &mut context,
+                MemoryBudget::DEFAULT,
+            );
+            let events = host_events(context.trace()).len();
+            let written = stdout_bytes(&mut context, root)?;
+            Ok((ended, events, written, own, given))
+        };
+        let (ended, events, written, _, _) = run(&|own| own)?;
+        assert!(ended.is_ok(), "{ended:?}");
+        assert_eq!((events, written.as_slice()), (1, b"x".as_slice()));
+        let mut other_driver = WorldDriver::new(&world);
+        let mut other = Context::for_world(&mut other_driver, header.clone());
+        let (_, foreign) = stdout_of(&mut other)?;
+        let unissued =
+            |own: GrantToken| GrantToken::new(own.context(), own.slot() + 1_000, 0);
+        let tokens: [(&str, &dyn Fn(GrantToken) -> GrantToken); 2] =
+            [("unissued", &unissued), ("foreign", &|_| foreign)];
+        for (what, token) in tokens {
+            let (ended, events, written, own, given) = run(token)?;
+            assert_eq!(
+                given.context() == own.context(),
+                what == "unissued",
+                "{what}: the token's context"
+            );
+            assert!(
+                matches!(
+                    ended,
+                    Err(RuntimeError::Trap {
+                        trap: Trap::InvalidHostValue,
+                        ..
+                    })
+                ),
+                "{what}: {ended:?}"
+            );
+            assert_eq!((events, written.len()), (0, 0), "{what}");
+        }
+        Ok(())
+    }
+}

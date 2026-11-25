@@ -844,6 +844,142 @@ fn atk_counter_refund_unknown() {
     );
 }
 
+/// Row `ATK-driver-completion-class` (F1 of the review of grants): a
+/// completion whose class disagrees with its error case is a driver fault.
+/// 06 "Host calls" keeps three outcomes apart, "known not submitted,
+/// completed, and may have run": `outcomeUnknown` "MUST NOT be reported as
+/// rejected before submission" (06 "Host error cases"), and of
+/// `limitExceeded` and `unsupported` "wherever they are decided, these two
+/// refusals are not completed calls" (06 "Audit trace"). Each pairing is
+/// `@runtime.invalidHostValue` with no event, and the whole reservation
+/// stays charged: what the driver did may have happened. A `denied` the
+/// driver reports as not submitted is not among them: the chapter does not
+/// settle it (the `denied` of an overflow is not a completed call either),
+/// and it stays accepted.
+#[test]
+fn atk_driver_completion_class() {
+    let inconsistent = [
+        (
+            "not submitted, outcomeUnknown",
+            Completion::NotSubmitted(
+                HostErrorCase::new(HostOp::FsWriteText.row().error, "outcomeUnknown")
+                    .expect("a case"),
+            ),
+        ),
+        (
+            "completed, limitExceeded",
+            completed(
+                err(HostOp::FsWriteText, "limitExceeded"),
+                Measured::Known(0),
+                Measured::Known(0),
+            ),
+        ),
+        (
+            "completed, unsupported",
+            completed(
+                err(HostOp::FsWriteText, "unsupported"),
+                Measured::Known(0),
+                Measured::Known(0),
+            ),
+        ),
+    ];
+    for (pairing, completion) in inconsistent {
+        let script = Scripted::new();
+        let mut driver = script.clone();
+        let mut cx = Context::new(&mut driver, header());
+        let out = bounded(
+            &mut cx,
+            HostInterface::DirWriteText,
+            limits(None, None, Some(10)),
+        );
+        script.tweak(Tweak {
+            completion: Some(completion),
+            ..Tweak::default()
+        });
+        assert!(
+            invalid(write(&mut cx, out, &["a.txt"], "sixsix")),
+            "{pairing}: a driver fault"
+        );
+        assert_eq!(used(&cx, out), [1, 0, 6], "{pairing}: the whole charge");
+        assert_eq!(
+            counters(&cx, out).output_bytes().reserved(),
+            0,
+            "{pairing}: nothing stays reserved"
+        );
+        assert!(cx.trace().events.is_empty(), "{pairing}: no event");
+    }
+}
+
+/// The control of `atk_driver_completion_class`: the pairings the chapters
+/// allow keep their class. A case known not submitted (`unsupported`,
+/// `limitExceeded`, or an operation's own case) refunds the bytes and
+/// records nothing; a completed `denied`, `outcomeUnknown`, or own case is
+/// one event.
+#[test]
+fn consistent_completions_keep_their_class() {
+    let not_submitted = |name: &str| {
+        Completion::NotSubmitted(
+            HostErrorCase::new(HostOp::FsWriteText.row().error, name).expect("a case"),
+        )
+    };
+    let done = |name: &str| {
+        completed(
+            err(HostOp::FsWriteText, name),
+            Measured::Known(0),
+            Measured::Known(0),
+        )
+    };
+    let pairings = [
+        (
+            not_submitted("unsupported"),
+            "unsupported",
+            false,
+            [1, 0, 0],
+        ),
+        (
+            not_submitted("limitExceeded"),
+            "limitExceeded",
+            false,
+            [1, 0, 0],
+        ),
+        (
+            not_submitted("permissionDenied"),
+            "permissionDenied",
+            false,
+            [1, 0, 0],
+        ),
+        (done("denied"), "denied", true, [1, 0, 0]),
+        (done("outcomeUnknown"), "outcomeUnknown", true, [1, 0, 6]),
+        (
+            done("permissionDenied"),
+            "permissionDenied",
+            true,
+            [1, 0, 0],
+        ),
+    ];
+    for (completion, name, due, charged) in pairings {
+        let script = Scripted::new();
+        let mut driver = script.clone();
+        let mut cx = Context::new(&mut driver, header());
+        let out = bounded(
+            &mut cx,
+            HostInterface::DirWriteText,
+            limits(None, None, Some(10)),
+        );
+        script.tweak(Tweak {
+            completion: Some(completion),
+            ..Tweak::default()
+        });
+        assert_eq!(
+            write(&mut cx, out, &["a.txt"], "sixsix"),
+            Ok((err(HostOp::FsWriteText, name), due)),
+            "{name}"
+        );
+        assert_eq!(used(&cx, out), charged, "{name}");
+        assert_eq!(cx.trace().events.len(), usize::from(due), "{name}");
+    }
+}
+
 #[test]
 fn atk_counter_partial_known() {
     let script = Scripted::new();
@@ -1443,6 +1579,77 @@ fn stdin_text_unsized_below_one_scalar() {
     assert_eq!(used(&cx, input), [0, 0, 0]);
 }
 
+/// F7 of the review of grants: a reserved device name in any case reaches
+/// the broker as a path operand, a `sub` prefix, or a policy prefix only
+/// from a value checked source cannot build, since the `RelativePath`
+/// constructor refuses it (03 "Filesystem policies": a name is rejected
+/// "when its stem, after each character is mapped to its Unicode simple
+/// uppercase", is a device stem, as `conın$` is). The broker refuses each
+/// one as a boundary value that is invalid, `@runtime.invalidHostValue`
+/// (06 "Traps"), before the driver is asked, and appends no event.
+#[test]
+fn atk_reserved_names_in_any_case_through_the_broker() {
+    let reserved = [
+        "nul",
+        "Nul.txt",
+        "CON .log",
+        "con\u{131}n$",
+        "Com\u{B9}",
+        "lPt3.x",
+        "CONOUT$",
+        "aUx.tar.gz",
+    ];
+    for name in reserved {
+        let script = Scripted::new();
+        script.file(&[name], "secret");
+        let mut driver = script.clone();
+        let mut cx = Context::new(&mut driver, header());
+        let notes = root(&mut cx, HostInterface::DirReadText);
+        assert!(invalid(read(&mut cx, notes, &[name])), "{name}: a read");
+        assert!(
+            invalid(read(&mut cx, notes, &["sub", name, "a.txt"])),
+            "{name}: a read below it"
+        );
+        let prefix = names(&[name]);
+        assert!(
+            matches!(
+                cx.narrow(NarrowRequest::Sub {
+                    grant: notes,
+                    prefix: &prefix,
+                }),
+                Err(HostFault::InvalidHostValue(_))
+            ),
+            "{name}: a sub"
+        );
+        let policy = files(&[name], &["read"], unit("anyName"));
+        assert!(
+            matches!(
+                cx.narrow(NarrowRequest::Restrict {
+                    grant: notes,
+                    policy: &policy,
+                }),
+                Err(HostFault::InvalidHostValue(_))
+            ),
+            "{name}: a restrict"
+        );
+        assert!(script.calls().is_empty(), "{name}: the driver is not asked");
+        assert!(cx.trace().events.is_empty(), "{name}: no event");
+    }
+    // The nearest accepted names pass the same checks.
+    let script = Scripted::new();
+    script.file(&["nul2"], "ok");
+    script.file(&["con\u{130}n$"], "ok");
+    let mut driver = script.clone();
+    let mut cx = Context::new(&mut driver, header());
+    let notes = root(&mut cx, HostInterface::DirReadText);
+    assert_eq!(read(&mut cx, notes, &["nul2"]), Ok((text("ok"), true)));
+    assert_eq!(
+        read(&mut cx, notes, &["con\u{130}n$"]),
+        Ok((text("ok"), true))
+    );
+    granted(sub(&mut cx, notes, &["nul2"]));
+}
+
 #[test]
 fn deep_ancestry() {
     let worker = std::thread::Builder::new()
@@ -1722,7 +1929,7 @@ fn counters_against_a_model() {
         });
     println!("broker model seed: {seed} (rerun with VIBRA_BROKER_SEED={seed})");
     let mut random = SplitMix64::new(seed);
-    for tree in 0..1_000 {
+    for tree in 0..10_000 {
         model_tree(&mut random, seed, tree);
     }
 }

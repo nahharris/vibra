@@ -1,0 +1,19 @@
+# F7 of the review of grants. A sub is lexical, so naming a file is no refusal.
+# A read of ["x"] is the rebased ["a.txt" "x"], which both rules select, and the
+# world finds a file above it. A read of the empty path is the rebased
+# ["a.txt"]: the file rule of the sub needs a positive number of further names,
+# so it is denied before the driver and appends nothing. The list of the empty
+# path is the prefix itself of a directory rule, and the world finds a file.
+id = "V2-GRANT-sub-file-prefix"
+rule = "V2-GRANT-sub-file-prefix"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "03-effects.md#filesystem-policies: a sub whose prefix is a file is granted; below it a read is a completed notADirectory, a read of the prefix itself is denied, and a list of it is a completed notADirectory"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

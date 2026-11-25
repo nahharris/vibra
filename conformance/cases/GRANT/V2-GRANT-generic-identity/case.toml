@@ -1,0 +1,15 @@
+# F7 of the review of grants. An unbounded type parameter permits no observation
+# of its value, so passing a grant through one only moves it.
+id = "V2-GRANT-generic-identity"
+rule = "V2-GRANT-generic-identity"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "02-type-system.md#generics: a grant through a generic identity, alone and in a record, is the same grant: each read is an event projecting dir.readText"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

@@ -24,3 +24,4 @@ mod owner_coverage;
 mod rules_directory;
 mod runner;
 mod spec_examples;
+mod test_root_callers;
