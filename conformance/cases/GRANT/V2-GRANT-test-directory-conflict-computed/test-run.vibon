@@ -1,0 +1,8 @@
+{
+  format: @testRun.v2
+  result: @command.testFailed
+  tests: [
+    {name: "@tests.run::\"computed\"" result: @test.invalid auditTrace: {format: @auditTrace.v2 revision: "sha256:74f315544f0b12c569695d6054971c5294c00cb493f9f6f96c3b47a773219bfb" drivers: [{provider: @hostWorld.v2 version: "0.0.2"}] policies: [:] redaction: @none events: []}}
+    {name: "@tests.run::\"empty path\"" result: @test.invalid auditTrace: {format: @auditTrace.v2 revision: "sha256:74f315544f0b12c569695d6054971c5294c00cb493f9f6f96c3b47a773219bfb" drivers: [{provider: @hostWorld.v2 version: "0.0.2"}] policies: [:] redaction: @none events: []}}
+  ]
+}

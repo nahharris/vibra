@@ -1,0 +1,38 @@
+use @std.assert enduse
+
+use @std.test.TestWorld enduse
+
+use @std.fs.RelativePath enduse
+
+use @std.policy.ScopeError enduse
+
+fn nested
+  takes {name: Str}
+  returns files: Result(Dict(RelativePath Str) ScopeError)
+  do
+    let parent be try RelativePath([name]) endlet
+    let child be try RelativePath([name "b"]) endlet
+    return Result.ok(value: [child: "2" parent: "1"])
+endfn
+
+test "computed"
+  takes {world: TestWorld}
+  performs {TestWorld}
+  do
+    match nested("a")
+      case Result.ok(value: files)
+        let _ be await TestWorld.directory(world files: files) endlet
+        assert.true(true)
+      case Result.err(error: _)
+        assert.true(false)
+    endmatch
+endtest
+
+test "empty path"
+  takes {world: TestWorld}
+  performs {TestWorld}
+  do
+    let Result.ok(value: root) be RelativePath([]) endlet
+    let _ be await TestWorld.directory(world files: [root: "1"]) endlet
+    assert.true(true)
+endtest

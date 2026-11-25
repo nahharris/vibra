@@ -251,7 +251,7 @@ input (exit 2, no diagnostics).
 | `@test.passed` | the body completed with no failed assertion |
 | `@test.assertionFailed` | an assertion was false, or an operand could not be observed |
 | `@test.trap` | a toolchain defect trap |
-| `@test.invalid` | the selection had static errors |
+| `@test.invalid` | the selection had static errors, or the test's `TestWorld.directory` fixture conflicts, `@test.conflictingFixture` |
 | `@test.unavailable` | the item needs an unsupported construct |
 | `@test.exhausted` | the item exhausted its memory, the host event `@runtime.memoryExhausted` |
 
@@ -259,11 +259,12 @@ input (exit 2, no diagnostics).
 their difference. An item that ended unknown or exhausted is never counted as
 passed, and the other items keep their results. When items differ, the suite
 result follows this precedence: trap, operational exhaustion, unavailable, test
-failed, ok. A diagnostic appears once in the envelope. Every error is attributed
-to every item of an invalid selection; an item's ending diagnostic (its
-`@tool.unavailable`, its trap, its exhaustion, or its observation error) is
-attributed to that item; a warning is attributed to no item. An item keeps the
-audit events it completed before a later failure.
+failed, ok; a test whose fixture conflicts counts as failed. A diagnostic
+appears once in the envelope. Every error is attributed to every item of an
+invalid selection; an item's ending diagnostic (its `@tool.unavailable`, its
+`@test.conflictingFixture`, its trap, its exhaustion, or its observation
+error) is attributed to that item; a warning is attributed to no item. An item
+keeps the audit events it completed before a later failure.
 
 ## Machine contracts
 

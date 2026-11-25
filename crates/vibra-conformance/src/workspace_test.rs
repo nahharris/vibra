@@ -8,7 +8,9 @@
 //! `unavailable` is unsupported, and `operationalFailure` and `trap` are
 //! unknown. A test that exhausts its memory budget ends with the host event
 //! `@runtime.memoryExhausted`, which the case expects with
-//! `expect.hostEvent`; its item is `@test.exhausted` in the observation.
+//! `expect.hostEvent`; its item is `@test.exhausted` in the observation. A
+//! test whose `TestWorld.directory` fixture conflicts is `@test.invalid`,
+//! and its `@test.conflictingFixture` joins the observed diagnostics.
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 use vibra_interp::MemoryBudget;
@@ -64,6 +66,12 @@ impl ProfileHandler for WorkspaceTestHandler {
             .map_err(|error| HandlerError::new(error.to_string()))?;
         let mut observation = CaseObservation::new(verdict(run.result()));
         observation.diagnostics = run.diagnostics().to_vec();
+        observation
+            .diagnostics
+            .extend(run.items().iter().filter_map(|item| match item.outcome() {
+                TestOutcome::Invalid(Some(diagnostic)) => Some(diagnostic.clone()),
+                _ => None,
+            }));
         observation.test_run = Some(run.document());
         if run
             .items()

@@ -254,7 +254,7 @@ fn the_loader_reports_an_external_fault_as_a_defect() {
     );
     let notes = notes(error.as_ref());
     assert!(notes.contains("@external.unknownSymbol"), "{notes}");
-    assert!(notes.contains("stdlib/src/std/builtin.vib"), "{notes}");
+    assert!(notes.contains("@std.builtin"), "{notes}");
 }
 
 #[test]

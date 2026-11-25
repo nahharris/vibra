@@ -1489,7 +1489,10 @@ every executor numbers a run alike.
 was written. It is a
 [span record](07-diagnostics-and-conformance.md#persistent-observations),
 `{sourceId: Str start: U64 end: U64}`: the source identity, as spans and
-diagnostics spell it, and the half-open byte offsets of the node. Nothing
+diagnostics spell it (for a node of an embedded library module, its module
+atom, as the
+[source snapshot](04-programs-and-packages.md#discovery-and-the-source-snapshot)
+defines), and the half-open byte offsets of the node. Nothing
 numbers origins. Where no source origin is known, a document omits its
 optional `origin` field, a JSON projection writes `null`, and a value holds
 `Option.none()`; where one is known, a JSON projection writes it as a

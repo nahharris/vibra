@@ -134,6 +134,7 @@ its level MUST agree with it.
 | `@tool.missingLinkTool` | `@error` |
 | `@tool.linkFailed` | `@error` |
 | `@tool.incompatibleArtifact` | `@error` |
+| `@test.conflictingFixture` | `@error` |
 
 The compiler owns this closed registry. Each entry has a level, a domain
 (the code's first component), a summary, and a **fix capability**, which is
@@ -148,9 +149,11 @@ every code any chapter cites is in the registry.
 - No source declaration and no data file creates a code.
 - A retired code is never reused for another meaning. Changing a level is a
   versioned change of the registry.
-- `@command.*` results, `@test.*` results, document format atoms, and the
-  cases of ordinary error types are not diagnostics and are not in the
-  registry.
+- `@command.*` results, the six test results of the
+  [test command](05-tooling.md#tests-and-selection) (`@test.passed` and the
+  others), document format atoms, and the cases of ordinary error types are
+  not diagnostics and are not in the registry. `@test.conflictingFixture`
+  is a diagnostic code.
 
 ### Diagnostic documents and spans
 
@@ -421,6 +424,7 @@ change to this table, with a positive case and a nearest negative case.
 | a missing platform linker | `@tool.missingLinkTool`, no location |
 | a failed link step | `@tool.linkFailed`, no location |
 | an artifact whose ABI, registry, or identities the runtime cannot admit | `@tool.incompatibleArtifact`, no location |
+| a [conflicting fixture](04-programs-and-packages.md#test-worlds-and-grants) of `TestWorld.directory`: a `files` key that is empty or a proper prefix of another key | `@test.conflictingFixture`, the `await` of the call; the test is `@test.invalid` |
 
 - Both traps mean the toolchain or runtime is wrong, not the program's
   input. A trap has a source origin only when the runtime can identify the

@@ -1,0 +1,13 @@
+id = "V2-RUNTIME-trace-library-origin"
+rule = "V2-RUNTIME-trace-library-origin"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "06-runtime.md#audit-trace: io.readAllText on a test-world stdin reads until the empty read; each event's origin is the await inside @std.io, whose source identity is its module atom (04 Discovery and the source snapshot), and each parent is the library invocation that awaited"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

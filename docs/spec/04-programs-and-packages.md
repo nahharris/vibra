@@ -304,7 +304,11 @@ a reference whose case differs from the file's actual name is
 `@module.fileDirectoryCollision`. Entries are sorted by project-relative
 path. Source identities are project-relative paths with `/` separators, and
 bytes are copied exactly into an immutable snapshot: repeated snapshots of an
-unchanged tree are identical. Later phases receive the snapshot and no
+unchanged tree are identical. The source identity of an embedded
+[standard library](#the-standard-library) module is its module path written as
+the module atom, such as `@std.io`; spans, related spans, and source origins
+in the library carry it. It cannot collide with a project file's identity,
+which is a path ending in `.vib`. Later phases receive the snapshot and no
 filesystem access.
 
 The optional top-level `tests/` directory is the source root of the reserved
@@ -744,9 +748,9 @@ The embedded library gets no exemption from the rule that imports do not
 form a cycle.
 
 Adding a module or symbol is a change to this specification and to the
-runtime registry. A project module whose source identity collides with an
-embedded one is `@module.sourceIdCollision` at offset 0 of the project
-module.
+runtime registry. An embedded module's source identity is its module atom, as
+[the source snapshot](#discovery-and-the-source-snapshot) defines, so no
+project module shares it.
 
 ## Tests
 
@@ -813,7 +817,7 @@ can name `TestWorld`, so no target can obtain one.
 `TestWorld` has these members. Each is a `proc` that takes the world as its
 one required parameter `{world: Self}`, takes its fixture data as labelled
 parameters with the constant defaults shown, performs only `TestWorld`, and
-cannot fail.
+cannot fail for a well-formed fixture.
 
 | Member | Labelled parameters | Returns |
 | --- | --- | --- |
@@ -838,9 +842,19 @@ test's world are unusable in another. The members behave as follows:
 - Each grant `directory` returns permits its own action everywhere in the
   new directory, with no limits: a `files` rule with `prefix: []`,
   `depth: @tree`, and `anyName` for the read and write grants, a
-  `directories` rule of `depth: @tree` for `list` and `stat`. A test
-  narrows them with `restrict`, `sub`, and `limit`. A multi-name path in
+  `directories` rule of `depth: @tree` for `list`, and for `stat`, whose
+  request on a directory the directory rules decide and on any other entry
+  the file rules decide, the `anyOf` of a `directories` rule and a `files`
+  rule with `@stat`, both with `prefix: []` and `depth: @tree`, the file
+  rule with `anyName`. A test narrows them with `restrict`, `sub`, and `limit`. A multi-name path in
   `files` implies its parent directories.
+- A `files` argument that holds the empty path, or in which one key is a
+  proper prefix of another so that one entry would be both a file and a
+  directory, is a **conflicting fixture**, whether its keys are literals or
+  computed. The call issues nothing and appends no event, and the test ends
+  `@test.invalid` with `@test.conflictingFixture` at the `await` of the
+  call. It is a fault of the test's setup, not a value the program sees and
+  not a trap; the other tests run in their own worlds as usual.
 - `directory` and `streams` make a new resource on every call. `streams`
   makes new standard streams whose input is its `stdin` argument.
 - `environment`, `clocks`, and `random` return grants over the world's one
@@ -877,7 +891,8 @@ the canonical encodings of the expected and actual values, and the call's
 span, and stops that test's body. It is not a trap, a `Result`, or a host
 event. Each test ends as exactly one of `@test.passed`,
 `@test.assertionFailed`, `@test.invalid`, `@test.unavailable`,
-`@test.trap`, or `@test.exhausted`.
+`@test.trap`, or `@test.exhausted`. A test is `@test.invalid` when its
+selection has static errors or when its fixture conflicts.
 
 Before any selected test runs, the runner checks every selected test module
 and its import closure. An error there makes every selected test

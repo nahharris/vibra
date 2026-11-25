@@ -16,4 +16,4 @@ code = "@effect.outsideCeiling"
 level = "@error"
 source = "src/app/main.vib"
 span = { start = 155, end = 182 }
-related = [{ source = "src/app/main.vib", span = { start = 161, end = 182 } }, { source = "stdlib/src/std/io.vib", span = { start = 2990, end = 3013 } }, { source = "stdlib/src/std/io.vib", span = { start = 3571, end = 3601 } }]
+related = [{ source = "src/app/main.vib", span = { start = 161, end = 182 } }, { source = "@std.io", span = { start = 2990, end = 3013 } }, { source = "@std.io", span = { start = 3571, end = 3601 } }]

@@ -534,3 +534,92 @@ fn test_json_validates() {
     assert_eq!(codes(&document), ["@project.notFound"]);
     assert_eq!(counts(&document), (0, 0, 0));
 }
+
+/// `tests/world.vib`: a test whose `TestWorld.directory` fixture holds `["a"]`
+/// as a file and as the parent of `["a" "b"]`. The `await` of the call is
+/// bytes 293 to 348, on line 13.
+const CONFLICTING: &str = "use @std.assert enduse\n\nuse @std.test.TestWorld enduse\n\n\
+    use @std.fs.RelativePath enduse\n\n\
+    test \"conflict\"\n  takes {world: TestWorld}\n  performs {TestWorld}\n  do\n    \
+    let Result.ok(value: a) be RelativePath([\"a\"]) endlet\n    \
+    let Result.ok(value: b) be RelativePath([\"a\" \"b\"]) endlet\n    \
+    let _ be await TestWorld.directory(world files: [a: \"1\" b: \"2\"]) endlet\nendtest\n";
+
+/// 04 "Test worlds and grants" and 05 "Tests and selection": a conflicting
+/// fixture ends its test `@test.invalid` with `@test.conflictingFixture` at
+/// the `await`, attributed to that item; it counts as failed, so the suite is
+/// `@command.testFailed` (exit 1), and the other test still passes.
+#[test]
+fn test_conflicting_fixture() {
+    let root = project(
+        "conflicting-fixture",
+        &[
+            ("tests/math.vib", &math_tests(&[ADDS])),
+            ("tests/world.vib", CONFLICTING),
+        ],
+    );
+    let (code, document) = test(&root, &[]);
+    assert_eq!(code, 1, "{document}");
+    assert_eq!(document["result"], "@command.testFailed");
+    assert_eq!(document["status"], "refuted");
+    assert_eq!(counts(&document), (2, 1, 1));
+    assert_eq!(
+        results(&document),
+        [json!("@test.passed"), json!("@test.invalid")]
+    );
+    let item = &document["payload"]["tests"][1];
+    assert_eq!(item["name"], "@tests.world::\"conflict\"");
+    assert_eq!(item["status"], "refuted");
+    assert_eq!(item["diagnostics"], json!(["@test.conflictingFixture"]));
+    assert_eq!(item["auditTrace"], json!([]));
+    assert_eq!(codes(&document), ["@test.conflictingFixture"]);
+    let span = &document["diagnostics"][0]["primarySpan"];
+    assert_eq!(span["sourceId"], "tests/world.vib");
+    assert_eq!(
+        (span["start"].as_u64(), span["end"].as_u64()),
+        (Some(293), Some(348))
+    );
+    assert_eq!(span["startPosition"]["line"], 13);
+}
+/// `tests/stdin.vib`: one test reading its stdin to the end through
+/// `io.readAllText`, whose host calls are awaited inside `@std.io`.
+const READ_ALL: &str = "use @std.assert enduse\n\nuse @std.test.TestWorld enduse\n\n\
+                        use @std.io enduse\n\nuse @std.io.StdinText enduse\n\n\
+                        test \"reads all\"\n  takes {world: TestWorld}\n  \
+                        performs {TestWorld StdinText}\n  do\n    \
+                        let {stdinText: input} be await TestWorld.streams(world stdin: \"hi\") endlet\n    \
+                        assert.equal(Result.ok(value: \"hi\") await io.readAllText(input))\nendtest\n";
+
+/// 06 "Audit trace": an event's origin is the `await` that ran the host
+/// call, here `await StdinText.read(input 65536u64)` at bytes 3565 to 3601
+/// of `stdlib/src/std/io.vib` (146:22 to 146:58), named by the module atom
+/// `@std.io` (04 "Discovery and the source snapshot"); its positions come
+/// from the library module's text. Two reads: "hi", then the empty end.
+#[test]
+fn test_trace_origin_in_a_library_module() {
+    let root = TempDir::project(
+        "test-library-origin",
+        LIBRARY,
+        &[("src/app/math.vib", MATH), ("tests/stdin.vib", READ_ALL)],
+    );
+    let (code, document) = envelope_in(root.path(), &["--format", "json", "test"]);
+    assert_eq!(code, 0, "{document}");
+    assert_eq!(document["result"], "@command.ok");
+    let trace = document["payload"]["tests"][0]["auditTrace"]
+        .as_array()
+        .expect("an audit trace");
+    assert_eq!(trace.len(), 2);
+    for event in trace {
+        assert_eq!(event["op"], "io.stdinText");
+        assert_eq!(
+            event["origin"],
+            json!({
+                "sourceId": "@std.io",
+                "start": 3565,
+                "end": 3601,
+                "startPosition": {"line": 146, "column": 22},
+                "endPosition": {"line": 146, "column": 58},
+            })
+        );
+    }
+}

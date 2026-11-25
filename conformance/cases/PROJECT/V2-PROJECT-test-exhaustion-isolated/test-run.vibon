@@ -2,7 +2,7 @@
   format: @testRun.v2
   result: @command.operationalFailure
   tests: [
-    {name: "@tests.memory::\"a exhausts\"" result: @test.exhausted auditTrace: {format: @auditTrace.v2 revision: "sha256:efb3f2f544a11a636ad9a1adeafca81991b0c2d0f1e89494ed91ceada0b4a5f1" drivers: [{provider: @hostWorld.v2 version: "0.0.2"}] policies: [:] redaction: @none events: []}}
-    {name: "@tests.memory::\"b passes\"" result: @test.passed auditTrace: {format: @auditTrace.v2 revision: "sha256:efb3f2f544a11a636ad9a1adeafca81991b0c2d0f1e89494ed91ceada0b4a5f1" drivers: [{provider: @hostWorld.v2 version: "0.0.2"}] policies: [:] redaction: @none events: []}}
+    {name: "@tests.memory::\"a exhausts\"" result: @test.exhausted auditTrace: {format: @auditTrace.v2 revision: "sha256:f28deb832e4287dae0ab5ed82d7949dad92618537a5a01267d6e510ac9ae9780" drivers: [{provider: @hostWorld.v2 version: "0.0.2"}] policies: [:] redaction: @none events: []}}
+    {name: "@tests.memory::\"b passes\"" result: @test.passed auditTrace: {format: @auditTrace.v2 revision: "sha256:f28deb832e4287dae0ab5ed82d7949dad92618537a5a01267d6e510ac9ae9780" drivers: [{provider: @hostWorld.v2 version: "0.0.2"}] policies: [:] redaction: @none events: []}}
   ]
 }

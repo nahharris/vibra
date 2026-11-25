@@ -127,51 +127,23 @@ fn the_overlay_is_the_unit_std() {
     assert_eq!(
         modules,
         vec![
-            (
-                "@std.assert",
-                "assert".to_owned(),
-                "stdlib/src/std/assert.vib"
-            ),
-            ("@std.bool", "bool".to_owned(), "stdlib/src/std/bool.vib"),
-            (
-                "@std.builtin",
-                "builtin".to_owned(),
-                "stdlib/src/std/builtin.vib"
-            ),
-            ("@std.bytes", "bytes".to_owned(), "stdlib/src/std/bytes.vib"),
-            ("@std.core", "core".to_owned(), "stdlib/src/std/core.vib"),
-            ("@std.env", "env".to_owned(), "stdlib/src/std/env.vib"),
-            ("@std.fs", "fs".to_owned(), "stdlib/src/std/fs.vib"),
-            ("@std.io", "io".to_owned(), "stdlib/src/std/io.vib"),
-            ("@std.iter", "iter".to_owned(), "stdlib/src/std/iter.vib"),
-            (
-                "@std.option",
-                "option".to_owned(),
-                "stdlib/src/std/option.vib"
-            ),
-            (
-                "@std.policy",
-                "policy".to_owned(),
-                "stdlib/src/std/policy.vib"
-            ),
-            (
-                "@std.process",
-                "process".to_owned(),
-                "stdlib/src/std/process.vib"
-            ),
-            (
-                "@std.random",
-                "random".to_owned(),
-                "stdlib/src/std/random.vib"
-            ),
-            (
-                "@std.result",
-                "result".to_owned(),
-                "stdlib/src/std/result.vib"
-            ),
-            ("@std.str", "str".to_owned(), "stdlib/src/std/str.vib"),
-            ("@std.test", "test".to_owned(), "stdlib/src/std/test.vib"),
-            ("@std.time", "time".to_owned(), "stdlib/src/std/time.vib"),
+            ("@std.assert", "assert".to_owned(), "@std.assert"),
+            ("@std.bool", "bool".to_owned(), "@std.bool"),
+            ("@std.builtin", "builtin".to_owned(), "@std.builtin"),
+            ("@std.bytes", "bytes".to_owned(), "@std.bytes"),
+            ("@std.core", "core".to_owned(), "@std.core"),
+            ("@std.env", "env".to_owned(), "@std.env"),
+            ("@std.fs", "fs".to_owned(), "@std.fs"),
+            ("@std.io", "io".to_owned(), "@std.io"),
+            ("@std.iter", "iter".to_owned(), "@std.iter"),
+            ("@std.option", "option".to_owned(), "@std.option"),
+            ("@std.policy", "policy".to_owned(), "@std.policy"),
+            ("@std.process", "process".to_owned(), "@std.process"),
+            ("@std.random", "random".to_owned(), "@std.random"),
+            ("@std.result", "result".to_owned(), "@std.result"),
+            ("@std.str", "str".to_owned(), "@std.str"),
+            ("@std.test", "test".to_owned(), "@std.test"),
+            ("@std.time", "time".to_owned(), "@std.time"),
         ]
     );
     assert_eq!(&overlay.prelude, stdlib.prelude());
@@ -197,23 +169,23 @@ fn the_overlay_is_resolution_s_embedded_unit() {
     assert_eq!(
         modules,
         [
-            ("@std.assert", "stdlib/src/std/assert.vib"),
-            ("@std.bool", "stdlib/src/std/bool.vib"),
-            ("@std.builtin", "stdlib/src/std/builtin.vib"),
-            ("@std.bytes", "stdlib/src/std/bytes.vib"),
-            ("@std.core", "stdlib/src/std/core.vib"),
-            ("@std.env", "stdlib/src/std/env.vib"),
-            ("@std.fs", "stdlib/src/std/fs.vib"),
-            ("@std.io", "stdlib/src/std/io.vib"),
-            ("@std.iter", "stdlib/src/std/iter.vib"),
-            ("@std.option", "stdlib/src/std/option.vib"),
-            ("@std.policy", "stdlib/src/std/policy.vib"),
-            ("@std.process", "stdlib/src/std/process.vib"),
-            ("@std.random", "stdlib/src/std/random.vib"),
-            ("@std.result", "stdlib/src/std/result.vib"),
-            ("@std.str", "stdlib/src/std/str.vib"),
-            ("@std.test", "stdlib/src/std/test.vib"),
-            ("@std.time", "stdlib/src/std/time.vib"),
+            ("@std.assert", "@std.assert"),
+            ("@std.bool", "@std.bool"),
+            ("@std.builtin", "@std.builtin"),
+            ("@std.bytes", "@std.bytes"),
+            ("@std.core", "@std.core"),
+            ("@std.env", "@std.env"),
+            ("@std.fs", "@std.fs"),
+            ("@std.io", "@std.io"),
+            ("@std.iter", "@std.iter"),
+            ("@std.option", "@std.option"),
+            ("@std.policy", "@std.policy"),
+            ("@std.process", "@std.process"),
+            ("@std.random", "@std.random"),
+            ("@std.result", "@std.result"),
+            ("@std.str", "@std.str"),
+            ("@std.test", "@std.test"),
+            ("@std.time", "@std.time"),
         ]
     );
     for module in unit.modules() {

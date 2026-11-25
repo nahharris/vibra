@@ -19,7 +19,8 @@
 //!    end, and registry order, and its code is attributed to every item it
 //!    affects: every error to every item of an invalid selection, and to an
 //!    item the diagnostic of its own ending (its `@tool.unavailable`, its
-//!    trap, its exhaustion, or its observation error).
+//!    `@test.conflictingFixture`, its trap, its exhaustion, or its
+//!    observation error).
 //! 6. Memory exhaustion is the host event `@runtime.memoryExhausted` on its
 //!    item: the item is `@test.exhausted`, the limit `memory` is reached,
 //!    and the observation is incomplete. It is not a trap.
@@ -39,7 +40,7 @@ use vibra_workspace::{
 
 use crate::args::Invocation;
 use crate::refusal;
-use crate::render::{Response, status_for};
+use crate::render::{Response, source_text, status_for};
 
 /// The memory budget each test runs under: the memory limit of the published
 /// limit profile.
@@ -132,7 +133,7 @@ const fn test_result(outcome: &TestOutcome) -> TestResult {
         TestOutcome::Passed => TestResult::Passed,
         TestOutcome::AssertionFailed(_) => TestResult::AssertionFailed,
         TestOutcome::Trap { .. } => TestResult::Trap,
-        TestOutcome::Invalid => TestResult::Invalid,
+        TestOutcome::Invalid(_) => TestResult::Invalid,
         TestOutcome::Unavailable(_) => TestResult::Unavailable,
         TestOutcome::Exhausted => TestResult::Exhausted,
     }
@@ -145,7 +146,7 @@ const fn item_status(outcome: &TestOutcome) -> Status {
         TestOutcome::Passed => CommandOutcome::Ok,
         TestOutcome::AssertionFailed(_) => CommandOutcome::TestFailed,
         TestOutcome::Trap { .. } => CommandOutcome::Trap,
-        TestOutcome::Invalid => CommandOutcome::Diagnostics,
+        TestOutcome::Invalid(_) => CommandOutcome::Diagnostics,
         TestOutcome::Unavailable(_) => CommandOutcome::Unavailable,
         TestOutcome::Exhausted => CommandOutcome::OperationalFailure,
     })
@@ -170,7 +171,8 @@ fn ending_diagnostic(outcome: &TestOutcome) -> Option<Diagnostic> {
                 MEMORY_BUDGET.bytes
             ),
         )),
-        TestOutcome::Unavailable(diagnostic) => Some(diagnostic.clone()),
+        TestOutcome::Unavailable(diagnostic)
+        | TestOutcome::Invalid(Some(diagnostic)) => Some(diagnostic.clone()),
         TestOutcome::AssertionFailed(failure) => match &failure.kind {
             FailureKind::Observation { code, .. } => Some(
                 Diagnostic::new(
@@ -182,7 +184,7 @@ fn ending_diagnostic(outcome: &TestOutcome) -> Option<Diagnostic> {
             ),
             FailureKind::Assertion => None,
         },
-        TestOutcome::Passed | TestOutcome::Invalid => None,
+        TestOutcome::Passed | TestOutcome::Invalid(None) => None,
     }
 }
 
@@ -220,7 +222,7 @@ fn finish(
             envelope.push(diagnostic.clone());
         }
         attributed.push(match outcome {
-            TestOutcome::Invalid => diagnostics
+            TestOutcome::Invalid(None) => diagnostics
                 .iter()
                 .filter(|diagnostic| diagnostic.is_error())
                 .cloned()
@@ -287,7 +289,7 @@ fn finish(
 /// source.
 fn span_document(origin: &SourceOrigin, response: &Response) -> SpanDocument {
     let source_id = origin.source_id();
-    let text = response.sources.get(source_id).map_or("", String::as_str);
+    let text = source_text(response, source_id);
     SpanDocument::render(origin.span(), &LineIndex::new(text), Some(source_id))
 }
 

@@ -40,7 +40,7 @@ use vibra_ir::external::host::{HostOp, HostRow, HostType, TestWorldOp};
 use vibra_ir::{CheckedFunction, HostBinding, Library, SourceOrigin, Type, TypeId};
 
 use crate::encode::to_neutral;
-use crate::machine::{Halt, Machine, Step, invalid};
+use crate::machine::{Fixture, Halt, Machine, Step, invalid};
 use crate::value::{Repr, Val};
 
 /// One argument of an entry or of a test body, as the caller that issued
@@ -132,11 +132,17 @@ const fn received<'a>(token: GrantToken) -> Val<'a> {
 }
 
 /// The halt of a fault of the context: a memory fault is the host event,
-/// any other the trap `@runtime.invalidHostValue`.
+/// any other the trap `@runtime.invalidHostValue`. Only a test-world member
+/// can answer a conflicting fixture, and `Machine::test_world` takes it
+/// before this.
 fn fault(fault: HostFault) -> Halt {
     match fault {
         HostFault::MemoryExhausted => Halt::Memory,
         HostFault::InvalidHostValue(message) => Halt::HostValue(message),
+        HostFault::ConflictingFixture(names) => Halt::HostValue(format!(
+            "a host operation answered a conflicting fixture [{}]",
+            names.join(" ")
+        )),
     }
 }
 
@@ -384,7 +390,7 @@ impl<'a> Machine<'a> {
         match binding {
             HostBinding::Operation(op) => self.operation(op, *grant, operands, origin),
             HostBinding::TestWorld(op) => {
-                self.test_world(op, *grant, function, operands)
+                self.test_world(op, *grant, function, operands, origin)
             }
         }
     }
@@ -443,13 +449,15 @@ impl<'a> Machine<'a> {
     }
 
     /// A member of `TestWorld`: its labelled arguments as neutral values, in
-    /// slot order, and the record, grant, or bytes it issues.
+    /// slot order, and the record, grant, or bytes it issues. A fixture whose
+    /// paths conflict ends the test at the `await` written at `origin`.
     fn test_world(
         &mut self,
         op: TestWorldOp,
         world: GrantToken,
         function: &'a CheckedFunction,
         operands: &[Val<'a>],
+        origin: Option<&'a SourceOrigin>,
     ) -> Result<Step<'a>, Halt> {
         let Type::Proc(signature) = function.signature.type_info() else {
             return invalid(format!("`{}` is not a procedure", op.symbol()));
@@ -470,9 +478,18 @@ impl<'a> Machine<'a> {
             .context
             .as_deref_mut()
             .ok_or_else(|| Halt::Unavailable("no host context".to_owned()))?;
-        let issued = context
-            .test_world(op, world, &values, invocation)
-            .map_err(fault)?;
+        let issued =
+            context
+                .test_world(op, world, &values, invocation)
+                .map_err(|error| match error {
+                    HostFault::ConflictingFixture(names) => {
+                        Halt::Fixture(Box::new(Fixture {
+                            names,
+                            origin: origin.cloned(),
+                        }))
+                    }
+                    other => fault(other),
+                })?;
         let value = issued_value(op, issued)?;
         self.allocated(&value)?;
         Ok(Step::Ret(value))

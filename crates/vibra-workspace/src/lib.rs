@@ -21,7 +21,8 @@
 //! tests of a snapshot, each in a fresh copy of the default host world or,
 //! with [`run_tests_in`], of a [`HostWorld`] that [`decode_world`] reads,
 //! and [`TestRun::document`] is its `@testRun.v2` observation, with the
-//! [`AuditTrace`] of each test.
+//! [`AuditTrace`] of each test. [`library_source`] gives the text of an
+//! embedded library module by its source identity, for a span that lies in one.
 //!
 //! # Position in the architecture
 //!
@@ -38,6 +39,7 @@ pub mod run;
 
 mod discovery;
 mod format_plan;
+mod library;
 mod project;
 mod resolve;
 mod revision;
@@ -50,6 +52,7 @@ pub use discovery::{DiscoveredProject, discover_project, discover_project_at};
 pub use format_plan::{
     Discovery, FormatPlan, InvalidPath, WorkspaceCapture, format_mode, plan_format,
 };
+pub use library::library_source;
 pub use project::{
     Availability, Dependency, DependencyKind, PROJECT_FILE_NAME, PROJECT_FORMAT,
     Package, Project, Target, TargetKind, decode_project, project_schema,

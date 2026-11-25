@@ -140,7 +140,7 @@
       }
     },
     {
-      "description": "test that admitted its selector carries the test payload. The suite result follows from the items by the precedence trap, operational exhaustion, unavailable, test failed, ok; static errors make every item invalid. A trap the tool itself raises because its own document failed validation keeps the empty payload.",
+      "description": "test that admitted its selector carries the test payload. The suite result follows from the items by the precedence trap, operational exhaustion, unavailable, test failed, ok, an item invalid by its fixture counting as failed; static errors make every item invalid. A trap the tool itself raises because its own document failed validation keeps the empty payload.",
       "if": { "$ref": "#/$defs/testResponse" },
       "then": {
         "if": {
@@ -206,14 +206,19 @@
                   "payload": {
                     "properties": {
                       "tests": {
-                        "contains": { "$ref": "#/$defs/itemFailed" },
+                        "contains": {
+                          "anyOf": [
+                            { "$ref": "#/$defs/itemFailed" },
+                            { "$ref": "#/$defs/itemFixtureInvalid" }
+                          ]
+                        },
                         "items": {
                           "not": {
                             "anyOf": [
                               { "$ref": "#/$defs/itemTrapped" },
                               { "$ref": "#/$defs/itemExhausted" },
                               { "$ref": "#/$defs/itemUnavailable" },
-                              { "$ref": "#/$defs/itemInvalid" }
+                              { "$ref": "#/$defs/itemSelectionInvalid" }
                             ]
                           }
                         }
@@ -240,7 +245,7 @@
                           "not": {
                             "anyOf": [
                               { "$ref": "#/$defs/itemTrapped" },
-                              { "$ref": "#/$defs/itemInvalid" }
+                              { "$ref": "#/$defs/itemSelectionInvalid" }
                             ]
                           }
                         }
@@ -266,7 +271,7 @@
                             "anyOf": [
                               { "$ref": "#/$defs/itemTrapped" },
                               { "$ref": "#/$defs/itemExhausted" },
-                              { "$ref": "#/$defs/itemInvalid" }
+                              { "$ref": "#/$defs/itemSelectionInvalid" }
                             ]
                           }
                         }
@@ -405,6 +410,21 @@
     "itemInvalid": {
       "properties": { "result": { "const": "@test.invalid" } },
       "required": ["result"]
+    },
+    "itemFixtureInvalid": {
+      "description": "An item invalid because its TestWorld.directory fixture conflicts; it counts as failed.",
+      "properties": {
+        "result": { "const": "@test.invalid" },
+        "diagnostics": { "contains": { "const": "@test.conflictingFixture" } }
+      },
+      "required": ["result", "diagnostics"]
+    },
+    "itemSelectionInvalid": {
+      "description": "An item invalid because its selection had static errors.",
+      "allOf": [
+        { "$ref": "#/$defs/itemInvalid" },
+        { "not": { "$ref": "#/$defs/itemFixtureInvalid" } }
+      ]
     },
     "itemUnavailable": {
       "properties": { "result": { "const": "@test.unavailable" } },

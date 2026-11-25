@@ -158,8 +158,10 @@ pub enum TestOutcome {
         /// Where the trapping node was written, when one was.
         origin: Option<SourceOrigin>,
     },
-    /// `@test.invalid`: the selection had static errors.
-    Invalid,
+    /// `@test.invalid`: the selection had static errors (`None`), or the
+    /// test's `TestWorld.directory` fixture conflicts, the
+    /// `@test.conflictingFixture` at the `await` of the call.
+    Invalid(Option<Diagnostic>),
     /// `@test.unavailable`: the test's declaration closure reaches a form
     /// this toolchain does not implement, the `@tool.unavailable` at it.
     Unavailable(Diagnostic),
@@ -176,7 +178,7 @@ impl TestOutcome {
             Self::Passed => "@test.passed",
             Self::AssertionFailed(_) => "@test.assertionFailed",
             Self::Trap { .. } => "@test.trap",
-            Self::Invalid => "@test.invalid",
+            Self::Invalid(_) => "@test.invalid",
             Self::Unavailable(_) => "@test.unavailable",
             Self::Exhausted => "@test.exhausted",
         }
@@ -254,7 +256,7 @@ impl SuiteResult {
 
     /// The suite result of tests that were checked and ran, by the
     /// precedence trap, operational exhaustion, unavailable, test failed,
-    /// ok.
+    /// ok. A test whose fixture conflicts failed.
     #[must_use]
     pub fn by_precedence<'a>(
         outcomes: impl IntoIterator<Item = &'a TestOutcome>,
@@ -263,8 +265,8 @@ impl SuiteResult {
             TestOutcome::Trap { .. } => 4,
             TestOutcome::Exhausted => 3,
             TestOutcome::Unavailable(_) => 2,
-            TestOutcome::AssertionFailed(_) => 1,
-            TestOutcome::Passed | TestOutcome::Invalid => 0,
+            TestOutcome::AssertionFailed(_) | TestOutcome::Invalid(Some(_)) => 1,
+            TestOutcome::Passed | TestOutcome::Invalid(None) => 0,
         };
         match outcomes.into_iter().map(rank).max() {
             Some(4) => Self::Trap,
@@ -533,7 +535,7 @@ pub fn run_tests_in(
             let Some(check) = &check else {
                 return TestItem {
                     selector: test.selector,
-                    outcome: TestOutcome::Invalid,
+                    outcome: TestOutcome::Invalid(None),
                     instrumentation: None,
                     trace: world_trace(&header),
                 };
@@ -748,6 +750,9 @@ fn outcome(
         Err(RuntimeError::MemoryExhausted { .. }) => (TestOutcome::Exhausted, None),
         Err(RuntimeError::Trap { trap, origin, .. }) => {
             (TestOutcome::Trap { trap, origin }, None)
+        }
+        Err(error @ RuntimeError::ConflictingFixture { .. }) => {
+            (TestOutcome::Invalid(Some(error.diagnostic())), None)
         }
         Err(
             error @ (RuntimeError::UnsupportedValue { .. }

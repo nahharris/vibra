@@ -1,0 +1,19 @@
+id = "V2-GRANT-test-directory-conflict"
+rule = "V2-GRANT-test-directory-conflict"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "04-programs-and-packages.md#test-worlds-and-grants: a fixture whose key [\"a\"] is a proper prefix of [\"a\" \"b\"] ends its test @test.invalid with @test.conflictingFixture at the await, issues nothing, appends no event, and the next test runs in its own world"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+testRun = "test-run.vibon"
+
+[[expect.diagnostics]]
+code = "@test.conflictingFixture"
+level = "@error"
+source = "tests/run.vib"
+span = { start = 400, end = 455 }

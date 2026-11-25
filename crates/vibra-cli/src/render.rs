@@ -14,6 +14,8 @@ use vibra_schema::{
     Status, TestPayload, TestResult,
 };
 
+use vibra_workspace::library_source;
+
 use crate::args::OutputFormat;
 use crate::exit_code;
 
@@ -35,8 +37,9 @@ pub struct Response {
     pub workspace_revision: Option<String>,
     /// The diagnostics, once each.
     pub diagnostics: Vec<Diagnostic>,
-    /// The text of each source a diagnostic names, by source identity, from
-    /// which display positions are derived.
+    /// The text of each captured source a diagnostic names, by source
+    /// identity, from which display positions are derived. An embedded
+    /// library module is not listed: its text is the toolchain's.
     pub sources: BTreeMap<String, String>,
     /// The payload.
     pub payload: Payload,
@@ -114,11 +117,27 @@ fn envelope(response: &Response) -> Result<Envelope, String> {
     envelope
         .workspace_revision
         .clone_from(&response.workspace_revision);
-    let indexes = response
+    let mut indexes = response
         .sources
         .iter()
-        .map(|(source_id, text)| (source_id.clone(), LineIndex::new(text)))
+        .map(|(source_id, text)| (source_id.clone(), LineIndex::new(text.as_str())))
         .collect::<BTreeMap<_, _>>();
+    // A span in an embedded library module is rendered against that module's
+    // text, named by its module atom.
+    for source_id in response.diagnostics.iter().flat_map(|diagnostic| {
+        diagnostic.source_id().into_iter().chain(
+            diagnostic
+                .related()
+                .iter()
+                .filter_map(|related| related.source_id.as_deref()),
+        )
+    }) {
+        if !indexes.contains_key(source_id)
+            && let Some(text) = library_source(source_id)
+        {
+            indexes.insert(source_id.to_owned(), LineIndex::new(text));
+        }
+    }
     // A diagnostic with no location, or naming a source that was never read,
     // is at offset 0 of the empty document.
     let empty = LineIndex::new("");
@@ -136,12 +155,24 @@ fn envelope(response: &Response) -> Result<Envelope, String> {
     Ok(envelope)
 }
 
+/// The text of the source source_id: a captured project document, or an
+/// embedded library module named by its module atom; empty for a source
+/// that was never read.
+pub(crate) fn source_text<'r>(response: &'r Response, source_id: &str) -> &'r str {
+    response
+        .sources
+        .get(source_id)
+        .map(String::as_str)
+        .or_else(|| library_source(source_id))
+        .unwrap_or("")
+}
+
 /// One line per diagnostic on standard error, with its location when it has
 /// one.
 fn write_diagnostics<E: Write>(response: &Response, stderr: &mut E) {
     for diagnostic in &response.diagnostics {
         let location = diagnostic.source_id().map(|source_id| {
-            let text = response.sources.get(source_id).map_or("", String::as_str);
+            let text = source_text(response, source_id);
             let position =
                 LineIndex::new(text).position(diagnostic.primary_span().start());
             format!("{source_id}:{}:{}: ", position.line, position.column)

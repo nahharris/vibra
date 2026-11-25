@@ -91,8 +91,8 @@ fn hex(bytes: &[u8]) -> String {
 
 impl SourceGraph {
     /// The graph of `snapshot`. A module whose source identity equals one of
-    /// `embedded` (the source identities of the embedded modules) is
-    /// `@module.sourceIdCollision`.
+    /// `embedded` (the source identities of the embedded modules, each its
+    /// module atom) is `@module.sourceIdCollision`.
     pub fn build(
         snapshot: &SourceSnapshot,
         embedded: &[&str],

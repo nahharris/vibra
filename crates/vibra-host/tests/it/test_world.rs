@@ -140,6 +140,14 @@ fn directory_issues_six_roots_in_field_name_order() {
     assert_eq!(list.grant.root, 1);
 }
 
+/// The policy of the `stat` root, in the normal form of 03 "The wire form":
+/// a `stat` of a directory is decided by the directory rules and of any
+/// other entry by the file rules, so the root holds one of each, the
+/// directory rule first by its canonical bytes.
+const STAT_POLICY: &str = "{kind: @anyOf items: [{kind: @directoryRule root: @testWorld \
+     prefix: [] depth: @tree actions: [@stat]} {kind: @fileRule root: @testWorld prefix: [] \
+     depth: @tree actions: [@stat] names: {kind: @anyName}}]}";
+
 #[test]
 fn each_directory_root_has_the_policy_of_the_chapter() {
     let mut world = WorldDriver::new(&HostWorld::default());
@@ -190,8 +198,13 @@ fn each_directory_root_has_the_policy_of_the_chapter() {
             "stat",
             HostOp::FsMetadataStat,
             vec![HostArgument::Path(&[])],
-            "{kind: @directoryRule root: @testWorld prefix: [] depth: @tree actions: \
-             [@stat]}",
+            STAT_POLICY,
+        ),
+        (
+            "stat",
+            HostOp::FsMetadataStat,
+            vec![HostArgument::Path(&at)],
+            STAT_POLICY,
         ),
     ];
     for (index, (name, op, arguments, expected)) in cases.iter().enumerate() {
@@ -429,20 +442,28 @@ fn a_foreign_world_and_its_grants_are_invalid_host_values() {
     assert!(matches!(outcome, Err(HostFault::InvalidHostValue(_))));
 }
 
-/// A fixture that holds a path as a file and as a directory makes nothing
-/// and issues nothing. What it is for the test is an open question; it is
-/// `InvalidHostValue` until it is ruled.
+/// A fixture that holds a path as a file and as a directory, or holds the
+/// empty path, makes nothing and issues nothing: it is the typed
+/// `ConflictingFixture` with that path, which ends the test
+/// `@test.invalid` (04 "Test worlds and grants"), never an invalid host
+/// value.
 #[test]
 fn a_conflicting_fixture_issues_nothing() {
     let mut world = WorldDriver::new(&HostWorld::default());
     let mut cx = Context::for_world(&mut world, header());
     let root = cx.test_root().expect("the test root");
-    for fixture in [
-        files(&[(&["a"], "1"), (&["a", "b"], "2")]),
-        files(&[(&[], "1")]),
+    for (fixture, conflict) in [
+        (files(&[(&["a"], "1"), (&["a", "b"], "2")]), vec!["a"]),
+        (files(&[(&["a", "b"], "2"), (&["a"], "1")]), vec!["a"]),
+        (files(&[(&[], "1")]), vec![]),
     ] {
         let outcome = member(&mut cx, TestWorldOp::Directory, root, &[fixture]);
-        assert!(matches!(outcome, Err(HostFault::InvalidHostValue(_))));
+        assert_eq!(
+            outcome,
+            Err(HostFault::ConflictingFixture(
+                conflict.into_iter().map(str::to_owned).collect()
+            ))
+        );
     }
     let grants = bundle(
         member(&mut cx, TestWorldOp::Directory, root, &[files(&[])]).expect("issued"),

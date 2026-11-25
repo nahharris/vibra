@@ -267,7 +267,7 @@ fn a_prelude_path_reaches_its_members() {
             "src/app/main.vib".to_owned(),
             start,
             end,
-            vec![("stdlib/src/std/option.vib".to_owned(), name, name_end)]
+            vec![("@std.option".to_owned(), name, name_end)]
         )]
     );
 }

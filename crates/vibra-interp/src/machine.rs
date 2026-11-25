@@ -50,6 +50,20 @@ pub(crate) enum Halt {
     /// The encoder reached a value that has no value encoding: a plan or a
     /// grant.
     NoEncoding,
+    /// The fixture of a `TestWorld.directory` call conflicts, which ends a
+    /// test body `@test.invalid`.
+    Fixture(Box<Fixture>),
+}
+
+/// A `TestWorld.directory` fixture whose paths conflict, and the `await`
+/// that ran it.
+#[derive(Debug)]
+pub(crate) struct Fixture {
+    /// The path, by its names, held as a file and a directory; empty for
+    /// the empty path.
+    pub(crate) names: Vec<String>,
+    /// The source origin of the `await`.
+    pub(crate) origin: Option<SourceOrigin>,
 }
 
 pub(crate) fn invalid<T>(message: impl Into<String>) -> Result<T, Halt> {

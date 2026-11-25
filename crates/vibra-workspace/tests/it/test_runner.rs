@@ -197,7 +197,7 @@ fn a_static_error_invalidates_the_whole_selection() {
     assert!(
         run.items()
             .iter()
-            .all(|item| item.outcome() == &TestOutcome::Invalid)
+            .all(|item| item.outcome() == &TestOutcome::Invalid(None))
     );
     assert_eq!(run.items().len(), 2);
     assert!(!run.diagnostics().is_empty());

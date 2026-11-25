@@ -105,6 +105,8 @@ pub enum Domain {
     Grant,
     /// Tool commands, limits, and builds.
     Tool,
+    /// The setup of a test in its fake world.
+    Test,
 }
 
 impl Domain {
@@ -124,6 +126,7 @@ impl Domain {
         Self::Contract,
         Self::Grant,
         Self::Tool,
+        Self::Test,
     ];
 
     /// The domain's spelling, without the leading `@` of a code.
@@ -144,6 +147,7 @@ impl Domain {
             Self::Contract => "contract",
             Self::Grant => "grant",
             Self::Tool => "tool",
+            Self::Test => "test",
         }
     }
 }
@@ -474,6 +478,8 @@ diagnostic_registry! {
         "a link step failed";
     ToolIncompatibleArtifact => "@tool.incompatibleArtifact", Tool, Error, None,
         "the runtime cannot admit an artifact's ABI, registry, or identities";
+    TestConflictingFixture => "@test.conflictingFixture", Test, Error, None,
+        "a `TestWorld.directory` fixture names a path as a file and a directory";
 }
 
 impl fmt::Display for DiagnosticCode {
@@ -488,7 +494,7 @@ mod tests {
     use std::collections::BTreeSet;
 
     /// The count of the specification table.
-    const REGISTERED_CODES: usize = 119;
+    const REGISTERED_CODES: usize = 120;
 
     #[test]
     fn the_registry_has_every_code_in_the_specification_table() {

@@ -79,7 +79,7 @@
     }
     {
       path: @std.test
-      digest: "sha256:3257a5da98318c9dc6bbd3cc7275b7db28540d3c09cffc926c0c8d23598d66d7"
+      digest: "sha256:29d0bbddc0efe64db0dfd1a168df24b123054f3fda68b70b7c9502d8c08cdb70"
       languageRoles: []
     }
     {

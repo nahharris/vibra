@@ -47,6 +47,10 @@ pub(crate) fn runtime_error(
         Halt::NoEncoding => {
             trap("a plan or a grant where a value encoding is required".to_owned())
         }
+        Halt::Fixture(fixture) => RuntimeError::ConflictingFixture {
+            names: fixture.names,
+            origin: fixture.origin,
+        },
     }
 }
 

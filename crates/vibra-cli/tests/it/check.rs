@@ -335,3 +335,96 @@ fn the_readme_shows_the_checked_example() {
         );
     }
 }
+
+/// The tree of the conformance case `group/id`, checked in place: `check`
+/// reads it and writes nothing.
+fn corpus_tree(group: &str, id: &str) -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../conformance/cases")
+        .join(group)
+        .join(id)
+        .join("tree")
+}
+
+/// A span document's source, offsets, and display positions.
+fn span_of(span: &Value) -> (String, u64, u64, (u64, u64), (u64, u64)) {
+    let number = |value: &Value| value.as_u64().expect("a number");
+    let position = |value: &Value| (number(&value["line"]), number(&value["column"]));
+    (
+        span["sourceId"].as_str().expect("a source").to_owned(),
+        number(&span["start"]),
+        number(&span["end"]),
+        position(&span["startPosition"]),
+        position(&span["endPosition"]),
+    )
+}
+
+/// 07 "Diagnostic documents and spans": a related span may be in another
+/// document, here the embedded `@std.fs`, whose source identity is its module
+/// atom (04 "Discovery and the source snapshot"); its positions come from the
+/// library module's text. Case `V2-GRANT-view-does-not-narrow`: the receiver
+/// `dir.readText` at bytes 2352 to 2364 (106:39 to 106:51), related to the
+/// name `DirWriteText` of its interface at bytes 5403 to 5415 of
+/// `stdlib/src/std/fs.vib` (234:11 to 234:23).
+#[test]
+fn check_json_related_span_in_a_library_module() {
+    let tree = corpus_tree("GRANT", "V2-GRANT-view-does-not-narrow");
+    let (code, document) = envelope_in(&tree, &["--format", "json", "check"]);
+    assert_eq!(code, 1, "{document}");
+    assert_eq!(document["result"], "@command.diagnostics");
+    assert_eq!(codes(&document), ["@type.unsatisfiedBound"]);
+    let diagnostic = &document["diagnostics"][0];
+    assert_eq!(
+        span_of(&diagnostic["primarySpan"]),
+        (
+            "tests/grants.vib".to_owned(),
+            2352,
+            2364,
+            (106, 39),
+            (106, 51)
+        )
+    );
+    let related = diagnostic["related"].as_array().expect("related spans");
+    assert_eq!(related.len(), 1);
+    assert_eq!(
+        span_of(&related[0]["span"]),
+        ("@std.fs".to_owned(), 5403, 5415, (234, 11), (234, 23))
+    );
+}
+
+/// The same with a primary span in a project file and related spans in the
+/// project file and twice in `@std.io`, the shape of case
+/// `V2-EFFECT-std-read-all-row`: the witness chain `io.readAllText(input)`
+/// (161 to 182), `readTextAfter(input "")` at bytes 2990 to 3013 of
+/// `stdlib/src/std/io.vib` (126:18 to 126:41), and
+/// `StdinText.read(input 65536u64)` at 3571 to 3601 (146:28 to 146:58).
+#[test]
+fn check_json_related_spans_in_a_project_file_and_a_library_module() {
+    let tree = corpus_tree("EFFECT", "V2-EFFECT-std-read-all-row");
+    let (code, document) = envelope_in(&tree, &["--format", "json", "check"]);
+    assert_eq!(code, 1, "{document}");
+    assert_eq!(codes(&document), ["@effect.outsideCeiling"]);
+    let diagnostic = &document["diagnostics"][0];
+    assert_eq!(
+        span_of(&diagnostic["primarySpan"]).0,
+        "src/app/main.vib".to_owned()
+    );
+    let related = diagnostic["related"]
+        .as_array()
+        .expect("related spans")
+        .iter()
+        .map(|related| span_of(&related["span"]))
+        .collect::<Vec<_>>();
+    assert_eq!(related.len(), 3);
+    assert_eq!(
+        (related[0].0.as_str(), related[0].1, related[0].2),
+        ("src/app/main.vib", 161, 182)
+    );
+    assert_eq!(
+        related[1..],
+        [
+            ("@std.io".to_owned(), 2990, 3013, (126, 18), (126, 41)),
+            ("@std.io".to_owned(), 3571, 3601, (146, 28), (146, 58)),
+        ]
+    );
+}

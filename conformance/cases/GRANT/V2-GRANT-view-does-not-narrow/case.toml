@@ -19,4 +19,4 @@ code = "@type.unsatisfiedBound"
 level = "@error"
 source = "tests/grants.vib"
 span = { start = 2352, end = 2364 }
-related = [{ source = "stdlib/src/std/fs.vib", span = { start = 5403, end = 5415 } }]
+related = [{ source = "@std.fs", span = { start = 5403, end = 5415 } }]

@@ -673,7 +673,7 @@ fn an_unknown_member_of_a_prelude_type_is_unknown() {
             "src/app/main.vib".to_owned(),
             span_of(text, "nothere", 0).0,
             span_of(text, "nothere", 0).1,
-            vec![("stdlib/src/std/option.vib".to_owned(), start, end)],
+            vec![("@std.option".to_owned(), start, end)],
         )]
     );
 }

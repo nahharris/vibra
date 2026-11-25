@@ -162,11 +162,12 @@ const EMBEDDED_MODULES: [(&str, &[u8]); 17] = [
     ),
 ];
 
-/// The source identity of the module at the path atom `path`: its file
-/// under `stdlib/src/`, such as `stdlib/src/std/bool.vib`.
+/// The source identity of the module at the path atom `path`: the atom
+/// itself, such as `@std.bool` (`docs/spec/04-programs-and-packages.md`,
+/// "Discovery and the source snapshot"). No project file has it, since a
+/// project file's identity is a path ending in `.vib`.
 fn source_id_of(path: &str) -> String {
-    let parts = path.strip_prefix('@').unwrap_or(path).replace('.', "/");
-    format!("stdlib/src/{parts}.vib")
+    path.to_owned()
 }
 
 /// The exact bytes of one standard-library load.
@@ -243,7 +244,7 @@ impl StdlibModule {
             .unwrap_or_default()
     }
 
-    /// The source identity, such as `stdlib/src/std/bool.vib`.
+    /// The source identity, its module atom, such as `@std.bool`.
     #[must_use]
     pub fn source_id(&self) -> &str {
         &self.source_id
@@ -1156,8 +1157,8 @@ mod tests {
     use super::source_id_of;
 
     #[test]
-    fn a_module_path_names_its_file() {
-        assert_eq!(source_id_of("@std.bool"), "stdlib/src/std/bool.vib");
-        assert_eq!(source_id_of("@std.a.b"), "stdlib/src/std/a/b.vib");
+    fn a_module_source_identity_is_its_atom() {
+        assert_eq!(source_id_of("@std.bool"), "@std.bool");
+        assert_eq!(source_id_of("@std.a.b"), "@std.a.b");
     }
 }

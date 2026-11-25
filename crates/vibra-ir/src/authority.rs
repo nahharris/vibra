@@ -7,7 +7,8 @@
 //! are indices, not authority: the broker validates each on every use. A
 //! typed refusal (`denied`, `limitExceeded`, `unsupported`,
 //! `outcomeUnknown`) is a [`HostReply::Err`]; a [`HostFault`] is only a
-//! defect or a host event, never a program result.
+//! defect, a host event, or a test fixture that ends its test, never a
+//! program result.
 
 use crate::external::host::{HostErrorType, HostOp, TestWorldOp};
 use crate::{SourceOrigin, Value};
@@ -282,7 +283,8 @@ pub enum Issued {
     },
 }
 
-/// A defect or a host event; never a typed refusal.
+/// A defect, a host event, or a test fixture the world cannot build; never
+/// a typed refusal the program sees.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum HostFault {
     /// A token, a receipt, or a reply the broker cannot accept:
@@ -290,6 +292,11 @@ pub enum HostFault {
     InvalidHostValue(String),
     /// The caller's memory budget cannot hold the result.
     MemoryExhausted,
+    /// The `files` of `TestWorld.directory` hold this path, by its names,
+    /// as a file and as a directory, or hold the empty path: the test ends
+    /// `@test.invalid` with `@test.conflictingFixture`, and nothing is
+    /// issued.
+    ConflictingFixture(Vec<String>),
 }
 
 /// The dispatch boundary every host operation passes, in the interpreter
@@ -325,7 +332,8 @@ pub trait HostContext {
     /// # Errors
     ///
     /// A token that is not a test world's, or arguments the member does not
-    /// take.
+    /// take; [`HostFault::ConflictingFixture`] for a `directory` fixture
+    /// whose paths conflict.
     fn test_world(
         &mut self,
         op: TestWorldOp,

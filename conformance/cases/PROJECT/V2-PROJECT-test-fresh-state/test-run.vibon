@@ -2,7 +2,7 @@
   format: @testRun.v2
   result: @command.ok
   tests: [
-    {name: "@tests.state::\"reads once\"" result: @test.passed auditTrace: {format: @auditTrace.v2 revision: "sha256:a3c4605c3de0bc6a959013df91e0b0210d49e3ef007d8099663c1c17f3c69f61" drivers: [{provider: @hostWorld.v2 version: "0.0.2"}] policies: [:] redaction: @none events: []}}
-    {name: "@tests.state::\"reads again\"" result: @test.passed auditTrace: {format: @auditTrace.v2 revision: "sha256:a3c4605c3de0bc6a959013df91e0b0210d49e3ef007d8099663c1c17f3c69f61" drivers: [{provider: @hostWorld.v2 version: "0.0.2"}] policies: [:] redaction: @none events: []}}
+    {name: "@tests.state::\"reads once\"" result: @test.passed auditTrace: {format: @auditTrace.v2 revision: "sha256:58b2cd71138f5f4528a08e41a150d2263c0a20c9b2266c4cd3358da8adead901" drivers: [{provider: @hostWorld.v2 version: "0.0.2"}] policies: [:] redaction: @none events: []}}
+    {name: "@tests.state::\"reads again\"" result: @test.passed auditTrace: {format: @auditTrace.v2 revision: "sha256:58b2cd71138f5f4528a08e41a150d2263c0a20c9b2266c4cd3358da8adead901" drivers: [{provider: @hostWorld.v2 version: "0.0.2"}] policies: [:] redaction: @none events: []}}
   ]
 }

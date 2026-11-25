@@ -16,4 +16,4 @@ code = "@name.unknownSymbol"
 level = "@error"
 source = "src/app/main.vib"
 span = { start = 198, end = 206 }
-related = [{ source = "stdlib/src/std/io.vib", span = { start = 1343, end = 1353 } }]
+related = [{ source = "@std.io", span = { start = 1343, end = 1353 } }]

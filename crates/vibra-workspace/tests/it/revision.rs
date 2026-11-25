@@ -157,7 +157,7 @@ fn a_revision_needs_exactly_one_toolchain_record() {
 /// computes from the bytes alone. A change to `examples/hello/` or to the
 /// library's manifest changes it; the script gives the new value.
 const SCRIPT_REVISION_OF_HELLO: &str =
-    "sha256:6d61869e4278fb95796c0711183519afc403f9ade0f0c661b8631705a3867a33";
+    "sha256:d23fa3f51e7a261cea493d528b950cd021c7f21d2ba26dc406cb22d6c67c4986";
 
 #[test]
 fn the_script_agrees_with_the_engine() {

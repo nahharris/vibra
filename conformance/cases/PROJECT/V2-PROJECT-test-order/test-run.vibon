@@ -2,9 +2,9 @@
   format: @testRun.v2
   result: @command.ok
   tests: [
-    {name: "@tests.a::\"zeta\"" result: @test.passed auditTrace: {format: @auditTrace.v2 revision: "sha256:03cf8c5888ffb2701ea0ac1f2b9407833b2f91f22fbf9fca0ba2427629e55dfa" drivers: [{provider: @hostWorld.v2 version: "0.0.2"}] policies: [:] redaction: @none events: []}}
-    {name: "@tests.a::\"alpha\"" result: @test.passed auditTrace: {format: @auditTrace.v2 revision: "sha256:03cf8c5888ffb2701ea0ac1f2b9407833b2f91f22fbf9fca0ba2427629e55dfa" drivers: [{provider: @hostWorld.v2 version: "0.0.2"}] policies: [:] redaction: @none events: []}}
-    {name: "@tests.b::\"second\"" result: @test.passed auditTrace: {format: @auditTrace.v2 revision: "sha256:03cf8c5888ffb2701ea0ac1f2b9407833b2f91f22fbf9fca0ba2427629e55dfa" drivers: [{provider: @hostWorld.v2 version: "0.0.2"}] policies: [:] redaction: @none events: []}}
-    {name: "@tests.b::\"first\"" result: @test.passed auditTrace: {format: @auditTrace.v2 revision: "sha256:03cf8c5888ffb2701ea0ac1f2b9407833b2f91f22fbf9fca0ba2427629e55dfa" drivers: [{provider: @hostWorld.v2 version: "0.0.2"}] policies: [:] redaction: @none events: []}}
+    {name: "@tests.a::\"zeta\"" result: @test.passed auditTrace: {format: @auditTrace.v2 revision: "sha256:0d08bd4b1e38ac5f431e33cf3f5c62a74cdfab0d8ecf91ffe5b172f32d461436" drivers: [{provider: @hostWorld.v2 version: "0.0.2"}] policies: [:] redaction: @none events: []}}
+    {name: "@tests.a::\"alpha\"" result: @test.passed auditTrace: {format: @auditTrace.v2 revision: "sha256:0d08bd4b1e38ac5f431e33cf3f5c62a74cdfab0d8ecf91ffe5b172f32d461436" drivers: [{provider: @hostWorld.v2 version: "0.0.2"}] policies: [:] redaction: @none events: []}}
+    {name: "@tests.b::\"second\"" result: @test.passed auditTrace: {format: @auditTrace.v2 revision: "sha256:0d08bd4b1e38ac5f431e33cf3f5c62a74cdfab0d8ecf91ffe5b172f32d461436" drivers: [{provider: @hostWorld.v2 version: "0.0.2"}] policies: [:] redaction: @none events: []}}
+    {name: "@tests.b::\"first\"" result: @test.passed auditTrace: {format: @auditTrace.v2 revision: "sha256:0d08bd4b1e38ac5f431e33cf3f5c62a74cdfab0d8ecf91ffe5b172f32d461436" drivers: [{provider: @hostWorld.v2 version: "0.0.2"}] policies: [:] redaction: @none events: []}}
   ]
 }

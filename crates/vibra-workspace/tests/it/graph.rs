@@ -68,3 +68,36 @@ fn a_module_with_an_embedded_source_identity_collides() {
         )]
     );
 }
+
+/// 04 "Discovery and the source snapshot": an embedded module's source
+/// identity is its module atom and a project module's is a path ending in
+/// `.vib`, so they never meet, even for a project module named like a
+/// library one.
+#[test]
+fn a_project_module_never_shares_an_embedded_source_identity() {
+    let project = TempDir::project("graph-atom", LIBRARY, &[("src/app/io.vib", "")]);
+    let snapshot = capture(project.path()).expect("captured");
+    let library = vibra_types::load_stdlib().expect("the embedded library");
+    let embedded = library
+        .modules()
+        .iter()
+        .map(|module| module.source_id())
+        .collect::<Vec<_>>();
+    assert!(!embedded.is_empty());
+    for module in library.modules() {
+        assert_eq!(module.source_id(), module.path());
+        assert!(
+            !module.source_id().ends_with(".vib"),
+            "{}",
+            module.source_id()
+        );
+    }
+    let graph = SourceGraph::build(&snapshot, &embedded).expect("no collision");
+    assert!(
+        graph
+            .canonical_text()
+            .contains("{path: @app.io sourceId: \"src/app/io.vib\""),
+        "{}",
+        graph.canonical_text()
+    );
+}

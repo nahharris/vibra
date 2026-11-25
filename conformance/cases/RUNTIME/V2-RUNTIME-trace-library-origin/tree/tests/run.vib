@@ -1,0 +1,15 @@
+use @std.assert enduse
+
+use @std.test.TestWorld enduse
+
+use @std.io enduse
+
+use @std.io.StdinText enduse
+
+test "reads all"
+  takes {world: TestWorld}
+  performs {TestWorld StdinText}
+  do
+    let {stdinText: input} be await TestWorld.streams(world stdin: "hi") endlet
+    assert.equal(Result.ok(value: "hi") await io.readAllText(input))
+endtest

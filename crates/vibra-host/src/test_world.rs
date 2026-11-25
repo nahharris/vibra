@@ -12,8 +12,9 @@
 //! - `directory` makes a new virtual directory holding the fixture's UTF-8
 //!   files. Each of its six roots permits its own action everywhere in the
 //!   directory: a file rule with `prefix: []`, `depth: @tree`, and
-//!   `@anyName` for the read and the write grants, and a directory rule of
-//!   `depth: @tree` for `list` and `stat`.
+//!   `@anyName` for the read and the write grants, a directory rule of
+//!   `depth: @tree` for `list`, and for `stat` the `anyOf` of that directory
+//!   rule and that file rule, each with `@stat`.
 //! - `streams` makes new standard streams whose input is its `stdin`.
 //! - `environment` sets the world's one environment; its variable grant
 //!   permits every name.
@@ -69,20 +70,11 @@ fn invalid(message: impl Into<String>) -> HostFault {
     HostFault::InvalidHostValue(message.into())
 }
 
-/// The fault of a primitive of the world that made nothing.
-fn world_fault(op: TestWorldOp, error: &WorldError) -> HostFault {
+/// The fault of a primitive of the world that made nothing. A fixture
+/// whose paths conflict is the test's setup fault, not a defect.
+fn world_fault(error: WorldError) -> HostFault {
     match error {
-        WorldError::Conflict(conflict) => invalid(format!(
-            "the fixture of `{}` holds the path [{}] as a file and a directory, or as \
-             the directory itself",
-            op.symbol(),
-            conflict
-                .names
-                .iter()
-                .map(|name| format!("{name:?}"))
-                .collect::<Vec<_>>()
-                .join(" ")
-        )),
+        WorldError::Conflict(conflict) => HostFault::ConflictingFixture(conflict.names),
         WorldError::Exhausted => HostFault::MemoryExhausted,
     }
 }
@@ -92,9 +84,10 @@ fn world_fault(op: TestWorldOp, error: &WorldError) -> HostFault {
 ///
 /// # Errors
 ///
-/// `InvalidHostValue` for arguments that are not the member's, or a
-/// fixture whose paths conflict; [`HostFault::MemoryExhausted`] when the
-/// world has no resource identity left.
+/// `InvalidHostValue` for arguments that are not the member's;
+/// [`HostFault::ConflictingFixture`] for a fixture whose paths conflict;
+/// [`HostFault::MemoryExhausted`] when the world has no resource identity
+/// left.
 pub(crate) fn member(
     op: TestWorldOp,
     world: &mut WorldDriver,
@@ -105,9 +98,8 @@ pub(crate) fn member(
             let [files] = arguments else {
                 return Err(arity(op));
             };
-            let resource = world
-                .make_directory(fixture(files)?)
-                .map_err(|error| world_fault(op, &error))?;
+            let resource =
+                world.make_directory(fixture(files)?).map_err(world_fault)?;
             roots(op, |interface| {
                 Ok(Root {
                     interface,
@@ -123,7 +115,7 @@ pub(crate) fn member(
             };
             let streams = world
                 .make_streams(stdin.clone().into_bytes())
-                .map_err(|error| world_fault(op, &error))?;
+                .map_err(world_fault)?;
             roots(op, |interface| {
                 let resource = match interface {
                     HostInterface::StdinText | HostInterface::StdinBytes => {
@@ -155,7 +147,7 @@ pub(crate) fn member(
                 .collect::<Result<BTreeMap<_, _>, HostFault>>()?;
             let environment = world
                 .set_environment(variables, arguments)
-                .map_err(|error| world_fault(op, &error))?;
+                .map_err(world_fault)?;
             roots(op, |interface| {
                 let resource = match interface {
                     HostInterface::EnvReadVar => environment.variables,
@@ -333,7 +325,12 @@ fn directory_policy(interface: HostInterface) -> Result<Policy, HostFault> {
             files(vec![FileAction::Replace, FileAction::Create])
         }
         HostInterface::DirList => directories(vec![DirAction::List]),
-        HostInterface::DirStat => directories(vec![DirAction::Stat]),
+        // 03 "Filesystem policies": a `stat` of a directory is decided by the
+        // directory rules and of any other entry by the file rules.
+        HostInterface::DirStat => Expr::AnyOf(vec![
+            directories(vec![DirAction::Stat]),
+            files(vec![FileAction::Stat]),
+        ]),
         _ => return Err(foreign(TestWorldOp::Directory, interface)),
     };
     Policy::new(&expression, 0)

@@ -2,8 +2,9 @@
 // grant the test runner hands a test that takes it. Each member binds a row
 // of the test-world registry with `external @host`: it takes the world, takes
 // its fixture data as labelled parameters with constant defaults, performs
-// only `TestWorld`, and cannot fail. No provider issues a `TestWorld`, so no
-// target can obtain one.
+// only `TestWorld`, and cannot fail for a well-formed fixture: a `directory`
+// fixture whose paths conflict ends the test `@test.invalid`. No provider
+// issues a `TestWorld`, so no target can obtain one.
 
 use @std.fs.DirReadBytes enduse
 

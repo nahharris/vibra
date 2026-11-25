@@ -253,6 +253,15 @@ pub enum RuntimeError {
         /// The form, for a person.
         message: String,
     },
+    /// A `TestWorld.directory` fixture holds a path as a file and a
+    /// directory, or holds the empty path: `@test.conflictingFixture`, which
+    /// ends the test `@test.invalid`. It is not a trap.
+    ConflictingFixture {
+        /// The path, by its names; empty for the empty path.
+        names: Vec<String>,
+        /// The source origin of the `await` of the call, when known.
+        origin: Option<SourceOrigin>,
+    },
 }
 
 impl RuntimeError {
@@ -270,6 +279,7 @@ impl RuntimeError {
             Self::MemoryExhausted { .. } => DiagnosticCode::RuntimeMemoryExhausted,
             Self::UnsupportedValue { .. } => DiagnosticCode::ToolUnsupportedValue,
             Self::Unavailable { .. } => DiagnosticCode::ToolUnavailable,
+            Self::ConflictingFixture { .. } => DiagnosticCode::TestConflictingFixture,
         }
     }
 
@@ -313,6 +323,28 @@ impl RuntimeError {
             ),
             Self::Unavailable { message } => {
                 Diagnostic::new(self.code(), at_start, message.clone())
+            }
+            Self::ConflictingFixture { names, origin } => {
+                let message = if names.is_empty() {
+                    "the fixture of `TestWorld.directory` holds the empty path"
+                        .to_owned()
+                } else {
+                    format!(
+                        "the fixture of `TestWorld.directory` holds the path [{}] as a file and a directory",
+                        names
+                            .iter()
+                            .map(|name| format!("{name:?}"))
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                    )
+                };
+                match origin {
+                    Some(origin) => {
+                        Diagnostic::new(self.code(), origin.span(), message)
+                            .with_source_id(origin.source_id())
+                    }
+                    None => Diagnostic::new(self.code(), at_start, message),
+                }
             }
         }
     }
