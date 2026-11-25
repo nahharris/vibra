@@ -4,16 +4,23 @@
 //! Every row has a wire symbol `<owner>.<member>`, with a lower-case owner
 //! and a camelCase member, exact generic, parameter, and result types over
 //! the role-bound library types and the [narrowing types](NarrowingType),
-//! and a purity flag. Every row is pure except the three assertion rows. Only
-//! the embedded standard library binds a row.
+//! a purity flag, and a totality mark. Every row is pure except the three
+//! assertion rows. Only the embedded standard library binds a row.
+//!
+//! A row marked **total** is pure, total, and cannot fault, so a call of a
+//! function bound to it is an atom of the certified fragment of guard
+//! predicates (`docs/spec/02-type-system.md`, "Predicates"). The one such
+//! row is `fs.validNames`, the name profile of `RelativePath`
+//! ([`crate::names`]).
 //!
 //! The rows `grant.restrict`, `grant.sub`, and `grant.limit` are the three
 //! narrowing members of every standard operation interface, generic over the
 //! grant type `G`. They are rows of 2.0, with `since` 0.
 //!
 //! The rows are frozen in `registry/compiler-2.0.txt`, one line per row in
-//! symbol order: the symbol, the generics, the parameters, and the result,
-//! separated by tabs, the types in source spelling.
+//! symbol order: the symbol, the generics, the parameters, the result, and
+//! the marks, separated by tabs, the types in source spelling. The marks are
+//! `@total` for a total row and empty otherwise.
 
 use std::fmt::Write as _;
 
@@ -396,6 +403,9 @@ pub enum CompilerIntrinsic {
     GrantSub,
     /// `grant.limit`: a sealed grant narrowed by limits.
     GrantLimit,
+    /// `fs.validNames`: whether every name of a list satisfies the name
+    /// profile of `RelativePath` ([`crate::names::valid_names`]). Total.
+    FsValidNames,
 }
 
 /// A declaration of the embedded library that plays no role and that the
@@ -547,12 +557,15 @@ pub struct IntrinsicRow {
     pub result: RowType,
     /// Whether the row is pure: every row but the assertion rows.
     pub pure: bool,
+    /// Whether the row is total: pure, defined for every operand, and
+    /// unable to fault.
+    pub total: bool,
 }
 
 impl IntrinsicRow {
     /// The row's line in `registry/compiler-2.0.txt`: the symbol, the
-    /// generics, the parameters as an input vector, and the result,
-    /// separated by tabs.
+    /// generics, the parameters as an input vector, the result, and the
+    /// marks (`@total` or nothing), separated by tabs.
     #[must_use]
     pub fn snapshot_line(&self) -> String {
         let parameters = self
@@ -564,11 +577,12 @@ impl IntrinsicRow {
         let mut line = String::new();
         let _ = write!(
             line,
-            "{}\t{}\t{{{}}}\t{}",
+            "{}\t{}\t{{{}}}\t{}\t{}",
             self.symbol,
             self.generics.join(" "),
             parameters,
-            self.result.spelling(self.generics)
+            self.result.spelling(self.generics),
+            if self.total { "@total" } else { "" }
         );
         line
     }
@@ -692,6 +706,7 @@ impl CompilerIntrinsic {
             | Self::ListNext => "list",
             Self::AssertTrue | Self::AssertFalse | Self::AssertEqual => "assert",
             Self::GrantRestrict | Self::GrantSub | Self::GrantLimit => "grant",
+            Self::FsValidNames => "fs",
         }
     }
 
@@ -729,6 +744,7 @@ impl CompilerIntrinsic {
             Self::GrantRestrict => "restrict".to_owned(),
             Self::GrantSub => "sub".to_owned(),
             Self::GrantLimit => "limit".to_owned(),
+            Self::FsValidNames => "validNames".to_owned(),
         }
     }
 
@@ -745,6 +761,14 @@ impl CompilerIntrinsic {
             self,
             Self::AssertTrue | Self::AssertFalse | Self::AssertEqual
         )
+    }
+
+    /// Whether the row is total: pure, defined for every operand, and
+    /// unable to fault. A call of a function bound to a total row is an
+    /// atom of the certified fragment. Only `fs.validNames` is.
+    #[must_use]
+    pub const fn is_total(self) -> bool {
+        matches!(self, Self::FsValidNames)
     }
 
     /// The generics of the row, in order.
@@ -892,6 +916,7 @@ impl CompilerIntrinsic {
                 vec![generic(0), narrowing(NarrowingType::GrantLimits)],
                 generic(0),
             ),
+            Self::FsValidNames => (vec![list(str_type())], boolean()),
         }
     }
 
@@ -905,6 +930,7 @@ impl CompilerIntrinsic {
             parameters,
             result,
             pure: self.is_pure(),
+            total: self.is_total(),
         }
     }
 
@@ -974,6 +1000,7 @@ impl CompilerIntrinsic {
             Self::GrantRestrict,
             Self::GrantSub,
             Self::GrantLimit,
+            Self::FsValidNames,
         ]);
         all.retain(|intrinsic| intrinsic.is_row());
         all.sort_by_cached_key(|intrinsic| intrinsic.symbol());

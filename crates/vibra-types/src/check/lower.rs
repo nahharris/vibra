@@ -1011,6 +1011,7 @@ pub(crate) fn check_program(
         tests: Vec::new(),
         test_set: None,
         obligations: Vec::new(),
+        library_faults: reviewed.library,
     };
     if result.types_known() {
         result.types = types_document(&program, &obligations);

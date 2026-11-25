@@ -1,156 +1,18 @@
-//! Path names and the reserved-name set of the scope policies.
+//! Path names: one name and a list of them, each under the name profile of
+//! the scope policies.
 //!
 //! `docs/spec/03-effects.md`, "Filesystem policies", fixes the name profile
-//! of a `RelativePath`. A name is non-empty and is rejected if it is `.` or
-//! `..`, contains `/`, `\`, `:`, NUL, or a control character, ends in a dot
-//! or a space, or is a reserved device name. A path is a list of names,
-//! possibly empty: the empty path names the directory a grant holds.
+//! of a `RelativePath`; its one definition is [`vibra_ir::names`], which the
+//! compiler row `fs.validNames` shares. A path is a list of names, possibly
+//! empty: the empty path names the directory a grant holds.
 //!
-//! Names are portable: the same closed set of device names is rejected on
-//! every platform. A name's **stem** is the part before its first dot, with
-//! trailing spaces removed; the name is a device name when its stem, after
-//! each character is mapped to its Unicode simple uppercase, is one of the
-//! closed set [`RESERVED_STEMS`].
-//!
-//! The vectors of `tests/it/names.tsv` hold this function to the chapter.
-//! The file-scope adapter of `vibra-fs-scope` checks the same profile with a
+//! The vectors of `tests/it/names.tsv` hold the profile to the chapter. The
+//! file-scope adapter of `vibra-fs-scope` checks the same profile with a
 //! function of its own, and is run over the same vectors.
 
 use std::fmt;
 
-/// The closed set of reserved device stems, each in upper case: `CON`,
-/// `PRN`, `AUX`, `NUL`, `CONIN$`, `CONOUT$`, `COM0` through `COM9`, `LPT0`
-/// through `LPT9`, and the superscript-digit forms `COM¹`, `COM²`, `COM³`,
-/// `LPT¹`, `LPT²`, `LPT³`.
-pub const RESERVED_STEMS: [&str; 32] = [
-    "CON",
-    "PRN",
-    "AUX",
-    "NUL",
-    "CONIN$",
-    "CONOUT$",
-    "COM0",
-    "COM1",
-    "COM2",
-    "COM3",
-    "COM4",
-    "COM5",
-    "COM6",
-    "COM7",
-    "COM8",
-    "COM9",
-    "COM\u{b9}",
-    "COM\u{b2}",
-    "COM\u{b3}",
-    "LPT0",
-    "LPT1",
-    "LPT2",
-    "LPT3",
-    "LPT4",
-    "LPT5",
-    "LPT6",
-    "LPT7",
-    "LPT8",
-    "LPT9",
-    "LPT\u{b9}",
-    "LPT\u{b2}",
-    "LPT\u{b3}",
-];
-
-/// Why a text is not a name.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum NameError {
-    /// The empty text.
-    Empty,
-    /// `.` or `..`.
-    DotName,
-    /// A `/`, `\`, `:`, NUL, or another control character.
-    ForbiddenCharacter(char),
-    /// The name ends in a dot or a space.
-    TrailingDotOrSpace,
-    /// The stem is a reserved device name.
-    ReservedDevice,
-}
-
-impl fmt::Display for NameError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Empty => formatter.write_str("a name is non-empty"),
-            Self::DotName => formatter.write_str("a name is not `.` or `..`"),
-            Self::ForbiddenCharacter(character) => write!(
-                formatter,
-                "a name contains no `/`, `\\`, `:`, NUL, or control character, \
-                 and this one contains U+{:04X}",
-                u32::from(*character)
-            ),
-            Self::TrailingDotOrSpace => {
-                formatter.write_str("a name does not end in a dot or a space")
-            }
-            Self::ReservedDevice => {
-                formatter.write_str("the name is a reserved device name")
-            }
-        }
-    }
-}
-
-/// Checks `name` against the name profile of "Filesystem policies".
-///
-/// The checks run in the order of the chapter's sentence: empty, `.` and
-/// `..`, the forbidden characters, the trailing dot or space, and the
-/// reserved device names.
-///
-/// # Errors
-///
-/// The first rule the name breaks.
-pub fn check_name(name: &str) -> Result<(), NameError> {
-    if name.is_empty() {
-        return Err(NameError::Empty);
-    }
-    if name == "." || name == ".." {
-        return Err(NameError::DotName);
-    }
-    if let Some(character) = name.chars().find(|character| {
-        matches!(character, '/' | '\\' | ':') || character.is_control()
-    }) {
-        return Err(NameError::ForbiddenCharacter(character));
-    }
-    if name.ends_with(['.', ' ']) {
-        return Err(NameError::TrailingDotOrSpace);
-    }
-    if is_reserved_device(name) {
-        return Err(NameError::ReservedDevice);
-    }
-    Ok(())
-}
-
-/// Whether the stem of `name`, mapped to its simple uppercase, is a reserved
-/// device stem.
-fn is_reserved_device(name: &str) -> bool {
-    let stem = name
-        .split('.')
-        .next()
-        .unwrap_or_default()
-        .trim_end_matches(' ');
-    let upper = stem.chars().map(simple_uppercase).collect::<String>();
-    RESERVED_STEMS.contains(&upper.as_str())
-}
-
-/// The Unicode simple uppercase of `character`.
-///
-/// Rust's `char::to_uppercase` is the full mapping. Where the full mapping is
-/// one character it is the simple mapping, because `SpecialCasing.txt` has
-/// unconditional entries only for mappings to several characters. Where it is
-/// several, the simple mapping is the character itself or another non-ASCII
-/// letter, and neither can occur in a device stem, whose characters are ASCII
-/// capitals, digits, `$`, and `¹²³`; the character is kept, which gives the
-/// verdict of the simple mapping.
-fn simple_uppercase(character: char) -> char {
-    let mut upper = character.to_uppercase();
-    match (upper.next(), upper.next()) {
-        (Some(single), None) => single,
-        _ => character,
-    }
-}
+use vibra_ir::names::{NameError, check_name};
 
 /// One name that satisfies the name profile.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]

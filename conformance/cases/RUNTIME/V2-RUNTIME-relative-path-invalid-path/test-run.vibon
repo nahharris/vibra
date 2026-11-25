@@ -1,0 +1,7 @@
+{
+  format: @testRun.v2
+  result: @command.ok
+  tests: [
+    {name: "@tests.run::\"invalidPath\"" result: @test.passed auditTrace: {format: @auditTrace.v2 revision: "sha256:0482cac189d8da913d49a46c9355d9ab0431838164bf07d68010da56a3e5239c" drivers: [{provider: @hostWorld.v2 version: "0.0.2"}] policies: [:] redaction: @none events: []}}
+  ]
+}

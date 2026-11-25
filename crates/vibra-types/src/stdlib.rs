@@ -8,9 +8,10 @@
 //! every module against its digest, parses every module in standard-library
 //! mode, checks every external declaration against its registry, checks that
 //! each of the nine language roles is claimed exactly once on a declaration of
-//! the shape the type chapter requires, and binds the prelude. Any fault is a
-//! toolchain defect, reported as `@runtime.invalidCheckedProgram` with the
-//! fault in its notes, never a fallback.
+//! the shape the type chapter requires, binds the prelude, and checks the
+//! library's guards and invariants against the certified fragment. Any fault
+//! is a toolchain defect, reported as `@runtime.invalidCheckedProgram` with
+//! the fault in its notes, never a fallback.
 
 mod external;
 mod identity;
@@ -654,8 +655,10 @@ pub fn load_stdlib() -> Result<Stdlib, StdlibError> {
 /// module, a digest that differs, a module the reader reports, an external
 /// declaration its registry rejects, a symbol the manifest does not list, a
 /// role claimed by no declaration, by several, or by one of the wrong shape,
-/// a core type of the wrong shape, an `Intrinsic` outside `@std.builtin`, and
-/// a prelude name with no declaration.
+/// a core type of the wrong shape, an `Intrinsic` outside `@std.builtin`, a
+/// prelude name with no declaration, and a fault the contract review of the
+/// library's own declarations reports, such as a `where` predicate outside
+/// the certified fragment.
 pub fn load_stdlib_from(inputs: &StdlibInputs<'_>) -> Result<Stdlib, StdlibError> {
     let manifest = manifest::read(inputs.manifest).map_err(StdlibError::new)?;
     let mut faults = manifest_faults(&manifest);
@@ -816,7 +819,7 @@ pub fn load_stdlib_from(inputs: &StdlibInputs<'_>) -> Result<Stdlib, StdlibError
             .map(|item| item.text.clone())
             .collect::<Vec<_>>()
     };
-    Ok(Stdlib {
+    let stdlib = Stdlib {
         package_name: manifest.package_name.clone(),
         package_version: manifest.package_version.clone(),
         modules,
@@ -828,7 +831,20 @@ pub fn load_stdlib_from(inputs: &StdlibInputs<'_>) -> Result<Stdlib, StdlibError
         host: texts(&manifest.host),
         native: texts(&manifest.native),
         names,
-    })
+    };
+    // A contract fault of the library, such as a predicate outside the
+    // certified fragment, is a defect of the library like a fault of
+    // `check_externals`: only checking the library finds it.
+    let faults = crate::check::library_faults(&stdlib)
+        .iter()
+        .map(|diagnostic| {
+            Fault::of_diagnostic(diagnostic.source_id().unwrap_or_default(), diagnostic)
+        })
+        .collect::<Vec<_>>();
+    if !faults.is_empty() {
+        return Err(StdlibError::new(faults));
+    }
+    Ok(stdlib)
 }
 
 /// The faults of the manifest on its own: its lists out of order, and

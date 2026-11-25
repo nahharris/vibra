@@ -3,9 +3,12 @@
 //! `docs/spec/02-type-system.md`, "Predicates": a guard's predicate and its
 //! `else` consequence are built only from parameters and constants,
 //! constructions, field reads, `if` and `match` with full coverage, the
-//! primitive comparison and `Bool` operations, and calls of certified
+//! primitive comparison and `Bool` operations, calls of functions of the
+//! embedded library bound to a total compiler row, and calls of certified
 //! functions. A certified function is a `fn` whose body is certified and
-//! that is not recursive, directly or through other functions.
+//! that is not recursive, directly or through other functions. A function
+//! bound to a total row is certified with no body: its application is an
+//! opaque term the discharge rules never read through.
 //!
 //! The fragment is decided over the checked IR, whose every node keeps the
 //! span it was written at:
@@ -336,7 +339,9 @@ pub(crate) enum Standing {
 
 /// The bodies whose standing is decided together: every function and every
 /// invariant predicate. An entry with no bodies is faulty; an external
-/// function is outside; any other entry is certified when its bodies are in
+/// function is outside (a function bound to a total compiler row is given as
+/// an entry with an empty list of bodies, so it is certified); any other
+/// entry is certified when its bodies are in
 /// the fragment and every entry they depend on is certified, which no entry
 /// on a cycle of dependencies is.
 pub(crate) fn standings(

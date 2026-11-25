@@ -1223,9 +1223,15 @@ traps, and no run-time check exists that the author did not write.
 A guard's predicate and its `else` consequence MUST be **certified**
 expressions: built only from parameters and constants, constructions, field
 reads, `if` and `match` with full coverage, the primitive comparison and
-`Bool` operations, and calls of certified functions. A certified function is
+`Bool` operations, calls of certified functions, and calls of total compiler
+primitives. A certified function is
 a `fn` whose body is certified and that is not recursive, directly or
-through other functions. The primitive comparison is a call of a member of
+through other functions. A total compiler primitive is a function of the
+embedded library bound `external @compiler` to a
+[compiler registry](06-runtime.md#compiler-intrinsic-registry) row marked
+total: it is pure and total and cannot fault, `GUARD-1` evaluates its call on
+constant operands, and the other rules treat its application as an opaque
+term, which `GUARD-4` matches. The primitive comparison is a call of a member of
 the interfaces playing `@equatable` and `@ordered`, at a closed receiver,
 whose selected implementation is declared in the embedded library. A call
 whose selected implementation is a program's own `impl` is an ordinary call
@@ -1340,7 +1346,8 @@ and the consequence. No type changes: a `where … else` constructor returns a
 `Result` whether or not a particular construction is proven. A constant
 construction known to fail is a legal `Result.err` value. A `let` pattern
 `Result.ok(value: x)` over a construction is irrefutable only when rule 1
-proves that construction succeeds.
+proves that construction succeeds; otherwise, whatever the reason, it is
+`@pattern.refutableBinding`.
 
 ### Guards and callable types
 

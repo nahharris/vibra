@@ -2,6 +2,6 @@
   format: @testRun.v2
   result: @command.ok
   tests: [
-    {name: "@tests.run::\"captures\"" result: @test.passed auditTrace: {format: @auditTrace.v2 revision: "sha256:8e91f1d5093a609db132e2cd5016c57407224515576344be5b4ea79265cba045" drivers: [{provider: @hostWorld.v2 version: "0.0.2"}] policies: [:] redaction: @none events: []}}
+    {name: "@tests.run::\"captures\"" result: @test.passed auditTrace: {format: @auditTrace.v2 revision: "sha256:4c47de687e002d02ef57aba284e6db4e59996ef1112e694f1d56a31c43b48b9d" drivers: [{provider: @hostWorld.v2 version: "0.0.2"}] policies: [:] redaction: @none events: []}}
   ]
 }

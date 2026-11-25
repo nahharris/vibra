@@ -147,6 +147,7 @@ const fn scope_case(case: ScopeErrorCase) -> &'static str {
         ScopeErrorCase::UnsupportedVersion => "unsupportedVersion",
         ScopeErrorCase::PolicyTooComplex => "policyTooComplex",
         ScopeErrorCase::ForeignRoot => "foreignRoot",
+        ScopeErrorCase::InvalidPath => "invalidPath",
     }
 }
 

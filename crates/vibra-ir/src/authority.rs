@@ -252,6 +252,9 @@ pub enum ScopeErrorCase {
     PolicyTooComplex,
     /// `foreignRoot`.
     ForeignRoot,
+    /// `invalidPath`: the error of a rejected `RelativePath` construction,
+    /// which no narrowing gives.
+    InvalidPath,
 }
 
 /// What a narrowing gives: the narrower grant, or the typed refusal.

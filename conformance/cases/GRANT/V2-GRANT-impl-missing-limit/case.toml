@@ -16,4 +16,4 @@ code = "@type.missingAbstractMember"
 level = "@error"
 source = "src/app/main.vib"
 span = { start = 229, end = 245 }
-related = [{ source = "stdlib/src/std/fs.vib", span = { start = 3832, end = 3837 } }]
+related = [{ source = "stdlib/src/std/fs.vib", span = { start = 3903, end = 3908 } }]

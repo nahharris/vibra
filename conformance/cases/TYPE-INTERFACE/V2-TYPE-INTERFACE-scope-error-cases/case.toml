@@ -2,7 +2,7 @@ id = "V2-TYPE-INTERFACE-scope-error-cases"
 rule = "V2-TYPE-INTERFACE-scope-error-cases"
 profile = "staticV2"
 operation = "workspaceCheck"
-description = "03-effects.md#narrowing: ScopeError has exactly the four cases, so a match over them with no default arm is exhaustive"
+description = "03-effects.md#narrowing: ScopeError has exactly the five cases, so a match over them with no default arm is exhaustive"
 
 [inputs]
 tree = "tree"

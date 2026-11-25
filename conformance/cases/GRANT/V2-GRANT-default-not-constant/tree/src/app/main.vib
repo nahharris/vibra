@@ -1,0 +1,13 @@
+use @std.fs.DirReadText enduse
+
+fn first
+  labelled {reader: Option(DirReadText) be Option.none()}
+  returns found: Bool
+  do
+    match reader
+      case Option.some(value: _)
+        return true
+      case Option.none()
+        return false
+    endmatch
+endfn

@@ -21,6 +21,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
+use vibra_ir::external::CompilerIntrinsic;
 use vibra_ir::{
     CheckedModuleSet, ClosureBody, Constant, Expr, Library, Node, Pattern, Value,
 };
@@ -166,6 +167,9 @@ pub(crate) struct Fold {
 pub(crate) struct Reviewed {
     /// The diagnostics, of local declarations only.
     pub(crate) diagnostics: Vec<Diagnostic>,
+    /// The diagnostics of the embedded library's declarations: each is a
+    /// defect of the library, which the loader refuses.
+    pub(crate) library: Vec<Diagnostic>,
     /// The folded guards of each function, by program index.
     pub(crate) folds: BTreeMap<usize, Fold>,
     /// The obligation of every bare-guard site of a local declaration.
@@ -263,10 +267,16 @@ impl Context<'_, '_> {
     }
 
     /// Reports `diagnostic` once: a contract guard is reviewed for each
-    /// place it is copied to, and its faults are the contract's.
+    /// place it is copied to, and its faults are the contract's. A fault of
+    /// the embedded library is kept apart, as a defect of the library.
     fn push(&mut self, module: usize, diagnostic: Diagnostic) {
-        if self.local(module) && !self.reviewed.diagnostics.contains(&diagnostic) {
-            self.reviewed.diagnostics.push(diagnostic);
+        let found = if self.local(module) {
+            &mut self.reviewed.diagnostics
+        } else {
+            &mut self.reviewed.library
+        };
+        if !found.contains(&diagnostic) {
+            found.push(diagnostic);
         }
     }
 
@@ -397,7 +407,8 @@ impl Context<'_, '_> {
                 "this expression is outside the certified fragment: a predicate \
                  or a consequence is built only from parameters, constants, \
                  constructions, field reads, `if` and `match`, the primitive \
-                 comparisons and `Bool` operations, and calls of certified \
+                 comparisons and `Bool` operations, calls of the library's \
+                 functions bound to total compiler rows, and calls of certified \
                  functions",
             ));
         }
@@ -560,8 +571,17 @@ pub(crate) fn review(
     let mut external = Vec::new();
     for index in &functions {
         let data = program.functions.get(*index);
-        // An external function and a `proc`, whose application builds a
-        // plan, are not certified functions.
+        // A function bound to a total compiler row is certified: it has no
+        // body, depends on nothing, and its application is an opaque term.
+        if data
+            .is_some_and(|data| data.external.is_some_and(CompilerIntrinsic::is_total))
+        {
+            external.push(false);
+            entries.push(Some(Vec::new()));
+            continue;
+        }
+        // Any other external function and a `proc`, whose application builds
+        // a plan, are not certified functions.
         external.push(data.is_some_and(|data| {
             data.external.is_some() || super::effects::procs::builds_plan(data)
         }));

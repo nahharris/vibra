@@ -263,3 +263,65 @@ fn a_relative_path_stays_a_dict_key() {
                   do return 0u64 endfn\n";
     assert_eq!(faults(source), []);
 }
+
+/// A labelled default is a constant, which has an encoding, and a type that
+/// holds a grant has none (`docs/spec/06-runtime.md`, "What has no
+/// encoding"): such a default is `@type.notConstant` at the default whatever
+/// its value, through an `Option`, a list, a record, a dict's values, and a
+/// brand's representation, at a `fn`, an anonymous `fn`, and an interface
+/// member. No checked program reaches the checked IR's own refusal of such
+/// a constant (`@runtime.invalidCheckedProgram`).
+#[test]
+fn a_default_whose_type_holds_a_grant_is_not_constant() {
+    let imports =
+        "use @std.fs.DirReadText enduse\n\nuse @std.fs.DirWriteText enduse\n\n";
+    let brand = "type LogDir of DirWriteText\n  visibility @public\n  representation @private\nendtype\n";
+    let cases = [
+        ("Option(DirReadText)", "Option.none()"),
+        ("List(DirReadText)", "[]"),
+        ("{r: Option(DirReadText)}", "{r: Option.none()}"),
+        ("Dict(Str DirReadText)", "[:]"),
+        ("Option(LogDir)", "Option.none()"),
+        (
+            "Option(Option(DirWriteText))",
+            "Option.some(value: Option.none())",
+        ),
+    ];
+    for (ty, default) in cases {
+        let sites = [
+            format!(
+                "fn take labelled {{held: {ty} be {default}}} returns r: Void do return void endfn\n"
+            ),
+            format!(
+                "fn outer returns r: Void do let f be fn labelled {{held: {ty} be {default}}} \
+                 returns s: Void do return void endfn endlet return f() endfn\n"
+            ),
+            format!(
+                "interface Takes\n  fn take\n    takes {{value: Self}}\n    \
+                 labelled {{held: {ty} be {default}}}\n    returns r: Void\n  endfn\nendinterface\n"
+            ),
+        ];
+        for site in sites {
+            let source = format!("{imports}{brand}{site}");
+            let checked = crate::check::check_source(super::SOURCE, &source);
+            assert!(
+                checked
+                    .diagnostics()
+                    .iter()
+                    .all(|diagnostic| diagnostic.code()
+                        != DiagnosticCode::RuntimeInvalidCheckedProgram),
+                "{source}"
+            );
+            assert_eq!(
+                faults(&source),
+                [(DiagnosticCode::TypeNotConstant, at(&source, default, 0))],
+                "{source}"
+            );
+        }
+    }
+    // A default that holds no grant is a constant.
+    let source = format!(
+        "{imports}fn take labelled {{held: Option(Str) be Option.none()}} returns r: Void do return void endfn\n"
+    );
+    assert_eq!(faults(&source), Vec::new());
+}

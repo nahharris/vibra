@@ -2,6 +2,6 @@
   format: @testRun.v2
   result: @command.ok
   tests: [
-    {name: "@tests.run::\"clamped\"" result: @test.passed auditTrace: {format: @auditTrace.v2 revision: "sha256:b61a95d2c76145e36994481fbbd854b8c4d93228dca70aa63bf3eef4fec49915" drivers: [{provider: @hostWorld.v2 version: "0.0.2"}] policies: [:] redaction: @none events: []}}
+    {name: "@tests.run::\"clamped\"" result: @test.passed auditTrace: {format: @auditTrace.v2 revision: "sha256:632db21b7cda00613940294c7bcc27be69d8d2c1ce54e43973458467249fa476" drivers: [{provider: @hostWorld.v2 version: "0.0.2"}] policies: [:] redaction: @none events: []}}
   ]
 }

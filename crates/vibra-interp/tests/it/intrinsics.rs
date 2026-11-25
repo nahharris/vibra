@@ -326,7 +326,91 @@ const HAND_ROWS: &[&str] = &[
     "grant.restrict",
     "grant.sub",
     "grant.limit",
+    "fs.validNames",
 ];
+
+/// The text of a VIBON string literal of `names.tsv`: the escapes `\\`,
+/// `\"`, `\t`, `\n`, `\r`, and `\u{…}`.
+fn string_literal(literal: &str) -> String {
+    let inner = literal
+        .strip_prefix('"')
+        .and_then(|rest| rest.strip_suffix('"'))
+        .unwrap_or_else(|| panic!("{literal} is a string literal"));
+    let mut text = String::new();
+    let mut characters = inner.chars();
+    while let Some(character) = characters.next() {
+        if character != '\\' {
+            text.push(character);
+            continue;
+        }
+        match characters.next() {
+            Some('\\') => text.push('\\'),
+            Some('"') => text.push('"'),
+            Some('t') => text.push('\t'),
+            Some('n') => text.push('\n'),
+            Some('r') => text.push('\r'),
+            Some('u') => {
+                let hex = characters
+                    .by_ref()
+                    .skip(1)
+                    .take_while(|digit| *digit != '}')
+                    .collect::<String>();
+                let scalar = u32::from_str_radix(&hex, 16)
+                    .ok()
+                    .and_then(char::from_u32)
+                    .unwrap_or_else(|| panic!("{literal}: a scalar escape"));
+                text.push(scalar);
+            }
+            other => panic!("{literal}: unknown escape {other:?}"),
+        }
+    }
+    text
+}
+
+fn valid_names(names: &[&str]) -> Evaluation {
+    apply(
+        CompilerIntrinsic::FsValidNames,
+        Vec::new(),
+        vec![(
+            Type::list(str_type()),
+            Value::List(names.iter().map(|name| text_value(name)).collect()),
+        )],
+    )
+}
+
+/// `fs.validNames` is held to the name vectors of the broker
+/// (`vibra-host/tests/it/names.tsv`): a one-name list is valid exactly when
+/// the name is accepted, the empty list is valid, and a list is valid only
+/// when every name is.
+#[test]
+fn fs_valid_names() {
+    let vectors = include_str!("../../../vibra-host/tests/it/names.tsv");
+    let mut lines = vectors.lines();
+    assert_eq!(lines.next(), Some("name\tverdict"));
+    let mut seen = 0;
+    for line in lines {
+        let (literal, verdict) = line.split_once('\t').expect("two columns");
+        let name = string_literal(literal);
+        let accepted = match verdict {
+            "accepted" => true,
+            "rejected" => false,
+            other => panic!("unknown verdict {other:?}"),
+        };
+        assert_eq!(
+            valid_names(&[&name]),
+            Evaluation::Value(Value::bool(accepted)),
+            "{literal}"
+        );
+        assert_eq!(
+            valid_names(&["a.txt", &name]),
+            Evaluation::Value(Value::bool(accepted)),
+            "{literal} after a valid name"
+        );
+        seen += 1;
+    }
+    assert!(seen > 80, "{seen} vectors");
+    assert_eq!(valid_names(&[]), Evaluation::Value(Value::bool(true)));
+}
 
 /// A grant row narrows a sealed grant through the host context, so its test
 /// runs in the fixture of `host.rs`: one narrowing request, and a result

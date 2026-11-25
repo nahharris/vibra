@@ -376,6 +376,7 @@ fn host_definitions() -> Vec<TypeDefinition> {
                 "unsupportedVersion",
                 "policyTooComplex",
                 "foreignRoot",
+                "invalidPath",
             ]),
         ),
         definition(
@@ -1883,6 +1884,52 @@ fn a_refusal_the_operation_never_gives_is_the_trap() {
         &mut host,
     );
     assert_trap(outcome, Trap::InvalidHostValue);
+}
+
+/// `invalidPath` is the error of a rejected `RelativePath` construction and
+/// nothing else, so `restrict`, `sub`, and `limit` never give it: a context
+/// that refuses with it replies with the wrong shape.
+#[test]
+fn invalid_path_from_a_narrowing_is_the_trap() {
+    let policy = case(policy_type(), "everything", Vec::new());
+    let mains = [
+        procedure(
+            "main",
+            vec![r_type()],
+            result(r_type(), scope_error()),
+            &[r_id()],
+            ret(narrowing("restrict", var(0, r_type()), policy)),
+            1,
+        ),
+        procedure(
+            "main",
+            vec![r_type()],
+            result(r_type(), scope_error()),
+            &[r_id()],
+            ret(narrowing("sub", var(0, r_type()), path_lit(&["logs"]))),
+            1,
+        ),
+        main_over_r(
+            ret(read(
+                narrowing("limit", var(0, r_type()), limits(3)),
+                &["a"],
+            )),
+            1,
+        ),
+    ];
+    for main in mains {
+        let mut host = Recording::default();
+        host.narrowed
+            .push_back(Ok(Narrowed::Refused(ScopeErrorCase::InvalidPath)));
+        let outcome = run_main(
+            vec![main],
+            Vec::new(),
+            Vec::new(),
+            vec![EntryArgument::Grant(token(1))],
+            &mut host,
+        );
+        assert_trap(outcome, Trap::InvalidHostValue);
+    }
 }
 
 /// `sub` on a grant: the prefix's names, and the `ok` of the returned

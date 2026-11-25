@@ -726,9 +726,9 @@ The package enters resolution as unit `@std`. Its modules are:
 | `@std.assert` | assertions, usable only from `@tests` |
 | `@std.test` | `TestWorld` |
 | `@std.process` | `ExitCode` |
-| `@std.policy` | `ScopeError` and `GrantLimits`; it imports nothing, so every operation module can import it |
+| `@std.policy` | `ScopeError`, the error of a narrowing and, as `invalidPath`, of a rejected `RelativePath` construction, and `GrantLimits`; it imports nothing, so every operation module can import it |
 | `@std.io` | the operation interfaces and error type of its host registry rows, and the procedures `readAllText` and `readAllBytes` |
-| `@std.fs` | the operation interfaces and error types of its host registry rows, `RelativePath`, and the policy and selector types of the [scope policies](03-effects.md#scope-policies): `FsPolicy`, `NameTest`, `FileDepth`, `DirDepth`, `FileAction`, `DirAction` |
+| `@std.fs` | the operation interfaces and error types of its host registry rows, `RelativePath` with its predicate `validNames`, bound to the total compiler row `fs.validNames`, and the policy and selector types of the [scope policies](03-effects.md#scope-policies): `FsPolicy`, `NameTest`, `FileDepth`, `DirDepth`, `FileAction`, `DirAction` |
 | `@std.env`, `@std.time`, `@std.random` | the operation interfaces and error types of the host registry |
 
 `readAllText` and `readAllBytes` read standard input to its end in source.

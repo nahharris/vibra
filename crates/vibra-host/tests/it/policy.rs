@@ -8,12 +8,13 @@
 
 use std::fmt::Write as _;
 
-use vibra_host::path::{NameError, RelativeNames, check_name};
+use vibra_host::path::RelativeNames;
 use vibra_host::policy::{
     Action, DirAction, DirDepth, DirectoryRule, Expr, FileAction, FileDepth, FileRule,
     MAX_DEPTH, MAX_SIZE, NameTest, Policy, PolicyError, Request, TooComplex, count,
     decode, hash, normalize, permits,
 };
+use vibra_ir::names::{NameError, check_name};
 use vibra_syntax::decode_string;
 
 /// The document around `expression`.

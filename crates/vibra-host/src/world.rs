@@ -41,8 +41,8 @@ use crate::driver::{
     Acquire, Action, Completion, Driver, DriverIdentity, Found, FoundAction, Gate,
     Measured, Operand, Progress, Resolved, ResourceId,
 };
-use crate::path::{NameError, check_name};
 use crate::recipe::Provider;
+use vibra_ir::names::{NameError, check_name};
 
 /// The format atom of a host world document.
 pub const WORLD_FORMAT: &str = "@hostWorld.v2";

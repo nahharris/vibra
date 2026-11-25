@@ -1,0 +1,13 @@
+id = "V2-RUNTIME-relative-path-invalid-path"
+rule = "V2-RUNTIME-relative-path-invalid-path"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "03-effects.md#filesystem-policies: a rejected RelativePath construction yields Result.err(error: ScopeError.invalidPath()), which a match observes at run time"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

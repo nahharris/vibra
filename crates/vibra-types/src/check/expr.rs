@@ -1087,6 +1087,18 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             }
             None => None,
         }?;
+        // A constant has an encoding, and a type that holds a grant has none.
+        if effects::grants::check_constant(self.program, ty) {
+            self.report(
+                DiagnosticCode::TypeNotConstant,
+                span,
+                format!(
+                    "a labelled default is a constant, which has a value encoding, \
+                     and `{ty}` holds a grant, which has none"
+                ),
+            );
+            return None;
+        }
         // A construction of a type whose `where` has an `else` is no
         // constant expression.
         let program = self.program;

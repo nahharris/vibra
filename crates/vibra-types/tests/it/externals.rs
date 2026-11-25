@@ -387,3 +387,27 @@ fn a_listed_host_symbol_the_library_does_not_bind_is_a_defect() {
         "{notes}"
     );
 }
+
+/// A contract fault of the library is a defect of the library, as a fault of
+/// `check_externals` is: `RelativePath`'s `where` given a recursive
+/// predicate, which is outside the certified fragment, stops the load with
+/// `@contract.unsupportedPredicate` in the defect's notes.
+#[test]
+fn a_library_predicate_outside_the_fragment_is_a_defect() {
+    let fs = embedded_source("@std.fs");
+    let changed = replace_once(
+        &fs,
+        "  where validNames else ScopeError.invalidPath()",
+        "  where namesOk else ScopeError.invalidPath()",
+    ) + "\nfn namesOk\n  takes {names: List(Str)}\n  returns valid: Bool\n  do\n    \
+         return namesOk(names)\nendfn\n";
+    let error = load_with_module("@std.fs", &changed);
+    assert_eq!(
+        error.as_ref().map(|error| error.diagnostic().code()),
+        Some(DiagnosticCode::RuntimeInvalidCheckedProgram)
+    );
+    let notes = notes(error.as_ref());
+    assert!(notes.contains("@contract.unsupportedPredicate"), "{notes}");
+    // The unchanged library loads.
+    assert!(load_with_module("@std.fs", &fs).is_none());
+}

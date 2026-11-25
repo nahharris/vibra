@@ -588,3 +588,38 @@ fn a_contract_call_is_compared_in_its_member_slot_order() {
         &[(REQUIRES, UNKNOWN)],
     );
 }
+
+/// Only rule 1 makes `let Result.ok(value: x)` over a construction
+/// irrefutable (`docs/spec/02-type-system.md`, "Guards with `else`"). A
+/// predicate outside the fragment, here a recursive one, proves nothing, so
+/// the binding stays refutable even when the construction would succeed; its
+/// certified neighbour is irrefutable.
+#[test]
+fn an_uncertified_predicate_leaves_an_ok_binding_refutable() {
+    let source = "type E case bad endtype\n\
+         type P of List(I32) where allPositive else E.bad() endtype\n\
+         fn allPositive takes {xs: List(I32)} returns ok: Bool do \
+         match Iter.next(xs) case Option.none() return true \
+         case Option.some(value: {x rest}) if Ordered.greater(x 0i32) then return allPositive(rest) \
+         else return false endif endmatch endfn\n\
+         fn run returns r: I32 do let Result.ok(value: p) be P([1i32]) endlet return 0i32 endfn\n";
+    assert_eq!(
+        faults(source),
+        [
+            (
+                DiagnosticCode::ContractUnsupportedPredicate,
+                at(source, "allPositive", 0)
+            ),
+            (
+                DiagnosticCode::PatternRefutableBinding,
+                at(source, "Result.ok(value: p)", 0)
+            ),
+        ],
+        "{source}"
+    );
+    let certified = "type E case bad endtype\n\
+         type P of I32 where isPositive else E.bad() endtype\n\
+         fn isPositive takes {raw: I32} returns ok: Bool do return Ordered.greater(raw 0i32) endfn\n\
+         fn run returns r: I32 do let Result.ok(value: p) be P(1i32) endlet return 0i32 endfn\n";
+    assert_eq!(faults(certified), Vec::new());
+}

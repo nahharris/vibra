@@ -1,8 +1,9 @@
 //! The checked IR of Vibra: the types, values, and expressions a checked
 //! module set is made of, the canonical encodings of types and values, the
 //! closed `@compiler` intrinsic registry, the host registry, the boundary
-//! every host call passes ([`authority`]), the source origins of nodes, and
-//! the arena layout that toolchain-owned native code reads.
+//! every host call passes ([`authority`]), the name profile of paths
+//! ([`names`]), the source origins of nodes, and the arena layout that
+//! toolchain-owned native code reads.
 //!
 //! The authority is `docs/spec`: the type chapter for [`Type`] and the
 //! declarations, the effects chapter for where an `await` stands, rows and
@@ -26,6 +27,7 @@ pub mod external;
 mod instantiation;
 mod library;
 mod module_set;
+pub mod names;
 mod nominal;
 mod origin;
 mod pattern;

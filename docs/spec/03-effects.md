@@ -300,7 +300,9 @@ A `limit` contributes no policy. A grant's projection in the
 policy.
 
 `ScopeError` (`@std.policy`) has the cases `invalidPolicy`,
-`unsupportedVersion`, `policyTooComplex`, and `foreignRoot`. For `restrict`,
+`unsupportedVersion`, `policyTooComplex`, `foreignRoot`, and `invalidPath`.
+`invalidPath` is the error of a rejected `RelativePath` construction, under
+**Paths** below, and no narrowing returns it. For `restrict`,
 `invalidPolicy` is exactly a policy with an empty `suffix`, and
 `policyTooComplex` a policy over the limits of
 [The wire form](#the-wire-form). An empty `actions` list and an empty
@@ -493,7 +495,12 @@ selects directories: `self` is `prefix` itself, `children` one name further,
 - **A file rule grants no listing.** Permission to read `.txt` files does
   not permit enumerating a directory.
 - **Paths.** A `RelativePath` (`@std.fs`) is a list of names, built by the
-  fallible constructor `RelativePath(names)`. The empty path is valid and
+  fallible constructor `RelativePath(names)`, whose type is
+  `Result(RelativePath ScopeError)`: its `where` predicate is the total
+  compiler primitive `validNames`, the
+  [`fs.validNames` row](06-runtime.md#compiler-intrinsic-registry), and a
+  list with a rejected name yields
+  `Result.err(error: ScopeError.invalidPath())`. The empty path is valid and
   names the directory the grant holds. No file rule selects that directory,
   so a policy permits a file operation on the empty path only if it
   permits every request, as an empty `allOf` does; otherwise the request is

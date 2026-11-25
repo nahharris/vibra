@@ -1,0 +1,8 @@
+use @std.fs.RelativePath enduse
+
+fn parent
+  returns found: RelativePath
+  do
+    let Result.ok(value: path) be RelativePath([".."]) endlet
+    return path
+endfn

@@ -34,7 +34,7 @@
     }
     {
       path: @std.fs
-      digest: "sha256:87dbd2dc350a277b808ea47ce363811021548aac1ea92cde113bbee55d9fd99c"
+      digest: "sha256:bfe8de5d0ccb2be343f2160b1e1d2f001defa8a9c2a415f9bacd4619823ac3b4"
       languageRoles: []
     }
     {
@@ -54,7 +54,7 @@
     }
     {
       path: @std.policy
-      digest: "sha256:4701704364d25c683e52b32e014f78894d130e7004a3066e655c4fd21b63e5a2"
+      digest: "sha256:9c2986aa7fd2ed4177ee976ccfa2bb22893780412c6b12a8333ec429354408ff"
       languageRoles: []
     }
     {
@@ -120,6 +120,7 @@
       "f64.parse"
       "f64.sub"
       "f64.toStr"
+      "fs.validNames"
       "grant.limit"
       "grant.restrict"
       "grant.sub"

@@ -13,5 +13,7 @@ fn name
         return "policyTooComplex"
       case policy.ScopeError.foreignRoot()
         return "foreignRoot"
+      case policy.ScopeError.invalidPath()
+        return "invalidPath"
     endmatch
 endfn

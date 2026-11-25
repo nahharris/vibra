@@ -6,14 +6,15 @@
 //! "cannot be written to a file, compared, or used as a dict key". The
 //! runtime chapter, "What has no encoding", rejects a type statically known
 //! to contain one wherever an encoding is required: an operand of
-//! `assert.equal` (`@type.functionNotEquatable`, as for a callable) and a
-//! dict key (`@type.invalidDictKey`). The checked IR keeps the same rule for
-//! constants and keys (`vibra-ir`, `constant.rs`).
+//! `assert.equal` (`@type.functionNotEquatable`, as for a callable), a dict
+//! key (`@type.invalidDictKey`), and a labelled default, which is a constant
+//! and so has an encoding (`@type.notConstant`, even for `Option.none()`).
+//! The checked IR keeps the same rule for constants and keys (`vibra-ir`,
+//! `constant.rs`), and no checked program reaches its refusal.
 //!
 //! The rest of what keeps a grant sealed needs no rule here: an interface
 //! value type has no constructor, viewing a value as an interface makes no
-//! grant, a brand is a declared type with a private representation, and a
-//! labelled default must be a constant expression, which no grant is.
+//! grant, and a brand is a declared type with a private representation.
 
 use std::collections::BTreeSet;
 
@@ -102,6 +103,13 @@ pub(crate) fn check_dict_key(
     key: &Type,
 ) -> Option<DiagnosticCode> {
     contains_grant(program, key).then_some(DiagnosticCode::TypeInvalidDictKey)
+}
+
+/// Whether a labelled default of type `ty` holds a grant, so that it is
+/// `@type.notConstant` at the default whatever its value: a constant has an
+/// encoding, and a type statically known to contain a grant has none.
+pub(crate) fn check_constant(program: &Program<'_>, ty: &Type) -> bool {
+    contains_grant(program, ty)
 }
 
 /// Whether an operand of type `operand` of `assert.equal` holds a grant, so

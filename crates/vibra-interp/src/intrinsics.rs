@@ -575,6 +575,17 @@ fn sequence_row<'a>(intrinsic: CompilerIntrinsic, args: &[Val<'a>]) -> Option<Va
                 Val::some(Val::tuple(vec![first.clone(), Val::list(rest.to_vec())]))
             }
         },
+        (C::FsValidNames, [list]) => {
+            let names = list
+                .as_list()?
+                .iter()
+                .map(|value| match &value.0 {
+                    Repr::Str(name) => Some(name.as_ref()),
+                    _ => None,
+                })
+                .collect::<Option<Vec<&str>>>()?;
+            Val::boolean(vibra_ir::names::valid_names(&names))
+        }
         _ => return None,
     })
 }

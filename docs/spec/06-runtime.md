@@ -356,6 +356,16 @@ performs no host operation and appends no event. An `impl` supplies its own
 narrowing members, as the
 [effects chapter](03-effects.md#operation-interfaces) states.
 
+A row may be marked **total**: it is pure, it is defined for every value of
+its parameter types, and it cannot fault, so a function of the library bound
+to it is a total compiler primitive, which the
+[type chapter](02-type-system.md#predicates) admits in a certified
+expression. The one total row is `fs.validNames`, of 2.0 with `since` 0:
+`Fn({List(Str)} Bool)`, true exactly when every name of the list satisfies
+the name profile of the
+[filesystem policies](03-effects.md#filesystem-policies). `@std.fs` binds it
+as `validNames`, the predicate of `RelativePath`.
+
 Three core types are used below:
 
 | Type | Cases |

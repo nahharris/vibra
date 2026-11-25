@@ -1,0 +1,11 @@
+use @std.fs.RelativePath enduse
+
+use @std.policy.ScopeError enduse
+
+fn named
+  takes {names: List(Str)}
+  returns found: Result(RelativePath ScopeError)
+  do
+    let path be try RelativePath(names) endlet
+    return Result.ok(value: path)
+endfn

@@ -69,6 +69,9 @@ pub struct CheckResult {
     tests: Vec<CheckedTest>,
     test_set: Option<Arc<CheckedModuleSet>>,
     obligations: Vec<Obligation>,
+    /// The faults the contract review found in the embedded library's own
+    /// declarations, which [library_faults] hands the loader.
+    library_faults: Vec<Diagnostic>,
 }
 
 /// One test of a covered module of `@tests`: the function its body was
@@ -121,6 +124,7 @@ impl CheckResult {
             tests: Vec::new(),
             test_set: None,
             obligations: Vec::new(),
+            library_faults: Vec::new(),
         }
     }
 
@@ -232,10 +236,28 @@ impl CheckResult {
 /// (`@tests.math`), which covers that module and its imports.
 #[must_use]
 pub fn check_workspace(input: &ResolveInput, units: &[String]) -> CheckResult {
-    let stdlib = match load_stdlib() {
-        Ok(stdlib) => stdlib,
-        Err(error) => return CheckResult::rejected(vec![error.diagnostic().clone()]),
-    };
+    match load_stdlib() {
+        Ok(stdlib) => check_with(input, units, &stdlib),
+        Err(error) => CheckResult::rejected(vec![error.diagnostic().clone()]),
+    }
+}
+
+/// The faults of the embedded library `stdlib` that only checking it finds:
+/// every diagnostic the contract review reports for one of its declarations,
+/// such as `@contract.unsupportedPredicate` for a predicate outside the
+/// certified fragment. The loader refuses a library with one, as it refuses
+/// a fault of `check_externals`.
+pub(crate) fn library_faults(stdlib: &Stdlib) -> Vec<Diagnostic> {
+    let input = ResolveInput::new(
+        PackageId::new(SOURCE_PACKAGE, SOURCE_VERSION),
+        Vec::new(),
+        stdlib.overlay().embedded_unit(),
+    );
+    check_with(&input, &[], stdlib).library_faults
+}
+
+/// [`check_workspace`] with the loaded library `stdlib`.
+fn check_with(input: &ResolveInput, units: &[String], stdlib: &Stdlib) -> CheckResult {
     let resolution = resolve(input);
     let mut diagnostics = resolution.diagnostics().to_vec();
     if resolution.has_errors() {
@@ -263,7 +285,7 @@ pub fn check_workspace(input: &ResolveInput, units: &[String]) -> CheckResult {
         });
     }
     let documents = parse_all(&sources);
-    let inputs = build_inputs(input, &stdlib, units);
+    let inputs = build_inputs(input, stdlib, units);
     let program = Program::build(&sources, &documents, &inputs);
     let mut result = lower::check_program(program, &documents);
     diagnostics.append(&mut result.diagnostics);

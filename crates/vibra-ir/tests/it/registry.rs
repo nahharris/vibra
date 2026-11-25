@@ -19,7 +19,7 @@ fn the_snapshot_is_the_table() {
         .map(|intrinsic| intrinsic.row().snapshot_line() + "\n")
         .collect::<String>();
     assert_eq!(rendered, SNAPSHOT);
-    assert_eq!(SNAPSHOT.lines().count(), 241);
+    assert_eq!(SNAPSHOT.lines().count(), 242);
 }
 
 /// The three narrowing members are rows of 2.0, generic over the grant
@@ -68,6 +68,37 @@ fn the_three_grant_rows_have_the_chapter_s_signatures() {
         .filter(|line| line.starts_with("grant."))
         .count();
     assert_eq!(grant_rows, 3);
+}
+
+/// `fs.validNames` is the one row marked total: `Fn({List(Str)} Bool)`,
+/// pure, with no generics, written with the mark `@total` in the snapshot
+/// (`docs/spec/06-runtime.md`, "Compiler intrinsic registry").
+#[test]
+fn fs_valid_names_is_the_one_total_row() {
+    let total = CompilerIntrinsic::all()
+        .into_iter()
+        .filter(|intrinsic| intrinsic.is_total())
+        .collect::<Vec<_>>();
+    assert_eq!(total, [CompilerIntrinsic::FsValidNames]);
+    let row = CompilerIntrinsic::FsValidNames.row();
+    assert_eq!(row.symbol, "fs.validNames");
+    assert!(row.pure && row.total);
+    assert!(row.generics.is_empty());
+    assert_eq!(
+        row.snapshot_line(),
+        "fs.validNames\t\t{List(Str)}\tBool\t@total"
+    );
+    let marked = SNAPSHOT
+        .lines()
+        .filter(|line| line.ends_with("\t@total"))
+        .collect::<Vec<_>>();
+    assert_eq!(marked, ["fs.validNames\t\t{List(Str)}\tBool\t@total"]);
+    assert!(
+        SNAPSHOT
+            .lines()
+            .all(|line| line.ends_with('\t') || line.ends_with("\t@total")),
+        "every row has a marks column"
+    );
 }
 
 #[test]
@@ -208,6 +239,7 @@ fn the_rows_with_vectors_are_the_number_char_text_and_bytes_rows() {
                 | CompilerIntrinsic::GrantRestrict
                 | CompilerIntrinsic::GrantSub
                 | CompilerIntrinsic::GrantLimit
+                | CompilerIntrinsic::FsValidNames
         );
         assert_eq!(
             !intrinsic.vectors().is_empty(),

@@ -970,7 +970,8 @@ These are minimum obligations. None of these tests exists yet.
    `trim`; eager `Bool` operations against `if`. `Result` is not iterable.
 9. **Contracts.** Each discharge rule and each integer fact, with a passing
    and a nearest failing case; bare `requires`, `ensures`, and `where`;
-   unproved and refuted; the certified fragment; every return, including
+   unproved and refuted; the certified fragment, with a call of a total
+   compiler primitive evaluated on constant operands; every return, including
    through `try`; a rejected `requires … else` skips the body and `ensures`;
    an `ensures … else` consequence differs from the candidate, is evaluated
    once, and is not checked again; a constant `where … else` error, with the
@@ -986,8 +987,9 @@ These are minimum obligations. None of these tests exists yet.
     narrowing against interface views; limits never reset.
 11. **Policies and drivers.** Whole rules stay correlated; restriction keeps
     the parent; normalization and size limits; a read-only directory chosen
-    at run time with a `.txt` rule; the real name of an entry; prefix by
-    names, not by string; reparse points, links, mounts, renames, and a
+    at run time with a `.txt` rule; the real name of an entry; a rejected
+    `RelativePath` is `ScopeError.invalidPath()`; prefix by names, not by
+    string; reparse points, links, mounts, renames, and a
     replaced root; no cached intermediate handle; hard-link and
     opened-object limits shown at approval; shared counters under siblings.
     The reserved HTTP rules: correlation, prefixes, queries, rebinding, and

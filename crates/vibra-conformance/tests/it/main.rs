@@ -20,6 +20,7 @@ mod exit_evidence;
 mod host_testing_feature;
 mod interpret;
 mod manifest;
+mod name_profile;
 mod owner_coverage;
 mod rules_directory;
 mod runner;

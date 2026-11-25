@@ -22,6 +22,7 @@
 //! | [`analysis`] | [`analysis::check_bodies`] | 09 |
 //! | [`values`] | [`values::written_type`], [`values::anonymous`] | 10 |
 //! | [`grants`] | [`grants::check_dict_key`], [`grants::check_equatable`] | 22 |
+//! | [`grants`] | [`grants::check_constant`] | fix A |
 //! | [`entry`] | the entry shape of a target | 25 |
 //!
 //! The hooks of [`procs`] read rows through [`rows`], and steps 12 and 24

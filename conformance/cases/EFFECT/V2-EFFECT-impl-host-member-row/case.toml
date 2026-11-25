@@ -16,4 +16,4 @@ code = "@type.mismatch"
 level = "@error"
 source = "src/app/main.vib"
 span = { start = 383, end = 404 }
-related = [{ source = "stdlib/src/std/fs.vib", span = { start = 3372, end = 3376 } }]
+related = [{ source = "stdlib/src/std/fs.vib", span = { start = 3443, end = 3447 } }]
