@@ -74,8 +74,8 @@ use vibra_ir::external::host::{HostErrorType, HostInterface, HostOp, TestWorldOp
 use vibra_ir::{EntityRef, Value};
 
 use crate::driver::{
-    Action, Completion, Driver, DriverIdentity, Found, FoundAction, Gate, Measured,
-    Operand, Progress, Refused, Reserved, ResourceId,
+    Acquire, Action, Completion, Driver, DriverIdentity, Found, FoundAction, Gate,
+    Measured, Operand, Progress, Refused, Reserved, Resolved, ResourceId,
 };
 use crate::path::RelativeNames;
 use crate::policy::{
@@ -928,10 +928,6 @@ impl<'d> Context<'d> {
     ///
     /// `InvalidHostValue` for a grant this context cannot accept, an event
     /// pending, or fields that do not match the status.
-    #[cfg_attr(
-        not(feature = "testing"),
-        expect(dead_code, reason = "startup (step 28) calls it")
-    )]
     pub(crate) fn startup_event(
         &mut self,
         leaf: LeafName,
@@ -1040,12 +1036,19 @@ impl<'d> Context<'d> {
         Ok((projection, policy))
     }
 
+    /// Asks the driver to acquire the resource of one recipe. Only startup
+    /// calls it; the resource is not authority until `issue` roots a grant
+    /// on it.
+    pub(crate) fn acquire(
+        &mut self,
+        provider: Provider,
+        resource: &Resolved,
+    ) -> Acquire {
+        self.driver.get_mut().acquire(provider, resource)
+    }
+
     /// Makes every grant that descends from a root on `resource` unusable,
     /// and only then releases the resource.
-    #[cfg_attr(
-        not(feature = "testing"),
-        expect(dead_code, reason = "startup (step 28) calls it")
-    )]
     pub(crate) fn release(&mut self, resource: ResourceId) {
         for lineage in &mut self.lineages {
             if lineage.resource == resource {
