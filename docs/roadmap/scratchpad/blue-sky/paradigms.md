@@ -332,7 +332,9 @@ records that Bend 2 dropped them because they could not be made as fast as
 conventional evaluation on ordinary hardware, and that the measured speedup
 was 8.8× to 12.1× on 16 threads. Bend 2 is instead affine, dependently
 typed, and termination-checked. Pure total steps already give Vibra
-parallelism that a conventional native runtime can exploit.
+parallelism that a conventional native runtime can exploit. The
+[Aurum notes](../aurum/README.md) ask the separate question of whether
+hardware built for the model changes its cost.
 
 ### Tactic proofs as the default surface
 
