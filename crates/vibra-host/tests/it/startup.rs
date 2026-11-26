@@ -78,6 +78,8 @@ struct Script {
     lose_identity: Option<Provider>,
     replies: BTreeMap<HostOp, Completion>,
     panic_at_release: bool,
+    /// The first release fails, for this reason.
+    fail_release: Option<&'static str>,
 }
 
 struct Rig {
@@ -164,14 +166,18 @@ impl Driver for Rig {
         acquired
     }
 
-    fn release(&mut self, resource: ResourceId) {
-        let panic = {
+    fn release(&mut self, resource: ResourceId) -> Result<(), String> {
+        let (panic, failure) = {
             let mut script = self.script.borrow_mut();
             script.log.push(Seen::Release(resource));
-            std::mem::take(&mut script.panic_at_release)
+            (
+                std::mem::take(&mut script.panic_at_release),
+                script.fail_release.take(),
+            )
         };
         assert!(!panic, "the driver panics inside `release`");
-        self.world.release(resource);
+        self.world.release(resource)?;
+        failure.map_or(Ok(()), |why| Err(why.to_owned()))
     }
 
     fn call(
@@ -441,6 +447,8 @@ struct Ran {
     next_invocation: u64,
     fault: Option<HostFault>,
     released: StartupRecord,
+    /// The lines release left for the tool's log.
+    log: Vec<String>,
     trace: AuditTrace,
     uncommitted: usize,
 }
@@ -464,7 +472,8 @@ fn run(plan: &BindingPlan, rig: &mut Rig) -> Ran {
         bindings,
         next_invocation,
         fault,
-        released,
+        log: released.failures.iter().map(ToString::to_string).collect(),
+        released: released.record,
         trace: cx.trace().clone(),
         uncommitted: cx.uncommitted(),
     }
@@ -1192,6 +1201,36 @@ fn release_after_a_failed_startup() {
     assert_eq!(status_of(&ran.released, "@b"), BindingStatus::Released);
     assert_eq!(status_of(&ran.released, "@a"), BindingStatus::Released);
     assert_eq!(status_of(&ran.released, "@z"), BindingStatus::Failed);
+}
+
+/// F4 of the drivers review: 06 "the failure goes to the tool's log". A
+/// release the driver reports as failed leaves every binding `released`,
+/// releases the rest, and leaves one line for the log.
+#[test]
+fn a_failed_release_is_one_log_line() {
+    let mut rig = Rig::new(&w());
+    rig.script.borrow_mut().fail_release = Some("the handle could not be closed");
+    let script = rig.script();
+    let ran = run(&o(), &mut rig);
+    assert!(
+        ran.released
+            .bindings
+            .iter()
+            .all(|binding| binding.status == BindingStatus::Released)
+    );
+    let mut acquired = script.borrow().acquired();
+    acquired.reverse();
+    assert_eq!(
+        script.borrow().released(),
+        acquired,
+        "every leaf is released"
+    );
+    assert_eq!(
+        ran.log,
+        ["releasing @z failed: the handle could not be closed"],
+        "the first release, of the last leaf acquired"
+    );
+    assert!(run(&o(), &mut Rig::new(&w())).log.is_empty());
 }
 
 #[test]

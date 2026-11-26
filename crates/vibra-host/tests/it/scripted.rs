@@ -79,6 +79,14 @@ pub(crate) enum Event {
         /// The answer.
         answer: Option<u64>,
     },
+    /// The driver asked the gate about an error decided below directories
+    /// it opened.
+    GateError {
+        /// The real names of the directories, then the rest of the request.
+        names: Vec<String>,
+        /// Whether the gate admitted the error.
+        admitted: bool,
+    },
     /// One of the driver's steps.
     Step(Step),
     /// The driver returned: `refused`, `notSubmitted`, or `completed`.
@@ -109,6 +117,13 @@ pub(crate) struct Tweak {
     pub completion: Option<Completion>,
     /// Go on as if the gate had admitted, whatever it answered.
     pub ignore_gate: bool,
+    /// The walk of a filesystem call fails below the directories of these
+    /// real names: the driver asks [`Gate::admit_error`] with them followed
+    /// by the rest of the request's names, and answers `notFound` once
+    /// admitted.
+    pub failed_below: Option<Vec<String>>,
+    /// After an admitted [`Self::failed_below`], ask [`Gate::admit`] too.
+    pub admit_after: bool,
 }
 
 /// The driver's state, which the test inspects.
@@ -267,6 +282,27 @@ impl Scripted {
         let op = action.op;
         let real = tweak.real_names.clone().unwrap_or_else(|| names.clone());
         let then = |default: Completion| tweak.completion.clone().unwrap_or(default);
+        if let Some(mut opened) = tweak.failed_below.clone() {
+            opened.extend(names.iter().skip(opened.len()).cloned());
+            let admitted = gate.admit_error(&opened).is_ok();
+            state.log.push(Event::GateError {
+                names: opened.clone(),
+                admitted,
+            });
+            if !admitted {
+                return Completion::Refused;
+            }
+            if tweak.admit_after {
+                let found = Found {
+                    real_names: &opened,
+                    action: FoundAction::Read,
+                    size: Some(0),
+                    links: Some(1),
+                };
+                ask(state, gate, found, true);
+            }
+            return then(completed(error(op, "notFound"), 0, 0));
+        }
         match op {
             HostOp::FsReadFile | HostOp::FsReadText => {
                 let Some(file) = state.files.get(&names).cloned() else {
@@ -456,8 +492,9 @@ impl Driver for Scripted {
         Acquire::Acquired(ResourceId(state.next_resource))
     }
 
-    fn release(&mut self, resource: ResourceId) {
+    fn release(&mut self, resource: ResourceId) -> Result<(), String> {
         self.state().log.push(Event::Release(resource));
+        Ok(())
     }
 
     fn call(
@@ -477,6 +514,7 @@ impl Driver for Scripted {
         state.log.push(Event::Returned(match completion {
             Completion::Refused => "refused",
             Completion::NotSubmitted(_) => "notSubmitted",
+            Completion::MemoryExhausted(_) => "memoryExhausted",
             Completion::Completed { .. } => "completed",
         }));
         completion

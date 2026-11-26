@@ -449,6 +449,23 @@ fn ancestry_permits(slots: &[Slot], slot: u32, request: &Request<'_>) -> bool {
         .all(|policy| policy::permits(policy.expression(), request))
 }
 
+/// Whether the policy of the whole ancestry of `slot` permits at least one
+/// of `may` on `names`.
+fn permits_any(
+    slots: &[Slot],
+    slot: u32,
+    names: &[String],
+    may: &[FoundAction],
+) -> bool {
+    may.iter().any(|action| {
+        let request = Request {
+            names,
+            action: policy_action(*action),
+        };
+        ancestry_permits(slots, slot, &request)
+    })
+}
+
 /// The policy action a found action is decided as.
 const fn policy_action(found: FoundAction) -> policy::Action {
     match found {
@@ -717,6 +734,22 @@ impl Gate for Admission<'_> {
         answer
             .map(|input| Reserved { input })
             .map_err(|_| Refused::new())
+    }
+
+    fn admit_error(&mut self, names: &[String]) -> Result<(), Refused> {
+        if self.answer.is_some() {
+            self.twice = true;
+            return Err(Refused::new());
+        }
+        let permitted =
+            !self.filesystem || permits_any(self.slots, self.slot, names, self.may);
+        let answer = if permitted {
+            Ok(0)
+        } else {
+            Err(Reason::Denied)
+        };
+        self.answer = Some(answer);
+        answer.map(|_| ()).map_err(|_| Refused::new())
     }
 }
 
@@ -1049,14 +1082,19 @@ impl<'d> Context<'d> {
 
     /// Makes every grant that descends from a root on `resource` unusable,
     /// and only then releases the resource.
-    pub(crate) fn release(&mut self, resource: ResourceId) {
+    ///
+    /// # Errors
+    ///
+    /// The driver reported the release as failed, for the reason given; the
+    /// grants are unusable all the same.
+    pub(crate) fn release(&mut self, resource: ResourceId) -> Result<(), String> {
         for lineage in &mut self.lineages {
             if lineage.resource == resource {
                 lineage.live = false;
                 lineage.generation = lineage.generation.wrapping_add(1);
             }
         }
-        self.driver.get_mut().release(resource);
+        self.driver.get_mut().release(resource)
     }
 
     /// Adds a slot; the token carries `generation`.
@@ -1156,18 +1194,6 @@ impl<'d> Context<'d> {
                 ..
             } => names.iter().any(|known| known == name),
             _ => true,
-        })
-    }
-
-    /// Whether the policy of the whole ancestry permits at least one of
-    /// `may` on `names`.
-    fn permits_any(&self, slot: u32, names: &[String], may: &[FoundAction]) -> bool {
-        may.iter().any(|action| {
-            let request = Request {
-                names,
-                action: policy_action(*action),
-            };
-            ancestry_permits(&self.slots, slot, &request)
         })
     }
 
@@ -1337,6 +1363,14 @@ impl<'d> Context<'d> {
                 reserved,
                 "the driver reported a refusal its gate did not make",
             )),
+            // 06 "Memory": the run ends as memory exhausted, as when the
+            // budget refuses, and no event claims the call completed. What
+            // the adapter moved before it could not allocate is charged as
+            // it knows it.
+            (_, Completion::MemoryExhausted(progress)) => {
+                self.settle(slot, reserved, progress, false)?;
+                Err(HostFault::MemoryExhausted)
+            }
             (_, Completion::NotSubmitted(case)) => {
                 if case.error() != error {
                     return Err(self.charge_all(
@@ -1803,7 +1837,9 @@ impl HostContext for Context<'_> {
             return Self::refusal(error, "denied");
         }
         // Step 3.
-        if derived.filesystem && !self.permits_any(slot, &derived.names, derived.may) {
+        if derived.filesystem
+            && !permits_any(&self.slots, slot, &derived.names, derived.may)
+        {
             return Self::refusal(error, "denied");
         }
         if derived.fixed.input > request.room {
@@ -1962,8 +1998,12 @@ impl Context<'_> {
     }
 
     /// `Context::release`, for the tests.
-    pub fn release_for_tests(&mut self, resource: ResourceId) {
-        self.release(resource);
+    ///
+    /// # Errors
+    ///
+    /// As `release`.
+    pub fn release_for_tests(&mut self, resource: ResourceId) -> Result<(), String> {
+        self.release(resource)
     }
 
     /// `Context::startup_event`, for the tests.

@@ -4,7 +4,9 @@
 use std::fs;
 use std::process::Command;
 
-use vibra_fs_scope::{EntryKind, Metadata, ScopeError, ScopedDir, check_name};
+use vibra_fs_scope::{
+    EntryKind, Metadata, ScopeError, ScopedDir, WalkError, check_name,
+};
 
 use crate::{Sandbox, create, file_id, not_run, read_opened};
 
@@ -288,6 +290,94 @@ fn a_missing_root_is_not_found() {
     ));
 }
 
+// F3 of the drivers review: a failed walk reports the names the filesystem
+// gave the directories it had opened, so the caller can ask its policy about
+// them before it answers.
+#[test]
+fn a_failed_walk_reports_the_directories_it_opened() {
+    let sandbox = Sandbox::new("walkopened");
+    fs::create_dir_all(sandbox.inside().join("PUB").join("d")).unwrap();
+    fs::write(sandbox.inside().join("PUB").join("x.txt"), "x").unwrap();
+    let root = sandbox.root();
+    let failed = |result: Result<(), WalkError>| {
+        let failure = result.expect_err("the walk fails");
+        (failure.error.to_string(), failure.opened)
+    };
+    let pub_ = vec!["PUB".to_owned()];
+    assert_eq!(
+        failed(root.open_read(&["pub", "y.txt"]).map(drop)),
+        ("notFound".to_owned(), pub_.clone())
+    );
+    assert_eq!(
+        failed(root.open_for_replace(&["pub", "no", "y.txt"]).map(drop)),
+        ("notFound".to_owned(), pub_.clone())
+    );
+    assert_eq!(
+        failed(root.open_read(&["pub", "d"]).map(drop)),
+        ("notAFile".to_owned(), pub_.clone())
+    );
+    assert_eq!(
+        failed(root.list(&["pub", "e"]).map(drop)),
+        ("notFound".to_owned(), pub_.clone())
+    );
+    assert_eq!(
+        failed(root.stat(&["pub", "y.txt"]).map(drop)),
+        ("notFound".to_owned(), pub_.clone())
+    );
+    assert_eq!(
+        failed(root.open_parent(&["pub", "no"]).map(drop)),
+        ("notFound".to_owned(), pub_)
+    );
+    assert_eq!(
+        failed(root.open_read(&["y.txt"]).map(drop)),
+        ("notFound".to_owned(), Vec::new())
+    );
+    assert!(check_name("..").is_err());
+    assert_eq!(
+        failed(root.open_read(&["pub", ".."]).map(drop)),
+        ("deniedName".to_owned(), Vec::new()),
+        "a name the profile refuses opens nothing"
+    );
+}
+
+/// The UNC path of `local`, through the administrative share of its drive
+/// on this machine: `\\localhost\C$\…`.
+fn unc_of(local: &std::path::Path) -> String {
+    let text = fs::canonicalize(local).unwrap().display().to_string();
+    let text = text.strip_prefix(r"\\?\").unwrap_or(&text).to_owned();
+    let (drive, rest) = text.split_at(2);
+    format!(
+        r"\\localhost\{}$\{}",
+        &drive[..1],
+        rest.trim_start_matches('\\')
+    )
+}
+
+// F2 of the drivers review: a directory on a remote volume is one on which
+// the driver cannot enforce the leaf's policy (04 "Startup order"). An SMB
+// server resolves its own junctions, which the client does not see as
+// reparse points, so the adapter refuses the volume before anything below
+// the root is opened.
+#[test]
+fn a_root_on_a_remote_volume_is_unsupported() {
+    let sandbox = Sandbox::new("rootunc");
+    fs::write(sandbox.inside().join("a.txt"), "inside").unwrap();
+    let unc = unc_of(&sandbox.inside());
+    if let Err(error) = fs::metadata(&unc) {
+        not_run(
+            "a_root_on_a_remote_volume_is_unsupported",
+            &format!("{unc} is not reachable without elevation: {error}"),
+        );
+        return;
+    }
+    let root = ScopedDir::open_root(std::path::Path::new(&unc));
+    assert!(
+        matches!(root, Err(ScopeError::Unsupported)),
+        "{unc}: {:?}",
+        root.map(|_| "held")
+    );
+}
+
 // Row "no handle kept". The count is the whole process's, so it is measured
 // in a child process that runs only `no_handle_kept_child`, with no other
 // test thread opening handles meanwhile.
@@ -372,7 +462,8 @@ fn no_handle_kept_child() {
         let parent = root.open_parent(&["d", "e"]).unwrap();
         drop(parent);
         assert!(matches!(
-            root.open_read(&["d", "missing", "a.txt"]),
+            root.open_read(&["d", "missing", "a.txt"])
+                .map_err(ScopeError::from),
             Err(ScopeError::NotFound)
         ));
         assert!(matches!(

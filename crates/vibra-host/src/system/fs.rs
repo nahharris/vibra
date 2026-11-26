@@ -24,6 +24,11 @@
 //!   proposed leaf, and then the leaf is created exclusively relative to the
 //!   held parent. A create that finds an entry by then is a completed
 //!   `denied`; it never falls back to a replace.
+//! - A walk that fails below directories it opened, a missing entry
+//!   included, shows the gate their real names followed by the rest of the
+//!   request's names ([`Gate::admit_error`]) before it answers the error. A
+//!   refusal answers `Answer::Refused`: whether an entry exists below a
+//!   directory the policy does not permit is not told.
 //!
 //! The driver keeps no handle but the root between calls, and has no remove,
 //! rename, append, or directory creation. On every platform other than
@@ -32,7 +37,7 @@
 use std::io;
 use std::path::Path;
 
-use vibra_fs_scope::{EntryKind, ScopeError, ScopedDir, ScopedFile};
+use vibra_fs_scope::{EntryKind, ScopeError, ScopedDir, ScopedFile, WalkError};
 use vibra_ir::authority::{HostFsKind, HostOk};
 use vibra_ir::external::host::HostOp;
 
@@ -72,12 +77,12 @@ pub(super) struct Directories {
 impl Directories {
     /// Calls the adapter through `open`, unless a test hook made the name
     /// query fail.
-    fn adapter<T>(
+    fn adapter<T, E: From<ScopeError>>(
         &self,
-        open: impl FnOnce() -> Result<T, ScopeError>,
-    ) -> Result<T, ScopeError> {
+        open: impl FnOnce() -> Result<T, E>,
+    ) -> Result<T, E> {
         if self.names_unsupported {
-            Err(ScopeError::Unsupported)
+            Err(ScopeError::Unsupported.into())
         } else {
             open()
         }
@@ -89,9 +94,9 @@ impl Directories {
     /// 04 "Startup order": a path that names nothing, names something that
     /// is not a directory, that the operating system denies the process
     /// permission to open, or that is not Unicode is refused; any other
-    /// error, a root that is itself a reparse point and a volume on which the
-    /// adapter cannot report normalized names or link counts included, is a
-    /// failure.
+    /// error, a root that is itself a reparse point, a remote volume, and a
+    /// volume on which the adapter cannot report normalized names or link
+    /// counts included, is a failure.
     pub(super) fn open_root(&self, path: &str) -> Result<ScopedDir, Acquire> {
         self.adapter(|| ScopedDir::open_root(Path::new(path)))
             .map_err(|error| match error {
@@ -105,8 +110,8 @@ impl Directories {
                     Acquire::Refused
                 }
                 ScopeError::Unsupported => Acquire::Failed(
-                    "the volume does not report normalized names or link counts, \
-                     so the leaf's policy cannot be enforced"
+                    "the volume is remote or does not report normalized names or \
+                     link counts, so the leaf's policy cannot be enforced"
                         .to_owned(),
                 ),
                 other => {
@@ -149,7 +154,7 @@ impl Directories {
     ) -> Answer {
         let mut file = match self.adapter(|| root.open_read(names)) {
             Ok(file) => file,
-            Err(error) => return map_error(error, Progress::NONE),
+            Err(failure) => return walk_failed(failure, names, gate),
         };
         let size = file.size();
         let found = Found {
@@ -185,7 +190,7 @@ impl Directories {
     fn list(&self, root: &ScopedDir, names: &[&str], gate: &mut dyn Gate) -> Answer {
         let listing = match self.adapter(|| root.list(names)) {
             Ok(listing) => listing,
-            Err(error) => return map_error(error, Progress::NONE),
+            Err(failure) => return walk_failed(failure, names, gate),
         };
         let found = Found {
             real_names: listing.real_names(),
@@ -207,7 +212,7 @@ impl Directories {
     fn stat(&self, root: &ScopedDir, names: &[&str], gate: &mut dyn Gate) -> Answer {
         let metadata = match self.adapter(|| root.stat(names)) {
             Ok(metadata) => metadata,
-            Err(error) => return map_error(error, Progress::NONE),
+            Err(failure) => return walk_failed(failure, names, gate),
         };
         let (action, kind) = match metadata.kind {
             EntryKind::Directory => (FoundAction::StatDirectory, HostFsKind::Directory),
@@ -243,8 +248,11 @@ impl Directories {
     ) -> Answer {
         match self.adapter(|| root.open_for_replace(names)) {
             Ok(file) => replace(file, contents, gate),
-            Err(ScopeError::NotFound) => self.create(root, names, contents, gate),
-            Err(error) => map_error(error, Progress::NONE),
+            Err(WalkError {
+                error: ScopeError::NotFound,
+                ..
+            }) => self.create(root, names, contents, gate),
+            Err(failure) => walk_failed(failure, names, gate),
         }
     }
 
@@ -265,7 +273,7 @@ impl Directories {
         };
         let held = match self.adapter(|| root.open_parent(parent)) {
             Ok(held) => held,
-            Err(error) => return map_error(error, Progress::NONE),
+            Err(failure) => return walk_failed(failure, names, gate),
         };
         let mut real_names = held.real_names().to_vec();
         real_names.push((*leaf).to_owned());
@@ -306,6 +314,28 @@ fn replace(mut file: ScopedFile, contents: &[u8], gate: &mut dyn Gate) -> Answer
     }
 }
 
+/// The answer to a walk of `names` that failed. When the failure was decided
+/// below directories the walk opened, the gate is asked first whether the
+/// policy permits the request on their real names followed by the rest of
+/// `names`; a refusal answers `Answer::Refused`, so the answer tells nothing
+/// of what lies below a directory the policy does not permit. A failure
+/// before any directory opened was decided on the request's own names, which
+/// step 3 permitted.
+fn walk_failed(failure: WalkError, names: &[&str], gate: &mut dyn Gate) -> Answer {
+    let WalkError { error, mut opened } = failure;
+    if !opened.is_empty() {
+        let rest = names
+            .iter()
+            .skip(opened.len())
+            .map(|name| (*name).to_owned());
+        opened.extend(rest);
+        if gate.admit_error(&opened).is_err() {
+            return Answer::Refused;
+        }
+    }
+    map_error(error, Progress::NONE)
+}
+
 /// The contents a write carries.
 fn written(operand: Operand<'_>) -> Option<&[u8]> {
     match operand {
@@ -322,10 +352,14 @@ fn written(operand: Operand<'_>) -> Option<&[u8]> {
 /// guarantees for is `unsupported`, known not submitted, before acting. A
 /// name the filesystem cannot interpret is `invalidPath`, a name that is not
 /// Unicode `invalidText`, and an operating-system refusal `permissionDenied`;
-/// every other failure is `other`.
+/// an allocation the operating system refuses is memory exhaustion, never an
+/// error case (06 "Memory"); every other failure is `other`.
 pub(super) fn map_error(error: ScopeError, progress: Progress) -> Answer {
     let case = match error {
         ScopeError::Unsupported => return Answer::NotSubmitted("unsupported"),
+        ScopeError::Io(error) if error.kind() == io::ErrorKind::OutOfMemory => {
+            return Answer::MemoryExhausted(progress);
+        }
         ScopeError::DeniedReparse | ScopeError::AlreadyExists => "denied",
         ScopeError::DeniedName => "invalidPath",
         ScopeError::NotFound => "notFound",
@@ -371,6 +405,15 @@ mod tests {
         assert!(matches!(
             map_error(ScopeError::Unsupported, Progress::NONE),
             Answer::NotSubmitted("unsupported")
+        ));
+        // F6 of the drivers review: a refused allocation is memory
+        // exhaustion, with the progress the call made.
+        assert!(matches!(
+            map_error(
+                ScopeError::Io(io::Error::from(io::ErrorKind::OutOfMemory)),
+                WRITE_UNCERTAIN
+            ),
+            Answer::MemoryExhausted(WRITE_UNCERTAIN)
         ));
     }
 

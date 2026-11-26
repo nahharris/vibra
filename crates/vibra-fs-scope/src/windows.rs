@@ -15,7 +15,7 @@ use std::fs::{File, OpenOptions};
 use std::io;
 use std::os::windows::fs::OpenOptionsExt;
 use std::os::windows::io::{
-    AsHandle, AsRawHandle, BorrowedHandle, FromRawHandle, OwnedHandle,
+    AsHandle, AsRawHandle, BorrowedHandle, FromRawHandle, IntoRawHandle, OwnedHandle,
 };
 use std::path::Path;
 use std::ptr;
@@ -23,12 +23,16 @@ use std::ptr;
 use windows_sys::Wdk::Foundation::OBJECT_ATTRIBUTES;
 use windows_sys::Wdk::Storage::FileSystem::{
     FILE_CREATE, FILE_OPEN, FILE_OPEN_REPARSE_POINT, FILE_STANDARD_INFORMATION,
-    FILE_SYNCHRONOUS_IO_NONALERT, FileAttributeTagInformation, FileNamesInformation,
-    FileNormalizedNameInformation, FileStandardInformation, NtCreateFile,
-    NtQueryDirectoryFile, NtQueryInformationFile,
+    FILE_SYNCHRONOUS_IO_NONALERT, FileAttributeTagInformation, FileFsDeviceInformation,
+    FileNamesInformation, FileNormalizedNameInformation, FileStandardInformation,
+    NtCreateFile, NtQueryDirectoryFile, NtQueryInformationFile,
+    NtQueryVolumeInformationFile,
+};
+use windows_sys::Wdk::System::SystemServices::{
+    FILE_FS_DEVICE_INFORMATION, FILE_REMOTE_DEVICE,
 };
 use windows_sys::Win32::Foundation::{
-    HANDLE, NTSTATUS, OBJ_DONT_REPARSE, STATUS_ACCESS_DENIED,
+    CloseHandle, HANDLE, NTSTATUS, OBJ_DONT_REPARSE, STATUS_ACCESS_DENIED,
     STATUS_FILE_IS_A_DIRECTORY, STATUS_INVALID_INFO_CLASS, STATUS_NO_MORE_FILES,
     STATUS_NO_SUCH_FILE, STATUS_NOT_A_DIRECTORY, STATUS_NOT_IMPLEMENTED,
     STATUS_NOT_SUPPORTED, STATUS_OBJECT_NAME_COLLISION, STATUS_OBJECT_NAME_INVALID,
@@ -40,11 +44,11 @@ use windows_sys::Win32::Storage::FileSystem::{
     FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_TAG_INFO, FILE_FLAG_BACKUP_SEMANTICS,
     FILE_FLAG_OPEN_REPARSE_POINT, FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES,
     FILE_READ_DATA, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
-    FILE_TRAVERSE, FILE_WRITE_DATA, SYNCHRONIZE,
+    FILE_TRAVERSE, FILE_TYPE_DISK, FILE_WRITE_DATA, GetFileType, SYNCHRONIZE,
 };
 use windows_sys::Win32::System::IO::IO_STATUS_BLOCK;
 
-use crate::{EntryKind, Metadata, ScopeError, ScopedFile, name};
+use crate::{EntryKind, Metadata, ScopeError, ScopedFile, WalkError, name};
 
 /// A held root directory. Every operation walks from this handle.
 ///
@@ -136,6 +140,7 @@ const CREATE: Open = Open {
 };
 
 const TAG_INFO_SIZE: u32 = size_of::<FILE_ATTRIBUTE_TAG_INFO>() as u32;
+const DEVICE_INFO_SIZE: u32 = size_of::<FILE_FS_DEVICE_INFORMATION>() as u32;
 const STANDARD_INFO_SIZE: u32 = size_of::<FILE_STANDARD_INFORMATION>() as u32;
 const OBJECT_ATTRIBUTES_SIZE: u32 = size_of::<OBJECT_ATTRIBUTES>() as u32;
 
@@ -166,9 +171,11 @@ struct Opened {
 impl ScopedDir {
     /// Acquires `path` as a root. The path itself is opened through the
     /// ordinary Win32 path rules, once; the directory it names must not be a
-    /// reparse point. A volume that does not report normalized names or link
-    /// counts for the root is [`ScopeError::Unsupported`], since no entry
-    /// below it could be checked.
+    /// reparse point. A remote volume, and a volume that does not report the
+    /// root's normalized name or its link count, is
+    /// [`ScopeError::Unsupported`]: an SMB server resolves its own links,
+    /// which the client does not see as reparse points, and without the
+    /// names no entry below the root could be checked.
     pub fn open_root(path: &Path) -> Result<Self, ScopeError> {
         let root = OpenOptions::new()
             .access_mode(
@@ -191,29 +198,40 @@ impl ScopedDir {
         if kind_of(info) != EntryKind::Directory {
             return Err(ScopeError::NotADirectory);
         }
-        if let Err(ScopeError::Unsupported) = real_name(root.as_handle()) {
-            return Err(ScopeError::Unsupported);
-        }
+        root_guarantees(
+            device_characteristics(root.as_handle()),
+            real_name(root.as_handle()),
+        )?;
         standard(root.as_handle())?;
         Ok(Self { root })
     }
 
+    /// Closes the root handle, reporting what the system answers.
+    ///
+    /// # Errors
+    ///
+    /// The system reported the close as failed; the handle is closed all the
+    /// same.
+    pub fn close(self) -> io::Result<()> {
+        close(self.root)
+    }
+
     /// Opens an existing file below the root for reading. Nothing is read.
     /// The empty path names the root, so it is [`ScopeError::NotAFile`].
-    pub fn open_read(&self, names: &[&str]) -> Result<ScopedFile, ScopeError> {
+    pub fn open_read(&self, names: &[&str]) -> Result<ScopedFile, WalkError> {
         self.open_file(names, &READ)
     }
 
     /// Opens an existing file below the root for a later replacement. The
     /// open does not change the file; [`ScopedFile::replace_contents`] does.
     /// The empty path names the root, so it is [`ScopeError::NotAFile`].
-    pub fn open_for_replace(&self, names: &[&str]) -> Result<ScopedFile, ScopeError> {
+    pub fn open_for_replace(&self, names: &[&str]) -> Result<ScopedFile, WalkError> {
         self.open_file(names, &REPLACE)
     }
 
     /// Opens the directory `names` for listing; no names is the root. No
     /// entry is read until [`ScopedListing::entries`].
-    pub fn list(&self, names: &[&str]) -> Result<ScopedListing, ScopeError> {
+    pub fn list(&self, names: &[&str]) -> Result<ScopedListing, WalkError> {
         name::check_each(names)?;
         let (opened, real_names) = self.walk_to(names, &LIST, Need::Directory)?;
         Ok(ScopedListing {
@@ -224,11 +242,15 @@ impl ScopedDir {
 
     /// Reports the kind and size of the entry `names`, without following it
     /// if it is a link; no names is the root.
-    pub fn stat(&self, names: &[&str]) -> Result<Metadata, ScopeError> {
+    pub fn stat(&self, names: &[&str]) -> Result<Metadata, WalkError> {
         name::check_each(names)?;
         let (opened, real_names) = self.walk_to(names, &STAT, Need::Any)?;
         let size = match opened.kind {
-            EntryKind::File => standard(opened.handle.as_handle())?.size,
+            EntryKind::File => {
+                standard(opened.handle.as_handle())
+                    .map_err(|error| below(error, &real_names))?
+                    .size
+            }
             EntryKind::Directory | EntryKind::Other => 0,
         };
         Ok(Metadata {
@@ -241,7 +263,7 @@ impl ScopedDir {
     /// Opens the directory `names` and holds it for one creation; no names
     /// is the root. Every component is refused if it is a reparse point.
     /// Nothing is created.
-    pub fn open_parent(&self, names: &[&str]) -> Result<ScopedParent<'_>, ScopeError> {
+    pub fn open_parent(&self, names: &[&str]) -> Result<ScopedParent<'_>, WalkError> {
         name::check_each(names)?;
         let (held, real_names) = self.walk(names)?;
         Ok(ScopedParent {
@@ -254,11 +276,12 @@ impl ScopedDir {
     /// Opens the file `names` with `open`. The empty path names the root, a
     /// directory, so it is [`ScopeError::NotAFile`] as any directory is; the
     /// root is reopened only to read its attributes, with no data access.
-    fn open_file(&self, names: &[&str], open: &Open) -> Result<ScopedFile, ScopeError> {
+    fn open_file(&self, names: &[&str], open: &Open) -> Result<ScopedFile, WalkError> {
         name::check_each(names)?;
         let open = if names.is_empty() { &STAT } else { open };
         let (opened, real_names) = self.walk_to(names, open, Need::File)?;
-        let info = standard(opened.handle.as_handle())?;
+        let info = standard(opened.handle.as_handle())
+            .map_err(|error| below(error, &real_names))?;
         Ok(ScopedFile::new(
             File::from(opened.handle),
             real_names,
@@ -269,18 +292,22 @@ impl ScopedDir {
 
     /// Walks every name as a directory. Returns the last directory's handle,
     /// `None` for the root, and the real names; every other handle is closed.
+    /// A failure carries the real names of the directories opened before it.
     fn walk(
         &self,
         names: &[&str],
-    ) -> Result<(Option<OwnedHandle>, Vec<String>), ScopeError> {
+    ) -> Result<(Option<OwnedHandle>, Vec<String>), WalkError> {
         let mut held: Option<OwnedHandle> = None;
         let mut real_names = Vec::with_capacity(names.len());
         for component in names {
             let base = held
                 .as_ref()
                 .map_or(self.root.as_handle(), AsHandle::as_handle);
-            let opened = open_checked(base, component, &TRAVERSE, Need::Directory)?;
-            real_names.push(real_name(opened.handle.as_handle())?);
+            let opened = open_checked(base, component, &TRAVERSE, Need::Directory)
+                .map_err(|error| below(error, &real_names))?;
+            let name = real_name(opened.handle.as_handle())
+                .map_err(|error| below(error, &real_names))?;
+            real_names.push(name);
             // The previous directory's handle is closed here.
             held = Some(opened.handle);
         }
@@ -288,13 +315,14 @@ impl ScopedDir {
     }
 
     /// Walks to the last name and opens it with `open`; no names reopens the
-    /// root itself.
+    /// root itself. A failure carries the real names of the directories
+    /// opened before it, the leaf's excluded.
     fn walk_to(
         &self,
         names: &[&str],
         open: &Open,
         need: Need,
-    ) -> Result<(Opened, Vec<String>), ScopeError> {
+    ) -> Result<(Opened, Vec<String>), WalkError> {
         let Some((leaf, directories)) = names.split_last() else {
             let opened = open_checked(self.root.as_handle(), "", open, need)?;
             return Ok((opened, Vec::new()));
@@ -303,9 +331,22 @@ impl ScopedDir {
         let base = parent
             .as_ref()
             .map_or(self.root.as_handle(), AsHandle::as_handle);
-        let opened = open_checked(base, leaf, open, need)?;
-        real_names.push(real_name(opened.handle.as_handle())?);
+        let opened = open_checked(base, leaf, open, need)
+            .map_err(|error| below(error, &real_names))?;
+        let name = real_name(opened.handle.as_handle())
+            .map_err(|error| below(error, &real_names))?;
+        real_names.push(name);
         Ok((opened, real_names))
+    }
+}
+
+/// The failure `error`, decided below the directories whose real names begin
+/// `real_names`: a failure after the leaf opened carries the leaf's name
+/// too, since it is decided on the opened object.
+fn below(error: ScopeError, real_names: &[String]) -> WalkError {
+    WalkError {
+        error,
+        opened: real_names.to_vec(),
     }
 }
 
@@ -628,6 +669,73 @@ fn real_name(handle: BorrowedHandle<'_>) -> Result<String, ScopeError> {
         .map_err(|_| ScopeError::NotUnicode)
 }
 
+/// Whether the adapter can give its guarantees on a root whose volume has
+/// the device characteristics `device` and whose normalized name query
+/// answered `name`: a local volume that reports the root's name. A remote
+/// volume, a volume whose characteristics cannot be read, and any failure of
+/// the name query are [`ScopeError::Unsupported`].
+fn root_guarantees(
+    device: Result<u32, ScopeError>,
+    name: Result<String, ScopeError>,
+) -> Result<(), ScopeError> {
+    match device {
+        Ok(characteristics) if characteristics & FILE_REMOTE_DEVICE == 0 => {}
+        _ => return Err(ScopeError::Unsupported),
+    }
+    name.map(|_| ()).map_err(|_| ScopeError::Unsupported)
+}
+
+/// The device characteristics of the volume the opened object is on.
+fn device_characteristics(handle: BorrowedHandle<'_>) -> Result<u32, ScopeError> {
+    let mut info = FILE_FS_DEVICE_INFORMATION::default();
+    let mut status_block = IO_STATUS_BLOCK::default();
+    // SAFETY: `handle` is borrowed, so it is open for the call. `info` is a
+    // writable FILE_FS_DEVICE_INFORMATION and `DEVICE_INFO_SIZE` is its size,
+    // the structure this class writes. `status_block` is a writable local.
+    let status = unsafe {
+        NtQueryVolumeInformationFile(
+            handle.as_raw_handle(),
+            &mut status_block,
+            (&raw mut info).cast(),
+            DEVICE_INFO_SIZE,
+            FileFsDeviceInformation,
+        )
+    };
+    if status < 0 {
+        return Err(status_error(status));
+    }
+    Ok(info.Characteristics)
+}
+
+/// Closes `file`, reporting what `CloseHandle` answers, which dropping a
+/// file does not.
+///
+/// # Errors
+///
+/// The system reported the close as failed; the handle is not valid after
+/// the call either way.
+pub fn close(file: File) -> io::Result<()> {
+    let handle = file.into_raw_handle();
+    // SAFETY: `handle` was owned by `file`, which `into_raw_handle` consumed,
+    // so it is open and nothing else closes it.
+    if unsafe { CloseHandle(handle) } == 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
+/// Whether the open `file` is a regular file of a disk volume: its handle's
+/// type is `FILE_TYPE_DISK` and its metadata says it is a file. The metadata
+/// alone does not tell: the standard library reports an anonymous pipe as a
+/// file whose length is the bytes the pipe holds at that moment.
+pub fn is_regular_file(file: &File) -> bool {
+    // SAFETY: the handle is borrowed from `file`, so it is open for the
+    // call, and GetFileType takes no pointer.
+    let kind = unsafe { GetFileType(file.as_raw_handle()) };
+    kind == FILE_TYPE_DISK && file.metadata().is_ok_and(|metadata| metadata.is_file())
+}
+
 /// Maps a failed NTSTATUS to the closed error enum.
 fn status_error(status: NTSTATUS) -> ScopeError {
     match status {
@@ -649,5 +757,41 @@ fn status_error(status: NTSTATUS) -> ScopeError {
             "NTSTATUS {:#010x}",
             other.cast_unsigned()
         ))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn named() -> Result<String, ScopeError> {
+        Ok("inside".to_owned())
+    }
+
+    /// F2 of the drivers review: the classification of a root's volume,
+    /// apart from a machine that can reach a share.
+    #[test]
+    fn a_root_is_held_only_on_a_local_volume_that_reports_its_name() {
+        assert!(root_guarantees(Ok(0), named()).is_ok());
+        assert!(matches!(
+            root_guarantees(Ok(FILE_REMOTE_DEVICE), named()),
+            Err(ScopeError::Unsupported)
+        ));
+        assert!(matches!(
+            root_guarantees(Err(ScopeError::Io(io::Error::other("x"))), named()),
+            Err(ScopeError::Unsupported)
+        ));
+        // Over SMB the name query fails with STATUS_INVALID_PARAMETER for a
+        // buffer of 65,540 bytes (probe 2): any failure is unsupported.
+        for failure in [
+            ScopeError::Unsupported,
+            ScopeError::Io(io::Error::other("NTSTATUS 0xc000000d")),
+            ScopeError::NotUnicode,
+        ] {
+            assert!(matches!(
+                root_guarantees(Ok(0), Err(failure)),
+                Err(ScopeError::Unsupported)
+            ));
+        }
     }
 }

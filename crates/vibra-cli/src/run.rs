@@ -155,6 +155,7 @@ pub(crate) fn respond(
     response.result = result;
     response.status = status_for(result);
     response.diagnostics.clone_from(&outcome.diagnostics);
+    response.log.clone_from(&outcome.log);
     if !outcome.limits_reached.is_empty() {
         // A reached limit is an unknown outcome and an incomplete
         // observation.

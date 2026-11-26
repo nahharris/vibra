@@ -661,12 +661,12 @@ Every graph has the `@tests` unit, even when empty.
 | --- | --- | --- |
 | `format` | `@sourceGraph.v1` | required |
 | `units` | list of unit records sorted by `name` | every unit of the snapshot |
-| `dependencies` | list of dependency records sorted by `alias` | every dependency the root project file declares |
+| `dependencies` | list of dependency records sorted by `name` | every dependency the root project file declares |
 
 A unit record has `name` (atom), `kind` (`@bin`, `@lib`, `@tests`, or
 `@dependency`), and `modules` (list of `{path: Atom sourceId: Str
 bytesHex: Str}` sorted by `path`, where `bytesHex` is the module's exact
-bytes in lower-case hexadecimal). A dependency record has `alias` (`Str`,
+bytes in lower-case hexadecimal). A dependency record has `name` (`Str`,
 the dependency's key, which is the name of the library it binds), `kind`
 (`@path` or `@git`), `source` (`Str`, the path or URL), `status`
 (`@captured`, `@verified`, `@unavailable`, or `@refuted`), and `span` (the

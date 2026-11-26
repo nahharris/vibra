@@ -392,6 +392,110 @@ fn stdin_passes_through() {
     assert_eq!(ran.stdout, b"x\n");
 }
 
+/// Runs `vibra run` on the tree of `V2-RUNTIME-run-stdin`, which reads the
+/// whole of its standard input and writes it back, feeding the pipe in
+/// `parts` with a pause before each part after the first. The pause is long
+/// enough that the program's first read happens while the pipe holds only
+/// what came before it.
+fn slow_stdin(parts: &[&[u8]]) -> Ran {
+    let tree = case_tree("V2-RUNTIME-run-stdin");
+    let mut child = Command::new(VIBRA)
+        .arg("run")
+        .current_dir(tree.path())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("the binary starts");
+    let mut input = child.stdin.take().expect("a piped standard input");
+    for (index, part) in parts.iter().enumerate() {
+        if index > 0 {
+            std::thread::sleep(std::time::Duration::from_secs(3));
+        }
+        // A program that ended early has closed the pipe: the write fails,
+        // and the output says what it read.
+        let _ = input.write_all(part).and_then(|()| input.flush());
+    }
+    drop(input);
+    let output = child.wait_with_output().expect("the binary ends");
+    Ran {
+        code: output.status.code().expect("an exit status"),
+        stdout: output.stdout,
+        stderr: output.stderr,
+    }
+}
+
+/// 06 "Standard input": a completed text read is empty only at the end of
+/// input. A scalar split across two writes of a pipe is read whole (F1 of
+/// the drivers review, probe 25).
+#[test]
+fn stdin_pipe_scalar_split_across_writes() {
+    let ran = slow_stdin(&[b"x\xc3", b"\xa9y"]);
+    assert_eq!(ran.code, 0, "{}", String::from_utf8_lossy(&ran.stderr));
+    assert_eq!(String::from_utf8_lossy(&ran.stdout), "x\u{e9}y");
+}
+
+/// A producer that pauses before its first byte does not end the input
+/// (F1 of the drivers review, probe 24).
+#[test]
+fn stdin_pipe_slow_producer() {
+    let ran = slow_stdin(&[b"", b"abc"]);
+    assert_eq!(ran.code, 0, "{}", String::from_utf8_lossy(&ran.stderr));
+    assert_eq!(ran.stdout, b"abc");
+    let ran = slow_stdin(&[b"ab", b"cd"]);
+    assert_eq!(ran.code, 0, "{}", String::from_utf8_lossy(&ran.stderr));
+    assert_eq!(ran.stdout, b"abcd");
+}
+
+/// An entry that reads one text window of at most four bytes from its
+/// standard input and writes it.
+const READ_FOUR: &str = "use @std.io.StdinText enduse\n\nuse @std.io.StdoutText enduse\n\n\
+    use @std.process.ExitCode enduse\n\n\
+    proc main\n  takes {input: StdinText out: StdoutText}\n  returns code: ExitCode\n  \
+    performs {StdinText StdoutText}\n  do\n    \
+    let Result.ok(value: text) be await StdinText.read(input 4u64) else\n      \
+    return ExitCode(1u8)\n    endlet\n    \
+    let _ be await StdoutText.write(out text) endlet\n    \
+    return ExitCode(0u8)\nendproc\n";
+
+/// 06 "Standard input": when the grant is released, a standard input that
+/// is a regular file is positioned just after the bytes delivered to the
+/// program (F5 of the drivers review). Two runs share one handle on the
+/// file `abc€def`: the first's window of four bytes ends inside `€`, so it
+/// delivers `abc` and keeps a byte; the second reads from `€` on.
+#[test]
+fn stdin_file_is_positioned_after_the_bytes_delivered() {
+    let first = case_tree("V2-RUNTIME-run-stdin");
+    fs::write(first.path().join("src/app/main.vib"), READ_FOUR).expect("the entry");
+    let second = case_tree("V2-RUNTIME-run-stdin");
+    let input = first.path().join("input.txt");
+    fs::write(&input, "abc\u{20ac}def").expect("the input file");
+    let shared = fs::File::open(&input).expect("the input opens");
+    let run = |tree: &TempDir| {
+        let output = Command::new(VIBRA)
+            .arg("run")
+            .current_dir(tree.path())
+            .stdin(Stdio::from(shared.try_clone().expect("a shared handle")))
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .expect("the binary runs");
+        (
+            output.status.code().expect("an exit status"),
+            String::from_utf8_lossy(&output.stdout).into_owned(),
+            String::from_utf8_lossy(&output.stderr).into_owned(),
+        )
+    };
+    let (code, stdout, stderr) = run(&first);
+    assert_eq!((code, stdout.as_str()), (0, "abc"), "{stderr}");
+    let (code, stdout, stderr) = run(&second);
+    assert_eq!(
+        (code, stdout.as_str()),
+        (0, "\u{20ac}def"),
+        "the second reader starts where the first program stopped: {stderr}"
+    );
+}
+
 const BYTE_255_PROJECT: &str = "{format: @project.v2 package: {name: \"bytes\" version: \"0.1.0\"} \
     targets: [{name: @app kind: @bin root: \"src/app\" entry: @app.main.main \
     effects: [@std.io.StdoutBytes] grants: [@out: {provider: @host.io.stdout \
@@ -554,36 +658,74 @@ fn rust_files(directory: &Path, found: &mut Vec<PathBuf>) {
     }
 }
 
-/// The workspace-relative files that construct `Launch::System`: an
-/// occurrence that is not in a comment, a string, or a documentation link,
-/// and not a pattern.
-fn system_launchers() -> Vec<String> {
+/// What one source file does with the process: whether it constructs
+/// `Launch::System`, imports a variant of `Launch` (so that `System { .. }`
+/// would construct one without the text `Launch::System`), or constructs a
+/// `SystemDriver`.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct LaunchUses {
+    launches: bool,
+    imports_variant: bool,
+    system_driver: bool,
+}
+
+/// Whether the occurrence at `index` of `text` is code: not in a line
+/// comment, a string opened on its line, or a documentation link.
+fn in_code(text: &str, index: usize) -> bool {
+    let line_start = text[..index].rfind('\n').map_or(0, |at| at + 1);
+    let before = &text[line_start..index];
+    let quotes = before.matches('"').count() - before.matches("\\\"").count();
+    !(before.contains("//") || before.ends_with(['`', '[']) || quotes % 2 == 1)
+}
+
+/// What `text`, one Rust source, does with the process.
+fn launch_uses(text: &str) -> LaunchUses {
+    let launches = text.match_indices("Launch::System").any(|(index, _)| {
+        in_code(text, index) && !is_pattern(&text[index + "Launch::System".len()..])
+    });
+    // A `use` declaration starts its line and runs to its `;`, over as many
+    // lines as it takes.
+    let imports_variant = text.match_indices("use ").any(|(index, _)| {
+        let line_start = text[..index].rfind('\n').map_or(0, |at| at + 1);
+        let before = text[line_start..index].trim();
+        if !(before.is_empty() || before == "pub" || before.starts_with("pub(")) {
+            return false;
+        }
+        let declaration = text[index..].split(';').next().unwrap_or_default();
+        let compact = declaration.split_whitespace().collect::<String>();
+        compact.contains("Launch::")
+    });
+    let system_driver = text
+        .match_indices("SystemDriver::new")
+        .any(|(index, _)| in_code(text, index));
+    LaunchUses {
+        launches,
+        imports_variant,
+        system_driver,
+    }
+}
+
+/// Each workspace-relative file under `crates`, with what it does with the
+/// process, when it does anything.
+fn process_launchers() -> Vec<(String, LaunchUses)> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let mut files = Vec::new();
     rust_files(&root.join("crates"), &mut files);
     let mut launchers = Vec::new();
     for file in files {
         let text = fs::read_to_string(&file).expect("a readable source");
-        for (index, _) in text.match_indices("Launch::System") {
-            let line_start = text[..index].rfind('\n').map_or(0, |at| at + 1);
-            let before = &text[line_start..index];
-            if before.contains("//") || before.ends_with(['"', '`', '[']) {
-                continue;
-            }
-            if is_pattern(&text[index + "Launch::System".len()..]) {
-                continue;
-            }
-            let relative = file
-                .strip_prefix(&root)
-                .expect("beneath the root")
-                .to_string_lossy()
-                .replace('\\', "/");
-            if !launchers.contains(&relative) {
-                launchers.push(relative);
-            }
+        let uses = launch_uses(&text);
+        if uses == LaunchUses::default() {
+            continue;
         }
+        let relative = file
+            .strip_prefix(&root)
+            .expect("beneath the root")
+            .to_string_lossy()
+            .replace('\\', "/");
+        launchers.push((relative, uses));
     }
-    launchers.sort();
+    launchers.sort_by(|left, right| left.0.cmp(&right.0));
     launchers
 }
 
@@ -594,18 +736,31 @@ fn only_caller_of_the_system_launch() {
         "crates/vibra-workspace/tests/it/attacks_run.rs",
         "crates/vibra-workspace/tests/it/dual_run.rs",
     ];
-    let launchers = system_launchers();
+    // The launch itself, and the system driver's own tests.
+    let drivers = [
+        "crates/vibra-workspace/src/run.rs",
+        "crates/vibra-host/tests/it/fs.rs",
+        "crates/vibra-host/tests/it/system.rs",
+    ];
+    let launchers = process_launchers();
     assert!(
-        launchers.contains(&"crates/vibra-cli/src/run.rs".to_owned()),
+        launchers
+            .iter()
+            .any(|(file, uses)| file == "crates/vibra-cli/src/run.rs" && uses.launches),
         "`vibra run` launches on the process: {launchers:?}"
     );
     let others = launchers
         .iter()
-        .filter(|file| !allowed.contains(&file.as_str()))
+        .filter(|(file, uses)| {
+            uses.imports_variant
+                || (uses.launches && !allowed.contains(&file.as_str()))
+                || (uses.system_driver && !drivers.contains(&file.as_str()))
+        })
         .collect::<Vec<_>>();
     assert!(
         others.is_empty(),
-        "other constructors of `Launch::System`: {others:?}"
+        "other constructors of `Launch::System` or `SystemDriver`, or an \
+         import of a variant of `Launch`: {others:?}"
     );
 }
 
@@ -617,4 +772,53 @@ fn the_launch_scanner_tells_a_construction_from_a_pattern() {
         " {\n    arguments: Vec::new(),\n    capture: true,\n},"
     ));
     assert!(!is_pattern(" { arguments, capture: false } == other"));
+}
+
+/// F10 of the drivers review: the scan sees a construction of the system
+/// launch under both spellings, the path and an imported variant, and a
+/// construction of the system driver; a comment, a string, or a
+/// documentation link is none of them.
+#[test]
+fn the_launch_scanner_sees_both_spellings_and_the_system_driver() {
+    let path = "let launch = Launch::System {\n    arguments: Vec::new(),\n};\n";
+    assert_eq!(
+        launch_uses(path),
+        LaunchUses {
+            launches: true,
+            ..LaunchUses::default()
+        }
+    );
+    let imported = "use vibra_workspace::run::Launch::{System, World};\n\n\
+        let launch = System { arguments, capture: true };\n";
+    assert_eq!(
+        launch_uses(imported),
+        LaunchUses {
+            imports_variant: true,
+            ..LaunchUses::default()
+        }
+    );
+    for spelling in [
+        "use vibra_workspace::run::{Launch::System, prepare};\n",
+        "pub use crate::run::Launch::*;\n",
+        "use vibra_workspace::run::{\n    Launch::{\n        System,\n    },\n};\n",
+    ] {
+        assert!(launch_uses(spelling).imports_variant, "{spelling}");
+    }
+    let driver = "let mut driver = SystemDriver::new(inputs);\n";
+    assert_eq!(
+        launch_uses(driver),
+        LaunchUses {
+            system_driver: true,
+            ..LaunchUses::default()
+        }
+    );
+    for quiet in [
+        "// Launch::System { .. } and SystemDriver::new(inputs)\n",
+        "//! [`Launch::System`] and [`SystemDriver::new`]\n",
+        "let text = \"SystemDriver::new\";\n",
+        "use vibra_workspace::run::{Launch, prepare};\n",
+        "if let Launch::System { .. } = launch {}\n",
+    ] {
+        assert_eq!(launch_uses(quiet), LaunchUses::default(), "{quiet}");
+    }
 }

@@ -23,9 +23,16 @@
 //!   creates the leaf exclusively relative to that held directory. Nothing is
 //!   created and then removed.
 //!
+//! An operation that walks and fails answers a [`WalkError`]: the failure,
+//! and the real names of the directories it had opened by then.
+//!
 //! The crate has no remove, rename, append, or directory creation. Every name
 //! of a request passes [`check_name`] first. On every platform other than
 //! Windows, [`ScopedDir::open_root`] returns [`ScopeError::Unsupported`].
+//!
+//! [`is_regular_file`] tells a standard stream that is a regular file from a
+//! pipe or a device, which on Windows needs the handle's file type, and
+//! [`close`] closes a file reporting what the system answers.
 //!
 //! The adapter's feasibility record is
 //! `docs/roadmap/v0.0.2/m0/file-scope-feasibility.md`.
@@ -41,12 +48,12 @@ pub use name::check_name;
 #[cfg(windows)]
 mod windows;
 #[cfg(windows)]
-pub use windows::{ScopedDir, ScopedListing, ScopedParent};
+pub use windows::{ScopedDir, ScopedListing, ScopedParent, close, is_regular_file};
 
 #[cfg(not(windows))]
 mod other;
 #[cfg(not(windows))]
-pub use other::{ScopedDir, ScopedListing, ScopedParent};
+pub use other::{ScopedDir, ScopedListing, ScopedParent, close, is_regular_file};
 
 /// Why a scoped operation did not happen.
 ///
@@ -98,6 +105,47 @@ impl std::error::Error for ScopeError {
             Self::Io(error) => Some(error),
             _ => None,
         }
+    }
+}
+
+/// Why an operation that walks from the root did not happen, with the names
+/// the filesystem reported for the directories it had opened by then, from
+/// the root down: the caller can decide whether the answer may tell anything
+/// about what lies below them.
+#[derive(Debug)]
+pub struct WalkError {
+    /// Why the operation did not happen.
+    pub error: ScopeError,
+    /// The real names of the directories opened before the failure, a prefix
+    /// of the request's components; empty when it failed at the root's first
+    /// component or before any open.
+    pub opened: Vec<String>,
+}
+
+impl From<ScopeError> for WalkError {
+    fn from(error: ScopeError) -> Self {
+        Self {
+            error,
+            opened: Vec::new(),
+        }
+    }
+}
+
+impl From<WalkError> for ScopeError {
+    fn from(error: WalkError) -> Self {
+        error.error
+    }
+}
+
+impl fmt::Display for WalkError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.error.fmt(formatter)
+    }
+}
+
+impl std::error::Error for WalkError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.error)
     }
 }
 
@@ -171,9 +219,15 @@ impl ScopedFile {
         self.links
     }
 
-    /// Reads at most `max` bytes from the start of the file.
+    /// Reads at most `max` bytes from the start of the file. The buffer is
+    /// reserved fallibly: an allocation the operating system refuses is
+    /// [`ScopeError::Io`] of kind [`std::io::ErrorKind::OutOfMemory`].
     pub fn read_at_most(&mut self, max: u64) -> Result<Vec<u8>, ScopeError> {
         let mut bytes = Vec::new();
+        let expected = usize::try_from(max.min(self.size)).unwrap_or(usize::MAX);
+        bytes
+            .try_reserve_exact(expected)
+            .map_err(|_| ScopeError::Io(std::io::ErrorKind::OutOfMemory.into()))?;
         self.file
             .seek(SeekFrom::Start(0))
             .and_then(|_| (&mut self.file).take(max).read_to_end(&mut bytes))

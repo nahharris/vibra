@@ -240,8 +240,8 @@ impl Driver for Versioned {
         self.inner.acquire(provider, resource)
     }
 
-    fn release(&mut self, resource: ResourceId) {
-        self.inner.release(resource);
+    fn release(&mut self, resource: ResourceId) -> Result<(), String> {
+        self.inner.release(resource)
     }
 
     fn call(

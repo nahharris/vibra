@@ -1489,8 +1489,10 @@ impl Driver for WorldDriver {
         }
     }
 
-    fn release(&mut self, resource: ResourceId) {
+    fn release(&mut self, resource: ResourceId) -> Result<(), String> {
+        // A world holds nothing to close.
         self.held.remove(&resource);
+        Ok(())
     }
 
     fn call(

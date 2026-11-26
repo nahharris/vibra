@@ -257,12 +257,12 @@ pub fn read_opened(file: &mut ScopedFile) -> Vec<u8> {
 
 /// Asserts the exact denial, with the case named in the message.
 #[track_caller]
-pub fn assert_denied<T: std::fmt::Debug>(
-    result: Result<T, ScopeError>,
+pub fn assert_denied<T: std::fmt::Debug, E: Into<ScopeError>>(
+    result: Result<T, E>,
     expected: fn(&ScopeError) -> bool,
     case: &str,
 ) {
-    match result {
+    match result.map_err(Into::into) {
         Err(error) if expected(&error) => {}
         other => panic!("{case}: expected the typed denial, got {other:?}"),
     }

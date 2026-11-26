@@ -53,7 +53,7 @@ fn a_git_dependency_is_unavailable_with_the_span_of_its_entry() {
     };
     assert_eq!(dependency.span(), ByteSpan::new(start, end));
     assert!(graph.canonical_text().ends_with(&format!(
-        "dependencies: [{{alias: \"money\" kind: @git source: \"https://example.com/money.git\" status: @unavailable span: {{sourceId: \"project.vibon\" start: {start}u64 end: {end}u64}}}}]}}"
+        "dependencies: [{{name: \"money\" kind: @git source: \"https://example.com/money.git\" status: @unavailable span: {{sourceId: \"project.vibon\" start: {start}u64 end: {end}u64}}}}]}}"
     )));
 }
 
@@ -86,7 +86,7 @@ fn a_path_dependency_is_captured_as_a_dependency_unit() {
     );
     assert!(
         text.contains(
-            "{alias: \"money\" kind: @path source: \"lib/money\" status: @captured"
+            "{name: \"money\" kind: @path source: \"lib/money\" status: @captured"
         ),
         "{text}"
     );

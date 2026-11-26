@@ -176,6 +176,9 @@ pub struct RunOutcome {
     pub stdout: Vec<u8>,
     /// Every byte the program wrote to its standard error.
     pub stderr: Vec<u8>,
+    /// The lines of the tool's log: each release the driver reported as
+    /// failed, which changes neither the result nor the observation.
+    pub log: Vec<String>,
 }
 
 impl RunOutcome {
@@ -319,6 +322,7 @@ fn before_startup(
         limits_reached: Vec::new(),
         stdout: Vec::new(),
         stderr: Vec::new(),
+        log: Vec::new(),
     })
 }
 
@@ -542,23 +546,27 @@ impl Prepared {
         let ceiling = self.facts.ceiling();
         let admitted =
             startup::admit(self.facts.plan(), &self.shape, &ceiling, &*driver);
-        let (ending, record, trace) = match admitted {
+        let (ending, record, trace, log) = match admitted {
             Err(refusal) => (
                 Ending::Refused(refusal),
                 StartupRecord::not_started(),
                 empty_trace(&self.revision, Some(&self.target)),
+                Vec::new(),
             ),
             Ok(admission) => {
                 let mut context = Context::new(&mut *driver, self.header.clone());
                 let mut started = startup::start(admission, &mut context);
                 let ending = self.enter(&mut started, budget);
                 // The one release of every acquired grant, in reverse order.
-                let record = startup::release(started);
-                (ending, record, context.trace().clone())
+                let released = startup::release(started);
+                let log = released.failures.iter().map(ToString::to_string).collect();
+                (ending, released.record, context.trace().clone(), log)
             }
         };
         let (stdout, stderr) = output(driver);
-        self.outcome(ending, record, trace, stdout, stderr)
+        let mut outcome = self.outcome(ending, record, trace, stdout, stderr);
+        outcome.log = log;
+        outcome
     }
 
     /// Runs the entry when startup bound every leaf.
@@ -773,6 +781,7 @@ impl Prepared {
             limits_reached,
             stdout,
             stderr,
+            log: Vec::new(),
         }
     }
 }
@@ -874,7 +883,8 @@ mod tests {
 
     use vibra_diagnostics::DiagnosticCode;
     use vibra_host::driver::{
-        Acquire, Action, Completion, DriverIdentity, Gate, Resolved, ResourceId,
+        Acquire, Action, Completion, DriverIdentity, Gate, Progress, Resolved,
+        ResourceId,
     };
     use vibra_host::recipe::Provider;
     use vibra_host::trace::Event;
@@ -921,14 +931,19 @@ mod tests {
         }
     }
 
-    /// The world driver, recording acquisitions and releases, and refusing
-    /// without a gate refusal on its `fault`-th call, counted from 1.
+    /// The world driver, recording acquisitions and releases, refusing
+    /// without a gate refusal on its `fault`-th call, counted from 1, and
+    /// failing its first release for the reason `fail_release`.
     struct Counting {
         inner: WorldDriver,
         acquired: Vec<ResourceId>,
         released: Vec<ResourceId>,
         calls: usize,
         fault: Option<usize>,
+        fail_release: Option<&'static str>,
+        /// The call, counted from 1, at which the driver reports memory
+        /// exhaustion.
+        exhausted: Option<usize>,
     }
 
     impl Driver for Counting {
@@ -944,9 +959,12 @@ mod tests {
             acquired
         }
 
-        fn release(&mut self, resource: ResourceId) {
+        fn release(&mut self, resource: ResourceId) -> Result<(), String> {
             self.released.push(resource);
-            self.inner.release(resource);
+            self.inner.release(resource)?;
+            self.fail_release
+                .take()
+                .map_or(Ok(()), |why| Err(why.to_owned()))
         }
 
         fn call(
@@ -958,6 +976,9 @@ mod tests {
             self.calls += 1;
             if self.fault == Some(self.calls) {
                 return Completion::Refused;
+            }
+            if self.exhausted == Some(self.calls) {
+                return Completion::MemoryExhausted(Progress::NONE);
             }
             self.inner.call(resource, action, gate)
         }
@@ -992,6 +1013,27 @@ mod tests {
         fault: Option<usize>,
         budget: MemoryBudget,
     ) -> (RunOutcome, Counting) {
+        run_failing_release(tail, fault, budget, None)
+    }
+
+    /// [`run`], with the driver's first release failing for `fail_release`.
+    fn run_failing_release(
+        tail: &str,
+        fault: Option<usize>,
+        budget: MemoryBudget,
+        fail_release: Option<&'static str>,
+    ) -> (RunOutcome, Counting) {
+        run_with(tail, fault, budget, fail_release, None)
+    }
+
+    /// [`run`], with each of the driver's faults.
+    fn run_with(
+        tail: &str,
+        fault: Option<usize>,
+        budget: MemoryBudget,
+        fail_release: Option<&'static str>,
+        exhausted: Option<usize>,
+    ) -> (RunOutcome, Counting) {
         let text = source(tail);
         let tree = Tree::new(&[("project.vibon", PROJECT), (MAIN, &text)]);
         let snapshot = tree.snapshot();
@@ -1007,6 +1049,8 @@ mod tests {
             released: Vec::new(),
             calls: 0,
             fault,
+            fail_release,
+            exhausted,
         };
         let outcome = prepared.run(&mut driver, budget, |driver| {
             let output = driver.inner.output();
@@ -1043,6 +1087,62 @@ mod tests {
             .iter()
             .filter(|event| matches!(event, Event::Host(_)))
             .count()
+    }
+
+    /// F6 of the drivers review: a driver that reports memory exhaustion,
+    /// for an allocation the system refused, ends the run as memory
+    /// exhausted: the memory limit reached, no event for the call, and every
+    /// leaf released.
+    #[test]
+    fn a_driver_out_of_memory_ends_the_run_as_memory_exhausted() {
+        let (outcome, driver) =
+            run_with("", None, MemoryBudget::DEFAULT, None, Some(2));
+        assert_eq!(outcome.result, CommandResult::OperationalFailure);
+        assert_eq!(outcome.limits_reached, ["memory"]);
+        assert_eq!(outcome.application_code, None);
+        assert_eq!(host_events(&outcome), 1, "only the completed write");
+        assert_eq!(
+            outcome
+                .diagnostics
+                .iter()
+                .map(|diagnostic| diagnostic.code())
+                .collect::<Vec<_>>(),
+            [DiagnosticCode::RuntimeMemoryExhausted]
+        );
+        assert_released(&outcome, &driver);
+    }
+
+    /// F4 of the drivers review: a release the driver reports as failed
+    /// leaves the result and the record as they were, and one line for the
+    /// tool's log.
+    #[test]
+    fn a_failed_release_leaves_the_result_and_one_log_line() {
+        let (outcome, driver) = run_failing_release(
+            "",
+            None,
+            MemoryBudget::DEFAULT,
+            Some("the handle could not be closed"),
+        );
+        assert_eq!(outcome.result, CommandResult::Ok);
+        assert_eq!(outcome.application_code, Some(0));
+        assert_released(&outcome, &driver);
+        assert_eq!(outcome.log.len(), 1, "{:?}", outcome.log);
+        assert!(
+            outcome
+                .log
+                .iter()
+                .all(|line| line.starts_with("releasing @")
+                    && line.ends_with(" failed: the handle could not be closed")),
+            "{:?}",
+            outcome.log
+        );
+        let (clean, _) = run("", None, MemoryBudget::DEFAULT);
+        assert!(clean.log.is_empty());
+        assert_eq!(
+            clean.document(),
+            outcome.document(),
+            "the observation is the same"
+        );
     }
 
     /// `V2-RUNTIME-run-trap`: the second host call faults after one

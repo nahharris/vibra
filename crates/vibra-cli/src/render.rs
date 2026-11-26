@@ -45,6 +45,9 @@ pub struct Response {
     pub payload: Payload,
     /// A line for a person when the response carries no diagnostic to show.
     pub notice: Option<String>,
+    /// The lines of the tool's log, written to standard error in either
+    /// format (05 "Streams").
+    pub log: Vec<String>,
     /// The limit profile, the limits reached, and whether the observation is
     /// complete.
     pub limits: Limits,
@@ -70,6 +73,7 @@ impl Response {
             sources: BTreeMap::new(),
             payload,
             notice: None,
+            log: Vec::new(),
             limits: limits(),
         }
     }
@@ -250,6 +254,9 @@ pub fn emit<W: Write, E: Write>(
     stderr: &mut E,
     serialize: &dyn Fn(&Envelope) -> Result<String, SchemaViolation>,
 ) -> i32 {
+    for line in &response.log {
+        let _ = writeln!(stderr, "{line}");
+    }
     match response.format {
         OutputFormat::Json => {
             let built = envelope(response).and_then(|built| {

@@ -306,6 +306,53 @@ fn a_permitted_read_completes_with_a_receipt_and_charges_its_size() {
     assert_eq!(counters(&cx, notes).input_bytes().reserved(), 0);
 }
 
+/// F3 of the drivers review: an error the driver decided below directories
+/// whose real names the policy does not permit is a completed `denied`; below
+/// a permitted one it is the error. The driver asks once.
+#[test]
+fn an_error_below_an_unpermitted_directory_is_denied() {
+    let script = Scripted::new();
+    let mut driver = script.clone();
+    let mut cx = Context::new(&mut driver, header());
+    let notes = with_policy(
+        &mut cx,
+        HostInterface::DirReadText,
+        file_rule("\"pub\"", "@read", ANY_NAME),
+    );
+    for (real, expected, admitted) in [
+        ("PUB", err(HostOp::FsReadText, "denied"), false),
+        ("pub", err(HostOp::FsReadText, "notFound"), true),
+    ] {
+        script.clear();
+        script.tweak(Tweak {
+            failed_below: Some(names(&[real])),
+            ..Tweak::default()
+        });
+        assert_eq!(
+            read(&mut cx, notes, &["pub", "y.txt"]),
+            Ok((expected, true)),
+            "{real}"
+        );
+        assert!(
+            script.state().log.contains(&Event::GateError {
+                names: names(&[real, "y.txt"]),
+                admitted,
+            }),
+            "{real}"
+        );
+    }
+    assert_eq!(used(&cx, notes), [2, 0, 0]);
+    script.tweak(Tweak {
+        failed_below: Some(names(&["pub"])),
+        admit_after: true,
+        ..Tweak::default()
+    });
+    assert!(
+        invalid(read(&mut cx, notes, &["pub", "y.txt"])),
+        "a driver that asks its gate twice"
+    );
+}
+
 #[test]
 fn atk_forged_token() {
     let script = Scripted::new();
@@ -339,7 +386,7 @@ fn atk_stale_grant() {
     let mut driver = script.clone();
     let mut cx = Context::new(&mut driver, header());
     let notes = root(&mut cx, HostInterface::DirReadText);
-    cx.release_for_tests(NOTES);
+    assert_eq!(cx.release_for_tests(NOTES), Ok(()));
     assert!(invalid(read(&mut cx, notes, &["a.txt"])));
     assert!(script.calls().is_empty());
 }
@@ -361,7 +408,7 @@ fn atk_stale_derived_grant() {
     assert_eq!(read(&mut cx, kept, &["a.txt"]), Ok((text("hello"), true)));
     script.clear();
     let before = cx.slot_for_tests(kept);
-    cx.release_for_tests(NOTES);
+    assert_eq!(cx.release_for_tests(NOTES), Ok(()));
     assert!(invalid(read(&mut cx, kept, &["a.txt"])));
     let narrowed = cx.narrow(NarrowRequest::Limit {
         grant: kept,
@@ -1298,6 +1345,38 @@ fn atk_driver_ignores_gate() {
         assert!(matches!(outcome, Err(HostFault::InvalidHostValue(_))));
         assert_eq!(script.last_gate(), Some(None));
     }
+    // No event is pending: the next call is not refused for one.
+    assert_eq!(read(&mut cx, notes, &["a.txt"]), Ok((text("hello"), true)));
+}
+
+/// F6 of the drivers review, 06 "Memory": a driver that reports memory
+/// exhaustion, for an allocation the system refused after its gate
+/// admitted the read, ends the call as memory exhaustion: no event is due,
+/// and the invocation is charged with what the adapter moved.
+#[test]
+fn a_driver_out_of_memory_is_memory_exhaustion() {
+    let script = Scripted::new();
+    script.file(&["a.txt"], "hello");
+    let mut driver = script.clone();
+    let mut cx = Context::new(&mut driver, header());
+    let notes = text_only(&mut cx);
+    script.tweak(Tweak {
+        completion: Some(Completion::MemoryExhausted(Progress::NONE)),
+        ..Tweak::default()
+    });
+    let at = names(&["a.txt"]);
+    let outcome = call(
+        &mut cx,
+        HostOp::FsReadText,
+        notes,
+        &[HostArgument::Path(&at)],
+    );
+    assert!(
+        matches!(outcome, Err(HostFault::MemoryExhausted)),
+        "{outcome:?}"
+    );
+    assert_eq!(script.last_returned(), Some("memoryExhausted"));
+    assert_eq!(used(&cx, notes), [1, 0, 0]);
     // No event is pending: the next call is not refused for one.
     assert_eq!(read(&mut cx, notes, &["a.txt"]), Ok((text("hello"), true)));
 }

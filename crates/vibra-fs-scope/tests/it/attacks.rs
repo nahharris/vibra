@@ -223,7 +223,7 @@ fn atk_fs_swapped_junction() {
     };
     let (mut inside_reads, mut denied, mut missing) = (0_u32, 0_u32, 0_u32);
     for _ in 0..10_000 {
-        match root.open_read(&["d", "a.txt"]) {
+        match root.open_read(&["d", "a.txt"]).map_err(ScopeError::from) {
             Ok(mut file) => {
                 let bytes = read_opened(&mut file);
                 assert_ne!(bytes, SECRET, "a read returned the outside content");

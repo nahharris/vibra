@@ -15,7 +15,9 @@
 //! [`Found`], before it reads, creates, or changes anything. The gate decides
 //! the policy on the names the filesystem reports and the action found, then
 //! the hard-link rule, then reserves the input bytes the driver may read, and
-//! answers [`Reserved`] or [`Refused`]. A driver whose gate refused returns
+//! answers [`Reserved`] or [`Refused`]. A driver whose walk failed below
+//! directories it opened calls [`Gate::admit_error`] instead, with the names
+//! the filesystem reported for them. A driver whose gate refused returns
 //! [`Completion::Refused`] and does nothing more; any other completion after
 //! a refusal is a defect of the driver, which the broker reports as
 //! `@runtime.invalidHostValue`.
@@ -175,6 +177,20 @@ pub trait Gate {
     ///
     /// [`Refused`]: the driver stops and returns [`Completion::Refused`].
     fn admit(&mut self, found: &Found<'_>) -> Result<Reserved, Refused>;
+
+    /// Admits or refuses the answer to an error the driver decided below
+    /// directories it opened, before it gives that answer. `names` are the
+    /// names the filesystem reported for those directories, then the rest of
+    /// the request's names. A driver calls it instead of [`Gate::admit`], at
+    /// most once per call.
+    ///
+    /// # Errors
+    ///
+    /// [`Refused`]: the policy permits no action of the operation on
+    /// `names`. The driver returns [`Completion::Refused`], which the broker
+    /// answers as a completed `denied`, so the reply does not tell what lies
+    /// below a directory the policy does not permit.
+    fn admit_error(&mut self, names: &[String]) -> Result<(), Refused>;
 }
 
 /// What the adapter measured, per charged byte resource, apart from the
@@ -211,6 +227,11 @@ pub enum Completion {
     Refused,
     /// The adapter knows the action was not submitted: no event.
     NotSubmitted(HostErrorCase),
+    /// The operating system refused an allocation for a reply the broker
+    /// had admitted: memory exhaustion, a host event and never an error
+    /// case of the operation (06 "Memory"). No event claims the call
+    /// completed; the broker charges what the adapter moved, as it knows it.
+    MemoryExhausted(Progress),
     /// The adapter call completed: an event is due.
     Completed {
         /// The operation's result.
@@ -229,9 +250,15 @@ pub trait Driver {
     /// Acquires the resource of one recipe at startup.
     fn acquire(&mut self, provider: Provider, resource: &Resolved) -> Acquire;
 
-    /// Releases a resource. The broker calls it only after every lineage on
-    /// the resource is dead.
-    fn release(&mut self, resource: ResourceId);
+    /// Releases a resource, closing it explicitly. The broker calls it only
+    /// after every lineage on the resource is dead.
+    ///
+    /// # Errors
+    ///
+    /// The release failed, for the reason given. The resource is released
+    /// all the same: no grant reaches it again, and the failure goes to the
+    /// tool's log (06 "Entry outcome").
+    fn release(&mut self, resource: ResourceId) -> Result<(), String>;
 
     /// Step 4 of a host call. `gate` answers what only the opened object
     /// decides, and reserves a size learned after opening.

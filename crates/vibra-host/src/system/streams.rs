@@ -17,7 +17,9 @@
 //! keeps the bytes it took and did not consume, and the next read starts
 //! with them. To tell "before the end of input" from "at the end" for an
 //! input of unknown size, the adapter takes one more byte, which it keeps
-//! the same way and does not charge.
+//! the same way and does not charge. When the grant is released, the kept
+//! bytes are given back: a regular file is positioned just after the bytes
+//! delivered, and a pipe or a console cannot take them back.
 //!
 //! **A write** delivers the whole value. A broken pipe is `closed`, and any
 //! other failure is `other`, both completed calls: a failed write may have
@@ -62,6 +64,17 @@ pub trait InputSource {
     ///
     /// The input cannot be read. [`io::ErrorKind::Interrupted`] is retried.
     fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize>;
+
+    /// Gives back the last `count` bytes read, which the adapter took and
+    /// did not deliver, when the grant is released: a regular file is
+    /// positioned `count` bytes back. A pipe or a console cannot take bytes
+    /// back and does nothing, an accepted limit of the platform (06
+    /// "Standard input").
+    ///
+    /// # Errors
+    ///
+    /// The position cannot be changed.
+    fn unread(&mut self, count: u64) -> io::Result<()>;
 }
 
 /// Why a whole-value write failed, and what the system reported of it.
@@ -158,10 +171,7 @@ pub(super) fn process_stdin() -> Opened<Box<dyn InputSource>> {
         return Opened::Open(Box::new(TerminalInput));
     }
     match duplicate(&stdin) {
-        Opened::Open(file) => {
-            let regular = file.metadata().is_ok_and(|metadata| metadata.is_file());
-            Opened::Open(Box::new(FileInput { file, regular }))
-        }
+        Opened::Open(file) => Opened::Open(Box::new(FileInput::new(file))),
         Opened::Missing => Opened::Missing,
         Opened::Failed(why) => {
             Opened::Failed(format!("the standard input could not be opened: {why}"))
@@ -203,12 +213,26 @@ impl InputSource for TerminalInput {
     fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
         io::stdin().lock().read(buffer)
     }
+
+    fn unread(&mut self, _count: u64) -> io::Result<()> {
+        Ok(())
+    }
 }
 
 /// A standard input that is a file or a pipe.
 struct FileInput {
     file: File,
     regular: bool,
+}
+
+impl FileInput {
+    /// The input `file`, whose size is known only when it is a regular
+    /// file. On Windows the standard library reports a pipe as a file whose
+    /// length is what the pipe holds now, so the handle's file type decides.
+    fn new(file: File) -> Self {
+        let regular = vibra_fs_scope::is_regular_file(&file);
+        Self { file, regular }
+    }
 }
 
 impl InputSource for FileInput {
@@ -223,6 +247,14 @@ impl InputSource for FileInput {
 
     fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
         self.file.read(buffer)
+    }
+
+    fn unread(&mut self, count: u64) -> io::Result<()> {
+        if !self.regular || count == 0 {
+            return Ok(());
+        }
+        let back = i64::try_from(count).map_err(io::Error::other)?;
+        self.file.seek(io::SeekFrom::Current(-back)).map(|_| ())
     }
 }
 
@@ -322,7 +354,7 @@ enum Filled {
     Window { bytes: Vec<u8>, ended: bool },
     /// The source failed after the adapter took this many bytes.
     Failed(u64),
-    /// The host could not hold the window; nothing was consumed.
+    /// The operating system refused the window; nothing was consumed.
     NoRoom,
 }
 
@@ -408,6 +440,19 @@ impl Reader {
         }
     }
 
+    /// Gives the kept bytes back to the source when the grant is released,
+    /// so a later reader of a regular file starts just after the bytes
+    /// delivered.
+    ///
+    /// # Errors
+    ///
+    /// The source could not be positioned back.
+    pub(super) fn release(&mut self) -> io::Result<()> {
+        let kept = length(self.kept.len());
+        self.kept.clear();
+        self.source.unread(kept)
+    }
+
     /// Puts `bytes` back in front of the kept bytes.
     fn keep(&mut self, mut bytes: Vec<u8>) {
         bytes.append(&mut self.kept);
@@ -439,7 +484,10 @@ impl Reader {
         let (window, ended) = match self.fill(count) {
             Filled::Window { bytes, ended } => (bytes, ended),
             Filled::Failed(taken) => return Answer::Err("other", moved(taken, 0)),
-            Filled::NoRoom => return Answer::NotSubmitted("unsupported"),
+            // The operating system refused the window the broker admitted:
+            // memory exhaustion (06 "Memory"). The bytes taken are kept, so
+            // none was delivered.
+            Filled::NoRoom => return Answer::MemoryExhausted(Progress::NONE),
         };
         let taken = length(window.len());
         if !text {
@@ -483,5 +531,59 @@ impl Reader {
                 Answer::NotSubmitted("unsupported")
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![expect(
+        clippy::expect_used,
+        reason = "tests assert by panicking on the fixtures they build"
+    )]
+
+    use std::fs::File;
+    use std::io::{self, Write as _};
+
+    use super::{FileInput, InputSource};
+
+    /// The reading end of an anonymous pipe, as the file a duplicated
+    /// standard handle is.
+    fn pipe_file(reader: io::PipeReader) -> File {
+        #[cfg(windows)]
+        let owned = std::os::windows::io::OwnedHandle::from(reader);
+        #[cfg(unix)]
+        let owned = std::os::fd::OwnedFd::from(reader);
+        File::from(owned)
+    }
+
+    /// 06 "Standard input": a pipe has no known size, whether it is empty or
+    /// holds bytes; only a regular file reports what remains (F1 of the
+    /// drivers review, probe 26).
+    #[test]
+    fn a_pipe_has_no_known_size() {
+        let (reader, mut writer) = io::pipe().expect("a pipe");
+        let mut input = FileInput::new(pipe_file(reader));
+        assert_eq!(input.remaining(), None, "an empty pipe");
+        writer.write_all(b"abcde").expect("written");
+        assert_eq!(input.remaining(), None, "a pipe holding five bytes");
+        let mut two = [0_u8; 2];
+        let read = input.read(&mut two).expect("read");
+        assert_eq!(read, 2);
+        assert_eq!(input.remaining(), None, "a pipe after a read");
+    }
+
+    #[test]
+    fn a_regular_file_reports_what_remains() {
+        let path = std::env::temp_dir()
+            .join(format!("vibra-host-streams-regular-{}", std::process::id()));
+        std::fs::write(&path, b"abcde").expect("the file");
+        let file = File::open(&path).expect("opened");
+        let mut input = FileInput::new(file);
+        assert_eq!(input.remaining(), Some(5));
+        let mut two = [0_u8; 2];
+        assert_eq!(input.read(&mut two).expect("read"), 2);
+        assert_eq!(input.remaining(), Some(3));
+        drop(input);
+        let _ = std::fs::remove_file(&path);
     }
 }

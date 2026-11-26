@@ -348,6 +348,38 @@ const SLOT_BYTES: u64 = size_of::<Option<Val<'static>>>() as u64;
 const KONT_BYTES: u64 = size_of::<Kont<'static>>() as u64;
 const VAL_BYTES: u64 = size_of::<Val<'static>>() as u64;
 
+/// The bytes of every part of `value`, a value the host built whole, each
+/// shared part counted once, as the memory accounting counts them.
+pub(crate) fn whole_bytes(value: &Val<'_>) -> u64 {
+    let mut seen = HashSet::new();
+    let mut parts = vec![value.clone()];
+    let mut total: u64 = 0;
+    while let Some(part) = parts.pop() {
+        if let Some((address, bytes)) = part.storage() {
+            if !seen.insert(address) {
+                continue;
+            }
+            total = total.saturating_add(as_u64(bytes));
+        }
+        match &part.0 {
+            Repr::Case(case) => {
+                parts.extend(case.fields.iter().map(|(_, field)| field.clone()))
+            }
+            Repr::Record(fields) => {
+                parts.extend(fields.iter().map(|(_, field)| field.clone()))
+            }
+            Repr::List(items) | Repr::Tuple(items) => {
+                parts.extend(items.iter().cloned())
+            }
+            Repr::Opt(Some(inner)) | Repr::Wrapper(inner) => {
+                parts.push(Val::clone(inner))
+            }
+            _ => {}
+        }
+    }
+    total
+}
+
 fn as_u64(n: usize) -> u64 {
     u64::try_from(n).unwrap_or(u64::MAX)
 }
@@ -551,6 +583,18 @@ impl<'a> Machine<'a> {
     pub(crate) fn allocated(&mut self, value: &Val<'a>) -> Result<(), Halt> {
         if let Some((_, bytes)) = value.storage() {
             self.allocated_bytes = self.allocated_bytes.saturating_add(as_u64(bytes));
+            self.reserve(0, std::slice::from_ref(value))?;
+        }
+        Ok(())
+    }
+
+    /// Accounts a newly built value that the host built whole, which no root
+    /// holds yet: every part of it, each shared part once, enters the
+    /// accounted footprint at once, not only its top.
+    pub(crate) fn allocated_whole(&mut self, value: &Val<'a>) -> Result<(), Halt> {
+        let bytes = whole_bytes(value);
+        if bytes > 0 {
+            self.allocated_bytes = self.allocated_bytes.saturating_add(bytes);
             self.reserve(0, std::slice::from_ref(value))?;
         }
         Ok(())

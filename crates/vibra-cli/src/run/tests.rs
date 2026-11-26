@@ -29,6 +29,47 @@ const MAIN: &str = "use @std.io.StdoutText enduse\n\nuse @std.process.ExitCode e
 
 const AWAIT: &str = "await StdoutText.write(out \"hello\\n\")";
 
+/// F4 of the drivers review: 05 "logs to standard error". A release the
+/// driver reported as failed is one line on the command's standard error, in
+/// either format, and changes neither the result nor the exit status.
+#[test]
+fn a_failed_release_is_one_line_on_standard_error() {
+    let root =
+        std::env::temp_dir().join(format!("vibra-cli-run-log-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(root.join("src/hello")).expect("the tree");
+    fs::write(root.join("project.vibon"), PROJECT).expect("the project");
+    fs::write(root.join("src/hello/main.vib"), MAIN).expect("the module");
+    let capture = WorkspaceCapture::capture(&root, Discovery::Search);
+    let snapshot = capture.snapshot().expect("the tree captures");
+    let mut outcome = run_target(
+        snapshot,
+        None,
+        Launch::World(&HostWorld::default()),
+        MEMORY_BUDGET,
+    );
+    let _ = fs::remove_dir_all(&root);
+    assert_eq!(outcome.result, CommandResult::Ok);
+    let line = "releasing @out failed: the handle could not be closed";
+    outcome.log.push(line.to_owned());
+    for format in [OutputFormat::Json, OutputFormat::Human] {
+        let response =
+            Response::new(format, "run", CommandOutcome::Ok, Payload::Empty {});
+        let response = respond(response, &outcome, "project.vibon");
+        let (mut stdout, mut stderr) = (Vec::new(), Vec::new());
+        let code = emit(&response, &mut stdout, &mut stderr, &|envelope| {
+            envelope.to_validated_json()
+        });
+        let stderr = String::from_utf8_lossy(&stderr);
+        assert_eq!(code, 0, "{format:?}: {stderr}");
+        assert_eq!(
+            stderr.lines().filter(|seen| *seen == line).count(),
+            1,
+            "{format:?}: {stderr}"
+        );
+    }
+}
+
 #[test]
 fn trap_is_exit_5_with_its_trap_record() {
     let root =

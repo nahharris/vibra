@@ -479,6 +479,10 @@ mod on_windows {
             }
             answer
         }
+
+        fn admit_error(&mut self, names: &[String]) -> Result<(), Refused> {
+            self.gate.admit_error(names)
+        }
     }
 
     impl Driver for Hooked<'_> {
@@ -490,8 +494,8 @@ mod on_windows {
             self.driver.acquire(provider, resource)
         }
 
-        fn release(&mut self, resource: ResourceId) {
-            self.driver.release(resource);
+        fn release(&mut self, resource: ResourceId) -> Result<(), String> {
+            self.driver.release(resource)
         }
 
         fn call(
@@ -876,6 +880,141 @@ mod on_windows {
         );
         assert_eq!(reply, denied(HostOp::FsReadText));
         assert_eq!(driver.file_reads_for_tests(), 0);
+    }
+
+    // --- Existence below a directory the policy does not permit -------------
+
+    /// The requests of the existence rows below the directory `dir`: each
+    /// operation on an entry that exists (`x.txt`, the directory `d`) and on
+    /// one that does not (`y.txt`, `e`, and `y.txt` below the missing `no`).
+    /// The policy permits every action below `[dir]`, the name the program
+    /// writes. Returns each request and its reply.
+    fn below(
+        driver: &mut dyn Driver,
+        root: ResourceId,
+        dir: &str,
+    ) -> Vec<(String, (HostReply, bool))> {
+        let expression = any_of(&[
+            files(&[dir], "@read @stat @create @replace", ANY),
+            directories(&[dir], "@list @stat"),
+        ]);
+        let mut cx = Context::new(driver, header());
+        let grant_of = |cx: &mut Context<'_>, interface| {
+            grant(cx, interface, root, &expression, Limits::default())
+        };
+        let read = grant_of(&mut cx, HostInterface::DirReadText);
+        let list = grant_of(&mut cx, HostInterface::DirList);
+        let stat = grant_of(&mut cx, HostInterface::DirStat);
+        let write = grant_of(&mut cx, HostInterface::DirWriteText);
+        let mut replies = Vec::new();
+        for (leaf, exists) in [
+            (&["x.txt"][..], true),
+            (&["y.txt"], false),
+            (&["no", "y.txt"], false),
+        ] {
+            let at = [&[dir][..], leaf].concat();
+            let state = if exists { "existing" } else { "missing" };
+            let mut note = |what: &str, reply| {
+                replies
+                    .push((format!("{what} of the {state} {}", at.join("/")), reply));
+            };
+            note("read", read_text(&mut cx, read, &at));
+            note("stat", on_path(&mut cx, HostOp::FsMetadataStat, stat, &at));
+            note("write", write_text(&mut cx, write, &at, "changed"));
+        }
+        for (leaf, exists) in [("d", true), ("e", false)] {
+            let at = [dir, leaf];
+            let state = if exists { "existing" } else { "missing" };
+            let reply = on_path(&mut cx, HostOp::FsReadEntries, list, &at);
+            replies.push((format!("list of the {state} {}", at.join("/")), reply));
+        }
+        replies
+    }
+
+    /// The directory `real` below `r`, holding the file `x.txt` and the
+    /// directory `d`.
+    fn existence_tree(sandbox: &Sandbox, real: &str) {
+        fs::create_dir(sandbox.at(&[real])).unwrap();
+        fs::write(sandbox.at(&[real, "x.txt"]), "secret").unwrap();
+        fs::create_dir(sandbox.at(&[real, "d"])).unwrap();
+    }
+
+    /// Asserts that every request of [`below`] is a completed `denied`, and
+    /// that nothing changed or was read.
+    fn all_denied(sandbox: &Sandbox, driver: &mut SystemDriver, dir: &str, row: &str) {
+        let before = sandbox.snapshot();
+        let root = held(driver, &sandbox.r());
+        let leaks = below(driver, root, dir)
+            .into_iter()
+            .filter_map(|(what, reply)| {
+                let op = match what.split(' ').next() {
+                    Some("read") => HostOp::FsReadText,
+                    Some("stat") => HostOp::FsMetadataStat,
+                    Some("write") => HostOp::FsWriteText,
+                    _ => HostOp::FsReadEntries,
+                };
+                (reply != denied(op)).then(|| format!("{what}: {reply:?}"))
+            })
+            .collect::<Vec<_>>();
+        assert!(leaks.is_empty(), "{row}: not denied:\n{}", leaks.join("\n"));
+        assert_eq!(driver.file_reads_for_tests(), 0, "{row}: nothing read");
+        assert_eq!(sandbox.snapshot(), before, "{row}: unchanged");
+    }
+
+    /// F3 of the drivers review, probe 19, the case alias: the policy names
+    /// `pub` and the real directory is `PUB`. An entry below it, existing or
+    /// missing, is a completed `denied`; the answer does not tell whether it
+    /// exists.
+    #[test]
+    fn atk_fs_existence_below_a_case_alias() {
+        let sandbox = Sandbox::new("existence-case");
+        existence_tree(&sandbox, "PUB");
+        let mut driver = driver();
+        all_denied(&sandbox, &mut driver, "pub", "case alias");
+    }
+
+    /// F3, probe 19, the short name: the policy names the 8.3 name of the
+    /// directory `secretdirectory`.
+    #[test]
+    fn atk_fs_existence_below_a_short_name() {
+        let sandbox = Sandbox::new("existence-short");
+        existence_tree(&sandbox, "secretdirectory");
+        let short = match short_name(&sandbox.at(&["secretdirectory"])) {
+            Ok(short) => short,
+            Err(reason) => return not_run("existence below a short name", &reason),
+        };
+        let mut driver = driver();
+        all_denied(&sandbox, &mut driver, &short, "short name");
+    }
+
+    /// F3, the control: below a directory the policy permits by its real
+    /// name, a missing entry is still `notFound`, a completed call.
+    #[test]
+    fn a_missing_entry_below_a_permitted_directory_is_not_found() {
+        let sandbox = Sandbox::new("existence-permitted");
+        existence_tree(&sandbox, "pub");
+        let mut driver = driver();
+        let root = held(&mut driver, &sandbox.r());
+        let replies = below(&mut driver, root, "pub");
+        for (what, reply) in &replies {
+            if what.contains("existing") {
+                assert!(reply.1, "{what}: completed");
+                assert!(matches!(reply.0, HostReply::Ok(_)), "{what}: {reply:?}");
+                continue;
+            }
+            let op = match what.split(' ').next() {
+                Some("read") => HostOp::FsReadText,
+                Some("stat") => HostOp::FsMetadataStat,
+                Some("list") => HostOp::FsReadEntries,
+                _ => HostOp::FsWriteText,
+            };
+            let expected = if op == HostOp::FsWriteText && what.ends_with("pub/y.txt") {
+                (VOID, true)
+            } else {
+                (err(op, "notFound"), true)
+            };
+            assert_eq!(*reply, expected, "{what}");
+        }
     }
 
     /// Row "symlink leaf": the link is opened as the link and refused; the
@@ -1541,7 +1680,7 @@ mod on_windows {
             open_exclusively(&sandbox.r()).is_err(),
             "the acquired root is held open"
         );
-        driver.release(root);
+        assert_eq!(driver.release(root), Ok(()), "the close is reported");
         drop(
             open_exclusively(&sandbox.r()).expect("no handle holds the released root"),
         );

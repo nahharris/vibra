@@ -31,9 +31,9 @@ pub(super) fn generate(operand: Operand<'_>) -> Answer {
         bytes.resize(count, 0);
         Some(bytes)
     }) else {
-        // Nothing was drawn: the host could not hold the bytes the broker
-        // admitted.
-        return Answer::NotSubmitted("unsupported");
+        // Nothing was drawn: the operating system refused the bytes the
+        // broker admitted, which is memory exhaustion (06 "Memory").
+        return Answer::MemoryExhausted(Progress::NONE);
     };
     match getrandom::fill(&mut bytes) {
         Ok(()) => Answer::Ok(HostOk::Bytes(bytes), moved(count, 0)),

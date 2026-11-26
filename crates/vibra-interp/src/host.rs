@@ -26,7 +26,6 @@
 //! With no context, a host body and a narrowing are
 //! [`crate::RuntimeError::Unavailable`].
 
-use std::collections::HashSet;
 use std::fmt;
 use std::rc::Rc;
 
@@ -40,7 +39,7 @@ use vibra_ir::external::host::{HostOp, HostRow, HostType, TestWorldOp};
 use vibra_ir::{CheckedFunction, HostBinding, Library, SourceOrigin, Type, TypeId};
 
 use crate::encode::to_neutral;
-use crate::machine::{Fixture, Halt, Machine, Step, invalid};
+use crate::machine::{Fixture, Halt, Machine, Step, invalid, whole_bytes};
 use crate::value::{Repr, Val};
 
 /// One argument of an entry or of a test body, as the caller that issued
@@ -91,38 +90,6 @@ impl fmt::Debug for HostSlot<'_> {
         slot.field("delivered", &self.delivered.is_some());
         slot.finish()
     }
-}
-
-/// The bytes of every part of `value`, a reply the host built whole, each
-/// shared part counted once, as the memory accounting counts them.
-fn reply_bytes(value: &Val<'_>) -> u64 {
-    let mut seen = HashSet::new();
-    let mut parts = vec![value.clone()];
-    let mut total: u64 = 0;
-    while let Some(part) = parts.pop() {
-        if let Some((address, bytes)) = part.storage() {
-            if !seen.insert(address) {
-                continue;
-            }
-            total = total.saturating_add(u64::try_from(bytes).unwrap_or(u64::MAX));
-        }
-        match &part.0 {
-            Repr::Case(case) => {
-                parts.extend(case.fields.iter().map(|(_, field)| field.clone()))
-            }
-            Repr::Record(fields) => {
-                parts.extend(fields.iter().map(|(_, field)| field.clone()))
-            }
-            Repr::List(items) | Repr::Tuple(items) => {
-                parts.extend(items.iter().cloned())
-            }
-            Repr::Opt(Some(inner)) | Repr::Wrapper(inner) => {
-                parts.push(Val::clone(inner))
-            }
-            _ => {}
-        }
-    }
-    total
 }
 
 /// The grant `token`, which the context handed back: a narrowed grant or
@@ -439,11 +406,12 @@ impl<'a> Machine<'a> {
         // 06 "Memory": the bytes a call hands the program are compared with
         // what the budget can still account, which is the room measured
         // for the request; nothing has run since. The host built the reply
-        // whole, so every part of it counts, not only its top.
-        if reply_bytes(&value) > room {
+        // whole, so every part of it counts, not only its top, and enters
+        // the accounted footprint at once.
+        if whole_bytes(&value) > room {
             return Err(Halt::Memory);
         }
-        self.allocated(&value)?;
+        self.allocated_whole(&value)?;
         self.host.pending = completion.receipt;
         Ok(Step::Ret(value))
     }
@@ -491,7 +459,7 @@ impl<'a> Machine<'a> {
                     other => fault(other),
                 })?;
         let value = issued_value(op, issued)?;
-        self.allocated(&value)?;
+        self.allocated_whole(&value)?;
         Ok(Step::Ret(value))
     }
 
@@ -694,7 +662,7 @@ impl<'a> Machine<'a> {
             let value = built.pop().ok_or_else(|| {
                 Halt::Invalid("an entry argument with no value".to_owned())
             })?;
-            self.allocated(&value)?;
+            self.allocated_whole(&value)?;
             values.push(value);
         }
         Ok(values)
@@ -726,7 +694,7 @@ mod tests {
     use super::received;
     use crate::evaluate::runtime_error;
     use crate::frame::TypeEnv;
-    use crate::machine::{Halt, Machine, Mode, Resolved, Target};
+    use crate::machine::{Halt, Machine, Mode, Resolved, Target, whole_bytes};
     use crate::value::{Repr, Val};
     use crate::{MemoryBudget, RuntimeError};
 
@@ -1045,6 +1013,32 @@ mod tests {
             "{outcome:?}"
         );
         assert!(log.is_empty(), "{log:?}");
+        Ok(())
+    }
+
+    /// A value the host built whole enters the accounted footprint whole:
+    /// a list of texts is its storage and every text's, a shared text once,
+    /// and a budget that holds only the list's top is exhausted.
+    #[test]
+    fn a_host_built_value_is_accounted_whole() -> Result<(), IrError> {
+        let text = Val::string("a text the host built, long enough to count");
+        let shared = Val::list(vec![text.clone(), text.clone()]);
+        let distinct = Val::list(vec![text.clone(), Val::string("another text")]);
+        let top = |value: &Val<'_>| {
+            value
+                .storage()
+                .map_or(0, |(_, bytes)| u64::try_from(bytes).unwrap_or(u64::MAX))
+        };
+        assert_eq!(whole_bytes(&shared), top(&shared) + top(&text));
+        assert!(whole_bytes(&distinct) > whole_bytes(&shared));
+        let set = host_set()?;
+        let mut machine = Machine::new(&set, Mode::Test, top(&distinct) + 1, u64::MAX);
+        assert!(matches!(
+            machine.allocated_whole(&distinct),
+            Err(Halt::Memory)
+        ));
+        let mut machine = Machine::new(&set, Mode::Test, 1 << 20, u64::MAX);
+        assert!(machine.allocated_whole(&distinct).is_ok());
         Ok(())
     }
 

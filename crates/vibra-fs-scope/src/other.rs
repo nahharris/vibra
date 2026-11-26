@@ -5,7 +5,7 @@
 use std::marker::PhantomData;
 use std::path::Path;
 
-use crate::{Metadata, ScopeError, ScopedFile, name};
+use crate::{Metadata, ScopeError, ScopedFile, WalkError, name};
 
 /// A held root directory. On this platform none can be acquired.
 #[derive(Debug)]
@@ -31,34 +31,43 @@ impl ScopedDir {
         Err(ScopeError::Unsupported)
     }
 
-    /// Returns [`ScopeError::DeniedName`] or [`ScopeError::Unsupported`].
-    pub fn open_read(&self, names: &[&str]) -> Result<ScopedFile, ScopeError> {
-        name::check_each(names)?;
-        Err(ScopeError::Unsupported)
+    /// Closes the root; none exists on this platform.
+    ///
+    /// # Errors
+    ///
+    /// None on this platform.
+    pub fn close(self) -> std::io::Result<()> {
+        Ok(())
     }
 
     /// Returns [`ScopeError::DeniedName`] or [`ScopeError::Unsupported`].
-    pub fn open_for_replace(&self, names: &[&str]) -> Result<ScopedFile, ScopeError> {
+    pub fn open_read(&self, names: &[&str]) -> Result<ScopedFile, WalkError> {
         name::check_each(names)?;
-        Err(ScopeError::Unsupported)
+        Err(ScopeError::Unsupported.into())
     }
 
     /// Returns [`ScopeError::DeniedName`] or [`ScopeError::Unsupported`].
-    pub fn list(&self, names: &[&str]) -> Result<ScopedListing, ScopeError> {
+    pub fn open_for_replace(&self, names: &[&str]) -> Result<ScopedFile, WalkError> {
         name::check_each(names)?;
-        Err(ScopeError::Unsupported)
+        Err(ScopeError::Unsupported.into())
     }
 
     /// Returns [`ScopeError::DeniedName`] or [`ScopeError::Unsupported`].
-    pub fn stat(&self, names: &[&str]) -> Result<Metadata, ScopeError> {
+    pub fn list(&self, names: &[&str]) -> Result<ScopedListing, WalkError> {
         name::check_each(names)?;
-        Err(ScopeError::Unsupported)
+        Err(ScopeError::Unsupported.into())
     }
 
     /// Returns [`ScopeError::DeniedName`] or [`ScopeError::Unsupported`].
-    pub fn open_parent(&self, names: &[&str]) -> Result<ScopedParent<'_>, ScopeError> {
+    pub fn stat(&self, names: &[&str]) -> Result<Metadata, WalkError> {
         name::check_each(names)?;
-        Err(ScopeError::Unsupported)
+        Err(ScopeError::Unsupported.into())
+    }
+
+    /// Returns [`ScopeError::DeniedName`] or [`ScopeError::Unsupported`].
+    pub fn open_parent(&self, names: &[&str]) -> Result<ScopedParent<'_>, WalkError> {
+        name::check_each(names)?;
+        Err(ScopeError::Unsupported.into())
     }
 }
 
@@ -85,6 +94,23 @@ impl ScopedListing {
     pub fn entries(self) -> Result<Vec<String>, ScopeError> {
         Err(ScopeError::Unsupported)
     }
+}
+
+/// Closes `file`. Without a system call the standard library does not offer,
+/// the close is the file's drop, whose failure is not reported.
+///
+/// # Errors
+///
+/// None on this platform.
+pub fn close(file: std::fs::File) -> std::io::Result<()> {
+    drop(file);
+    Ok(())
+}
+
+/// Whether the open `file` is a regular file: its metadata says so. A pipe,
+/// a terminal, and a character device are not.
+pub fn is_regular_file(file: &std::fs::File) -> bool {
+    file.metadata().is_ok_and(|metadata| metadata.is_file())
 }
 
 #[cfg(test)]

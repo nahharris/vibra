@@ -105,6 +105,14 @@ impl InputSource for Source {
         held.at += count;
         Ok(count)
     }
+
+    fn unread(&mut self, count: u64) -> io::Result<()> {
+        let mut held = self.0.borrow_mut();
+        if held.sized {
+            held.at -= usize::try_from(count).expect("a small count");
+        }
+        Ok(())
+    }
 }
 
 /// What a test sink does with one write.
@@ -206,6 +214,10 @@ impl Gate for Recording<'_> {
         });
         answer
     }
+
+    fn admit_error(&mut self, names: &[String]) -> Result<(), Refused> {
+        self.gate.admit_error(names)
+    }
 }
 
 impl Driver for Watched {
@@ -218,8 +230,8 @@ impl Driver for Watched {
         self.driver.acquire(provider, resource)
     }
 
-    fn release(&mut self, resource: ResourceId) {
-        self.driver.release(resource);
+    fn release(&mut self, resource: ResourceId) -> Result<(), String> {
+        self.driver.release(resource)
     }
 
     fn call(
@@ -490,6 +502,24 @@ fn stdin_by_count_a_pipe() {
         assert_eq!(read(cx, HostOp::IoStdinBytes, input, 2), bytes(b"c"));
         assert_eq!(read(cx, HostOp::IoStdinBytes, input, 2), bytes(b""));
     });
+}
+
+/// F5 of the drivers review, 06 "Standard input": when the grant is
+/// released, a regular file is positioned just after the bytes delivered;
+/// a pipe cannot take back the bytes the adapter kept, an accepted limit.
+#[test]
+fn stdin_release_gives_back_the_kept_bytes() {
+    for (source, at) in [
+        (Source::file("abc\u{20AC}d".as_bytes()), 3),
+        (Source::pipe("abc\u{20AC}d".as_bytes()), 5),
+    ] {
+        on_stdin(&source, |cx, stdin| {
+            let input = grant(cx, HostInterface::StdinText, stdin, Limits::default());
+            assert_eq!(read(cx, HostOp::IoStdinText, input, 4), text("abc"));
+            assert_eq!(cx.release_for_tests(stdin), Ok(()));
+        });
+        assert_eq!(source.0.borrow().at, at, "the position after release");
+    }
 }
 
 /// Row "stdin, a file of known size" (Q10).
@@ -971,6 +1001,17 @@ fn random_huge_count() {
     let (replies, calls) = generate(&[u64::MAX], Limits::default(), 1024);
     assert_eq!(replies, [Err(HostFault::MemoryExhausted)]);
     assert_eq!(calls, 0, "the driver was not called");
+}
+
+/// F6 of the drivers review, 06 "Memory": an allocation the operating system
+/// refuses inside the driver, for a reply the broker admitted, is memory
+/// exhaustion, never an error case of the operation, and no event claims
+/// the call completed.
+#[test]
+fn random_allocation_refused_is_memory_exhaustion() {
+    let (replies, calls) = generate(&[1 << 62], Limits::default(), u64::MAX);
+    assert_eq!(replies, [Err(HostFault::MemoryExhausted)]);
+    assert_eq!(calls, 1, "the driver was called and could not allocate");
 }
 
 // --- Identities and admission --------------------------------------------

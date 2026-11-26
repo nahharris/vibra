@@ -721,6 +721,102 @@ endproc
              RelativePath; no host call"
         );
     }
+
+    /// The UNC path of `local` through the administrative share of its
+    /// drive on this machine: `\\localhost\C$\…`.
+    fn unc_of(local: &Path) -> String {
+        let text = fs::canonicalize(local)
+            .expect("a canonical path")
+            .display()
+            .to_string();
+        let text = text.strip_prefix(r"\\?\").unwrap_or(&text).to_owned();
+        let (drive, rest) = text.split_at(2);
+        format!(
+            r"\\localhost\{}$\{}",
+            &drive[..1],
+            rest.trim_start_matches('\\')
+        )
+    }
+
+    /// Writes the tree of `document` and `main` into `tree` and runs it on
+    /// the process, capturing its output.
+    fn run_tree(tree: &Path, document: &str, main: &str) -> RunOutcome {
+        fs::create_dir_all(tree.join("src/app")).expect("the tree's directories");
+        fs::write(tree.join("project.vibon"), document).expect("the project file");
+        fs::write(tree.join("src/app/main.vib"), main).expect("the entry");
+        let snapshot = crate::support::capture(tree).expect("the tree captures");
+        vibra_workspace::run::run_target(
+            &snapshot,
+            None,
+            vibra_workspace::run::Launch::System {
+                arguments: Vec::new(),
+                capture: true,
+            },
+            vibra_workspace::MemoryBudget::DEFAULT,
+        )
+    }
+
+    /// F2 of the drivers review, probe 2: 04 "Startup order" makes a
+    /// directory on which the driver cannot enforce the leaf's policy a
+    /// failure, `@grant.acquisitionFailed`. A remote volume is one.
+    #[test]
+    fn atk_run_unc_root() {
+        let row = "ATK-run-unc-root";
+        let directory = TempDir::new("attack-unc");
+        let inside = directory.join("inside");
+        fs::create_dir(&inside).expect("the root");
+        fs::write(inside.join("a.txt"), "inside").expect("a file");
+        let unc = unc_of(&inside);
+        if let Err(error) = fs::metadata(&unc) {
+            println!(
+                "NOT RUN {row}: {unc} is not reachable without elevation: {error}"
+            );
+            return;
+        }
+        let document = project(
+            "@std.fs.DirReadText",
+            &file_rule(
+                "@source",
+                &format!(
+                    "{{kind: @fixedPath path: {}}}",
+                    vibra_syntax::canonical_string(&unc)
+                ),
+                "",
+                "@read",
+                ANY_NAME,
+                "after: []",
+            ),
+        );
+        let main = format!(
+            "{}proc main
+  takes {{source: DirReadText}}
+  returns code: ExitCode
+  performs {{DirReadText}}
+  do
+    let Result.ok(value: path) be RelativePath([\"a.txt\"]) endlet
+    match await DirReadText.read(source path)
+      case Result.ok(value: _)
+        return ExitCode(0u8)
+      case _
+        return ExitCode(1u8)
+    endmatch
+endproc
+",
+            uses(&["@std.fs.DirReadText", "@std.fs.RelativePath"])
+        );
+        let outcome = run_tree(&directory.join("tree"), &document, &main);
+        assert_eq!(
+            outcome.result.as_atom(),
+            "@command.operationalFailure",
+            "{row}: {:?}",
+            outcome.diagnostics
+        );
+        let failure = outcome.startup.failure.as_ref().expect("a startup failure");
+        assert_eq!(failure.code.atom(), "@grant.acquisitionFailed", "{row}");
+        assert_eq!(failure.binding.to_string(), "@source", "{row}");
+        assert_eq!(outcome.application_code, None, "{row}: the entry never ran");
+        println!("ROW {row}: windows, passed: {unc} is @grant.acquisitionFailed");
+    }
 }
 
 #[cfg(not(windows))]
@@ -738,6 +834,7 @@ fn attack_rows_not_run() {
         "ATK-run-prefix-by-names",
         "ATK-run-swapped-component",
         "ATK-run-ambient-path",
+        "ATK-run-unc-root",
     ] {
         println!("NOT RUN {row}: no directory driver");
     }

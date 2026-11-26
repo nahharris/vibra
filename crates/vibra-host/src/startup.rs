@@ -50,9 +50,12 @@
 //!
 //! [`release`] releases the teardown list in reverse, each resource through
 //! `Context::release`, which makes every grant on it unusable before it
-//! calls the driver. Each acquired binding's status becomes `released`.
+//! calls the driver. Each acquired binding's status becomes `released`, and a
+//! release the driver reports as failed is a [`ReleaseFailure`], one line of
+//! the tool's log, which changes neither the binding nor the result.
 //! Dropping a [`Started`] releases the same way, so every exit path, an
-//! unwinding one included, releases. Release appends no event.
+//! unwinding one included, releases; a failure there has no log to go to.
+//! Release appends no event.
 
 use std::collections::BTreeMap;
 
@@ -417,11 +420,12 @@ impl StartupRecord {
     }
 }
 
-/// One resource on the teardown list, and the index its leaf's binding
-/// record has once it is reported.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// One resource on the teardown list, its leaf, and the index its leaf's
+/// binding record has once it is reported.
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct Held {
     resource: ResourceId,
+    leaf: LeafName,
     binding: usize,
 }
 
@@ -436,9 +440,41 @@ struct Teardown<'c, 'd> {
 impl Drop for Teardown<'_, '_> {
     fn drop(&mut self) {
         while let Some(held) = self.held.pop() {
-            self.context.release(held.resource);
+            // A drop has no log to report a failed release to.
+            let _ = self.context.release(held.resource);
         }
     }
+}
+
+/// A release the driver reported as failed: the leaf's binding is
+/// `released` all the same, and its grants are unusable.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReleaseFailure {
+    /// The leaf whose resource was released.
+    pub binding: LeafName,
+    /// What the driver reported.
+    pub reason: String,
+}
+
+impl std::fmt::Display for ReleaseFailure {
+    /// The line of the tool's log.
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "releasing {} failed: {}",
+            self.binding, self.reason
+        )
+    }
+}
+
+/// What [`release`] returns.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Released {
+    /// The startup record, each acquired binding `released`.
+    pub record: StartupRecord,
+    /// Each release the driver reported as failed, in release order: one
+    /// line each of the tool's log.
+    pub failures: Vec<ReleaseFailure>,
 }
 
 /// A startup that ran: its record, the entry's bindings, the ordinal of the
@@ -628,10 +664,14 @@ impl Run<'_, '_, '_> {
                 Read::Failed(why) => return Ok(Outcome::Failed(why)),
             },
         };
+        // The leaf's name is copied before the acquisition, so nothing that
+        // can fail stands between it and the teardown list.
+        let name = leaf.name.clone();
         let resource = match self.teardown.context.acquire(leaf.provider, &resolved) {
             Acquire::Acquired(resource) => {
                 self.teardown.held.push(Held {
                     resource,
+                    leaf: name,
                     binding: self.record.bindings.len(),
                 });
                 resource
@@ -818,23 +858,30 @@ pub fn start<'c, 'd>(
 }
 
 /// Releases every resource startup acquired, in reverse acquisition order,
-/// and returns the record with each acquired binding `released`. Each
-/// release makes every grant on the resource unusable before the driver is
-/// called. It appends no event.
+/// and returns the record with each acquired binding `released`, and each
+/// release the driver reported as failed. Each release makes every grant on
+/// the resource unusable before the driver is called; a failed release
+/// changes neither the binding nor what the run did. It appends no event.
 #[must_use]
-pub fn release(started: Started<'_, '_>) -> StartupRecord {
+pub fn release(started: Started<'_, '_>) -> Released {
     let Started {
         mut record,
         mut teardown,
         ..
     } = started;
+    let mut failures = Vec::new();
     while let Some(held) = teardown.held.pop() {
-        teardown.context.release(held.resource);
+        if let Err(reason) = teardown.context.release(held.resource) {
+            failures.push(ReleaseFailure {
+                binding: held.leaf,
+                reason,
+            });
+        }
         if let Some(binding) = record.bindings.get_mut(held.binding) {
             binding.status = BindingStatus::Released;
         }
     }
-    record
+    Released { record, failures }
 }
 
 /// A test hook that sees each startup read's resolution when it is stored,

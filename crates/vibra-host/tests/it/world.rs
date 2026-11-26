@@ -296,6 +296,10 @@ impl Gate for RecordingGate<'_> {
         });
         answer
     }
+
+    fn admit_error(&mut self, names: &[String]) -> Result<(), Refused> {
+        self.inner.admit_error(names)
+    }
 }
 
 struct Recording<'w> {
@@ -312,8 +316,8 @@ impl Driver for Recording<'_> {
         self.inner.acquire(provider, resource)
     }
 
-    fn release(&mut self, resource: ResourceId) {
-        self.inner.release(resource);
+    fn release(&mut self, resource: ResourceId) -> Result<(), String> {
+        self.inner.release(resource)
     }
 
     fn call(

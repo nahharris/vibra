@@ -334,6 +334,8 @@ enum Answer {
     Ok(HostOk, Progress),
     /// Completed with a case of the row's error type.
     Err(&'static str, Progress),
+    /// The operating system refused an allocation for an admitted reply.
+    MemoryExhausted(Progress),
 }
 
 /// The progress of an adapter that took `input` bytes and sent `output`.
@@ -403,8 +405,33 @@ impl Driver for SystemDriver {
         }
     }
 
-    fn release(&mut self, resource: ResourceId) {
-        self.held.remove(&resource);
+    fn release(&mut self, resource: ResourceId) -> Result<(), String> {
+        match self.held.remove(&resource) {
+            // No call is running, so the driver holds the root's only
+            // reference, and closes it explicitly.
+            Some(Held::Directory(root)) => match Rc::try_unwrap(root) {
+                Ok(root) => root.close().map_err(|error| {
+                    format!("the directory could not be closed: {error}")
+                }),
+                Err(_) => Ok(()),
+            },
+            // The last hold of the standard input gives back the bytes the
+            // adapter kept and did not deliver.
+            Some(Held::Stdin)
+                if !self.held.values().any(|held| matches!(held, Held::Stdin)) =>
+            {
+                match &mut self.stdin {
+                    Stream::Open(reader) => reader.release().map_err(|error| {
+                        format!(
+                            "the standard input could not be positioned after the \
+                             bytes delivered: {error}"
+                        )
+                    }),
+                    Stream::Process | Stream::Absent => Ok(()),
+                }
+            }
+            _ => Ok(()),
+        }
     }
 
     fn call(
@@ -435,6 +462,9 @@ impl Driver for SystemDriver {
         let completion = match answer {
             Answer::Refused => Some(Completion::Refused),
             Answer::NotSubmitted(name) => case(name).map(Completion::NotSubmitted),
+            Answer::MemoryExhausted(progress) => {
+                Some(Completion::MemoryExhausted(progress))
+            }
             Answer::Ok(value, progress) => Some(Completion::Completed {
                 reply: HostReply::Ok(value),
                 progress,
