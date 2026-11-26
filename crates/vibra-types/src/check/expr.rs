@@ -20,7 +20,6 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
-use vibra_ir::external::compiler::is_assertion;
 use vibra_ir::{
     Arguments, BodyContext, CallTarget, ClosureBody, Constant, Construction, ExitGuard,
     Expr as IrExpr, FnType, Library, MatchArm, Node, Pattern as IrPattern,
@@ -426,6 +425,67 @@ struct Local {
     generic: Option<Rc<GenericClosure>>,
 }
 
+/// The locals in scope, in binding order, and the positions of each name's
+/// locals, so that finding the innermost local of a name does not grow with
+/// the length of a body.
+#[derive(Debug, Default)]
+struct Locals {
+    locals: Vec<Local>,
+    named: BTreeMap<String, Vec<usize>>,
+}
+
+impl Locals {
+    fn len(&self) -> usize {
+        self.locals.len()
+    }
+
+    fn get(&self, index: usize) -> Option<&Local> {
+        self.locals.get(index)
+    }
+
+    fn push(&mut self, local: Local) {
+        self.named
+            .entry(local.name.clone())
+            .or_default()
+            .push(self.locals.len());
+        self.locals.push(local);
+    }
+
+    fn extend(&mut self, locals: impl IntoIterator<Item = Local>) {
+        for local in locals {
+            self.push(local);
+        }
+    }
+
+    /// Ends every local from `len` on.
+    fn truncate(&mut self, len: usize) {
+        while self.locals.len() > len {
+            let Some(local) = self.locals.pop() else {
+                break;
+            };
+            if let Some(positions) = self.named.get_mut(&local.name) {
+                positions.pop();
+                if positions.is_empty() {
+                    self.named.remove(&local.name);
+                }
+            }
+        }
+    }
+
+    fn clear(&mut self) {
+        self.locals.clear();
+        self.named.clear();
+    }
+
+    /// The index of the innermost local named `name`.
+    fn innermost(&self, name: &str) -> Option<usize> {
+        self.named
+            .get(name)
+            .and_then(|positions| positions.last())
+            .copied()
+    }
+}
+
 /// A generic anonymous callable bound by `let`, checked once over its own
 /// type parameters.
 #[derive(Debug)]
@@ -535,7 +595,7 @@ pub(crate) struct BodyChecker<'p, 'a> {
     binders: Vec<String>,
     /// What `Self` denotes in it.
     self_type: Option<Type>,
-    locals: Vec<Local>,
+    locals: Locals,
     slots: Vec<Type>,
     /// The diagnostics found.
     pub(crate) diagnostics: Vec<Diagnostic>,
@@ -564,8 +624,8 @@ pub(crate) struct BodyChecker<'p, 'a> {
     /// The interface whose default member is being checked.
     self_interface: Option<usize>,
     /// Each expression whose expected type is written, with the written
-    /// type's span.
-    destinations: Vec<(ByteSpan, ByteSpan)>,
+    /// type's span; the latest one recorded for a span holds.
+    destinations: BTreeMap<ByteSpan, ByteSpan>,
     /// The span of the written result type of the callable being checked.
     result_span: Option<ByteSpan>,
     /// Forms the checked IR cannot hold, reported only when the body has no
@@ -639,7 +699,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             result: None,
             binders: Vec::new(),
             self_type: None,
-            locals: Vec::new(),
+            locals: Locals::default(),
             slots: Vec::new(),
             diagnostics: Vec::new(),
             references: Vec::new(),
@@ -652,7 +712,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             bounds: Vec::new(),
             associated: Vec::new(),
             self_interface: None,
-            destinations: Vec::new(),
+            destinations: BTreeMap::new(),
             result_span: None,
             gaps: Vec::new(),
             sites: Vec::new(),
@@ -1199,7 +1259,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         self.result = None;
         let span = expr_span(&value);
         if let Some(written) = written {
-            self.destinations.push((span, written));
+            self.destinations.insert(span, written);
         }
         let out = self.run(Task::Expr(value, Ctx::Value(Some(ty.clone()))));
         let node = match out.ty {
@@ -1339,7 +1399,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
 
     /// The index of the innermost local named `name`.
     fn local_index(&self, name: &str) -> Option<usize> {
-        self.locals.iter().rposition(|local| local.name == name)
+        self.locals.innermost(name)
     }
 
     /// A read of the local at `index` at `span`: of its slot in its own
@@ -1439,7 +1499,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                 if self.frames.is_empty()
                     && let Some(written) = self.result_span
                 {
-                    self.destinations.push((expr_span(&operand), written));
+                    self.destinations.insert(expr_span(&operand), written);
                 }
                 Step::Child(
                     Task::Return(span),
@@ -2821,7 +2881,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             .functions
             .get(index)
             .and_then(|data| data.external)
-            .is_some_and(|row| is_assertion(&row.symbol()));
+            .is_some_and(|row| !row.is_pure());
         if in_tests || !assertion {
             return false;
         }
@@ -4536,7 +4596,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                         (&written, view.written_type())
                     {
                         self.destinations
-                            .push((expr_span(&value), written_type.span()));
+                            .insert(expr_span(&value), written_type.span());
                     }
                     state.pending = Pending::Let {
                         pattern,

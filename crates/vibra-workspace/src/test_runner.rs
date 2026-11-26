@@ -43,6 +43,7 @@ use vibra_syntax::source::Declaration;
 use vibra_syntax::{canonical_string, decode_string, parse_source};
 use vibra_types::{CheckResult, check_workspace, load_stdlib};
 
+use crate::nesting::SOURCE_NESTING;
 use crate::resolve::resolve_input_of;
 use crate::revision::workspace_revision;
 use crate::snapshot::{SourceFile, SourceSnapshot, UnitKind};
@@ -285,6 +286,7 @@ pub struct TestRun {
     items: Vec<TestItem>,
     diagnostics: Vec<Diagnostic>,
     revision: String,
+    limits: Vec<String>,
 }
 
 impl TestRun {
@@ -327,6 +329,15 @@ impl TestRun {
     #[must_use]
     pub fn failed(&self) -> usize {
         self.selected() - self.passed()
+    }
+
+    /// The limits checking the run reached, by the name `limits.reached`
+    /// gives them, in the order first reached: `sourceNesting` when a module
+    /// is nested past the source nesting limit, and those of the check of
+    /// the tests ([`vibra_types::CheckResult::limits_reached`]).
+    #[must_use]
+    pub fn limits_reached(&self) -> &[String] {
+        &self.limits
     }
 
     /// The workspace revision the run was taken from.
@@ -466,6 +477,7 @@ pub fn run_tests_in(
             items: Vec::new(),
             diagnostics: snapshot.limit_faults().to_vec(),
             revision,
+            limits: vec![SOURCE_NESTING.to_owned()],
         });
     }
     let modules = test_modules(snapshot, selector)?;
@@ -502,6 +514,7 @@ pub fn run_tests_in(
             items: Vec::new(),
             diagnostics: parse_errors,
             revision,
+            limits: Vec::new(),
         });
     }
     if let Some(selector) = selector {
@@ -521,6 +534,7 @@ pub fn run_tests_in(
                 items: Vec::new(),
                 diagnostics: vec![error.diagnostic().clone()],
                 revision,
+                limits: Vec::new(),
             });
         }
     };
@@ -536,6 +550,11 @@ pub fn run_tests_in(
         }
         Err(defect) => (None, vec![*defect]),
     };
+    let limits = check
+        .iter()
+        .flat_map(|check| check.limits_reached().iter())
+        .map(|limit| (*limit).to_owned())
+        .collect();
     let check = check.filter(|check| !check.has_errors() || check.only_unavailable());
     let invalid = check.is_none();
     let items = discovered
@@ -578,6 +597,7 @@ pub fn run_tests_in(
         items,
         diagnostics,
         revision,
+        limits,
     })
 }
 

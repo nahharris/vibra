@@ -1013,6 +1013,7 @@ pub(crate) fn check_program(
         obligations: Vec::new(),
         library_faults: reviewed.library,
         targets: Vec::new(),
+        limits_reached: reviewed.limits,
     };
     if result.types_known() {
         result.types = types_document(&program, &obligations);

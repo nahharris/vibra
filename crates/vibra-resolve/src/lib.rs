@@ -127,7 +127,8 @@ pub fn resolve(input: &ResolveInput) -> Resolution {
     imports::resolve_imports(&mut graph, &mut diagnostics);
     declare::casing(&graph, &mut diagnostics);
     let mut references = Vec::new();
-    let visible = paths::resolve_paths(&graph, &mut diagnostics, &mut references);
+    let (visible, chain) =
+        paths::resolve_paths(&graph, &mut diagnostics, &mut references);
     let imports = graph
         .imports
         .iter()
@@ -197,6 +198,7 @@ pub fn resolve(input: &ResolveInput) -> Resolution {
             .collect(),
         diagnostics,
         visible,
+        chain,
     };
     resolution.sort();
     resolution

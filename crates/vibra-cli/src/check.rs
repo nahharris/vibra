@@ -200,6 +200,7 @@ pub fn run(invocation: &Invocation) -> Response {
         .unwrap_or_default();
     checked(&mut response, check.diagnostics().to_vec(), obligations);
     reach(&mut response, capture.limits_reached());
+    reach(&mut response, check.limits_reached().to_vec());
     if response.result == CommandOutcome::Ok {
         response.notice = Some("check passed".to_owned());
     }

@@ -316,11 +316,7 @@ impl<'a> BodyChecker<'_, 'a> {
     /// The written type span of the expected type at the expression
     /// `span`, when it is written.
     pub(super) fn written_span(&self, span: ByteSpan) -> Option<ByteSpan> {
-        self.destinations
-            .iter()
-            .rev()
-            .find(|(at, _)| *at == span)
-            .map(|(_, written)| *written)
+        self.destinations.get(&span).copied()
     }
 
     /// Reports `code` at `span`, related to `related` of `module`.

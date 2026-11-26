@@ -956,6 +956,92 @@ fn v11_a_body_nested_100_000_deep_validates_on_a_small_stack() {
     assert_eq!(closures, Ok(DEEP));
 }
 
+/// A sequence of `length` statements of one kind, each binding slot 0 for
+/// the rest of the sequence, which ends by reading it: `let`s, `let …
+/// else`s whose fallback returns, or destructuring `let`s, each a `match` of
+/// one arm.
+fn spine(kind: &str, length: usize) -> Node {
+    let mut rest = variable(0, Type::I32);
+    for k in 0..length {
+        let value = Box::new(int(i32::try_from(k).expect("a small length")));
+        let body = Box::new(rest);
+        rest = node(match kind {
+            "let" => Expr::Let {
+                slot: Some(0),
+                value,
+                body,
+            },
+            "letElse" => Expr::LetElse {
+                pattern: vibra_ir::Pattern::Bind(0),
+                value,
+                fallback: Box::new(node(Expr::Return(Box::new(int(0))))),
+                body,
+            },
+            _ => Expr::Match {
+                subject: value,
+                arms: vec![vibra_ir::MatchArm {
+                    pattern: vibra_ir::Pattern::Bind(0),
+                    body: *body,
+                }],
+                value_type: Type::I32,
+            },
+        });
+    }
+    rest
+}
+
+/// The length of a sequence is not nesting: a body of 100,000 sequential
+/// `let`s, `let … else`s, or destructuring `let`s is validated, cloned,
+/// compared, written for debugging, and dropped on a small stack, each walk
+/// a loop down the rest of the sequence.
+#[test]
+fn v11_a_sequence_100_000_long_costs_no_stack() {
+    for kind in ["let", "letElse", "match"] {
+        let (valid, same, written) = on_small_stack(move || {
+            let body = spine(kind, DEEP);
+            let copy = body.clone();
+            let same = copy == body;
+            let written = format!("{copy:?}").len();
+            let mut parts = library_parts();
+            parts.functions =
+                vec![function("main", signature(Vec::new(), Type::I32), body, 1)];
+            let valid = CheckedModuleSet::try_new(parts).is_ok();
+            (valid, same, written)
+        });
+        assert!(valid, "{kind}: the body validates");
+        assert!(same, "{kind}: a clone is equal");
+        assert!(written > DEEP, "{kind}: every link is written");
+    }
+}
+
+/// A clone of a sequence is the sequence, and two sequences that differ in
+/// one link, or in their length, differ.
+#[test]
+fn a_sequence_compares_link_by_link() {
+    for kind in ["let", "letElse", "match"] {
+        let body = spine(kind, 3);
+        assert_eq!(body.clone(), body, "{kind}");
+        assert_ne!(spine(kind, 4), body, "{kind}");
+        let mut changed = spine(kind, 3);
+        let mut link = &mut changed;
+        for _ in 0..2 {
+            link = match &mut link.expr {
+                Expr::Let { body, .. } | Expr::LetElse { body, .. } => body,
+                Expr::Match { arms, .. } => &mut arms[0].body,
+                _ => unreachable!(),
+            };
+        }
+        match &mut link.expr {
+            Expr::Let { value, .. }
+            | Expr::LetElse { value, .. }
+            | Expr::Match { subject: value, .. } => **value = int(9),
+            _ => unreachable!(),
+        }
+        assert_ne!(changed, body, "{kind}");
+        assert_eq!(format!("{:?}", body.clone()), format!("{body:?}"));
+    }
+}
+
 /// `List` applied `levels` times to `U8`.
 fn lists(levels: usize) -> Type {
     (0..levels).fold(Type::U8, |ty, _| Type::list(ty))

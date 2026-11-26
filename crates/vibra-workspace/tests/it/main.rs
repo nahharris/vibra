@@ -18,6 +18,7 @@ mod project;
 mod recursion;
 mod resolve;
 mod revision;
+mod sequences;
 mod snapshot;
 mod stack;
 mod test_runner;

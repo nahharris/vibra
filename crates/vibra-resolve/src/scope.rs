@@ -21,6 +21,8 @@
 //! `@name.reservedDeclaration`; a reserved word in a binder position is the
 //! reader's diagnostic.
 
+use std::collections::BTreeMap;
+
 use vibra_diagnostics::{ByteSpan, DiagnosticCode};
 use vibra_syntax::source::{
     Body, Callable, Expr, ExprForm, Guard, Ident, Pattern, PatternForm, Postfix,
@@ -33,66 +35,103 @@ use crate::identity::DeclarationKind;
 use crate::namespaces::at;
 use crate::paths::{Entity, Position, Scope, Walker};
 
-/// One local binding: a parameter, a labelled parameter, a result name, or
-/// a pattern binder.
-#[derive(Clone, Debug)]
-pub(crate) struct Local {
-    pub(crate) name: String,
-    pub(crate) span: ByteSpan,
-}
-
 /// The lexical scopes open at a position, outermost first. Each frame holds
-/// its bindings in the order they were made.
+/// the names it bound, in the order they were bound: a parameter, a labelled
+/// parameter, a result name, or a pattern binder.
+///
+/// The cost of a binding and of a lookup does not grow with the length of a
+/// body: [`Self::named`] holds the visible bindings of each name, and every
+/// binding is also a link of [`Self::chain`], which points at the binding
+/// visible just before it, so that what is visible at a position is one
+/// index, [`Self::top`].
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Frames {
-    frames: Vec<Vec<Local>>,
+    frames: Vec<Vec<String>>,
+    /// The visible bindings of each name, latest last.
+    named: BTreeMap<String, Vec<ByteSpan>>,
+    /// The newest visible binding when each open scope was opened.
+    opened: Vec<Option<usize>>,
+    /// The newest visible binding, a link of `chain`.
+    top: Option<usize>,
+    /// Every binding made, with the link of the binding visible before it.
+    chain: Vec<(String, Option<usize>)>,
+}
+
+/// The scopes [`Frames::take`] took.
+#[derive(Debug)]
+pub(crate) struct Taken {
+    frames: Vec<Vec<String>>,
+    named: BTreeMap<String, Vec<ByteSpan>>,
+    opened: Vec<Option<usize>>,
+    top: Option<usize>,
 }
 
 impl Frames {
     /// Opens a scope.
     pub(crate) fn push(&mut self) {
         self.frames.push(Vec::new());
+        self.opened.push(self.top);
     }
 
     /// Closes the innermost scope and every binding made in it.
     pub(crate) fn pop(&mut self) {
-        self.frames.pop();
+        for name in self.frames.pop().unwrap_or_default() {
+            if let Some(spans) = self.named.get_mut(&name) {
+                spans.pop();
+                if spans.is_empty() {
+                    self.named.remove(&name);
+                }
+            }
+        }
+        if let Some(top) = self.opened.pop() {
+            self.top = top;
+        }
     }
 
     /// Binds `name` at `span` in the innermost scope.
     pub(crate) fn bind(&mut self, name: &str, span: ByteSpan) {
         if let Some(frame) = self.frames.last_mut() {
-            frame.push(Local {
-                name: name.to_owned(),
-                span,
-            });
+            frame.push(name.to_owned());
+            self.named.entry(name.to_owned()).or_default().push(span);
+            self.chain.push((name.to_owned(), self.top));
+            self.top = Some(self.chain.len() - 1);
         }
     }
 
-    /// The latest visible binding of `name`.
-    pub(crate) fn find(&self, name: &str) -> Option<&Local> {
-        self.frames
-            .iter()
-            .rev()
-            .flat_map(|frame| frame.iter().rev())
-            .find(|local| local.name == name)
+    /// The newest visible binding, as a link of [`Self::chain`]: what is
+    /// visible here is it and the bindings it links to.
+    pub(crate) const fn top(&self) -> Option<usize> {
+        self.top
     }
 
-    /// Every visible binding, outermost scope first, each scope in binding
-    /// order.
-    pub(crate) fn visible(&self) -> impl Iterator<Item = &Local> {
-        self.frames.iter().flatten()
+    /// Every binding made, each with the link of the binding visible before
+    /// it, taken out at the end of the walk.
+    pub(crate) fn take_chain(&mut self) -> Vec<(String, Option<usize>)> {
+        std::mem::take(&mut self.chain)
+    }
+
+    /// The span of the latest visible binding of `name`.
+    pub(crate) fn find(&self, name: &str) -> Option<ByteSpan> {
+        self.named.get(name).and_then(|spans| spans.last()).copied()
     }
 
     /// Takes every open scope away, leaving none; [`Self::restore`] puts
     /// them back. A named callable sees no enclosing local.
-    pub(crate) fn take(&mut self) -> Self {
-        std::mem::take(self)
+    pub(crate) fn take(&mut self) -> Taken {
+        Taken {
+            frames: std::mem::take(&mut self.frames),
+            named: std::mem::take(&mut self.named),
+            opened: std::mem::take(&mut self.opened),
+            top: self.top.take(),
+        }
     }
 
     /// Puts back the scopes [`Self::take`] took.
-    pub(crate) fn restore(&mut self, frames: Self) {
-        *self = frames;
+    pub(crate) fn restore(&mut self, taken: Taken) {
+        self.frames = taken.frames;
+        self.named = taken.named;
+        self.opened = taken.opened;
+        self.top = taken.top;
     }
 }
 
@@ -282,8 +321,8 @@ impl<'a> Walker<'_, 'a, '_> {
     /// module scope.
     fn shadowed(&self, scope: &Scope, name: &str) -> Option<(String, ByteSpan)> {
         let here = self.source_id().to_owned();
-        if let Some(local) = self.frames.find(name) {
-            return Some((here, local.span));
+        if let Some(span) = self.frames.find(name) {
+            return Some((here, span));
         }
         if let Some((_, span)) =
             scope.params.iter().rev().find(|(param, _)| param == name)

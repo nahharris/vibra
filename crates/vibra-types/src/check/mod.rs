@@ -59,6 +59,14 @@ const SOURCE_UNIT: &str = "@app";
 /// The one module of a source checked alone.
 const SOURCE_MODULE: &str = "@app.main";
 
+/// The name `limits.reached` gives the reduction limit of one compile-time
+/// evaluation (`docs/spec/05-tooling.md`, "Limits").
+pub const COMPILE_TIME_REDUCTIONS: &str = "compileTimeReductions";
+
+/// The name `limits.reached` gives the derivation limit of the discharge of
+/// one obligation.
+pub const PROOF_DERIVATIONS: &str = "proofDerivations";
+
 /// What one check found: its diagnostics, the notes recording the
 /// standard-library declarations it skipped, and, when nothing was rejected,
 /// the checked module set and the `@types.v2` document.
@@ -78,6 +86,9 @@ pub struct CheckResult {
     library_faults: Vec<Diagnostic>,
     /// What [`check_targets`] found of each target it was given.
     targets: Vec<TargetCheck>,
+    /// The limits a local declaration reached, by name, in the order first
+    /// reached.
+    limits_reached: Vec<&'static str>,
 }
 
 /// One test of a covered module of `@tests`: the function its body was
@@ -132,7 +143,17 @@ impl CheckResult {
             obligations: Vec::new(),
             library_faults: Vec::new(),
             targets: Vec::new(),
+            limits_reached: Vec::new(),
         }
+    }
+
+    /// The limits the check of a local declaration reached, by the name
+    /// `limits.reached` gives them ([`COMPILE_TIME_REDUCTIONS`],
+    /// [`PROOF_DERIVATIONS`]), in the order first reached. Each is reported
+    /// by a `@tool.limitExceeded`.
+    #[must_use]
+    pub fn limits_reached(&self) -> &[&'static str] {
+        &self.limits_reached
     }
 
     /// What [`check_targets`] found of each binary target it was given, in

@@ -1,0 +1,5 @@
+use @std.assert enduse
+
+use @app.main enduse
+
+test "f" do assert.equal(main.f() 3001i32) endtest

@@ -114,6 +114,7 @@ pub fn run(invocation: &Invocation) -> Response {
     inject(&mut items, &mut result);
     finish(&mut response, result, items, traces, run.diagnostics());
     reach(&mut response, capture.limits_reached());
+    reach(&mut response, run.limits_reached().to_vec());
     response
 }
 

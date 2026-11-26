@@ -160,7 +160,11 @@ derivations of
 derivation being one application of one fact to one premise or one pair of
 premises, or one comparison of two constants, whether or not its conclusion
 is new. A discharge that this limit stops before the rules reach a verdict
-is reported as [Bare guards](02-type-system.md#bare-guards) states.
+is reported as [Bare guards](02-type-system.md#bare-guards) states. Each
+limit a command reaches is `@tool.limitExceeded` and is named in
+`limits.reached`: the reduction limit of a compile-time evaluation is
+`compileTimeReductions`, and the derivation limit of the discharge of an
+obligation is `proofDerivations`.
 
 `m1Default` also bounds **source nesting** at 1,024 levels. A *form*
 encloses the tokens written inside it:
@@ -181,7 +185,9 @@ link of a chain is a form, so in `return try await y`, `y.a.b`, and
 `y()()`, `y` is nested three, two, and two levels, and in `if c then 1i32
 else if d then 2i32 else 3i32 endif endif` the second `if` is nested one
 level and `d` two. The limit is the tool's, not the language's: the source
-grammar nests without bound, and the reader and `fmt` read any depth.
+grammar nests without bound, and the reader and `fmt` read any depth. The
+length of a sequence, the statements of a body, the elements of a list, or
+the arms of a `match`, is not nesting, and this limit does not bound it.
 
 - Each source module and data document a command reads, a project file
   included, is measured once after it is read, before any later stage.
@@ -349,9 +355,11 @@ Every structured response is a closed object with these fields:
   `check`, `project init`, `edit imports`. An operand is never part of it,
   so `project add target` has the name `project add`.
 - `limits.profile` names the published limit profile, with its units, defaults,
-  and engine version. `reached` lists the names of the limits reached, in order;
-  the memory limit is `"memory"`. `complete` is `false` after truncation or
-  exhaustion.
+  and engine version. `reached` lists the names of the limits reached, in order:
+  `"memory"` for the memory limit, and `"sourceNesting"`,
+  `"compileTimeReductions"`, and `"proofDerivations"` for the limits of
+  [Program arguments, execution and evaluation](#program-arguments-execution-and-evaluation).
+  `complete` is `false` after truncation or exhaustion.
 - When output would exceed its limit, the tool emits a bounded, valid
   document with status `unknown`. It never emits truncated JSON and never
   silently omits facts.

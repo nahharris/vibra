@@ -41,9 +41,9 @@ conformance/cases` exits 0:
 | --- | --- | --- | --- | --- |
 | `readerV2` | 178 | 0 | 0 | 0 |
 | `staticV2` | 704 | 0 | 0 | 0 |
-| `interpreterV2` | 342 | 0 | 0 | 0 |
+| `interpreterV2` | 343 | 0 | 0 | 0 |
 | `toolingV2` | 10 | 0 | 0 | 0 |
-| total | 1234 | 0 | 0 | 0 |
+| total | 1235 | 0 | 0 | 0 |
 
 No required case under `staticV2` or `interpreterV2` is failed, unknown, or
 unavailable. The two cases whose expected verdict is `unsupported` hold no
@@ -56,13 +56,16 @@ touched, with the three other crates that read the nesting measure:
 cargo test --locked --offline -p vibra-syntax -p vibra-fmt -p vibra-resolve -p vibra-ir -p vibra-interp -p vibra-types -p vibra-fs-scope -p vibra-host -p vibra-workspace -p vibra-schema -p vibra-cli -p vibra-conformance --all-features
 ```
 
-It exits 0. It prints 39 `test result:` lines, all `ok`, with 2109 tests
-passed, 0 failed, and 5 ignored: `vibra-fs-scope`
+It exits 0. It prints 39 `test result:` lines, all `ok`, with 2125 tests
+passed, 0 failed, and 10 ignored: `vibra-fs-scope`
 `controls::no_handle_kept_child`, which `controls::no_handle_kept` runs
 in a child process; `vibra-workspace` `stack::probe` and
-`recursion::child`, the children of the two measurements below; and
+`recursion::child`, the children of the two measurements below;
 `stack::stack_per_level` and `recursion::recursion_probes`, the
-measurements, which take minutes. One row is not run on Windows, listed
+measurements, which take minutes; and the five sequences of 100,000,
+`vibra-workspace` `sequences::a_hundred_thousand_*` and `vibra-cli`
+`sequences::a_hundred_thousand_lets_give_every_verdict`, which take
+minutes and whose default sizes show the same property. One row is not run on Windows, listed
 under [NOT RUN](#not-run).
 
 The other commands:
@@ -80,8 +83,11 @@ The other commands:
 ([Limits](../../../spec/05-tooling.md#program-arguments-execution-and-evaluation)).
 Every module and data document a command reads is measured once after it is
 read, and a command runs its stages on a thread sized for the limit, so no
-depth of nesting overflows a command's stack. The cases are written by hand from the
-chapter, with their rows in `conformance/rules/m2-fixD.tsv`:
+depth of nesting overflows a command's stack. The stages loop along a
+sequence, the statements of a body, the elements of a list, or the arms of
+a `match`, so no length of a sequence overflows it either. The cases are
+written by hand from the chapter, with their rows in
+`conformance/rules/m2-fixD.tsv` and `conformance/rules/m2-fixE.tsv`:
 
 | Case or host test | Shows | Result |
 | --- | --- | --- |
@@ -91,8 +97,13 @@ chapter, with their rows in `conformance/rules/m2-fixD.tsv`:
 | `V2-TOOL-nesting-lists-limit` | 1,025 nested lists are the limit alone, with no `@type.depthExceeded` | case, passed |
 | `V2-TOOL-nesting-project-file` | a project file is measured before it is decoded | case, passed |
 | `V2-TOOL-nesting-format` | a snapshot with a module past the limit is formatted by syntax alone | case, passed |
+| `V2-TOOL-sequence-lets` | a body of sequential `let`s checks, and the test of the value they compute passes | case, passed |
 | `vibra-syntax` `nesting::*` | the definition of a level, form by form, and each example of 05; the first token past the limit in source order; 100,000 levels measured on a 256 KiB stack | 9 tests, passed |
 | `vibra-cli` `nesting::*` | `check`, `test`, and `run` past the limit give the limit alone with `limits.reached` `sourceNesting`; `build`, `eval`, and `project inspect` stay unavailable; `fmt` formats 3,000 levels; `check` answers 1,000,000 nested brackets and each chain kind at 100,000 links with the limit alone, and each recursion probe with its document | 9 tests, passed |
+| `vibra-cli` `sequences::*` | `check`, `test`, and `run` of a long body of `let`s through the binary each give their document, and `run` the code the program returns | 1 test, passed; 1 ignored |
+| `vibra-cli` `limits::*` | `check`, `test`, and `run` name the reduction limit of a compile-time evaluation `compileTimeReductions` and the derivation limit of an obligation `proofDerivations` in `limits.reached`, with the status `unknown` | 6 tests, passed |
+| `vibra-ir` `soundness::v11_a_sequence_100_000_long_costs_no_stack`, `soundness::a_sequence_compares_link_by_link` | a checked sequence of `let`s, `let … else`s, or destructuring `let`s is validated, cloned, compared, printed, and dropped on a small stack, link by link | 2 tests, passed |
+| `vibra-workspace` `sequences::*` | sequential `let`s, `let … else`s, expression statements, the elements of a list, and the arms of a `match` each check, pass their test, run to the program's code, and plan their formatting on a 256 KiB stack, at a length that overflowed 1 MiB when a stage recursed along the sequence | 6 tests, passed; 4 ignored |
 | `vibra-workspace` `stack::stages_fit_a_quarter_of_the_command_stack` | every stage on ten nesting shapes at 1,024 levels fits a quarter of the command stack | passed |
 | `vibra-workspace` `recursion::chains_past_the_limit_are_the_limit_alone` | application, field-read, and prefix-word chains of 100,000 links are the limit alone, at the token the definition names, and every stage answers them on a quarter of the command stack | passed |
 | `vibra-workspace` `recursion::probes_check_and_pass_when_small` | every probe of [the chains the limit does not bound](#what-stays-unavailable) checks and passes at 20 | passed |
@@ -102,11 +113,17 @@ The command stack is 32 MiB: four times the deepest stage a debug build
 needs at the limit, 5,060 KiB, for checking 1,024 nested `do` blocks
 (`vibra_workspace::COMMAND_STACK`).
 
-The limit bounds how deeply one document nests, not how long a chain of
-declarations, calls, imports, or packages is, or how many statements one
-body holds. `recursion::recursion_probes` probes those; one overflows a
-command's stack, and some take minutes, both listed under
+The limit bounds how deeply one document nests, not how long a sequence or
+a chain of declarations, calls, imports, or packages is. A sequence costs
+no host stack: `recursion::recursion_probes` checks, tests, and runs the
+probes `sequentialLets` and `wideList` at every size on a 1 MiB stack.
+Some chains take minutes, listed under
 [What stays unavailable](#what-stays-unavailable).
+
+Every tool limit a command reaches is named in `limits.reached`:
+`sourceNesting`, `memory`, `compileTimeReductions` for the reductions of
+one compile-time evaluation, and `proofDerivations` for the derivations of
+one obligation.
 
 ## Coverage audit
 
@@ -300,9 +317,10 @@ runs it.
 | `@git` dependencies and the lock | not in this release | `V2-PROJECT-git-dependency-unavailable` |
 | native execution | M4 | owner table, "Native execution slice" |
 | a contract call on an interface's type parameter whose bound leaves an associated type open | the checker of M1 | `V2-PROJECT-test-unavailable-closure` |
-| a body of 15,000 sequential `let`s: `check` overflows the 32 MiB command stack, and 1,000 overflow a 1 MiB stack (10,000 fit the command stack) | fix package E: every walk of a sequence in the checked program without host recursion | the checked program nests each `let` around the rest of its sequence (`vibra_ir::Node::Let`, `LetElse`), so every walk after the checker recurses once per statement, at 2 to 4 KiB each in a debug build; `recursion::recursion_probes`, `sequentialLets` |
 | a `check` that ends within 180 s in a debug build: 100,000 declared types, 10,000 calls that each ensure their result, 100,000 module values, 10,000 imports | no milestone names it | no overflow: 10,000 types check in 40 s, 1,000 calls in 70 s, 10,000 module values in 145 to 175 s, 1,000 imports in 8 to 33 s; `recursion::recursion_probes` |
 | a command that presents a target's authority before a run | M3, approvals | review finding F8: 03 asks that a target's authority be "presentable in plain terms"; coverage 11, "hard-link and opened-object limits shown at approval", has the limits enforced (`ATK-fs-hard-link-replace`, `ATK-gate-replace-without-link-count`) and no command that shows them |
+| a `match` of about 2,800 or more literal arms: it is `@pattern.unsupportedCoverage`, because coverage has a fixed size that the limit profile does not publish | no milestone names it | `vibra-types` `coverage_has_a_fixed_limit`; 2,000 arms are decided (`vibra-workspace` `sequences::arms_cost_no_stack`) |
+| the name of the limit when a compile-time evaluation runs out of memory: it is reported as `compileTimeReductions` | M3, `eval`, which gives evaluation a memory limit of its own | no case |
 
 ## Specification questions
 

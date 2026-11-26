@@ -12,6 +12,7 @@ use vibra_diagnostics::{Diagnostic, DiagnosticCode, Level};
 use vibra_types::{CheckResult, check_targets};
 
 use crate::entry::{EntryFacts, check_target, target_entry};
+use crate::nesting::SOURCE_NESTING;
 use crate::project::{Target, TargetKind};
 use crate::resolve::resolve_input;
 use crate::snapshot::{SourceSnapshot, UnitKind};
@@ -22,6 +23,7 @@ pub struct WorkspaceCheck {
     diagnostics: Vec<Diagnostic>,
     check: Option<CheckResult>,
     entries: Vec<EntryFacts>,
+    limits: Vec<String>,
 }
 
 impl WorkspaceCheck {
@@ -57,6 +59,15 @@ impl WorkspaceCheck {
         self.check.as_ref()
     }
 
+    /// The limits checking reached, by the name `limits.reached` gives them,
+    /// in the order first reached: those of the check of the covered units
+    /// ([`CheckResult::limits_reached`]), and `sourceNesting` when a module
+    /// is nested past the source nesting limit.
+    #[must_use]
+    pub fn limits_reached(&self) -> &[String] {
+        &self.limits
+    }
+
     /// The `@types.v2` document of the covered local declarations.
     #[must_use]
     pub fn types_document(&self) -> Option<&str> {
@@ -86,6 +97,7 @@ pub fn check_snapshot(
             diagnostics: snapshot.limit_faults().to_vec(),
             check: None,
             entries: Vec::new(),
+            limits: vec![SOURCE_NESTING.to_owned()],
         };
     }
     let project = snapshot.project().project();
@@ -124,6 +136,7 @@ pub fn check_snapshot(
                 diagnostics,
                 check: None,
                 entries: Vec::new(),
+                limits: Vec::new(),
             };
         }
     };
@@ -145,9 +158,15 @@ pub fn check_snapshot(
         )
     });
     diagnostics.extend(check.diagnostics().iter().cloned());
+    let limits = check
+        .limits_reached()
+        .iter()
+        .map(|limit| (*limit).to_owned())
+        .collect();
     WorkspaceCheck {
         diagnostics,
         check: Some(check),
         entries,
+        limits,
     }
 }

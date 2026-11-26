@@ -30,6 +30,7 @@ use super::ctfe::{Evaluator, Outcome};
 use super::declare::{Entity, Program};
 use super::expr::{Checked, Layout};
 use super::obligation::Obligation;
+use super::{COMPILE_TIME_REDUCTIONS, PROOF_DERIVATIONS};
 use fragment::{Facts, Standing, walk};
 
 /// A checked guard of a callable.
@@ -174,6 +175,9 @@ pub(crate) struct Reviewed {
     pub(crate) folds: BTreeMap<usize, Fold>,
     /// The obligation of every bare-guard site of a local declaration.
     pub(crate) obligations: Vec<Obligation>,
+    /// The name of each limit a local declaration reached, in the order
+    /// first reached.
+    pub(crate) limits: Vec<&'static str>,
 }
 
 /// A declaration whose body holds sites: a function, a module value, a
@@ -362,7 +366,7 @@ impl Context<'_, '_> {
             super::ctfe::PROFILE.name,
             super::ctfe::PROFILE.proof_derivations
         );
-        self.limit_message(module, span, message);
+        self.limit_message(module, span, message, PROOF_DERIVATIONS);
     }
 
     /// Reports `@tool.limitExceeded` at the predicate at `span` of the
@@ -375,16 +379,26 @@ impl Context<'_, '_> {
             super::ctfe::PROFILE.name,
             super::ctfe::PROFILE.compile_time.reductions
         );
-        self.limit_message(module, span, message);
+        self.limit_message(module, span, message, COMPILE_TIME_REDUCTIONS);
     }
 
     /// Reports `@tool.limitExceeded` with `message` at the predicate at
-    /// `span` of the module `module`, once.
-    fn limit_message(&mut self, module: usize, span: ByteSpan, message: String) {
+    /// `span` of the module `module`, once, and names the limit reached,
+    /// `limit`, when the declaration is local.
+    fn limit_message(
+        &mut self,
+        module: usize,
+        span: ByteSpan,
+        message: String,
+        limit: &'static str,
+    ) {
         if self.limited.contains(&(module, span)) {
             return;
         }
         self.limited.push((module, span));
+        if self.local(module) && !self.reviewed.limits.contains(&limit) {
+            self.reviewed.limits.push(limit);
+        }
         let diagnostic =
             self.diagnostic(DiagnosticCode::ToolLimitExceeded, module, span, message);
         self.push(module, diagnostic);

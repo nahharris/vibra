@@ -9,8 +9,11 @@
 //! stage reads the snapshot. The reader and the formatter read any depth.
 //!
 //! The limit is what bounds the host stack of the stages after the reader:
-//! resolution, checking, lowering, and the interpreter recurse over the
-//! tree, and a command runs them on a thread whose stack is sized for it.
+//! resolution, checking, lowering, and the interpreter recurse into the
+//! nested forms of the tree, and a command runs them on a thread whose stack
+//! is sized for it. They loop along a sequence, the statements of a body,
+//! the elements of a list, or the arms of a `match`, so its length costs no
+//! stack.
 
 use vibra_diagnostics::{Diagnostic, DiagnosticCode};
 use vibra_interp::LimitProfile;
@@ -22,10 +25,11 @@ pub const SOURCE_NESTING: &str = "sourceNesting";
 /// The stack of the thread a command runs its stages on.
 ///
 /// The stages after the reader (resolution, checking, lowering, the
-/// interpreter) recurse over the tree, so their host stack grows with the
-/// nesting of what they read. No document nested past
-/// [`source_nesting_limit`] reaches them, so a stack sized for the limit
-/// suffices for every input.
+/// interpreter) recurse into nested forms, so their host stack grows with
+/// the nesting of what they read, and loop along sequences, so it does not
+/// grow with their length (the host tests `sequences`). No document nested
+/// past [`source_nesting_limit`] reaches them, so a stack sized for the
+/// limit suffices for every input.
 ///
 /// The size is at least four times the deepest stack any stage needs in a
 /// debug build at the limit. The host test `stack::stack_per_level` of this

@@ -1,0 +1,13 @@
+id = "V2-TOOL-sequence-lets"
+rule = "V2-TOOL-sequence-lets"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "05-tooling.md#program-arguments-execution-and-evaluation: the length of a sequence is not nesting: 3,000 sequential lets, a0 1 and each later one more, check, and the test that f is a0 + a2999 = 3001 passes"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

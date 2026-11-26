@@ -62,7 +62,6 @@ use vibra_syntax::canonical_string;
 use vibra_types::{GrantShape, load_stdlib};
 
 use crate::entry::EntryFacts;
-use crate::nesting::SOURCE_NESTING;
 use crate::project::TargetKind;
 use crate::revision::workspace_revision;
 use crate::semantic::check_snapshot;
@@ -437,11 +436,11 @@ fn prepare(
         };
         let mut outcome =
             before_startup(revision, Some(name), result, diagnostics, None);
-        if !snapshot.limit_faults().is_empty() {
-            // A module nested past the source nesting limit is the limit
-            // alone: an unknown, incomplete observation.
-            outcome.limits_reached.push(SOURCE_NESTING.to_owned());
-        }
+        // A reached limit, a module nested past the source nesting limit
+        // among them, is an unknown, incomplete observation.
+        outcome
+            .limits_reached
+            .extend(check.limits_reached().iter().cloned());
         return Err(outcome);
     }
     let library = match load_stdlib() {

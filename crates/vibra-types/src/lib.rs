@@ -20,9 +20,10 @@ mod check;
 mod stdlib;
 
 pub use check::{
-    CheckResult, CheckedTest, DataReference, EntryLeaf, EntrySignature, GrantShape,
-    Interpretation, LeafType, Obligation, ObligationKind, ObligationStatus, RowEntry,
-    TargetCheck, TargetEntry, check_source, check_targets, check_workspace, interpret,
+    COMPILE_TIME_REDUCTIONS, CheckResult, CheckedTest, DataReference, EntryLeaf,
+    EntrySignature, GrantShape, Interpretation, LeafType, Obligation, ObligationKind,
+    ObligationStatus, PROOF_DERIVATIONS, RowEntry, TargetCheck, TargetEntry,
+    check_source, check_targets, check_workspace, interpret,
 };
 
 pub use stdlib::{
