@@ -104,8 +104,8 @@ this one in the dependency graph; no two of them own one file.
 | 35 | [fix-drivers](steps/35-fix-drivers.md) | evidence | 34 | — | `vibra-fs-scope`, `vibra-host`, `vibra-workspace`, `vibra-cli` | [list](steps/35-fix-drivers.md#files-owned) | landed |
 | 36 | [release-program](steps/36-release-program.md) | vertical | 35 | — | `examples`, `vibra-cli` | [list](steps/36-release-program.md#files-owned) | landed |
 | 37 | [m2-exit](steps/37-m2-exit.md) | evidence | 36 | — | `vibra-conformance`, `conformance/cases` | [list](steps/37-m2-exit.md#files-owned) | landed |
-| 38 | [pilot-freeze](steps/38-pilot-freeze.md) | evidence | 37 | — | none | [list](steps/38-pilot-freeze.md#files-owned) | planned |
-| 39 | [pilot-references](steps/39-pilot-references.md) | evidence | 38 | — | `examples` | [list](steps/39-pilot-references.md#files-owned) | planned |
+| 38 | [pilot-freeze](steps/38-pilot-freeze.md) | evidence | 37 | — | none | [list](steps/38-pilot-freeze.md#files-owned) | landed |
+| 39 | [pilot-references](steps/39-pilot-references.md) | evidence | 38 | — | `examples` | [list](steps/39-pilot-references.md#files-owned) | landed |
 | 40 | [pilot-runs](steps/40-pilot-runs.md) | evidence | 39 | — | none | [list](steps/40-pilot-runs.md#files-owned) | planned |
 | 41 | [pilot-observation](steps/41-pilot-observation.md) | evidence | 40 | — | none | [list](steps/41-pilot-observation.md#files-owned) | planned |
 
