@@ -1,0 +1,19 @@
+id = "V2-PROJECT-dependency-cycle"
+rule = "V2-PROJECT-dependency-cycle"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "04-programs-and-packages.md#dependencies-and-lock: money depends on the root project by path: @project.dependencyCycle at that entry, which closes the cycle in discovery order, related to the root's entry"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@project.dependencyCycle"
+level = "@error"
+source = "lib/money/project.vibon"
+span = { start = 133, end = 167 }
+related = [{ source = "project.vibon", span = { start = 127, end = 167 } }]

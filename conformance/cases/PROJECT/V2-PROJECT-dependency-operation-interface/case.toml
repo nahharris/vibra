@@ -1,0 +1,12 @@
+id = "V2-PROJECT-dependency-operation-interface"
+rule = "V2-PROJECT-dependency-operation-interface"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#operation-interfaces: a proc of the root performs an operation interface a dependency declares, whose identity is that declaration's"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

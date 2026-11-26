@@ -304,6 +304,10 @@ fn check_with(
                 bytes: module.bytes().to_vec(),
                 embedded: false,
                 tests: unit.kind() == UnitKind::Tests,
+                package: unit.package().map(|package| PackageName {
+                    name: package.name().to_owned(),
+                    version: package.version().to_owned(),
+                }),
             });
         }
     }
@@ -314,6 +318,7 @@ fn check_with(
             bytes: module.bytes().to_vec(),
             embedded: true,
             tests: false,
+            package: None,
         });
     }
     let documents = parse_all(&sources);

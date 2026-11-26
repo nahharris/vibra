@@ -100,7 +100,6 @@ its level MUST agree with it.
 | `@project.dependencyCycle` | `@error` |
 | `@project.entryOutsideTarget` | `@error` |
 | `@project.invalidEntrySignature` | `@error` |
-| `@project.ambiguousDependencyTarget` | `@error` |
 | `@project.reservedUnitName` | `@error` |
 | `@project.duplicateName` | `@error` |
 | `@project.overlappingTargetRoots` | `@error` |
@@ -212,7 +211,9 @@ command-line context.
 | a target or test root that is missing, not a directory, absolute, or escapes | `@project.invalidTargetRoot`, the target's `root` value; for the test root, offset 0 of the source `tests` |
 | target roots that overlap each other or `tests` | `@project.overlappingTargetRoots`, the later target's `root` value, or the `root` value of the target that overlaps `tests`; no related span |
 | a target or dependency named `tests` or `std` | `@project.reservedUnitName`, the target's `name` value or the dependency's key |
-| two targets with one name, or a target and a dependency with one name | `@project.duplicateName`, the later name, a target's `name` value or a dependency's key, related to the earlier one |
+| two different units with one name anywhere in the snapshot, including a transitive dependency named like a root target | `@project.duplicateName`, the later name in discovery order, a target's `name` value or a dependency's key, related to the earlier one |
+| a dependency key that names no target of its package, or a binary target | `@name.unknownSymbol` or `@name.wrongEntityKind`, the key |
+| a path dependency whose directory holds no `project.vibon` | `@project.notFound`, its `path` value |
 | other project input or output failure | `@project.ioError` |
 | module enumeration or read failure, unreadable or dangling entry | `@module.ioError`, at offset 0 of the entry's project-relative path |
 | an invalid source path segment | `@module.invalidSegment`, at offset 0 of that source |
@@ -220,13 +221,12 @@ command-line context.
 | a link that leaves the source root | `@module.pathEscape`, at offset 0 of the entry's project-relative path |
 | one source identity for two modules, including dependency inputs | `@module.sourceIdCollision`, at offset 0 of the project module |
 | an import cycle | `@module.importCycle`: primary span on the later edge, related spans along the cycle |
-| a dependency cycle | `@project.dependencyCycle`, the later dependency entry in the project file, related along the cycle |
+| a dependency cycle | `@project.dependencyCycle`, the entry that closes it in discovery order, related along the cycle; an entry that names its own package has no related span |
 | a `.vib` file beside a directory of the same name | `@module.fileDirectoryCollision`, at offset 0 of that source |
 | a path whose unit is not visible to the importing module, or that reaches no module | `@module.unknownPath`, the reference |
 | a lock whose `project` digest or dependency set differs from the project; a missing vendor directory or vendored content whose content hash differs from the lock | `@project.staleLock`, the lock's `format` field or the lock entry |
 | a target `entry` whose first part is not the target's name | `@project.entryOutsideTarget`, the `entry` field |
 | an `entry` that is not a module-level `proc` with an entry signature, or that has a bare `requires` | `@project.invalidEntrySignature`, the `entry` field, related to the declaration |
-| a dependency without `target` on a package with several library targets | `@project.ambiguousDependencyTarget`, the dependency entry |
 | access to a private declaration, a static member reached through its type included | `@name.privateAccess`, the reference, or the member's name in the path, related to the declaration |
 | use of a hidden constructor, pattern, or field read | `@name.inaccessibleRepresentation`, the use, related to the type |
 | a name that resolves to nothing: a path part, a `given` key, an `impl` member or choice that is no member of the interface, an entity reference slot | `@name.unknownSymbol`, the name |
@@ -661,15 +661,15 @@ Every graph has the `@tests` unit, even when empty.
 | --- | --- | --- |
 | `format` | `@sourceGraph.v1` | required |
 | `units` | list of unit records sorted by `name` | every unit of the snapshot |
-| `dependencies` | list of dependency records sorted by `alias` | every declared dependency |
+| `dependencies` | list of dependency records sorted by `alias` | every dependency the root project file declares |
 
 A unit record has `name` (atom), `kind` (`@bin`, `@lib`, `@tests`, or
 `@dependency`), and `modules` (list of `{path: Atom sourceId: Str
 bytesHex: Str}` sorted by `path`, where `bytesHex` is the module's exact
 bytes in lower-case hexadecimal). A dependency record has `alias` (`Str`),
-`kind` (`@path` or `@git`), `source` (`Str`, the path or URL), `target`
-(optional atom), `status` (`@captured`, `@verified`, `@unavailable`, or
-`@refuted`), and `span` (the span record of its project entry).
+`kind` (`@path` or `@git`), `source` (`Str`, the path or URL), `status`
+(`@captured`, `@verified`, `@unavailable`, or `@refuted`), and `span` (the
+span record of its project entry).
 
 ```vibon
 {

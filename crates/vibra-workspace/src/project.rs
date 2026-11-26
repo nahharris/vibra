@@ -6,8 +6,10 @@
 //! bytes and no path. Every target is available for checking: a `@bin`
 //! target keeps its `entry`, its `effects` list, and its `grants` dict with
 //! where each is written, for the checks of [`crate::entry`]. Every
-//! dependency is decoded and marked unavailable (path dependencies until M2,
-//! Git dependencies throughout this release).
+//! dependency is decoded with where its `path` is written; its key is the
+//! name of the library target it binds. A path dependency is available
+//! ([`crate::dependencies`] loads it), and a Git dependency is unavailable
+//! throughout this release.
 //!
 //! The grant binding's `resource` is a closed union selected by its `kind`:
 //! `kind`, then the fields the provider table names for that kind, all
@@ -256,12 +258,13 @@ pub struct Dependency {
     span: ByteSpan,
     kind: DependencyKind,
     source: String,
+    source_span: ByteSpan,
     rev: Option<String>,
-    target: Option<String>,
 }
 
 impl Dependency {
-    /// The dependency name, the dict key.
+    /// The dependency name, the dict key: the name of the library target it
+    /// binds.
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
@@ -291,22 +294,27 @@ impl Dependency {
         &self.source
     }
 
+    /// Where the `path` of a path dependency, or the `git` of a Git
+    /// dependency, is written.
+    #[must_use]
+    pub const fn source_span(&self) -> ByteSpan {
+        self.source_span
+    }
+
     /// The revision of a Git dependency.
     #[must_use]
     pub fn rev(&self) -> Option<&str> {
         self.rev.as_deref()
     }
 
-    /// The selected library target, an atom with its `@`.
-    #[must_use]
-    pub fn target(&self) -> Option<&str> {
-        self.target.as_deref()
-    }
-
-    /// Dependencies are unavailable in this release.
+    /// A path dependency is available; a Git dependency is not, in this
+    /// release.
     #[must_use]
     pub const fn availability(&self) -> Availability {
-        Availability::Unavailable
+        match self.kind {
+            DependencyKind::Path => Availability::Available,
+            DependencyKind::Git => Availability::Unavailable,
+        }
     }
 }
 
@@ -540,7 +548,6 @@ fn dependency() -> Slot {
                 RecordSchema::new(vec![
                     FieldSchema::required("kind", Slot::AtomOf(vec!["@path"])),
                     FieldSchema::required("path", Slot::Str(None)),
-                    FieldSchema::optional("target", Slot::Atom(None)),
                 ]),
             ),
             (
@@ -549,7 +556,6 @@ fn dependency() -> Slot {
                     FieldSchema::required("kind", Slot::AtomOf(vec!["@git"])),
                     FieldSchema::required("git", Slot::Str(Some(git_url))),
                     FieldSchema::required("rev", Slot::Str(Some(git_revision))),
-                    FieldSchema::optional("target", Slot::Atom(None)),
                 ]),
             ),
         ],
@@ -706,8 +712,8 @@ pub fn decode_project(
                 span: entry.span(),
                 kind,
                 source: text_of(source),
+                source_span: source.map_or(entry.span(), TypedNode::span),
                 rev: value.get("rev").map(|rev| text_of(Some(rev))),
-                target: value.get("target").map(|target| text_of(Some(target))),
             }
         })
         .collect();

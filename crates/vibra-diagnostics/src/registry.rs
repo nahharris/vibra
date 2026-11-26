@@ -410,8 +410,6 @@ diagnostic_registry! {
         "a target `entry` does not start with the target's name";
     ProjectInvalidEntrySignature => "@project.invalidEntrySignature", Project, Error, None,
         "an `entry` is not a module-level `proc` with an entry signature";
-    ProjectAmbiguousDependencyTarget => "@project.ambiguousDependencyTarget", Project, Error, None,
-        "a dependency without `target` names a package with several library targets";
     ProjectReservedUnitName => "@project.reservedUnitName", Project, Error, None,
         "a target or dependency is named `tests` or `std`";
     ProjectDuplicateName => "@project.duplicateName", Project, Error, None,
@@ -492,7 +490,7 @@ mod tests {
     use std::collections::BTreeSet;
 
     /// The count of the specification table.
-    const REGISTERED_CODES: usize = 119;
+    const REGISTERED_CODES: usize = 118;
 
     #[test]
     fn the_registry_has_every_code_in_the_specification_table() {

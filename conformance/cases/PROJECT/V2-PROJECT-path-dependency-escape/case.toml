@@ -1,0 +1,18 @@
+id = "V2-PROJECT-path-dependency-escape"
+rule = "V2-PROJECT-path-dependency-escape"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "04-programs-and-packages.md#dependencies-and-lock: a path dependency outside the root project's directory is @module.pathEscape at its path"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@module.pathEscape"
+level = "@error"
+source = "project.vibon"
+span = { start = 155, end = 165 }

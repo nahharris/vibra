@@ -12,6 +12,13 @@ case's input bytes and the toolchain record, with no code of the engine:
 - a `source` record is each file with the exact extension `.vib` below a
   target root the project names (`root: "..."`) or below `tests/`, its
   identifier the path from the tree's root with `/` between names;
+- each `@path` dependency, followed breadth-first from the root project
+  through every project file reached, its `path` relative to the directory
+  of the project file that declares it: a `dependency` record holds the
+  exact bytes of that directory's `project.vibon`, identified by its path
+  from the tree's root, and a `source` record each `.vib` file below the
+  root of the library target the dependency's key names; a package reached
+  twice is recorded once;
 - the `toolchain` record, identified `@toolchain`, is the canonical bytes of
   the `@toolchain.v2` document of release 0.0.2, whose `stdlib` is `sha256:`
   and the SHA-256 of the canonical bytes of `stdlib/manifest.vibon`.
@@ -134,8 +141,36 @@ function Get-TreeRevision([string] $TreePath, [string] $Toolchain) {
     $records.Add([pscustomobject] @{
         Kind = 'toolchain'; Id = '@toolchain'; Bytes = $utf8.GetBytes($Toolchain)
     })
-    foreach ($relative in $roots) {
-        $directory = Join-Path $treeRoot $relative
+    $sourceRoots = [System.Collections.Generic.List[string]]::new()
+    foreach ($relative in $roots) { $sourceRoots.Add((Join-Path $treeRoot $relative)) }
+    $seen = [System.Collections.Generic.HashSet[string]]::new()
+    [void] $seen.Add($treeRoot)
+    $pending = [System.Collections.Generic.Queue[object]]::new()
+    $pending.Enqueue([pscustomobject] @{ Directory = $treeRoot; Text = $projectText })
+    while ($pending.Count -gt 0) {
+        $package = $pending.Dequeue()
+        $entries = [regex]::Matches(
+            $package.Text, '"([^"]*)"\s*:\s*\{\s*kind:\s*@path\s+path:\s*"([^"]*)"')
+        foreach ($entry in $entries) {
+            $key = $entry.Groups[1].Value
+            $directory = [System.IO.Path]::GetFullPath(
+                (Join-Path $package.Directory $entry.Groups[2].Value)).TrimEnd('\', '/')
+            $file = Join-Path $directory 'project.vibon'
+            if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { continue }
+            $bytes = [System.IO.File]::ReadAllBytes($file)
+            $text = $utf8.GetString($bytes)
+            $target = [regex]::Match(
+                $text, "name:\s*@$([regex]::Escape($key))\s+kind:\s*@lib\s+root:\s*`"([^`"]*)`"")
+            if ($target.Success) {
+                $sourceRoots.Add((Join-Path $directory $target.Groups[1].Value))
+            }
+            if (-not $seen.Add($directory)) { continue }
+            $id = $file.Substring($treeRoot.Length).TrimStart('\', '/').Replace('\', '/')
+            $records.Add([pscustomobject] @{ Kind = 'dependency'; Id = $id; Bytes = $bytes })
+            $pending.Enqueue([pscustomobject] @{ Directory = $directory; Text = $text })
+        }
+    }
+    foreach ($directory in ($sourceRoots | Select-Object -Unique)) {
         if (-not (Test-Path -LiteralPath $directory -PathType Container)) { continue }
         Get-ChildItem -LiteralPath $directory -Recurse -File |
             Where-Object { $_.Name.EndsWith('.vib', [System.StringComparison]::Ordinal) } |

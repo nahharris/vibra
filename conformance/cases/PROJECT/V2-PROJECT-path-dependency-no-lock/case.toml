@@ -1,0 +1,12 @@
+id = "V2-PROJECT-path-dependency-no-lock"
+rule = "V2-PROJECT-path-dependency-no-lock"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "04-programs-and-packages.md#dependencies-and-lock: a @path dependency binds the library its key names and is checked with no project-lock.vibon (Q23)"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

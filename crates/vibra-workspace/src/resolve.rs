@@ -2,7 +2,9 @@
 //!
 //! Resolution receives the package, every unit's modules by value, and the
 //! embedded standard library; it reads no path. The units keep the
-//! snapshot's order, `@tests` last.
+//! snapshot's order, `@tests` last. A dependency's unit carries its own
+//! package, the provenance of its declarations' identities, and each unit
+//! carries the dependency units its modules may name.
 
 use vibra_resolve::{PackageId, ResolveInput, SourceModule, SourceUnit};
 use vibra_types::{StdlibError, load_stdlib};
@@ -43,7 +45,13 @@ pub(crate) fn resolve_input_of(
                     SourceModule::new(module.path(), module.source_id(), module.bytes())
                 })
                 .collect();
-            SourceUnit::new(unit.name(), unit_kind(unit.kind()), modules)
+            let source = SourceUnit::new(unit.name(), unit_kind(unit.kind()), modules)
+                .with_dependencies(unit.dependencies().to_vec());
+            match unit.package() {
+                Some(package) => source
+                    .with_package(PackageId::new(package.name(), package.version())),
+                None => source,
+            }
         })
         .collect();
     Ok(ResolveInput::new(
@@ -58,5 +66,6 @@ const fn unit_kind(kind: UnitKind) -> vibra_resolve::UnitKind {
         UnitKind::Bin => vibra_resolve::UnitKind::Bin,
         UnitKind::Lib => vibra_resolve::UnitKind::Lib,
         UnitKind::Tests => vibra_resolve::UnitKind::Tests,
+        UnitKind::Dependency => vibra_resolve::UnitKind::Dependency,
     }
 }

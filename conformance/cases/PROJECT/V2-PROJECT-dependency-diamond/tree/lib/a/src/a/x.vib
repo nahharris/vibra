@@ -1,0 +1,9 @@
+use @units.u enduse
+
+fn one
+  takes {value: I32}
+  returns result: I32
+  visibility @public
+  do
+    return u.one(value)
+endfn

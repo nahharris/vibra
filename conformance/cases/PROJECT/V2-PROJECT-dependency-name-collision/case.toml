@@ -1,0 +1,19 @@
+id = "V2-PROJECT-dependency-name-collision"
+rule = "V2-PROJECT-dependency-name-collision"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "04-programs-and-packages.md#packages-units-and-targets: a dependency keyed like a target of the project is @project.duplicateName at the key, related to the target name"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@project.duplicateName"
+level = "@error"
+source = "project.vibon"
+span = { start = 127, end = 132 }
+related = [{ source = "project.vibon", span = { start = 78, end = 82 } }]

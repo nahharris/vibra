@@ -254,8 +254,8 @@ output.
 | grant binding | `provider`, `resource`, `policy`, `limits`, `after` | `provider`, `resource`, `after` required; `policy` and `limits` optional; a present `limits` holds at least one bound; see [Targets](#targets) |
 | resource | `kind`, then the fields the [provider table](#targets) names for that kind, in its order | all required; `kind` is one of the table's resource kinds |
 | limits | `invocations`, `inputBytes`, `outputBytes` | each an optional `U64`; at least one present |
-| path dependency | `kind`, `path`, `target` | `kind` is `@path`; `path` a `Str` confined beneath the project root; `target` an optional atom |
-| Git dependency | `kind`, `git`, `rev`, `target` | `kind` is `@git`; `git` is an HTTPS URL without userinfo; `rev` is 40 lower-case hexadecimal digits; `target` an optional atom |
+| path dependency | `kind`, `path` | `kind` is `@path`; `path` a `Str`, relative to the directory of the project file that declares it and confined beneath the root project's directory |
+| Git dependency | `kind`, `git`, `rev` | `kind` is `@git`; `git` is an HTTPS URL without userinfo; `rev` is 40 lower-case hexadecimal digits |
 
 A `format` other than `@project.v2` is rejected under the
 [schema rules](#schemas); there is no fallback and no automatic migration.
@@ -326,20 +326,24 @@ part of every declaration's identity and never appear in a reference.
 Dependency selection is exact; there is no version solving.
 
 A **unit** is one local target, the reserved unit `@tests`, the embedded
-standard library `@std`, or one dependency name. The first part of every
-code-reference atom names a unit. Target and dependency names share one
-namespace with the two reserved units. Two targets with one name, or a
-target and a dependency with one name, are `@project.duplicateName` at the
-later name in the project file, a target's `name` value or a dependency's
-key, related to the earlier one. Because roots are disjoint, every
-module belongs to exactly one unit and has exactly one canonical path.
+standard library `@std`, or one library target of a dependency package. The
+first part of every code-reference atom names a unit, and a unit's name is
+global: one name means one unit in the whole snapshot, whichever project
+file declares it. Target names, dependency keys, and the two reserved units
+share that namespace. Two different units with one name, among them a
+transitive dependency named like a root target, are `@project.duplicateName`
+at the later name in discovery order, a target's `name` value or a
+dependency's key, related to the earlier one. Two entries that reach one
+library target of one package name one unit, which is no fault. Because
+roots are disjoint, every module belongs to exactly one unit and has exactly
+one canonical path.
 
 The units a module can name are closed: its own unit, `@std`, and the
-dependencies its project declares; a module of `@tests` can also name every
-local target. A path whose first part is any other unit, including `@tests`
-from a target and an undeclared dependency, is `@module.unknownPath` at the
-reference. Together with the acyclic dependency graph this keeps the unit
-graph acyclic.
+dependencies its own project file declares; a module of `@tests` can also
+name every local target. A path whose first part is any other unit,
+including `@tests` from a target, a dependency of a dependency, and an
+undeclared unit, is `@module.unknownPath` at the reference. Together with
+the acyclic dependency graph this keeps the unit graph acyclic.
 
 A library target has no entry. Its surface is every public declaration of
 every module under its root.
@@ -589,11 +593,22 @@ as for any other missing module.
 ## Dependencies and lock
 
 A dependency is local (`kind: @path`) or an exact Git revision
-(`kind: @git`). A dependency name binds one `@lib` target of the dependency's
-package, named by `target`; when omitted, the package's only library target
-is selected, and a package with several is
-`@project.ambiguousDependencyTarget`. A dependency never binds a binary
-target.
+(`kind: @git`). A dependency's key is the name of the library target it
+binds in the dependency's package; there is no renaming. A key that names no
+target of the package is `@name.unknownSymbol` at the key, and a key that
+names a binary target is `@name.wrongEntityKind` at the key: a dependency
+never binds a binary target.
+
+A `path` is relative to the directory of the project file that declares it,
+and that directory holds the dependency's `project.vibon`; when it holds
+none, the dependency is `@project.notFound` at its `path` value. Discovery
+takes the project files breadth-first from the root project, each file's
+entries in dict order. As with imports, an entry is added to the dependency
+graph unless its package already reaches the declaring package through the
+entries added before it; such an entry, one naming the root project
+included, is `@project.dependencyCycle` at that entry, related to the
+entries of the shortest such chain in chain order, and an entry that names
+its own package has no related span.
 
 `vibra project sync` exports each Git revision into `dep/<name>/` without
 repository metadata and writes `project-lock.vibon`, one `@projectLock.v2`
@@ -613,8 +628,8 @@ A lock entry has `kind` (`@path` or `@git`); for `@path`, `path` (`Str`);
 for `@git`, `git` (`Str`), `rev` (`Str`, 40 lower-case hexadecimal digits),
 `vendorPath` (`Str`, the project-relative vendor directory), and
 `contentHash` (`Str`, the [content hash](#content-hash) of the vendored
-tree); then `target` (optional atom) and `dependencies` (list of `Str`, the
-names the dependency's own project declares, sorted by UTF-8 bytes).
+tree); then `dependencies` (list of `Str`, the names the dependency's own
+project declares, sorted by UTF-8 bytes).
 
 The example shows the shape. Its `project` digest is a placeholder, not the
 digest of any project file in this chapter; its `contentHash` is the test

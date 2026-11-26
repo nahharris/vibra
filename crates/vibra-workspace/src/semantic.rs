@@ -103,7 +103,7 @@ pub fn check_snapshot(
                 .map(|unit| unit.name().to_owned()),
         );
     }
-    let mut diagnostics = Vec::new();
+    let mut diagnostics = snapshot.unavailable().to_vec();
     let input = match resolve_input(snapshot) {
         Ok(input) => input,
         Err(error) => {

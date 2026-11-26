@@ -191,12 +191,12 @@ fn a_library_that_writes_a_binary_field_is_a_shape_fault_at_the_field() {
 }
 
 #[test]
-fn dependencies_are_decoded_unavailable_and_constrained() {
+fn dependencies_are_decoded_and_constrained() {
     let rev = "0123456789abcdef0123456789abcdef01234567";
     let text = LIBRARY.replace(
         "dependencies: [:]",
         &format!(
-            "dependencies: [\"money\": {{kind: @git git: \"https://example.com/money.git\" rev: \"{rev}\"}} \"local\": {{kind: @path path: \"../local\" target: @local}}]"
+            "dependencies: [\"money\": {{kind: @git git: \"https://example.com/money.git\" rev: \"{rev}\"}} \"local\": {{kind: @path path: \"lib/local\"}}]"
         ),
     );
     let project = decode_project("project.vibon", text.as_bytes()).expect("accepted");
@@ -205,7 +205,8 @@ fn dependencies_are_decoded_unavailable_and_constrained() {
     };
     assert_eq!(local.name(), "local");
     assert_eq!(local.kind(), DependencyKind::Path);
-    assert_eq!(local.target(), Some("@local"));
+    assert_eq!(local.source(), "lib/local");
+    assert_eq!(local.availability(), Availability::Available);
     assert_eq!(money.kind(), DependencyKind::Git);
     assert_eq!(money.rev(), Some(rev));
     assert_eq!(money.availability(), Availability::Unavailable);
@@ -222,6 +223,15 @@ fn dependencies_are_decoded_unavailable_and_constrained() {
     assert_eq!(
         faults(&bad).first().map(|fault| fault.0),
         Some(DiagnosticCode::DataInvalidValue)
+    );
+    let bad = text.replace("path: \"lib/local\"", "path: \"lib/local\" target: @local");
+    let field = bad.find("target: @local").expect("the field");
+    assert_eq!(
+        faults(&bad),
+        [(
+            DiagnosticCode::DataInvalidShape,
+            ByteSpan::new(field, field + 6)
+        )]
     );
 }
 

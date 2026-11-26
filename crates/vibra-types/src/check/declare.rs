@@ -64,6 +64,8 @@ pub(crate) struct Source {
     pub(crate) embedded: bool,
     /// Whether the module belongs to the `@tests` unit.
     pub(crate) tests: bool,
+    /// The package of a dependency's module; `None` for a local one.
+    pub(crate) package: Option<PackageName>,
 }
 
 /// Parses every source in the grammar of where it comes from.
@@ -112,6 +114,8 @@ pub(crate) struct ModuleData<'a> {
     pub(crate) embedded: bool,
     /// Whether it belongs to the `@tests` unit.
     pub(crate) tests: bool,
+    /// The package of a dependency's module; `None` for a local one.
+    pub(crate) package: Option<PackageName>,
     /// Whether its declarations are checked and lowered.
     pub(crate) in_scope: bool,
     /// The typed view.
@@ -586,6 +590,7 @@ impl<'a> Program<'a> {
             source_id: Arc::from(source.source_id.as_str()),
             embedded: source.embedded,
             tests: source.tests,
+            package: source.package.clone(),
             in_scope: false,
             view,
             text: document.text(),
@@ -595,7 +600,7 @@ impl<'a> Program<'a> {
         let package = if source.embedded {
             &inputs.embedded
         } else {
-            &inputs.local
+            source.package.as_ref().unwrap_or(&inputs.local)
         };
         let dotted = source
             .path
@@ -1537,7 +1542,7 @@ impl<'a> Program<'a> {
         let package = if data.embedded {
             &self.embedded_package
         } else {
-            &self.local_package
+            data.package.as_ref().unwrap_or(&self.local_package)
         };
         vibra_resolve::implementation_identity(
             &package.name,
@@ -1561,7 +1566,11 @@ impl<'a> Program<'a> {
         let package = if embedded {
             &self.embedded_package
         } else {
-            &self.local_package
+            self.modules
+                .iter()
+                .find(|data| !data.embedded && data.path == module)
+                .and_then(|data| data.package.as_ref())
+                .unwrap_or(&self.local_package)
         };
         declaration_identity(&package.name, &package.version, module, owner, kind, name)
     }

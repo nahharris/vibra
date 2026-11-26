@@ -22,8 +22,12 @@
 //!    not a reserved word (`@module.invalidSegment`). Paths that differ only
 //!    by case are `@module.caseCollision`, and `text.vib` beside `text/` is
 //!    `@module.fileDirectoryCollision`.
-//! 4. The bytes. No source byte is read before the walk's checks pass; the
-//!    bytes are then copied exactly, sorted by project-relative path.
+//! 4. Dependencies. After the root's own checks pass, [`crate::dependencies`]
+//!    reads the dependency graph; each dependency's unit is walked under the
+//!    same rules, with its package's directory as its project root.
+//! 5. The bytes. No source byte is read before the walk's checks pass; the
+//!    bytes are then copied exactly, sorted by project-relative path. One
+//!    source identity in two units is `@module.sourceIdCollision`.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
@@ -34,8 +38,9 @@ use std::path::{Component, Path, PathBuf};
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 use vibra_syntax::is_reserved_word;
 
+use crate::dependencies::{Dependencies, name_faults};
 use crate::discovery::DiscoveredProject;
-use crate::project::{PROJECT_FILE_NAME, TargetKind};
+use crate::project::{PROJECT_FILE_NAME, Package, TargetKind};
 use crate::revision::{RevisionKind, RevisionRecord, embedded_toolchain_record};
 
 /// The name of the test unit's root directory, and its source identity.
@@ -50,6 +55,8 @@ pub enum UnitKind {
     Lib,
     /// The reserved test unit.
     Tests,
+    /// The library target of another package, bound by a dependency.
+    Dependency,
 }
 
 impl UnitKind {
@@ -60,6 +67,7 @@ impl UnitKind {
             Self::Bin => "@bin",
             Self::Lib => "@lib",
             Self::Tests => "@tests",
+            Self::Dependency => "@dependency",
         }
     }
 }
@@ -99,6 +107,8 @@ pub struct SourceUnit {
     name: String,
     kind: UnitKind,
     modules: Vec<SourceFile>,
+    package: Option<Package>,
+    dependencies: Vec<String>,
 }
 
 impl SourceUnit {
@@ -119,6 +129,19 @@ impl SourceUnit {
     pub fn modules(&self) -> &[SourceFile] {
         &self.modules
     }
+
+    /// The package of a dependency's unit; `None` for a local unit.
+    #[must_use]
+    pub const fn package(&self) -> Option<&Package> {
+        self.package.as_ref()
+    }
+
+    /// The dependency units its modules may name: the dependencies its
+    /// project declares, `@` included.
+    #[must_use]
+    pub fn dependencies(&self) -> &[String] {
+        &self.dependencies
+    }
 }
 
 /// The immutable capture of one project: its marker and every module.
@@ -126,17 +149,23 @@ impl SourceUnit {
 pub struct SourceSnapshot {
     project: DiscoveredProject,
     units: Vec<SourceUnit>,
+    /// Each dependency's project file, by its path from the project root.
+    dependency_files: Vec<(String, Vec<u8>)>,
+    unavailable: Vec<Diagnostic>,
 }
 
 impl SourceSnapshot {
     /// Checks the unit names and roots, walks every root and `tests/`, and
     /// copies the modules' bytes.
     pub fn capture(project: DiscoveredProject) -> Result<Self, Vec<Diagnostic>> {
-        let roots = validate_roots(&project)?;
+        let mut roots = validate_roots(&project)?;
+        let dependencies = crate::dependencies::load(&project)?;
+        add_dependency_roots(&mut roots, &dependencies);
         let mut diagnostics = Vec::new();
         let mut walks = Vec::with_capacity(roots.len());
         for root in &roots {
-            let mut walk = Walk::new(project.root(), root);
+            let mut walk =
+                Walk::new(root.project_root.as_deref().unwrap_or(project.root()), root);
             walk.run();
             walk.collisions();
             diagnostics.append(&mut walk.diagnostics);
@@ -166,6 +195,8 @@ impl SourceSnapshot {
                 name: root.name.clone(),
                 kind: root.kind,
                 modules,
+                package: root.package.clone(),
+                dependencies: root.dependencies.clone(),
             });
         }
         if !diagnostics.is_empty() {
@@ -176,9 +207,27 @@ impl SourceSnapshot {
                 name: "@tests".to_owned(),
                 kind: UnitKind::Tests,
                 modules: Vec::new(),
+                package: None,
+                dependencies: dependencies.root().to_vec(),
             });
         }
-        Ok(Self { project, units })
+        let collisions = source_id_collisions(&units);
+        if !collisions.is_empty() {
+            return Err(collisions);
+        }
+        Ok(Self {
+            project,
+            units,
+            dependency_files: dependencies.files().to_vec(),
+            unavailable: dependencies.unavailable().to_vec(),
+        })
+    }
+
+    /// `@tool.unavailable` at each `@git` dependency entry of every project
+    /// file read: a valid construct outside this release.
+    #[must_use]
+    pub fn unavailable(&self) -> &[Diagnostic] {
+        &self.unavailable
     }
 
     /// The discovered project.
@@ -187,8 +236,8 @@ impl SourceSnapshot {
         &self.project
     }
 
-    /// The target units in project order, then `@tests`, which is always
-    /// present.
+    /// The target units in project order, then the dependency units in
+    /// discovery order, then `@tests`, which is always present.
     #[must_use]
     pub fn units(&self) -> &[SourceUnit] {
         &self.units
@@ -235,13 +284,22 @@ impl SourceSnapshot {
         records
     }
 
-    /// The `project` and `source` records, over the exact captured bytes.
+    /// The `project`, `dependency`, and `source` records, over the exact
+    /// captured bytes: one `dependency` record for each dependency's project
+    /// file, by its path from the project root.
     fn input_records(&self) -> Vec<RevisionRecord> {
         let mut records = vec![RevisionRecord::new(
             RevisionKind::Project,
             PROJECT_FILE_NAME,
             self.project.bytes(),
         )];
+        records.extend(self.dependency_files.iter().map(|(source_id, bytes)| {
+            RevisionRecord::new(
+                RevisionKind::Dependency,
+                source_id.clone(),
+                bytes.clone(),
+            )
+        }));
         records.extend(self.modules().map(|module| {
             RevisionRecord::new(
                 RevisionKind::Source,
@@ -306,13 +364,68 @@ struct Root {
     canonical: PathBuf,
     /// The span of the target's `root` value; `None` for `tests/`.
     span: Option<ByteSpan>,
+    /// The canonical directory of a dependency's package, its project root
+    /// for the walk; `None` for the root project's units.
+    project_root: Option<PathBuf>,
+    /// The package of a dependency's unit.
+    package: Option<Package>,
+    /// The dependency units its modules may name.
+    dependencies: Vec<String>,
 }
 
-fn is_reserved_unit(name: &str) -> bool {
+/// Gives the root project's units its dependencies, and adds the units of
+/// `dependencies` before `@tests`, which `roots` ends with when present.
+fn add_dependency_roots(roots: &mut Vec<Root>, dependencies: &Dependencies) {
+    for root in roots.iter_mut() {
+        root.dependencies = dependencies.root().to_vec();
+    }
+    let at = roots
+        .iter()
+        .position(|root| root.kind == UnitKind::Tests)
+        .unwrap_or(roots.len());
+    let units = dependencies.units().iter().map(|unit| Root {
+        name: unit.name().to_owned(),
+        kind: UnitKind::Dependency,
+        relative: unit.root().to_owned(),
+        canonical: unit.canonical_root().to_path_buf(),
+        span: Some(unit.root_span().1),
+        project_root: Some(unit.package_root().to_path_buf()),
+        package: Some(unit.package().clone()),
+        dependencies: unit.dependencies().to_vec(),
+    });
+    let tail = roots.split_off(at);
+    roots.extend(units);
+    roots.extend(tail);
+}
+
+/// `@module.sourceIdCollision` at offset 0 of each source identity that two
+/// units of the snapshot capture: a file reached through a dependency that
+/// another unit also holds.
+fn source_id_collisions(units: &[SourceUnit]) -> Vec<Diagnostic> {
+    let mut seen = BTreeSet::new();
+    let mut reported = BTreeSet::new();
+    let mut diagnostics = Vec::new();
+    for module in units.iter().flat_map(|unit| unit.modules.iter()) {
+        if !seen.insert(module.source_id.as_str())
+            && reported.insert(module.source_id.as_str())
+        {
+            diagnostics.push(module_fault(
+                DiagnosticCode::ModuleSourceIdCollision,
+                &module.source_id,
+                "two units capture one source identity",
+            ));
+        }
+    }
+    sorted(diagnostics)
+}
+
+/// Whether `name` is a reserved unit name.
+pub(crate) fn is_reserved_unit(name: &str) -> bool {
     matches!(name, "tests" | "std")
 }
 
-fn lexically_relative(value: &str) -> bool {
+/// Whether `value` is a non-empty relative path without `.` or `..` parts.
+pub(crate) fn lexically_relative(value: &str) -> bool {
     let path = Path::new(value);
     !value.is_empty()
         && !value.starts_with(['/', '\\'])
@@ -327,7 +440,7 @@ fn lexically_relative(value: &str) -> bool {
 
 /// The canonical directory of `relative` below `project_root`, or the code of
 /// the fault and its reason.
-fn canonical_root(
+pub(crate) fn canonical_root(
     project_root: &Path,
     relative: &str,
 ) -> Result<Option<PathBuf>, (DiagnosticCode, String)> {
@@ -369,57 +482,12 @@ fn canonical_root(
     Ok(Some(canonical))
 }
 
-/// `@project.duplicateName` for two targets with one name, or a target and
-/// a dependency with one name: at the later name in the project file, a
-/// target's `name` value or a dependency's key, related to the earlier one.
-fn duplicate_names(project: &DiscoveredProject) -> Vec<Diagnostic> {
-    let manifest = project.project();
-    let mut names: Vec<(&str, ByteSpan)> = manifest
-        .targets()
-        .iter()
-        .map(|target| {
-            let part = target.name().strip_prefix('@').unwrap_or(target.name());
-            (part, target.name_span())
-        })
-        .chain(
-            manifest
-                .dependencies()
-                .iter()
-                .map(|dependency| (dependency.name(), dependency.name_span())),
-        )
-        .collect();
-    names.sort_by_key(|(_, span)| (span.start(), span.end()));
-    let mut diagnostics = Vec::new();
-    for (index, (name, span)) in names.iter().enumerate() {
-        if let Some((_, earlier)) =
-            names.iter().take(index).find(|(other, _)| other == name)
-        {
-            diagnostics.push(
-                project_fault(
-                    DiagnosticCode::ProjectDuplicateName,
-                    *span,
-                    format!("two units are named `{name}`"),
-                )
-                .with_related(*earlier, "the unit of the same name"),
-            );
-        }
-    }
-    diagnostics
-}
-
 fn validate_roots(project: &DiscoveredProject) -> Result<Vec<Root>, Vec<Diagnostic>> {
     let project_root = project.root();
     let mut diagnostics = Vec::new();
     let mut roots = Vec::new();
+    diagnostics.extend(name_faults(project.project(), PROJECT_FILE_NAME));
     for target in project.project().targets() {
-        let part = target.name().strip_prefix('@').unwrap_or(target.name());
-        if is_reserved_unit(part) {
-            diagnostics.push(project_fault(
-                DiagnosticCode::ProjectReservedUnitName,
-                target.name_span(),
-                format!("`{}` is a reserved unit name", target.name()),
-            ));
-        }
         if !lexically_relative(target.root()) {
             diagnostics.push(project_fault(
                 DiagnosticCode::ProjectInvalidTargetRoot,
@@ -438,6 +506,9 @@ fn validate_roots(project: &DiscoveredProject) -> Result<Vec<Root>, Vec<Diagnost
                 relative: target.root().replace('\\', "/"),
                 canonical,
                 span: Some(target.root_span()),
+                project_root: None,
+                package: None,
+                dependencies: Vec::new(),
             }),
             Ok(None) => diagnostics.push(project_fault(
                 DiagnosticCode::ProjectInvalidTargetRoot,
@@ -449,16 +520,7 @@ fn validate_roots(project: &DiscoveredProject) -> Result<Vec<Root>, Vec<Diagnost
             }
         }
     }
-    for dependency in project.project().dependencies() {
-        if is_reserved_unit(dependency.name()) {
-            diagnostics.push(project_fault(
-                DiagnosticCode::ProjectReservedUnitName,
-                dependency.name_span(),
-                format!("`{}` is a reserved unit name", dependency.name()),
-            ));
-        }
-    }
-    diagnostics.extend(duplicate_names(project));
+
     let tests = match canonical_root(project_root, TESTS_ROOT) {
         Ok(canonical) => canonical.map(|canonical| Root {
             name: "@tests".to_owned(),
@@ -466,6 +528,9 @@ fn validate_roots(project: &DiscoveredProject) -> Result<Vec<Root>, Vec<Diagnost
             relative: TESTS_ROOT.to_owned(),
             canonical,
             span: None,
+            project_root: None,
+            package: None,
+            dependencies: Vec::new(),
         }),
         Err((code, message)) => {
             diagnostics.push(module_fault(code, TESTS_ROOT, message));

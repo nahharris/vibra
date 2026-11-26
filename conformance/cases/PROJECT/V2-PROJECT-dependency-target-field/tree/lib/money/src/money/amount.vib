@@ -1,0 +1,14 @@
+fn cents
+  takes {value: I32}
+  returns result: I32
+  visibility @public
+  do
+    return value
+endfn
+
+fn secret
+  takes {value: I32}
+  returns result: I32
+  do
+    return value
+endfn

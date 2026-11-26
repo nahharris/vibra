@@ -1,0 +1,19 @@
+id = "V2-PROJECT-dependency-name-global"
+rule = "V2-PROJECT-dependency-name-global"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "04-programs-and-packages.md#packages-units-and-targets: unit names are global: a transitive dependency named like a root target is @project.duplicateName at its key, related to the root target name"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@project.duplicateName"
+level = "@error"
+source = "lib/money/project.vibon"
+span = { start = 133, end = 138 }
+related = [{ source = "project.vibon", span = { start = 78, end = 82 } }]

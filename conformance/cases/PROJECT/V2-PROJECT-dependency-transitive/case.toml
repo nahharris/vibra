@@ -1,0 +1,12 @@
+id = "V2-PROJECT-dependency-transitive"
+rule = "V2-PROJECT-dependency-transitive"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "04-programs-and-packages.md#dependencies-and-lock: a dependency's own path dependency, relative to its project file, is loaded; app imports only @money"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

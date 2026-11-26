@@ -45,6 +45,8 @@ pub enum UnitKind {
     Lib,
     /// The reserved unit `@tests`.
     Tests,
+    /// The library target of another package, bound by a dependency name.
+    Dependency,
 }
 
 /// One module: its path, its source identity, and its exact bytes.
@@ -90,12 +92,15 @@ impl SourceModule {
     }
 }
 
-/// One local unit and its modules.
+/// One unit and its modules: a local unit, or a dependency's unit with the
+/// package it comes from.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SourceUnit {
     name: String,
     kind: UnitKind,
     modules: Vec<SourceModule>,
+    package: Option<PackageId>,
+    dependencies: Vec<String>,
 }
 
 impl SourceUnit {
@@ -110,7 +115,38 @@ impl SourceUnit {
             name: name.into(),
             kind,
             modules,
+            package: None,
+            dependencies: Vec::new(),
         }
+    }
+
+    /// This unit, whose declarations belong to `package` rather than to the
+    /// input's local package: a dependency's unit.
+    #[must_use]
+    pub fn with_package(mut self, package: PackageId) -> Self {
+        self.package = Some(package);
+        self
+    }
+
+    /// This unit, whose modules may also name the dependency units
+    /// `dependencies` (atoms with their `@`): the dependencies its project
+    /// declares.
+    #[must_use]
+    pub fn with_dependencies(mut self, dependencies: Vec<String>) -> Self {
+        self.dependencies = dependencies;
+        self
+    }
+
+    /// The package of a dependency's unit; `None` for a local unit.
+    #[must_use]
+    pub const fn package(&self) -> Option<&PackageId> {
+        self.package.as_ref()
+    }
+
+    /// The dependency units its modules may name, `@` included.
+    #[must_use]
+    pub fn dependencies(&self) -> &[String] {
+        &self.dependencies
     }
 
     /// The unit name, `@` included.

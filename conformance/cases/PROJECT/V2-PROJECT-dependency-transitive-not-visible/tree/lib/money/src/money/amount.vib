@@ -1,0 +1,9 @@
+use @units.scale enduse
+
+fn cents
+  takes {value: I32}
+  returns result: I32
+  visibility @public
+  do
+    return scale.one(value)
+endfn

@@ -1,0 +1,1 @@
+{format: @project.v2 package: {name: "app" version: "0.1.0"} targets: [{name: @app kind: @lib root: "src/app"}] dependencies: ["money": {kind: @git git: "https://example.com/money.git" rev: "0123456789abcdef0123456789abcdef01234567"}]}

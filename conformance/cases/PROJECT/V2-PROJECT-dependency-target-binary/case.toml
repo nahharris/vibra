@@ -1,0 +1,18 @@
+id = "V2-PROJECT-dependency-target-binary"
+rule = "V2-PROJECT-dependency-target-binary"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "04-programs-and-packages.md#dependencies-and-lock: a dependency key that names a binary target is @name.wrongEntityKind at the key: a dependency never binds a binary target"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@name.wrongEntityKind"
+level = "@error"
+source = "project.vibon"
+span = { start = 127, end = 134 }

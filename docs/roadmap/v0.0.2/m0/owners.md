@@ -214,7 +214,7 @@ Programs chapter.
 | Units and targets | 09 | `V1-PROJECT-graph-static-overlap`, `V2-PROJECT-graph-reserved-tests`, `V2-PROJECT-graph-reserved-std` | `@project.overlappingTargetRoots`, `@project.reservedUnitName` | `@sourceGraph.v1` |
 | Module paths | 09 | `V1-PROJECT-graph-static-invalid-segment`, `V1-PROJECT-graph-static-collision`; host tests of step 09, since a tree whose paths differ only by case cannot be checked out on Windows and an embedded identity is not a file of a tree: `snapshot::paths_that_differ_only_by_case_collide_on_a_case_sensitive_host`, `snapshot::paths_that_differ_only_by_case_collide_at_the_later_path`, `graph::a_module_with_an_embedded_source_identity_collides` | `@module.invalidSegment`, `@module.fileDirectoryCollision`, `@module.sourceIdCollision`, `@module.caseCollision` | `@sourceGraph.v1` |
 | Imports | 10 | `V2-PROJECT-import-*` | `@module.unknownPath`, `@module.importCycle`, `@name.privateAccess`, `@name.unknownSymbol` | `@resolved.v2` |
-| Local dependencies | M2 27 | `V2-PROJECT-path-dependency-*`, `V2-PROJECT-dependency-*`, `V2-PROJECT-git-dependency-unavailable` | `@project.dependencyCycle`, `@project.ambiguousDependencyTarget`, `@module.pathEscape`, `@name.privateAccess`, `@tool.unavailable` | `@project.v2`, `@sourceGraph.v1` |
+| Local dependencies | M2 27 | `V2-PROJECT-path-dependency-*`, `V2-PROJECT-dependency-*`, `V2-PROJECT-git-dependency-unavailable` | `@project.dependencyCycle`, `@project.duplicateName`, `@name.unknownSymbol`, `@name.wrongEntityKind`, `@module.pathEscape`, `@name.privateAccess`, `@tool.unavailable` | `@project.v2`, `@sourceGraph.v1` |
 | Git dependencies and the lock | not in this release | | | |
 | The standard library (embedding, manifest, roles) | 14 | host tests of step 14 | `@external.unknownSymbol`, `@external.signatureMismatch`, `@external.ownerMismatch`, `@runtime.invalidCheckedProgram`, `@module.sourceIdCollision` | `@stdlibManifest.v2` |
 | Tests | 23 / 25 | `V2-PROJECT-test-*`; the host test `check_covers_tests` of step 25 | `@module.testOutsideTests`, `@module.missingRequiredImport`, `@name.redeclaration`, `@type.invalidReturn`, `@type.invalidTry` | `@testRun.v2` |
@@ -372,7 +372,6 @@ A code with no step belongs to the milestone named.
 | `@project.dependencyCycle` | M2 step 27 |
 | `@project.entryOutsideTarget` | M2 step 25 |
 | `@project.invalidEntrySignature` | M2 step 25 |
-| `@project.ambiguousDependencyTarget` | M2 step 27 |
 | `@project.reservedUnitName` | steps 09 |
 | `@project.duplicateName` | steps 08 |
 | `@project.overlappingTargetRoots` | steps 09 |

@@ -35,25 +35,62 @@ fn a_binary_target_is_recorded_with_its_kind() {
 }
 
 #[test]
-fn a_dependency_is_unavailable_with_the_span_of_its_entry() {
+fn a_git_dependency_is_unavailable_with_the_span_of_its_entry() {
+    let rev = "0123456789abcdef0123456789abcdef01234567";
     let document = LIBRARY.replace(
         "dependencies: [:]",
-        "dependencies: [\"local\": {kind: @path path: \"../local\" target: @local}]",
+        &format!(
+            "dependencies: [\"money\": {{kind: @git git: \"https://example.com/money.git\" rev: \"{rev}\"}}]"
+        ),
     );
     let project = TempDir::project("graph-dep", &document, &[("src/app/", "")]);
     let snapshot = capture(project.path()).expect("captured");
     let graph = SourceGraph::build(&snapshot, &[]).expect("built");
-    let start = document.find("\"local\"").expect("key");
-    let end = document.find("@local}").expect("value") + "@local}".len();
+    let start = document.find("\"money\"").expect("key");
+    let end = document.find(&format!("{rev}\"}}")).expect("value") + rev.len() + 2;
     let [dependency] = graph.dependencies() else {
         panic!("one dependency");
     };
     assert_eq!(dependency.span(), ByteSpan::new(start, end));
     assert!(graph.canonical_text().ends_with(&format!(
-        "dependencies: [{{alias: \"local\" kind: @path source: \"../local\" target: @local status: @unavailable span: {{sourceId: \"project.vibon\" start: {start}u64 end: {end}u64}}}}]}}"
+        "dependencies: [{{alias: \"money\" kind: @git source: \"https://example.com/money.git\" status: @unavailable span: {{sourceId: \"project.vibon\" start: {start}u64 end: {end}u64}}}}]}}"
     )));
 }
 
+/// A path dependency's unit is in the graph with the kind `@dependency`,
+/// and its record is `@captured`.
+#[test]
+fn a_path_dependency_is_captured_as_a_dependency_unit() {
+    let document = LIBRARY.replace(
+        "dependencies: [:]",
+        "dependencies: [\"money\": {kind: @path path: \"lib/money\"}]",
+    );
+    let project = TempDir::project(
+        "graph-path-dep",
+        &document,
+        &[
+            ("src/app/", ""),
+            (
+                "lib/money/project.vibon",
+                "{format: @project.v2 package: {name: \"money\" version: \"1.0.0\"} targets: [{name: @money kind: @lib root: \"src/money\"}] dependencies: [:]}",
+            ),
+            ("lib/money/src/money/amount.vib", "b"),
+        ],
+    );
+    let snapshot = capture(project.path()).expect("captured");
+    let graph = SourceGraph::build(&snapshot, &[]).expect("built");
+    let text = graph.canonical_text();
+    assert!(
+        text.contains("{name: @money kind: @dependency modules: [{path: @money.amount sourceId: \"lib/money/src/money/amount.vib\" bytesHex: \"62\"}]}"),
+        "{text}"
+    );
+    assert!(
+        text.contains(
+            "{alias: \"money\" kind: @path source: \"lib/money\" status: @captured"
+        ),
+        "{text}"
+    );
+}
 #[test]
 fn a_module_with_an_embedded_source_identity_collides() {
     let project = TempDir::project("graph-embedded", LIBRARY, &[("src/app/a.vib", "")]);
