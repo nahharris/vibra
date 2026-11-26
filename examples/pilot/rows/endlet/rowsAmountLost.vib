@@ -1,0 +1,27 @@
+type Row of {key: Str amount: I32}
+  visibility @public
+endtype
+
+fn indexRows
+  takes {rows: List(Row)}
+  returns index: Dict(Str I32)
+  visibility @public
+  do
+    return From.convert(Iter.collect(Iter.map(rows pairOf)))
+endfn
+
+fn pairOf
+  takes {row: Row}
+  returns pair: {Str I32}
+  do
+    let Row(key: key amount: amount) be row endlet
+    return {key 0i32}
+endfn
+
+fn latest
+  takes {rows: List(Row) key: Str}
+  returns amount: Option(I32)
+  visibility @public
+  do
+    return indexRows(rows)(key)
+endfn

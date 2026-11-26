@@ -1,0 +1,18 @@
+task	control	grade	shows
+packet	packetStopIgnored	refuted	test the stop code scores nothing
+pair	pairDeltaOffByDefault	refuted	test a reversed pair is ordered with its delta
+positive	positiveUnchecked	unknown	code @contract.unproved
+positive	positiveZero	refuted	code @contract.refuted
+range	rangeUnhandled	refuted	code @pattern.refutableBinding
+order	orderUnguarded	unknown	code @contract.unproved
+order	orderSwapped	unknown	code @contract.unproved
+order	orderConstantFalse	refuted	code @contract.refuted
+gate	gateBareRequires	refuted	code @contract.obligationLost
+gate	gateBareEnsures	unknown	code @contract.unproved
+reader	readerFallbackOnError	refuted	test a missing file is the error, not the fallback
+reader	readerPure	refuted	code @effect.invalidAwait
+plan	planOnce	refuted	test two runs use exactly two invocations
+plan	planNoCeiling	refuted	code @effect.outsideCeiling
+optional	optionalBareRequires	unknown	code @contract.unproved
+optional	optionalNoOffset	refuted	test a positive value is offset
+rows	rowsAmountLost	refuted	test the latest amount of a key

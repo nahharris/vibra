@@ -1,0 +1,35 @@
+# Task: plan
+
+Write the module `@pilot.plan`. Each declaration named below has exactly
+the name, parameters, and result written here, and has
+`visibility @public` unless this task says it is private. You may add
+declarations of your own. Write no `test`.
+
+- The procedure `emit`, which takes
+  `{enabled: Bool writer: DirWriteText at: RelativePath contents: Str}`,
+  returns `outcome: Result(Void FsError)`, has the guard
+  `requires enabled else Result.ok(value: void)`, and performs
+  `{DirWriteText}`. Its body writes `contents` to the file `at` through
+  `writer` and returns the result of the write.
+- The function `prepare`, which takes the same parameters as `emit` and
+  returns `plan: Intent(Result(Void FsError) {DirWriteText})`: the plan of
+  `emit` applied to its parameters.
+- The procedure `runTwice`, which takes the same parameters as `emit`,
+  returns `count: Result(U32 FsError)`, and performs `{DirWriteText}`.
+
+`prepare` runs nothing. `runTwice` builds the plan once with `prepare` and
+runs that one plan twice, in order. When the first run returns an error,
+`runTwice` returns that error and does not run the plan again; when the
+second run returns an error, it returns that error. Otherwise it returns
+`Result.ok(value: 2u32)`.
+
+Examples:
+
+- With `enabled` true and a writer whose directory permits the write,
+  `runTwice` returns `Result.ok(value: 2u32)` and the file holds
+  `contents`.
+- With `enabled` false, `runTwice` returns `Result.ok(value: 2u32)` and
+  writes nothing.
+- With `enabled` true and a writer that permits only one write, `runTwice`
+  returns `Result.err(error: FsError.limitExceeded())` and the file holds
+  `contents` from the first run.

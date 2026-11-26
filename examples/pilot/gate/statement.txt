@@ -1,0 +1,34 @@
+# Task: gate
+
+Write the module `@pilot.gate`. Each declaration named below has exactly
+the name, parameters, and result written here, and has
+`visibility @public` unless this task says it is private. You may add
+declarations of your own. Write no `test`.
+
+- The type `GateError`, a variant type with the cases `disabled` and
+  `nonPositive`.
+- The private function `positiveOk`, which takes
+  `{outcome: Result(I32 GateError)}` and returns `ok: Bool`: for
+  `Result.ok(value: amount)` whether `amount` is greater than `0i32`, and
+  true for every error.
+- The function `gateAmount`, which takes `{enabled: Bool amount: I32}` and
+  returns `outcome: Result(I32 GateError)`, with these two guards, and
+  whose body returns `Result.ok(value: amount)`:
+
+  ```vibra
+  requires enabled else Result.err(error: GateError.disabled())
+  ensures positiveOk(outcome) else Result.err(error: GateError.nonPositive())
+  ```
+
+- The function `viaGate`, which takes
+  `{gate: Fn({Bool I32} Result(I32 GateError)) enabled: Bool amount: I32}`
+  and returns `outcome: Result(I32 GateError)`: the result of applying
+  `gate` to `enabled` and `amount`.
+
+Examples:
+
+- `viaGate(gateAmount false 4i32)` is
+  `Result.err(error: GateError.disabled())`.
+- `viaGate(gateAmount true 4i32)` is `Result.ok(value: 4i32)`.
+- `viaGate(gateAmount true -4i32)` is
+  `Result.err(error: GateError.nonPositive())`.

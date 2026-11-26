@@ -1,0 +1,24 @@
+# Task: reader
+
+Write the module `@pilot.reader`. Each declaration named below has
+exactly the name, parameters, and result written here, and has
+`visibility @public` unless this task says it is private. You may add
+declarations of your own. Write no `test`.
+
+- The procedure `readOptional`, which takes
+  `{reader: Option(DirReadText) at: RelativePath fallback: Str}`, returns
+  `text: Result(Str FsError)`, and performs `{DirReadText}`.
+
+When `reader` is `Option.none()`, `readOptional` returns
+`Result.ok(value: fallback)` and performs no operation. When it holds a
+grant, `readOptional` reads the file `at` through that grant and returns
+the result of the read as it is: an error of the read is returned, never
+the fallback.
+
+Examples:
+
+- With no reader, `readOptional` returns `Result.ok(value: fallback)`.
+- With a reader whose directory holds the file `a.txt` with the text
+  `hello`, reading `a.txt` returns `Result.ok(value: "hello")`.
+- With a reader whose directory holds no `a.txt`, reading `a.txt` returns
+  `Result.err(error: FsError.notFound())`.

@@ -1,0 +1,30 @@
+# Task: packet
+
+Write the module `@pilot.packet`. Each declaration named below has exactly
+the name, parameters, and result written here, and has
+`visibility @public` unless this task says it is private. You may add
+declarations of your own. Write no `test`.
+
+- The type `Packet`, a variant type with the cases `empty` and
+  `item {points: List(I32) code: I32}`.
+- The private module value `stopCode`, of type `I32`, whose value is
+  `99i32`.
+- The function `packetScore`, which takes `{packet: Packet}` and returns
+  `score: Option(I32)`.
+
+`packetScore` returns `Option.none()` for an empty packet. For an item
+whose code is `stopCode`, matched by using `stopCode` as a constant
+pattern, it returns `Option.none()`. For any other item it needs exactly
+two points, `first` and `second`; with any other number of points it
+returns `Option.none()`. Otherwise it returns
+`Option.some(value: I32.add(I32.add(first second) code))`.
+
+Examples:
+
+- `packetScore(Packet.item(points: [2i32 3i32] code: 7i32))` is
+  `Option.some(value: 12i32)`.
+- `packetScore(Packet.item(points: [2i32 3i32] code: 99i32))` is
+  `Option.none()`.
+- `packetScore(Packet.item(points: [2i32] code: 7i32))` is
+  `Option.none()`.
+- `packetScore(Packet.empty())` is `Option.none()`.

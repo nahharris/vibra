@@ -1,0 +1,27 @@
+# Task: order
+
+Write the module `@pilot.order`. Each declaration named below has exactly
+the name, parameters, and result written here, and has
+`visibility @public` unless this task says it is private. You may add
+declarations of your own. Write no `test`.
+
+- The type `OrderError`, a variant type with the one case `reversed`.
+- The function `inOrder`, which takes `{low: I32 high: I32}` and returns
+  `ok: Bool`: true exactly when `low` is less than or equal to `high`.
+- The function `chooseUpper`, which takes `{low: I32 high: I32}` and
+  returns `upper: I32`, with the guards `requires inOrder(low high)` and
+  `ensures inOrder(low upper)`, neither of which has an `else`. It returns
+  `high`.
+- The function `orderedChoice`, which takes `{low: I32 high: I32}` and
+  returns `choice: Result(I32 OrderError)`.
+
+`orderedChoice` returns `Result.ok(value: chooseUpper(low high))` when
+`low` and `high` are in order and
+`Result.err(error: OrderError.reversed())` otherwise.
+
+Examples:
+
+- `orderedChoice(2i32 5i32)` is `Result.ok(value: 5i32)`.
+- `orderedChoice(5i32 2i32)` is
+  `Result.err(error: OrderError.reversed())`.
+- `orderedChoice(4i32 4i32)` is `Result.ok(value: 4i32)`.

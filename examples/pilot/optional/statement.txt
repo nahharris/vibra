@@ -1,0 +1,27 @@
+# Task: optional
+
+Write the module `@pilot.optional`. Each declaration named below has
+exactly the name, parameters, and result written here, and has
+`visibility @public` unless this task says it is private. You may add
+declarations of your own. Write no `test`.
+
+- The generic function `mapOptional`, with the type parameters `A` and
+  `B`, which takes `{item: Option(A) f: Fn({A} B)}` and returns
+  `mapped: Option(B)`.
+- The function `clampPositive`, which takes `{value: I32}` and returns
+  `clamped: I32`, with the guard
+  `requires Ordered.greater(value 0i32) else 0i32`. Its body returns
+  `value`.
+- The function `adjust`, which takes `{item: Option(I32) offset: I32}` and
+  returns `adjusted: Option(I32)`.
+
+`mapOptional` returns `Option.none()` for `Option.none()`, and
+`Option.some(value: f(x))` for `Option.some(value: x)`, applying `f` once.
+`adjust` applies `mapOptional` to `item` and an anonymous function that
+returns `I32.add(clampPositive(value) offset)` for its parameter `value`.
+
+Examples:
+
+- `adjust(Option.none() 2i32)` is `Option.none()`.
+- `adjust(Option.some(value: 3i32) 2i32)` is `Option.some(value: 5i32)`.
+- `adjust(Option.some(value: -3i32) 2i32)` is `Option.some(value: 2i32)`.

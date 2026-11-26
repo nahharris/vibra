@@ -1,0 +1,28 @@
+# Task: positive
+
+Write the module `@pilot.positive`. Each declaration named below has
+exactly the name, parameters, and result written here, and has
+`visibility @public` unless this task says it is private. You may add
+declarations of your own. Write no `test`.
+
+- The type `PositiveError`, a variant type with the one case
+  `nonPositive`.
+- The type `Positive`, a wrapper of `I32` with the guard
+  `where isPositive`, which has no `else`.
+- The function `isPositive`, which takes `{value: I32}` and returns
+  `ok: Bool`: true exactly when `value` is greater than `0i32`.
+- The function `makePositive`, which takes `{raw: I32}` and returns
+  `made: Result(Positive PositiveError)`.
+- The function `readPositive`, which takes one parameter of type
+  `Positive` and returns `value: I32`, with the guard
+  `ensures isPositive(value)`, which has no `else`.
+
+`makePositive` returns `Result.ok(value: Positive(raw))` when `raw` is
+positive and `Result.err(error: PositiveError.nonPositive())` otherwise.
+`readPositive` returns the `I32` the `Positive` wraps.
+
+Examples:
+
+- `makePositive(3i32)` is `Result.ok(value: Positive(3i32))`.
+- `makePositive(0i32)` is `Result.err(error: PositiveError.nonPositive())`.
+- `readPositive(Positive(3i32))` is `3i32`.

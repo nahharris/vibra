@@ -1,0 +1,34 @@
+Here is the module:
+
+```vibra
+type Packet
+  case empty
+  case item {points: List(I32) code: I32}
+  visibility @public
+endtype
+
+let stopCode: I32 be 99i32 endlet
+
+fn packetScore
+  takes {packet: Packet}
+  returns score: Option(I32)
+  visibility @public
+  do
+    return match packet
+      case Packet.empty()
+        Option.none()
+      case Packet.item(points: _ code: stopCode)
+        Option.none()
+      case Packet.item(points: points code: code)
+        scoreOf(points code)
+    endmatch
+endfn
+
+fn scoreOf
+  takes {points: List(I32) code: I32}
+  returns score: Option(I32)
+  do
+    let [first second] be points else return Option.none() endlet
+    return Option.some(value: I32.add(I32.add(first second) code))
+endfn
+```

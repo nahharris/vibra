@@ -1,0 +1,57 @@
+type RangeError
+  case invalid
+  visibility @public
+endtype
+
+type Range of {low: I32 high: I32}
+  where orderedRange else RangeError.invalid()
+  visibility @public
+endtype
+
+fn orderedRange
+  takes {bounds: {low: I32 high: I32}}
+  returns ok: Bool
+  do
+    return Ordered.lessOrEqual(bounds.low bounds.high)
+endfn
+
+let reversed: Result(Range RangeError) be Range(low: 5i32 high: 2i32)
+
+fn makeRange
+  takes {low: I32 high: I32}
+  returns made: Result(Range RangeError)
+  visibility @public
+  do
+    return Range(low: low high: high)
+endfn
+
+fn span
+  takes {range: Range}
+  returns width: I32
+  visibility @public
+  do
+    let Range(low: low high: high) be range
+    return I32.sub(high low)
+endfn
+
+fn spanOr
+  takes {low: I32 high: I32 fallback: I32}
+  returns width: I32
+  visibility @public
+  do
+    let Result.ok(value: range) be makeRange(low high) else return fallback endlet
+    return span(range)
+endfn
+
+fn reversedSpanOr
+  takes {fallback: I32}
+  returns width: I32
+  visibility @public
+  do
+    return match reversed
+      case Result.ok(value: range)
+        span(range)
+      case Result.err(error: _)
+        fallback
+    endmatch
+endfn

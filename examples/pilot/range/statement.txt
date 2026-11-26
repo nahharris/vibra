@@ -1,0 +1,35 @@
+# Task: range
+
+Write the module `@pilot.range`. Each declaration named below has exactly
+the name, parameters, and result written here, and has
+`visibility @public` unless this task says it is private. You may add
+declarations of your own. Write no `test`.
+
+- The type `RangeError`, a variant type with the one case `invalid`.
+- The type `Range`, a record type `{low: I32 high: I32}` with the guard
+  `where orderedRange else RangeError.invalid()`.
+- The private function `orderedRange`, which takes
+  `{bounds: {low: I32 high: I32}}` and returns `ok: Bool`: true exactly
+  when `low` is less than or equal to `high`.
+- The function `makeRange`, which takes `{low: I32 high: I32}` and returns
+  `made: Result(Range RangeError)`: the construction of a `Range` from
+  `low` and `high`.
+- The function `spanOr`, which takes `{low: I32 high: I32 fallback: I32}`
+  and returns `width: I32`.
+- The private module value `reversed`, of type `Result(Range RangeError)`,
+  whose value is the construction of a `Range` with `low` `5i32` and
+  `high` `2i32`.
+- The function `reversedSpanOr`, which takes `{fallback: I32}` and returns
+  `width: I32`.
+
+The span of a range is `I32.sub(high low)`. `spanOr` returns the span of
+the range `makeRange(low high)` makes, or `fallback` when it makes an
+error. `reversedSpanOr` returns the span of the range in `reversed`, or
+`fallback` when `reversed` holds an error.
+
+Examples:
+
+- `spanOr(2i32 5i32 -7i32)` is `3i32`.
+- `spanOr(5i32 2i32 -7i32)` is `-7i32`.
+- `reversedSpanOr(-7i32)` is `-7i32`.
+- `makeRange(5i32 2i32)` is `Result.err(error: RangeError.invalid())`.

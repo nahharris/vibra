@@ -1,0 +1,97 @@
+use @std.assert enduse
+
+use @std.test.TestWorld enduse
+
+use @std.fs.DirReadText enduse
+
+use @std.fs.DirWriteText enduse
+
+use @std.fs.FsError enduse
+
+use @std.fs.RelativePath enduse
+
+use @std.policy.GrantLimits enduse
+
+use @pilot.plan enduse
+
+// The writer bounded at `count` invocations.
+fn bounded
+  takes {grant: DirWriteText count: U64}
+  returns narrowed: DirWriteText
+  do
+    return DirWriteText.limit(
+      grant
+      GrantLimits(
+        invocations: Option.some(value: count)
+        inputBytes: Option.none()
+        outputBytes: Option.none()
+      )
+    )
+endfn
+
+test "an enabled plan runs twice and writes"
+  takes {world: TestWorld}
+  performs {TestWorld DirReadText DirWriteText}
+  do
+    let Result.ok(value: at) be RelativePath(["out.txt"]) endlet
+    let {readText: check writeText: grant} be await TestWorld.directory(world) endlet
+    assert.equal(Result.ok(value: 2u32) await plan.runTwice(true grant at "x"))
+    assert.equal(Result.ok(value: "x") await DirReadText.read(check at))
+endtest
+
+test "a disabled plan writes nothing"
+  takes {world: TestWorld}
+  performs {TestWorld DirReadText DirWriteText}
+  do
+    let Result.ok(value: at) be RelativePath(["out.txt"]) endlet
+    let {readText: check writeText: grant} be await TestWorld.directory(world) endlet
+    assert.equal(Result.ok(value: 2u32) await plan.runTwice(false grant at "x"))
+    assert.equal(Result.err(error: FsError.notFound()) await DirReadText.read(check at))
+endtest
+
+test "the second run's failure is the result and the first write stays"
+  takes {world: TestWorld}
+  performs {TestWorld DirReadText DirWriteText}
+  do
+    let Result.ok(value: at) be RelativePath(["out.txt"]) endlet
+    let {readText: check writeText: grant} be await TestWorld.directory(world) endlet
+    assert.equal(
+      Result.err(error: FsError.limitExceeded())
+      await plan.runTwice(true bounded(grant 1u64) at "x")
+    )
+    assert.equal(Result.ok(value: "x") await DirReadText.read(check at))
+endtest
+
+test "two runs use exactly two invocations"
+  takes {world: TestWorld}
+  performs {TestWorld DirWriteText}
+  do
+    let Result.ok(value: at) be RelativePath(["out.txt"]) endlet
+    let {readText: _ writeText: grant} be await TestWorld.directory(world) endlet
+    let limited be bounded(grant 2u64) endlet
+    assert.equal(Result.ok(value: 2u32) await plan.runTwice(true limited at "x"))
+    assert.equal(
+      Result.err(error: FsError.limitExceeded())
+      await DirWriteText.write(limited at "y")
+    )
+endtest
+
+test "preparing a plan runs nothing"
+  takes {world: TestWorld}
+  performs {TestWorld DirReadText}
+  do
+    let Result.ok(value: at) be RelativePath(["out.txt"]) endlet
+    let {readText: check writeText: grant} be await TestWorld.directory(world) endlet
+    let _ be plan.prepare(true grant at "x") endlet
+    assert.equal(Result.err(error: FsError.notFound()) await DirReadText.read(check at))
+endtest
+
+test "a disabled emit is ok and writes nothing"
+  takes {world: TestWorld}
+  performs {TestWorld DirReadText DirWriteText}
+  do
+    let Result.ok(value: at) be RelativePath(["out.txt"]) endlet
+    let {readText: check writeText: grant} be await TestWorld.directory(world) endlet
+    assert.equal(Result.ok(value: void) await plan.emit(false grant at "x"))
+    assert.equal(Result.err(error: FsError.notFound()) await DirReadText.read(check at))
+endtest
