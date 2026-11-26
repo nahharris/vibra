@@ -52,7 +52,9 @@ surface arms that differ only in whether an ordinary `let` ends with
 and test world. Reference solutions and negative controls pass before any
 model call. The result is a dated observation about that one choice on those
 tasks and models. If it favors the other arm under its registered rule, the
-change returns to the specification.
+change returns to the specification. The
+[observation of 2026-11-26](pilot/observation.md) answers that the default
+stays: `let … be … endlet` remains the specified form.
 
 ## Not in this milestone
 

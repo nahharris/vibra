@@ -42,6 +42,16 @@ stop rules, the setup calls, and a regrade of the 20 runs the registered
 seed picks. It prints `schedule complete: N of N` and exits 0 only when
 every check holds.
 
+  pwsh -NoProfile -File examples/pilot/grade.ps1 -TranslationCounts <runs.tsv>
+
+runs only the translation's reader, and no vibra, over the stored
+solution.vib of every noEndlet run of the run table (the runs/ directory
+beside it) and prints, per model and overall, the solutions read, those
+the translation changed, those it left unchanged, and the readings that
+failed, with the run of each failed reading. It also checks that each stored solution has the digest its
+record names and that each closed count equals the run table's, and exits
+0 only when both hold. It grades nothing.
+
 The script reads no network. It writes only under a fresh directory of the
 system's temporary directory, which it removes.
 
@@ -69,6 +79,8 @@ param(
   [switch]$CheckReader,
   [Parameter(ParameterSetName = 'Verify', Mandatory)]
   [string]$VerifyRuns,
+  [Parameter(ParameterSetName = 'Counts', Mandatory)]
+  [string]$TranslationCounts,
   [Parameter(ParameterSetName = 'One')]
   [Parameter(ParameterSetName = 'All')]
   [Parameter(ParameterSetName = 'Verify')]
@@ -1780,7 +1792,54 @@ function Invoke-VerifyRuns([string]$TablePath) {
   }
 }
 
+# The translation alone over the stored noEndlet solutions of the runs: what
+# the translation changed. No vibra runs and nothing is graded.
+function Invoke-TranslationCounts([string]$TablePath) {
+  $tableFile = [IO.Path]::GetFullPath($TablePath, (Get-Location).Path)
+  $records = Join-Path (Split-Path $tableFile) 'runs'
+  $rows = @(Import-Csv -LiteralPath $tableFile -Delimiter "`t" | Where-Object arm -ceq 'noEndlet')
+  $problems = [Collections.Generic.List[string]]::new()
+  $failedRuns = [Collections.Generic.List[string]]::new()
+  $counts = [ordered]@{}
+  foreach ($row in $rows) {
+    if (-not $counts.Contains($row.cohort)) { $counts[$row.cohort] = [ordered]@{ read = 0; changed = 0; unchanged = 0; failed = 0 } }
+    $directory = Join-Path $records $row.run
+    $file = Join-Path $directory 'solution.vib'
+    if (-not (Test-Path -LiteralPath $file)) {
+      if ($row.outcome -eq 'completion') { $problems.Add("$($row.run): no stored solution") }
+      continue
+    }
+    $bytes = [IO.File]::ReadAllBytes($file)
+    $recorded = (Read-KeyValues (Join-Path $directory 'record.tsv'))['solutionSha256']
+    if ((Get-Sha256 $bytes) -ne $recorded) { $problems.Add("$($row.run): the stored solution is not the one its record names") }
+    $translation = [VibraPilot.Reader]::Translate($bytes)
+    $closed = if ($translation.Read) { $translation.Closed } else { 0 }
+    if ("$closed" -ne $row.closed) { $problems.Add("$($row.run): closed count $closed, the run table has $($row.closed)") }
+    $c = $counts[$row.cohort]
+    $c.read++
+    if (-not $translation.Read) { $c.failed++; $failedRuns.Add($row.run) }
+    elseif ($translation.Changed) { $c.changed++ }
+    else { $c.unchanged++ }
+  }
+  "model`tread`tchanged`tunchanged`treadingFailed"
+  $all = [ordered]@{ read = 0; changed = 0; unchanged = 0; failed = 0 }
+  foreach ($model in $counts.Keys) {
+    $c = $counts[$model]
+    "$model`t$($c.read)`t$($c.changed)`t$($c.unchanged)`t$($c.failed)"
+    foreach ($key in @($all.Keys)) { $all[$key] += $c[$key] }
+  }
+  "all`t$($all.read)`t$($all.changed)`t$($all.unchanged)`t$($all.failed)"
+  foreach ($run in $failedRuns) { "readingFailed`t$run" }
+  foreach ($problem in $problems) { "problem`t$problem" }
+  "summary`t$($all.read) noEndlet solutions read; $($problems.Count) problems"
+  $script:ExitCode = if ($problems.Count) { 1 } else { 0 }
+}
+
 switch ($PSCmdlet.ParameterSetName) {
+  'Counts' {
+    Invoke-TranslationCounts $TranslationCounts
+    exit $script:ExitCode
+  }
   'Verify' {
     $script:VibraPath = Resolve-VibraPath
     Invoke-VerifyRuns $VerifyRuns
