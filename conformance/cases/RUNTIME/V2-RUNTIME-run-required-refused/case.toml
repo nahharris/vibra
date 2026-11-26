@@ -1,0 +1,26 @@
+id = "V2-RUNTIME-run-required-refused"
+rule = "V2-RUNTIME-run-required-refused"
+profile = "interpreterV2"
+operation = "workspaceRun"
+description = "05-tooling.md#versioned-envelope-and-results: a refused required leaf ends the run as an operational failure at its recipe; the startup events that completed are kept"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+hostWorld = "world.vibon"
+
+[expect]
+verdict = "unknown"
+targetRun = "target-run.vibon"
+
+[[expect.diagnostics]]
+code = "@contract.unusedEffect"
+level = "@warning"
+source = "src/app/main.vib"
+span = { start = 281, end = 292 }
+
+[[expect.diagnostics]]
+code = "@grant.requiredUnavailable"
+level = "@error"
+source = "project.vibon"
+span = { start = 302, end = 580 }

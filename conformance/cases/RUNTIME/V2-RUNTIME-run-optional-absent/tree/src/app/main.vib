@@ -1,0 +1,18 @@
+use @std.env.EnvReadVar enduse
+
+use @std.fs.DirWriteText enduse
+
+use @std.process.ExitCode enduse
+
+proc main
+  takes {metrics: Option(DirWriteText) vars: EnvReadVar}
+  returns code: ExitCode
+  performs {DirWriteText EnvReadVar}
+  do
+    match metrics
+      case Option.none()
+        return ExitCode(0u8)
+      case _
+        return ExitCode(1u8)
+    endmatch
+endproc

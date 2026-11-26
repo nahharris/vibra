@@ -187,6 +187,8 @@ pub struct CaseExpectations {
     pub result: Option<String>,
     /// The `@testRun.v2` snapshot.
     pub test_run: Option<String>,
+    /// The `@targetRun.v2` snapshot.
+    pub target_run: Option<String>,
     /// The atom of the host event the execution ends with, such as
     /// `@runtime.memoryExhausted`.
     pub host_event: Option<DiagnosticCode>,
@@ -204,6 +206,7 @@ impl CaseExpectations {
             ("types", self.types.as_deref()),
             ("result", self.result.as_deref()),
             ("testRun", self.test_run.as_deref()),
+            ("targetRun", self.target_run.as_deref()),
         ]
         .into_iter()
         .filter_map(|(key, path)| path.map(|path| (key, path)))
@@ -572,6 +575,7 @@ fn decode_expectations(
         types: raw.types,
         result: raw.result,
         test_run: raw.test_run,
+        target_run: raw.target_run,
         host_event,
     })
 }
@@ -700,6 +704,8 @@ struct RawExpectations {
     result: Option<String>,
     #[serde(default)]
     test_run: Option<String>,
+    #[serde(default)]
+    target_run: Option<String>,
     #[serde(default)]
     host_event: Option<String>,
 }

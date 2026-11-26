@@ -1,0 +1,20 @@
+id = "V2-RUNTIME-run-reads-note"
+rule = "V2-RUNTIME-run-reads-note"
+profile = "interpreterV2"
+operation = "workspaceRun"
+description = "06-runtime.md#audit-trace: the target of the programs chapter reads its note under a world; invocation 1 is the startup read, 2 the entry, 3 and 4 its awaits"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+hostWorld = "world.vibon"
+
+[expect]
+verdict = "accepted"
+targetRun = "target-run.vibon"
+
+[[expect.diagnostics]]
+code = "@contract.unusedEffect"
+level = "@warning"
+source = "src/app/main.vib"
+span = { start = 281, end = 292 }

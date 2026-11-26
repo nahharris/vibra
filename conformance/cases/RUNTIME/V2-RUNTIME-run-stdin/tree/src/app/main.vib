@@ -1,0 +1,19 @@
+use @std.io enduse
+
+use @std.io.StdinText enduse
+
+use @std.io.StdoutText enduse
+
+use @std.process.ExitCode enduse
+
+proc main
+  takes {input: StdinText out: StdoutText}
+  returns code: ExitCode
+  performs {StdinText StdoutText}
+  do
+    let Result.ok(value: text) be await io.readAllText(input) else
+      return ExitCode(1u8)
+    endlet
+    let _ be await StdoutText.write(out text) endlet
+    return ExitCode(0u8)
+endproc

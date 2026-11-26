@@ -1,0 +1,18 @@
+use @std.env.EnvError enduse
+
+use @std.env.EnvReadVar enduse
+
+use @std.process.ExitCode enduse
+
+proc main
+  takes {vars: EnvReadVar}
+  returns code: ExitCode
+  performs {EnvReadVar}
+  do
+    match await EnvReadVar.read(vars "PATH")
+      case Result.err(error: EnvError.denied())
+        return ExitCode(6u8)
+      case _
+        return ExitCode(0u8)
+    endmatch
+endproc

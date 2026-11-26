@@ -388,6 +388,7 @@ fn matches(
         ("types", observation.types.as_deref()),
         ("result", observation.result.as_deref()),
         ("testRun", observation.test_run.as_deref()),
+        ("targetRun", observation.target_run.as_deref()),
     ];
     for (key, path) in expected.snapshots() {
         let snapshot = case.read_bytes(path).map_err(|error| {
@@ -400,6 +401,10 @@ fn matches(
         else {
             return Err(format!("the handler produced no {key} observation"));
         };
+        if key == "targetRun" {
+            crate::workspace_run::compare_target_run(path, &snapshot, actual)?;
+            continue;
+        }
         let same = if key == "formatted" {
             actual.as_bytes() == snapshot.as_slice()
         } else {

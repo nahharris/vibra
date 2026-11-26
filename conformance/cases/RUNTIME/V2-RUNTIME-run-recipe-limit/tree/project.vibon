@@ -1,0 +1,1 @@
+{format: @project.v2 package: {name: "hello" version: "0.1.0"} targets: [{name: @hello kind: @bin root: "src/hello" entry: @hello.main.main effects: [@std.io.StdoutText] grants: [@out: {provider: @host.io.stdout resource: {kind: @processStream} limits: {outputBytes: 3u64} after: []}]}] dependencies: [:]}

@@ -1,0 +1,13 @@
+id = "V2-RUNTIME-run-nonzero"
+rule = "V2-RUNTIME-run-nonzero"
+profile = "interpreterV2"
+operation = "workspaceRun"
+description = "06-runtime.md#entry-outcome: a non-zero ExitCode is programFailed with the code in applicationCode and no trap"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "unknown"
+targetRun = "target-run.vibon"

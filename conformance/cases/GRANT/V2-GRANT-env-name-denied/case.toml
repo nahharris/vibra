@@ -1,0 +1,14 @@
+id = "V2-GRANT-env-name-denied"
+rule = "V2-GRANT-env-name-denied"
+profile = "interpreterV2"
+operation = "workspaceRun"
+description = "06-runtime.md#closed-operation-semantics: a variable outside the recipe names is denied with no event, though the world holds it"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+hostWorld = "world.vibon"
+
+[expect]
+verdict = "unknown"
+targetRun = "target-run.vibon"

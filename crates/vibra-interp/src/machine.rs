@@ -309,7 +309,7 @@ pub(crate) struct Machine<'a> {
     globals: Vec<GlobalState<'a>>,
     dispatch: HashMap<DispatchKey, Resolved<'a>>,
     pub(crate) empty_env: Rc<TypeEnv>,
-    origin: Option<&'a SourceOrigin>,
+    pub(crate) origin: Option<&'a SourceOrigin>,
     reduction_limit: u64,
     budget: u64,
     frame_bytes: u64,

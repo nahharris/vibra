@@ -1,0 +1,18 @@
+use @std.io.IoError enduse
+
+use @std.io.StdoutText enduse
+
+use @std.process.ExitCode enduse
+
+proc main
+  takes {out: StdoutText}
+  returns code: ExitCode
+  performs {StdoutText}
+  do
+    match await StdoutText.write(out "hello")
+      case Result.err(error: IoError.limitExceeded())
+        return ExitCode(5u8)
+      case _
+        return ExitCode(0u8)
+    endmatch
+endproc

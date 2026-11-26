@@ -1,0 +1,13 @@
+id = "V2-RUNTIME-run-code-255"
+rule = "V2-RUNTIME-run-code-255"
+profile = "interpreterV2"
+operation = "workspaceRun"
+description = "05-tooling.md#command-payloads: applicationCode is an integer 0 to 255; 255 is passed unchanged"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "unknown"
+targetRun = "target-run.vibon"

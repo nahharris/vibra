@@ -1,0 +1,19 @@
+id = "V2-RUNTIME-run-static-error"
+rule = "V2-RUNTIME-run-static-error"
+profile = "interpreterV2"
+operation = "workspaceRun"
+description = "05-tooling.md#versioned-envelope-and-results: static diagnostics prevent admission; nothing starts and the trace has no event"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+targetRun = "target-run.vibon"
+
+[[expect.diagnostics]]
+code = "@type.argumentMismatch"
+level = "@error"
+source = "src/hello/main.vib"
+span = { start = 233, end = 236 }

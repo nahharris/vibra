@@ -148,6 +148,8 @@ impl<'a> Machine<'a> {
             arguments,
             rebox,
         } = Rc::try_unwrap(plan).unwrap_or_else(|shared| PlanVal::clone(&shared));
+        // A fault of the call is at the `await`, not at its last operand.
+        self.origin = Some(origin);
         let ordinal = self.stats.invocation_count.saturating_add(1);
         self.stats.invocation_count = ordinal;
         let tail = rebox.is_none()

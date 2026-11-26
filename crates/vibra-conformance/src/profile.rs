@@ -299,6 +299,8 @@ pub struct CaseObservation {
     pub result: Option<String>,
     /// The `@testRun.v2` observation.
     pub test_run: Option<String>,
+    /// The `@targetRun.v2` observation.
+    pub target_run: Option<String>,
     /// The host event the execution ended with.
     pub host_event: Option<DiagnosticCode>,
 }
@@ -317,6 +319,7 @@ impl CaseObservation {
             types: None,
             result: None,
             test_run: None,
+            target_run: None,
             host_event: None,
         }
     }

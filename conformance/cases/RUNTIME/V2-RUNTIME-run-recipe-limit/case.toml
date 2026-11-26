@@ -1,0 +1,13 @@
+id = "V2-RUNTIME-run-recipe-limit"
+rule = "V2-RUNTIME-run-recipe-limit"
+profile = "interpreterV2"
+operation = "workspaceRun"
+description = "03-effects.md#limits: a recipe output bound below the write refuses it with limitExceeded before dispatch, and the entry returns 5"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "unknown"
+targetRun = "target-run.vibon"

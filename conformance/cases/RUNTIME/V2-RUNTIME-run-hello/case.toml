@@ -1,0 +1,13 @@
+id = "V2-RUNTIME-run-hello"
+rule = "V2-RUNTIME-run-hello"
+profile = "interpreterV2"
+operation = "workspaceRun"
+description = "06-runtime.md#entry-outcome: the hello program returns ExitCode zero under the default world; its trace is the chapter example with this tree identities"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+targetRun = "target-run.vibon"

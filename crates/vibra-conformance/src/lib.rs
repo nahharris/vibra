@@ -3,7 +3,8 @@
 //! `docs/spec/07-diagnostics-and-conformance.md` requires a corpus of Vibra
 //! cases that is independent of any backend and organized by the rule each
 //! case tests. This crate loads that corpus from `conformance/cases`, checks
-//! every case against the rule index `conformance/rules.tsv`, dispatches each
+//! every case against the rule index (`conformance/rules.tsv` and each file of
+//! `conformance/rules/`, read by [`RuleIndex::from_root`]), dispatches each
 //! case to a handler of its profile, and compares the handler's observations
 //! with the expectations written from the specification. It has no mode that
 //! writes an expectation.
@@ -20,11 +21,12 @@
 //! [`ReaderV2Handler`] runs the `reader` operation under `readerV2`;
 //! [`ProjectDecodeHandler`], [`SourceGraphHandler`], [`ResolveHandler`], and
 //! [`WorkspaceCheckHandler`] run `projectDecode`, `sourceGraph`, `resolve`,
-//! and `workspaceCheck` under `staticV2`; [`InterpretHandler`] and
-//! [`WorkspaceTestHandler`] run `interpret` and `workspaceTest` under
-//! `interpreterV2`; [`FormatHandler`] runs `format` under `toolingV2`.
-//! Every other case is unavailable until the step that makes its
-//! observations exist registers a handler.
+//! and `workspaceCheck` under `staticV2`; [`InterpretHandler`],
+//! [`WorkspaceRunHandler`], and [`WorkspaceTestHandler`] run `interpret`,
+//! `workspaceRun`, and `workspaceTest` under `interpreterV2`;
+//! [`FormatHandler`] runs `format` under `toolingV2`. Every other case is
+//! unavailable until the step that makes its observations exist registers a
+//! handler.
 
 mod corpus;
 mod format;
@@ -38,6 +40,7 @@ mod rules;
 mod runner;
 mod standard;
 mod workspace_check;
+mod workspace_run;
 mod workspace_test;
 
 pub use corpus::{
@@ -64,4 +67,5 @@ pub use rules::{
 pub use runner::{CaseReport, CaseStatus, ConformanceRunner, ProfileCounts, RunReport};
 pub use standard::{DispatchResult, ProfileDispatcher, standard_dispatcher};
 pub use workspace_check::WorkspaceCheckHandler;
+pub use workspace_run::{WorkspaceRunHandler, compare_target_run};
 pub use workspace_test::WorkspaceTestHandler;

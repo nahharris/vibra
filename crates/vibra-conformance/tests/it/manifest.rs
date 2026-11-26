@@ -317,7 +317,7 @@ fn the_expectation_keys_decode() {
             "reader",
             "tree = \"tree.vibon\"\nformatted = \"formatted.vibon\"\n\
              graph = \"g.vibon\"\nresolved = \"r.vibon\"\ntypes = \"t.vibon\"\n\
-             result = \"v.vibon\"\ntestRun = \"run.vibon\"\n",
+             result = \"v.vibon\"\ntestRun = \"run.vibon\"\ntargetRun = \"target.vibon\"\n",
         )
     );
     let case = CaseManifest::from_str(&text).expect("a valid manifest");
@@ -336,7 +336,8 @@ fn the_expectation_keys_decode() {
             "resolved",
             "types",
             "result",
-            "testRun"
+            "testRun",
+            "targetRun"
         ]
     );
     let [diagnostic] = expect.diagnostics.as_slice() else {
@@ -589,4 +590,67 @@ fn the_committed_rule_index_has_its_header_and_decodes() {
     let text = std::fs::read_to_string(&path).expect("the rule index exists");
     assert!(text.starts_with("identity\tstatus\tanchor\n"), "{text:?}");
     RuleIndex::parse(&text).expect("it decodes");
+}
+
+/// The repository root, two levels above this crate.
+fn repository() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
+}
+
+/// 06 "Host world": the shipped launcher has no user-selectable world, and
+/// conformance never launches on the process.
+#[test]
+fn the_handler_constructs_no_system_launch() {
+    let mut pending =
+        vec![std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src")];
+    let mut searched = 0;
+    while let Some(directory) = pending.pop() {
+        for entry in std::fs::read_dir(&directory).expect("a source directory") {
+            let path = entry.expect("an entry").path();
+            if path.is_dir() {
+                pending.push(path);
+            } else if path.extension().is_some_and(|extension| extension == "rs") {
+                let text = std::fs::read_to_string(&path).expect("a source file");
+                assert!(!text.contains("Launch::System"), "{}", path.display());
+                searched += 1;
+            }
+        }
+    }
+    assert!(searched > 0);
+}
+
+/// 07 "Persistent observations": the hello run against its hand-written
+/// observation matches, and one changed byte of stdout is a mismatch that
+/// names `stdout`.
+#[test]
+fn the_target_run_observation_is_compared_field_by_field() {
+    use vibra_workspace::run::{Launch, run_target};
+    use vibra_workspace::{
+        HostWorld, MemoryBudget, SourceSnapshot, discover_project_at,
+    };
+
+    let case = repository().join("conformance/cases/RUNTIME/V2-RUNTIME-run-hello");
+    let snapshot = discover_project_at(case.join("tree"))
+        .and_then(SourceSnapshot::capture)
+        .expect("the tree captures");
+    let world = HostWorld::default();
+    let observed = run_target(
+        &snapshot,
+        None,
+        Launch::World(&world),
+        MemoryBudget::DEFAULT,
+    )
+    .document();
+    let path = "target-run.vibon";
+    let expected = std::fs::read_to_string(case.join(path)).expect("the observation");
+    assert_eq!(
+        vibra_conformance::compare_target_run(path, expected.as_bytes(), &observed),
+        Ok(())
+    );
+    let changed = expected.replacen("values: [104u8", "values: [105u8", 1);
+    assert_ne!(changed, expected);
+    let mismatch =
+        vibra_conformance::compare_target_run(path, changed.as_bytes(), &observed)
+            .expect_err("a mismatch");
+    assert!(mismatch.contains("`stdout`"), "{mismatch}");
 }

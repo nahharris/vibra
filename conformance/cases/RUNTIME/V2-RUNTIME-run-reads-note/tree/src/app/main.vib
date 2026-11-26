@@ -1,0 +1,24 @@
+use @std.env.EnvReadArgs enduse
+
+use @std.fs.DirReadText enduse
+
+use @std.fs.RelativePath enduse
+
+use @std.io.StdoutText enduse
+
+use @std.process.ExitCode enduse
+
+proc main
+  takes {args: EnvReadArgs notes: DirReadText out: Option(StdoutText)}
+  returns code: ExitCode
+  performs {EnvReadArgs DirReadText StdoutText}
+  do    let Result.ok(value: path) be RelativePath(["a.txt"]) endlet
+    let Result.ok(value: text) be await DirReadText.read(notes path) else
+      return ExitCode(1u8)
+    endlet
+    let Option.some(value: stdout) be out else
+      return ExitCode(2u8)
+    endlet
+    let _ be await StdoutText.write(stdout text) endlet
+    return ExitCode(0u8)
+endproc

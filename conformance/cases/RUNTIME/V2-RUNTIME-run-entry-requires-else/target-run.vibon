@@ -1,0 +1,9 @@
+{
+  format: @targetRun.v2
+  result: @command.programFailed
+  applicationCode: 9u8
+  stdout: {kind: @bytes values: []}
+  stderr: {kind: @bytes values: []}
+  startup: [{binding: @out status: @released}]
+  auditTrace: {format: @auditTrace.v2 revision: "sha256:5f4da77fba4d0aa245d2eec4be78d7a79865be2a7f2f8c5268cb58c35aa08408" target: @hello drivers: [{provider: @hostWorld.v2 version: "0.0.2"}] policies: [:] redaction: @none events: [{kind: @startup binding: @out provider: @host.io.stdout status: @acquired grant: {issuedBy: {kind: @binding leaf: @out} policy: "" rights: [{path: @std.io.StdoutText seed: "sha256:fe4d0fcafb6fef90ff00bf30700b9d76346269c0f4a5d1c919bda5399decda11"}] root: 1u64}}]}
+}

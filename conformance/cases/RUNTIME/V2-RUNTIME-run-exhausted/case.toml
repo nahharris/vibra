@@ -1,0 +1,19 @@
+id = "V2-RUNTIME-run-exhausted"
+rule = "V2-RUNTIME-run-exhausted"
+profile = "interpreterV2"
+operation = "workspaceRun"
+description = "06-runtime.md#entry-outcome: memory exhaustion is an operational failure with no application code; the grant is released"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "unknown"
+targetRun = "target-run.vibon"
+hostEvent = "@runtime.memoryExhausted"
+
+[[expect.diagnostics]]
+code = "@runtime.memoryExhausted"
+level = "@error"
+span = { start = 0, end = 0 }

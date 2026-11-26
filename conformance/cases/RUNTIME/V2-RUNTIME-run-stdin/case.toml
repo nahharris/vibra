@@ -1,0 +1,14 @@
+id = "V2-RUNTIME-run-stdin"
+rule = "V2-RUNTIME-run-stdin"
+profile = "interpreterV2"
+operation = "workspaceRun"
+description = "06-runtime.md#host-world: the world stdin feeds an entry run under it; io.readAllText reads it to the empty end"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+hostWorld = "world.vibon"
+
+[expect]
+verdict = "accepted"
+targetRun = "target-run.vibon"

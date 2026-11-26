@@ -1,0 +1,8 @@
+{
+  format: @targetRun.v2
+  result: @command.invalidInput
+  stdout: {kind: @bytes values: []}
+  stderr: {kind: @bytes values: []}
+  startup: []
+  auditTrace: {format: @auditTrace.v2 revision: "sha256:da1b118e9ccdbd5bbbc4bf582c1247f027c7f093450864e849e8560ba7158fb0" drivers: [] policies: [:] redaction: @none events: []}
+}

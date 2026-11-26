@@ -1,0 +1,10 @@
+{
+  format: @hostWorld.v2
+  stdin: "x\ny"
+  directories: ["/notes"]
+  files: ["/notes/a.txt": "hello" "/notes/raw.bin": {kind: @bytes values: [0u8 255u8]}]
+  env: ["HOME": "/home/vibra"]
+  args: ["/notes"]
+  clock: {wall: 1700000000000000000i64 monotonic: 0u64 step: 1000u64}
+  random: {seed: 42u64}
+}
