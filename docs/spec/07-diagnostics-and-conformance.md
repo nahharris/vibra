@@ -52,7 +52,6 @@ its level MUST agree with it.
 | `@type.redundantImplementation` | `@error` |
 | `@type.defaultOverride` | `@error` |
 | `@type.missingAbstractMember` | `@error` |
-| `@type.functionNotEquatable` | `@error` |
 | `@type.notApplicable` | `@error` |
 | `@type.unknownRecordField` | `@error` |
 | `@type.numericOutOfRange` | `@error` |
@@ -282,10 +281,9 @@ Resolution reads only the captured source graph.
 | a type nested more than 64 levels, a declared callable's own type included | `@type.depthExceeded`, the written type, the expression whose type it is, or a callable's deepest written parameter or result type |
 | a generic callable that reaches itself at a type built around one of its own type parameters | `@type.expandingInstantiation`, the call or callable reference with the expanding type argument, related along the cycle |
 | an inadmissible dict key type | `@type.invalidDictKey`, the key type, or the first key when none is written |
-| a callable as a dict key, or an `assert.equal` operand whose type contains a callable, plan, or grant | `@type.functionNotEquatable`, the type, or each such operand |
 | `try` on a wrong carrier, in a callable with another carrier, or directly in a test | `@type.invalidTry`, the `try` |
 | a fallible value left unused as a statement | `@type.unhandledFallible`, the statement |
-| an `impl` inside an interface that targets a type of the same module | `@type.redundantImplementation`, the `impl` head |
+| an `impl` inside an interface that targets a type of the same module; an `impl` whose target is `Any` or `Encodable` | `@type.redundantImplementation`, the `impl` head, or the target |
 | a default member supplied again by an implementation | `@type.defaultOverride`, the member's name, related to the default |
 | an abstract member or an associated type an implementation does not supply | `@type.missingAbstractMember`, the `impl` head, related to the contract member |
 | two implementations of one receiver whose targets unify | `@type.overlappingImplementation`, the later `impl` head, related to the earlier |

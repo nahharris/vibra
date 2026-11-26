@@ -21,6 +21,7 @@ endfn
 fn equal(T)
   takes {expected: T actual: T}
   returns done: Void
+  given {T: Encodable}
   visibility @public
   external @compiler
   symbol "assert.equal"

@@ -551,6 +551,9 @@ pub struct IntrinsicRow {
     pub symbol: String,
     /// The generics, in order.
     pub generics: &'static [&'static str],
+    /// The bound of each bounded generic, by its position: the interface it
+    /// must conform to.
+    pub bounds: &'static [(usize, Library)],
     /// The parameter types, in order.
     pub parameters: Vec<RowType>,
     /// The result type.
@@ -564,7 +567,7 @@ pub struct IntrinsicRow {
 
 impl IntrinsicRow {
     /// The row's line in `registry/compiler-2.0.txt`: the symbol, the
-    /// generics, the parameters as an input vector, the result, and the
+    /// generics, each with its bound as `T: Encodable`, the parameters as an input vector, the result, and the
     /// marks (`@total` or nothing), separated by tabs.
     #[must_use]
     pub fn snapshot_line(&self) -> String {
@@ -579,13 +582,30 @@ impl IntrinsicRow {
             line,
             "{}\t{}\t{{{}}}\t{}\t{}",
             self.symbol,
-            self.generics.join(" "),
+            spell_generics(self.generics, self.bounds),
             parameters,
             self.result.spelling(self.generics),
             if self.total { "@total" } else { "" }
         );
         line
     }
+}
+
+/// The generics of a row in source spelling, each bounded one as
+/// `T: Encodable`, separated by spaces.
+#[must_use]
+pub fn spell_generics(generics: &[&str], bounds: &[(usize, Library)]) -> String {
+    generics
+        .iter()
+        .enumerate()
+        .map(|(index, name)| {
+            bounds.iter().find(|(at, _)| *at == index).map_or_else(
+                || (*name).to_owned(),
+                |(_, bound)| format!("{name}: {}", bound.name()),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn core(ty: Type) -> RowType {
@@ -788,6 +808,17 @@ impl CompilerIntrinsic {
         }
     }
 
+    /// The bound of each bounded generic of the row, by its position. Only
+    /// `assert.equal` has one: its `T` must be `Encodable`, so that the
+    /// two operands have canonical encodings to compare.
+    #[must_use]
+    pub const fn bounds(self) -> &'static [(usize, Library)] {
+        match self {
+            Self::AssertEqual => &[(0, Library::Encodable)],
+            _ => &[],
+        }
+    }
+
     /// The parameter types and the result type of the row.
     #[must_use]
     pub fn signature(self) -> (Vec<RowType>, RowType) {
@@ -927,6 +958,7 @@ impl CompilerIntrinsic {
         IntrinsicRow {
             symbol: self.symbol(),
             generics: self.generics(),
+            bounds: self.bounds(),
             parameters,
             result,
             pure: self.is_pure(),

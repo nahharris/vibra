@@ -46,7 +46,7 @@ pub(super) enum View {
     /// By the implementation `index`, at the types its binders take.
     Selected(usize, Vec<Option<Type>>),
     /// By the structural `Equatable` or `Ordered` of an atom, a tuple, or a
-    /// record.
+    /// record, or the structural `Encodable` of a type with an encoding.
     Structural,
 }
 
@@ -434,6 +434,42 @@ impl<'a> BodyChecker<'_, 'a> {
     ) -> (Found, Vec<Goal>) {
         let program = self.program;
         let none = (Found::None, Vec::new());
+        if program.prelude_interface("Encodable") == Some(interface)
+            && arguments.is_empty()
+            && !matches!(
+                receiver,
+                Type::Binder(_) | Type::SelfType | Type::Associated(_) | Type::Never
+            )
+        {
+            // 02 "Interfaces": conformance to `Encodable` is structural. A
+            // type with no callable, plan, or grant in it, through every
+            // declared type's representation, conforms, and each open form in
+            // it must conform through a bound.
+            if !effects::grants::is_encodable(program, receiver) {
+                return none;
+            }
+            let mut goals = Vec::new();
+            receiver.visit(&mut |inner| {
+                if matches!(
+                    inner,
+                    Type::Binder(_) | Type::SelfType | Type::Associated(_)
+                ) && !goals.iter().any(|goal: &Goal| goal.receiver == *inner)
+                {
+                    goals.push(Goal {
+                        receiver: inner.clone(),
+                        interface,
+                        arguments: Vec::new(),
+                        required: Vec::new(),
+                    });
+                }
+            });
+            let evidence = Evidence {
+                arguments: Vec::new(),
+                choices: Vec::new(),
+                view: View::Structural,
+            };
+            return (Found::One(evidence), goals);
+        }
         if receiver.is_interface_value() || *receiver == Type::Never {
             return none;
         }

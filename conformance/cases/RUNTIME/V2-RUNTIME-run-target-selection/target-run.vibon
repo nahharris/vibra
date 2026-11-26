@@ -4,5 +4,5 @@
   stdout: {kind: @bytes values: []}
   stderr: {kind: @bytes values: []}
   startup: []
-  auditTrace: {format: @auditTrace.v2 revision: "sha256:da1b118e9ccdbd5bbbc4bf582c1247f027c7f093450864e849e8560ba7158fb0" drivers: [] policies: [:] redaction: @none events: []}
+  auditTrace: {format: @auditTrace.v2 revision: "sha256:b59fc3105d8d1dfaab8d3ab493847ccf1f5251cd9f181c606f0a497faf6a194e" drivers: [] policies: [:] redaction: @none events: []}
 }

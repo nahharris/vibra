@@ -49,7 +49,7 @@ pub const STDLIB_UNIT: &str = "@std";
 /// The prelude of the type chapter: the only names a program names without
 /// an import. `Any` and `Self` are predeclared and have no declaration; every
 /// other name is a declaration of the standard library.
-pub const PRELUDE: [&str; 31] = [
+pub const PRELUDE: [&str; 32] = [
     "Void",
     "Never",
     "Atom",
@@ -74,6 +74,7 @@ pub const PRELUDE: [&str; 31] = [
     "Iter",
     "Equatable",
     "Ordered",
+    "Encodable",
     "From",
     "TryFrom",
     "Any",
@@ -464,7 +465,7 @@ impl Stdlib {
     }
 
     /// The declaration of each library declaration the checked IR names:
-    /// the nine roles and the three core types.
+    /// the ten roles and the three core types.
     #[must_use]
     pub const fn library(&self) -> &BTreeMap<Library, StdlibDeclaration> {
         &self.library

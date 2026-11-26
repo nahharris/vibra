@@ -27,8 +27,10 @@ const ASSERT_MODULE: &str = "@std.assert";
 pub(crate) struct TestFaults {
     /// Every fault, in written order per module.
     pub(crate) diagnostics: Vec<Diagnostic>,
-    /// The `@tool.unavailable` of each test that takes a world, by test
-    /// index.
+    /// The `@tool.unavailable` over each test whose own header holds a form
+    /// this checker does not support, by test index. [`unavailable_closure`]
+    /// starts from these and adds every declaration whose closure reaches
+    /// an unavailable form.
     pub(crate) unavailable: BTreeMap<usize, Diagnostic>,
 }
 

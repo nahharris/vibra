@@ -220,16 +220,21 @@ with its relatives.
 
 No source expression makes a grant. A path, a policy value, a wrapper type,
 an `impl`, and decoded data are not grants and cannot become one. A grant has
-no encoding: it cannot be written to a file, compared, or used as a dict key.
+no encoding, so it cannot be written to a file. It is not compared and is no
+dict key: an operation interface value type receives no `impl`, so it
+implements neither `Equatable` nor `Ordered`.
 A type **holds a grant** when it is an operation interface value type, or
 holds one through a record, a tuple, a list, an `Option`, a wrapper, the
 representation of a declared type, or the type arguments of a declared
 type; a callable type holds none on its own account. A type that holds a
-grant is no dict key, as the
-[type chapter](02-type-system.md#dict-keys-equality-and-order) states, no
-operand of `assert.equal`, as
-[Assertions](04-programs-and-packages.md#assertions) states, and no
-labelled default, since a default is a constant. A grant from another world, or one released at shutdown, is unusable.
+grant is not `Encodable`, as the
+[type chapter](02-type-system.md#interfaces) states, and is no labelled
+default, since a default is a constant. A declared type that holds a grant
+may implement `Equatable` and `Ordered`, and is then compared by its own
+implementations and is a dict key, as
+[Dict keys, equality, and order](02-type-system.md#dict-keys-equality-and-order)
+states; a dict whose key type holds a grant holds a grant.
+A grant from another world, or one released at shutdown, is unusable.
 Checked source cannot reach either, so the runtime treats a use of one as a
 defect, as [host calls](06-runtime.md#host-calls) state.
 

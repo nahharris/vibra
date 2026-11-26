@@ -23,7 +23,10 @@ fn every_role_is_claimed_exactly_once() {
             ("@std.bool", vec![Role::Bool]),
             ("@std.builtin", vec![Role::Dict]),
             ("@std.bytes", vec![Role::Bytes]),
-            ("@std.core", vec![Role::Equatable, Role::Ordered]),
+            (
+                "@std.core",
+                vec![Role::Equatable, Role::Ordered, Role::Encodable]
+            ),
             ("@std.env", vec![]),
             ("@std.fs", vec![]),
             ("@std.io", vec![]),

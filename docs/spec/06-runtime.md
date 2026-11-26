@@ -314,10 +314,10 @@ defines. A row alone MUST NOT create a grant or permit a real effect.
 - A false assertion records `@test.assertionFailed` and stops only its own
   test. It is an outcome of the runner. It is not a `Result` and not a trap,
   and source cannot catch it.
-- A type known to contain a function, a plan, or a grant is rejected
-  statically wherever a value must be observed. An interface value that
-  holds one gives an explicit observation error, `@tool.unsupportedValue`,
-  and never a trap.
+- A type that is not [`Encodable`](02-type-system.md#interfaces) is
+  rejected statically wherever a value must be observed. An interface value
+  that holds a function, a plan, or a grant gives an explicit observation
+  error, `@tool.unsupportedValue`, and never a trap.
 - Defect traps and host events keep their own categories.
 
 ## Compiler intrinsic registry
@@ -518,7 +518,7 @@ rows.
 | --- | --- | --- |
 | `assert.true` | `Fn({Bool} Void)` | returns `void` when the operand is `true` |
 | `assert.false` | `Fn({Bool} Void)` | returns `void` when the operand is `false` |
-| `assert.equal` | generic over `T`: `Fn({T T} Void)`, expected then actual | returns `void` when both operands have the same [canonical value encoding](#canonical-value-encoding) |
+| `assert.equal` | generic over `T` with `given {T: Encodable}`: `Fn({T T} Void)`, expected then actual | returns `void` when both operands have the same [canonical value encoding](#canonical-value-encoding) |
 
 Otherwise the row does not return: it records the structured failure of
 [Test assertions](#test-assertions) and ends the body of the running
@@ -906,8 +906,9 @@ value encoding:
 A function, a procedure, a plan, and a sealed authority have no value
 encoding, and nothing decodes into one.
 
-- A type statically known to contain one is rejected wherever an encoding
-  is required.
+- [`Encodable`](02-type-system.md#interfaces) is the bound that states
+  which types have an encoding as far as their static type shows: a type
+  that is not `Encodable` is rejected wherever an encoding is required.
 - An interface value whose held value is one of these gives an explicit
   encoding error, because its static type did not show it. It never gives a
   trap, a fake null, or a truncated value.

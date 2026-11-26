@@ -142,7 +142,7 @@ Type chapter, by section.
 | Recursive types | 16 | `V2-TYPE-NOMINAL-recursive-list`, `V2-TYPE-NOMINAL-infinite-size`, `V2-TYPE-NOMINAL-infinite-size-mutual` | `@type.infiniteSize` | `@types.v2` |
 | Callable types (`Fn`) | 18 | `V2-TYPE-NOMINAL-fn-type-with-labelled`, `V2-TYPE-NOMINAL-fn-type-labelled-mismatch`, `V2-SRC-CALLS-function-value` | `@type.mismatch` | `@types.v2` |
 | Callable types (`Proc`, `Intent`) | M2 10 | `V2-EFFECT-proc-type-*`, `V2-EFFECT-intent-*`, `V2-EFFECT-callback-row-*`, `V2-EFFECT-return-row-mismatch`, `V2-EFFECT-field-row-mismatch`, `V2-EFFECT-fn-for-proc`, `V2-EFFECT-proc-for-fn`, `V2-EFFECT-named-proc-value*`, `V2-TYPE-NAMES-suspicious-row*`, `V2-RUNTIME-callback-awaited` | `@type.argumentMismatch`, `@type.mismatch`, `@type.suspiciousRow`, `@contract.obligationLost`, `@effect.invalidReference`, `@effect.duplicateRoot` | `@types.v2`, `@testRun.v2` |
-| Dict keys, equality, and order | 16 / 19 | `V2-TYPE-NOMINAL-dict-*`, `V2-TYPE-INTERFACE-equatable-tuple`, `V2-PROJECT-test-function-not-equatable` | `@type.invalidDictKey`, `@type.functionNotEquatable` | `@types.v2`, `@value.v2` |
+| Dict keys, equality, and order | 16 / 19 | `V2-TYPE-NOMINAL-dict-*`, `V2-TYPE-INTERFACE-equatable-tuple`, `V2-PROJECT-test-assert-equal-function` | `@type.invalidDictKey` | `@types.v2`, `@value.v2` |
 | Application | 15 / 16 | `V2-SRC-CALLS-arity`, `V2-SRC-CALLS-order`, `V2-SRC-CALLS-callee-expression`, `V2-SRC-CALLS-lookup-*`, `V2-SRC-CALLS-evaluation-order`, `V2-TYPE-NOMINAL-not-applicable` | `@type.argumentMismatch`, `@type.notApplicable` | `@types.v2`, `@value.v2` |
 | Namespaces and resolution | 10 / 11 | `V2-TYPE-NAMES-*` | `@name.unknownSymbol`, `@name.wrongEntityKind`, `@name.privateAccess`, `@name.redeclaration`, `@name.memberCollision`, `@name.genericRedeclaration`, `@name.reservedDeclaration`, `@name.reservedValueSpelling`, `@style.casing` | `@resolved.v2` |
 | Functions as values | 18 | `V2-TYPE-INFER-constructor-not-value`, `V2-TYPE-INFER-constructor-wrapped`, `V2-TYPE-INFER-member-value`, `V2-TYPE-INTERFACE-member-as-value`, `V2-TYPE-INTERFACE-member-as-value-ambiguous` | `@type.mismatch`, `@type.ambiguousInference` | `@types.v2` |
@@ -219,7 +219,7 @@ Programs chapter.
 | The standard library (embedding, manifest, roles) | 14 | host tests of step 14 | `@external.unknownSymbol`, `@external.signatureMismatch`, `@external.ownerMismatch`, `@runtime.invalidCheckedProgram`, `@module.sourceIdCollision` | `@stdlibManifest.v2` |
 | Tests | 23 / 25 | `V2-PROJECT-test-*`; the host test `check_covers_tests` of step 25 | `@module.testOutsideTests`, `@module.missingRequiredImport`, `@name.redeclaration`, `@type.invalidReturn`, `@type.invalidTry` | `@testRun.v2` |
 | Test worlds and grants | M2 21 / M2 22 | `V2-GRANT-test-*`, `V2-EFFECT-test-row-missing-*`, `V2-PROJECT-test-takes-*`, `V2-RUNTIME-trace-*`, `V2-RUNTIME-invocation-gaps`, `V2-RUNTIME-root-ordinals`; the host tests `ATK-test-world-op-on-leaf`, `ATK-test-runner-no-system-driver` | `@effect.outsideCeiling`, `@name.unknownSymbol`, `@type.argumentMismatch` | `@testRun.v2`, `@hostWorld.v2`, `@auditTrace.v2` |
-| Assertions | 23 | `V2-PROJECT-test-fails`, `V2-PROJECT-test-stops-at-failure`, `V2-PROJECT-test-assert-renamed`, `V2-PROJECT-test-equal-typed-from-actual`, `V2-PROJECT-assert-outside-tests`, `V2-PROJECT-assert-value-outside-tests`, `V2-PROJECT-test-function-not-equatable`, `V2-PROJECT-test-unobservable` | `@module.assertionOutsideTests`, `@type.functionNotEquatable`, `@tool.unsupportedValue` | `@testRun.v2`, `@stdlibManifest.v2` |
+| Assertions | 23 | `V2-PROJECT-test-fails`, `V2-PROJECT-test-stops-at-failure`, `V2-PROJECT-test-assert-renamed`, `V2-PROJECT-test-equal-typed-from-actual`, `V2-PROJECT-assert-outside-tests`, `V2-PROJECT-assert-value-outside-tests`, `V2-PROJECT-test-assert-equal-function`, `V2-PROJECT-test-unobservable` | `@module.assertionOutsideTests`, `@tool.unsupportedValue` | `@testRun.v2`, `@stdlibManifest.v2` |
 | Build products | not in this release | | | |
 
 ## Standard library modules
@@ -324,7 +324,6 @@ A code with no step belongs to the milestone named.
 | `@type.redundantImplementation` | steps 19 |
 | `@type.defaultOverride` | steps 19 |
 | `@type.missingAbstractMember` | steps 19 |
-| `@type.functionNotEquatable` | steps 16, 23 |
 | `@type.notApplicable` | steps 15, 16 |
 | `@type.unknownRecordField` | steps 11, 16 |
 | `@type.numericOutOfRange` | steps 15 |

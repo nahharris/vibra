@@ -1,0 +1,19 @@
+id = "V2-PROJECT-test-unavailable-closure"
+rule = "V2-PROJECT-test-unavailable-closure"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "05-tooling.md#tests-and-selection: a test whose declaration closure reaches a form this toolchain does not support (a contract call on an interface's type parameter whose bound leaves an associated type open) is unavailable and the other test runs"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "unsupported"
+testRun = "test-run.vibon"
+
+[[expect.diagnostics]]
+code = "@tool.unavailable"
+level = "@error"
+source = "src/app/holder.vib"
+span = { start = 239, end = 256 }

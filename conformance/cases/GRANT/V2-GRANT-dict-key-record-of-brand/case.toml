@@ -1,0 +1,12 @@
+id = "V2-GRANT-dict-key-record-of-brand"
+rule = "V2-GRANT-dict-key-record-of-brand"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#dict-keys-equality-and-order: an anonymous record whose components are an Ordered brand over a grant and a Str conforms to Ordered structurally and is a dict key"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

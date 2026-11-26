@@ -4,7 +4,7 @@
 //! A constant has a value encoding, and a grant and a plan have none
 //! (`docs/spec/06-runtime.md`, "What has no encoding"): a type that is, or
 //! holds, an operation interface value type, a `Proc`, or an `Intent` is no
-//! constant type and no dict key type. [`crate::Value`] has no form for a
+//! constant type. [`crate::Value`] has no form for a
 //! grant or a plan, so no constant, input, or decoded datum holds one.
 
 use std::collections::BTreeMap;

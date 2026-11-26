@@ -3,10 +3,10 @@
 The evidence that M2 meets the [exit evidence](README.md#exit-evidence) of
 its README, except the model-writing pilot, which steps 38 to 41 run and
 record. Each line names the case, the host test, or the evidence file that
-shows it. The commands ran on Windows 11 in the worktree of
-`m2/37-m2-exit`, on `v0.0.2/m2-ops` at `0bcc6514` with the commits of step
-37, with `--locked --offline`, `CARGO_BUILD_JOBS=4`, and
-`RUSTFLAGS=-D warnings` for clippy and the tests.
+shows it. The commands ran on Windows 11 in the worktree of `m2/fix-c`,
+on `v0.0.2/m2-ops` at `4294c424` with the commits of fix C, with
+`--locked --offline`, `CARGO_BUILD_JOBS=4`, and `RUSTFLAGS=-D warnings` for
+clippy and the tests.
 
 ## Status
 
@@ -41,10 +41,10 @@ conformance/cases` exits 0:
 | Profile | Passed | Failed | Unknown | Unavailable |
 | --- | --- | --- | --- | --- |
 | `readerV2` | 178 | 0 | 0 | 0 |
-| `staticV2` | 690 | 0 | 0 | 0 |
-| `interpreterV2` | 336 | 0 | 0 | 0 |
+| `staticV2` | 699 | 0 | 0 | 0 |
+| `interpreterV2` | 342 | 0 | 0 | 0 |
 | `toolingV2` | 9 | 0 | 0 | 0 |
-| total | 1213 | 0 | 0 | 0 |
+| total | 1228 | 0 | 0 | 0 |
 
 No required case under `staticV2` or `interpreterV2` is failed, unknown, or
 unavailable. The two cases whose expected verdict is `unsupported` hold no
@@ -57,7 +57,7 @@ touched:
 cargo test --locked --offline -p vibra-ir -p vibra-interp -p vibra-types -p vibra-fs-scope -p vibra-host -p vibra-workspace -p vibra-schema -p vibra-cli -p vibra-conformance --all-features
 ```
 
-It exits 0. It prints 30 `test result:` lines, all `ok`, with 1743 tests
+It exits 0. It prints 30 `test result:` lines, all `ok`, with 1744 tests
 passed, 0 failed, and 1 ignored: `vibra-fs-scope`
 `controls::no_handle_kept_child`, which `controls::no_handle_kept` runs
 in a child process. The output holds one `NOT RUN` line, listed under
@@ -263,7 +263,8 @@ runs it.
 | `project init`, `inspect`, `add`, `remove`, `sync` | no milestone names them | owner table, Findings |
 | `@git` dependencies and the lock | not in this release | `V2-PROJECT-git-dependency-unavailable` |
 | native execution | M4 | owner table, "Native execution slice" |
-| a module named as a value | the checker of M1 | `V2-PROJECT-test-unavailable-item`; see [Reported to the specification's owner](#reported-to-the-specifications-owner) |
+| a contract call on an interface's type parameter whose bound leaves an associated type open | the checker of M1 | `V2-PROJECT-test-unavailable-closure` |
+| a command that presents a target's authority before a run | M3, approvals | review finding F8: 03 asks that a target's authority be "presentable in plain terms"; coverage 11, "hard-link and opened-object limits shown at approval", has the limits enforced (`ATK-fs-hard-link-replace`, `ATK-gate-replace-without-link-count`) and no command that shows them |
 
 ## Specification questions
 
@@ -327,24 +328,18 @@ chapters" was read again against the tree at this commit. None remains.
 | `crates/vibra-workspace/src/project.rs` | a `@path` dependency is a unit (`V2-PROJECT-dependency-*`); only `@git` stays unavailable |
 | `crates/vibra-ir/registry/compiler-2.0.txt` | rows `grant.limit`, `grant.restrict`, `grant.sub` |
 
+## Answered with the owner
+
+| Question | Ruling | Rows |
+| --- | --- | --- |
+| May a brand over a grant implement `Equatable` or `Ordered` itself? | It may. A declared type that holds a grant is compared by its own `Equatable` and is a dict key through its own `Ordered`, as any declared type; it holds a grant, so it is not `Encodable` and is no operand of `assert.equal`. | `V2-GRANT-dict-key-ordered-brand`, `V2-GRANT-equatable-brand-equal`, `V2-GRANT-assert-equal-brand`, `V2-GRANT-dict-key-record-of-brand`, `V2-GRANT-dict-key-generic-box` |
+| What decides a dict key? | Its `Ordered` conformance alone, with no exception for grants: a grant implements no `Ordered`, and a callable key is `@type.invalidDictKey`. | `V2-GRANT-dict-key-grant`, `V2-GRANT-dict-key-unordered-brand`, `V2-GRANT-dict-key-ordered-brand`, `V2-GRANT-dict-key-record-of-brand`, `V2-GRANT-dict-key-generic-box`, `V2-TYPE-NOMINAL-dict-key-function` |
+| What decides an operand of `assert.equal`? | The bound `T: Encodable`, whose conformance the compiler decides structurally by one rule: a type other than `Never` conforms unless a callable type, a plan type, or a grant occurs in it, through the type arguments and the representation of every declared type in it, and each open form in it conforms through a bound. An interface value is decided in the run, with `@tool.unsupportedValue`. An unsatisfied bound is `@type.unsatisfiedBound` at the operand that fixes `T`, and an `impl` of `Encodable` or `Any` is `@type.redundantImplementation`. | `V2-PROJECT-test-assert-equal-function`, `V2-PROJECT-test-assert-equal-generic`, `V2-PROJECT-test-assert-equal-generic-unbounded`, `V2-PROJECT-test-assert-equal-generic-callable`, `V2-GRANT-assert-equal-grant`, `V2-GRANT-assert-equal-option-grant`, `V2-GRANT-assert-equal-brand`, `V2-GRANT-equatable-brand-equal`, `V2-PROJECT-test-assert-equal-wrapped-function`, `V2-PROJECT-test-assert-equal-field-function`, `V2-PROJECT-test-assert-equal-generic-argument-function`, `V2-PROJECT-test-assert-equal-recursive`, `V2-PROJECT-test-unobservable`, `V2-TYPE-INTERFACE-impl-encodable`, `V2-TYPE-INTERFACE-impl-any` |
+
 ## Open with the owner
 
-Not decided here; each waits for Hannah.
+Not decided here; it waits for Hannah.
 
 | Question | Where it stands | Rows that wait |
 | --- | --- | --- |
-| Review finding F8: no command presents a target's authority before a run, while 03 asks that it be "presentable in plain terms" | the gate of step 34 left it open; coverage 11, "hard-link and opened-object limits shown at approval", has the limits enforced (`ATK-fs-hard-link-replace`, `ATK-gate-replace-without-link-count`) but no command that shows them | none in M2; the command that presents a target's authority |
-| May a brand over a grant implement `Equatable` or `Ordered` itself? | today it may; a direct `Equatable.equal` call on it is accepted, while `assert.equal` and a dict key refuse it (`V2-GRANT-assert-equal-brand`, `V2-GRANT-dict-key-ordered-brand`) | those two cases and the `Equatable` call row a ruling adds |
 | Is a callable-typed labelled default a constant? | a default of type `Option(Fn(...))` is accepted and a `Proc` default is `@tool.unavailable` (`V2-EFFECT-plan-default-not-constant` covers an `Intent` default) | the default rows of 02 "Constant expressions" a ruling adds |
-
-## Reported to the specification's owner
-
-- `V2-PROJECT-test-unavailable-item` expects `@tool.unavailable` for a
-  module named as a value. Chapter 02, "Namespaces and resolution", makes a
-  path that resolves to another kind of entity `@name.wrongEntityKind`. The
-  form belongs to the names of M1, not to M2; the checker still reports it
-  unavailable.
-- The doc comment of `TestFaults::unavailable` in
-  `crates/vibra-types/src/check/testing.rs` says "each test that takes a
-  world"; the field holds the tests whose closure holds an unavailable
-  form.

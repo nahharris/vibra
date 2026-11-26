@@ -1,4 +1,4 @@
-assert.equal	T	{T T}	Void	
+assert.equal	T: Encodable	{T T}	Void	
 assert.false		{Bool}	Void	
 assert.true		{Bool}	Void	
 bytes.concat		{Bytes Bytes}	Bytes	

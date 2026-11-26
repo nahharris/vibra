@@ -32,6 +32,10 @@ pub enum Library {
     Equatable,
     /// The interface playing `@ordered`.
     Ordered,
+    /// The interface playing `@encodable`, which a type conforms to
+    /// structurally, with no implementation, when it has a canonical value
+    /// encoding as far as its static type shows.
+    Encodable,
     /// `Ordering`, with the cases `less`, `equal`, and `greater`.
     Ordering,
     /// `ArithmeticError`, with `overflow`, `divisionByZero`, and
@@ -43,9 +47,9 @@ pub enum Library {
 }
 
 impl Library {
-    /// Every library declaration, the nine roles first in the order of the
+    /// Every library declaration, the ten roles first in the order of the
     /// role table.
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 13] = [
         Self::Bool,
         Self::Str,
         Self::Bytes,
@@ -55,6 +59,7 @@ impl Library {
         Self::Iter,
         Self::Equatable,
         Self::Ordered,
+        Self::Encodable,
         Self::Ordering,
         Self::ArithmeticError,
         Self::ConversionError,
@@ -73,6 +78,7 @@ impl Library {
             Self::Iter => "Iter",
             Self::Equatable => "Equatable",
             Self::Ordered => "Ordered",
+            Self::Encodable => "Encodable",
             Self::Ordering => "Ordering",
             Self::ArithmeticError => "ArithmeticError",
             Self::ConversionError => "ConversionError",
@@ -93,6 +99,7 @@ impl Library {
             Self::Iter => "@iter",
             Self::Equatable => "@equatable",
             Self::Ordered => "@ordered",
+            Self::Encodable => "@encodable",
             Self::Ordering | Self::ArithmeticError | Self::ConversionError => {
                 return None;
             }
@@ -102,7 +109,10 @@ impl Library {
     /// Whether the declaration is an interface rather than a type.
     #[must_use]
     pub const fn is_interface(self) -> bool {
-        matches!(self, Self::Iter | Self::Equatable | Self::Ordered)
+        matches!(
+            self,
+            Self::Iter | Self::Equatable | Self::Ordered | Self::Encodable
+        )
     }
 
     /// The number of type parameters the declaration has.

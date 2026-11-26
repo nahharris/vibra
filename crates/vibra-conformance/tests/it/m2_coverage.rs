@@ -81,9 +81,10 @@ const UNAVAILABLE: &[(&str, &str, &str)] = &[
         "not in this release (owner table, Findings)",
     ),
     (
-        "V2-PROJECT-test-unavailable-item",
-        "a module named as a value",
-        "the checker of M1; chapter 02 makes the form `@name.wrongEntityKind`",
+        "V2-PROJECT-test-unavailable-closure",
+        "a contract call on an interface's type parameter whose bound leaves an \
+         associated type open",
+        "the checker of M1 (an interface takes no extra parameter for the choice)",
     ),
 ];
 

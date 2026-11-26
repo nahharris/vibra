@@ -1,0 +1,13 @@
+id = "V2-GRANT-equatable-brand-equal"
+rule = "V2-GRANT-equatable-brand-equal"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "02-type-system.md#dict-keys-equality-and-order: a direct Equatable.equal call on a declared type that holds a grant and implements Equatable is accepted and returns what its implementation returns"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

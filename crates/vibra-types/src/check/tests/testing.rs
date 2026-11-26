@@ -200,23 +200,19 @@ fn a_test_body_has_no_return_and_no_try() -> Result<(), String> {
 }
 
 #[test]
-fn an_operand_of_assert_equal_that_holds_a_callable_is_not_equatable()
+fn an_operand_of_assert_equal_that_holds_a_callable_is_not_encodable()
 -> Result<(), String> {
+    // A callable type is not `Encodable`: the bound of `assert.equal` is
+    // unsatisfied at the operand that fixes `T`.
     let source = "use @std.assert enduse\n\nuse @app.math enduse\n\n\
                   test \"x\" do assert.equal(math.add math.add) endtest\n";
     let result = check(MATH, &[("@tests.math", source)], &["@tests"])?;
     assert_eq!(
         faults(&result),
-        [
-            (
-                DiagnosticCode::TypeFunctionNotEquatable,
-                at(source, "math.add", 0)
-            ),
-            (
-                DiagnosticCode::TypeFunctionNotEquatable,
-                at(source, "math.add", 1)
-            ),
-        ]
+        [(
+            DiagnosticCode::TypeUnsatisfiedBound,
+            at(source, "math.add", 0)
+        )]
     );
     Ok(())
 }

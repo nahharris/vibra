@@ -966,20 +966,13 @@ impl<'a> Program<'a> {
         data.applied(arguments)
     }
 
-    /// Why `key` cannot key a dict, when it cannot: a callable anywhere in
-    /// its structure is `@type.functionNotEquatable`; any other type that
-    /// does not implement `Ordered`, written or structurally, is
-    /// `@type.invalidDictKey`.
+    /// Why `key` cannot key a dict, when it cannot: a type that does not
+    /// implement `Ordered`, written or structurally, is
+    /// `@type.invalidDictKey`. A callable anywhere in its structure
+    /// implements none, open or closed.
     pub(crate) fn key_fault(&self, key: &Type) -> Option<DiagnosticCode> {
-        let mut callable = false;
-        key.visit(&mut |ty| {
-            callable |= matches!(ty, Type::Fn(_) | Type::Proc(_) | Type::Intent(_));
-        });
-        if callable {
-            return Some(DiagnosticCode::TypeFunctionNotEquatable);
-        }
-        if let Some(code) = effects::grants::check_dict_key(self, key) {
-            return Some(code);
+        if holds_callable(key) {
+            return Some(DiagnosticCode::TypeInvalidDictKey);
         }
         let mut pending = vec![key];
         while let Some(ty) = pending.pop() {
@@ -1126,9 +1119,8 @@ impl<'a> Program<'a> {
                     let code = if !key.is_open() {
                         self.key_fault(key)
                     } else {
-                        self.key_fault(key).filter(|code| {
-                            *code == DiagnosticCode::TypeFunctionNotEquatable
-                        })
+                        holds_callable(key)
+                            .then_some(DiagnosticCode::TypeInvalidDictKey)
                     };
                     if let Some(code) = code {
                         return Err(NoType::Fault(Box::new(key_diagnostic(
@@ -2009,10 +2001,21 @@ pub(crate) fn key_diagnostic(
     span: ByteSpan,
     key: &Type,
 ) -> Diagnostic {
-    let message = if code == DiagnosticCode::TypeFunctionNotEquatable {
-        format!("`{key}` holds a callable, which is not equatable, so it keys no dict")
+    let message = if holds_callable(key) {
+        format!(
+            "`{key}` holds a callable, which implements no `Ordered`, so it keys no dict"
+        )
     } else {
         format!("`{key}` does not implement `Ordered`, so it keys no dict")
     };
     Diagnostic::new(code, span, message)
+}
+
+/// Whether a callable type occurs anywhere in the structure of `ty`.
+fn holds_callable(ty: &Type) -> bool {
+    let mut callable = false;
+    ty.visit(&mut |inner| {
+        callable |= matches!(inner, Type::Fn(_) | Type::Proc(_) | Type::Intent(_));
+    });
+    callable
 }

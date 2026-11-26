@@ -83,8 +83,8 @@ when it is added.
   `@type.unsatisfiedBound` at the argument that fixes the parameter,
   related to the bound.
 - **Brand.** Its own `Equatable` does not make it an `assert.equal`
-  operand. Its type contains a grant, which is `@type.functionNotEquatable`
-  once at each operand.
+  operand. Its type contains a grant, so it is not `Encodable`:
+  `@type.unsatisfiedBound` once, at the operand that fixes `T`.
 - **A file prefix.** A `sub` is lexical, so naming a file is no refusal.
   The read of `["x"]` below it reaches the world, which finds a file above
   `x`: a completed `notADirectory`. The read of the empty path, the rebased

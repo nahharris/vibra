@@ -1,0 +1,8 @@
+{
+  format: @testRun.v2
+  result: @command.diagnostics
+  tests: [
+    {name: "@tests.math::\"static\"" result: @test.invalid auditTrace: {format: @auditTrace.v2 revision: "sha256:16cada7a064c8e6024a45157541f42f596bec723b2d461a63b7d824a1209e5e5" drivers: [{provider: @hostWorld.v2 version: "0.0.2"}] policies: [:] redaction: @none events: []}}
+    {name: "@tests.math::\"plain\"" result: @test.invalid auditTrace: {format: @auditTrace.v2 revision: "sha256:16cada7a064c8e6024a45157541f42f596bec723b2d461a63b7d824a1209e5e5" drivers: [{provider: @hostWorld.v2 version: "0.0.2"}] policies: [:] redaction: @none events: []}}
+  ]
+}

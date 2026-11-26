@@ -20,7 +20,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
-use vibra_ir::external::compiler::{CompilerIntrinsic, is_assertion};
+use vibra_ir::external::compiler::is_assertion;
 use vibra_ir::{
     Arguments, BodyContext, CallTarget, ClosureBody, Constant, Construction, ExitGuard,
     Expr as IrExpr, FnType, Library, MatchArm, Node, Pattern as IrPattern,
@@ -142,8 +142,8 @@ enum Head {
     Contract(usize, String),
     /// A type, by its program index.
     Type(usize),
-    /// An interface or a module.
-    Static,
+    /// An interface or a module, by the noun that names its kind.
+    Static(&'static str),
     /// A generic anonymous callable bound by `let`, not yet instantiated.
     Generic(Rc<GenericClosure>),
     /// Already reported.
@@ -1832,7 +1832,8 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                 Head::Value(Box::new(Out { ty, node }))
             }
             Entity::Type(index) => Head::Type(index),
-            Entity::Interface(_) | Entity::Module(_) => Head::Static,
+            Entity::Interface(_) => Head::Static("an interface"),
+            Entity::Module(_) => Head::Static("a module"),
             Entity::Fn(index) => {
                 let module = program.functions.get(index).map(|data| data.module);
                 module.map_or(Head::Error, |module| self.skipped(module, whole))
@@ -1909,7 +1910,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                         }
                         Head::Type(index) => self.constructor(index, callee_span),
                         Head::Value(out) => self.applied_value(*out, callee_span),
-                        Head::Static => {
+                        Head::Static(_) => {
                             self.report(
                                 DiagnosticCode::TypeNotApplicable,
                                 callee_span,
@@ -1947,8 +1948,14 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                 let expected = state.ctx.expected().cloned();
                 self.contract_value(interface, &member, whole, expected.as_ref())
             }
-            Head::Static => {
-                self.unavailable(whole, "a type used as a value");
+            // 02 "Namespaces and resolution": a value position requires a value,
+            // so a path that resolves to another kind of entity is the wrong kind.
+            Head::Static(found) => {
+                self.report(
+                    DiagnosticCode::NameWrongEntityKind,
+                    whole,
+                    format!("this names {found}; a value is required here"),
+                );
                 Out::error()
             }
             Head::Pending | Head::Error => Out::error(),
@@ -2826,42 +2833,6 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         true
     }
 
-    /// Reports `@type.functionNotEquatable` at each operand of an
-    /// `assert.equal` call whose type contains a callable, a plan, or a
-    /// grant.
-    fn unequatable_operands(&mut self, state: &CallState<'a>) -> bool {
-        let Callee::Function(index) = state.callee else {
-            return false;
-        };
-        let row = self
-            .program
-            .functions
-            .get(index)
-            .and_then(|data| data.external);
-        if row != Some(CompilerIntrinsic::AssertEqual) {
-            return false;
-        }
-        let Some(Some(operand)) = state.assignment.first() else {
-            return false;
-        };
-        if self.program.key_fault(operand)
-            != Some(DiagnosticCode::TypeFunctionNotEquatable)
-            && !effects::grants::check_equatable(self.program, operand)
-        {
-            return false;
-        }
-        for arg in &state.args {
-            self.report(
-                DiagnosticCode::TypeFunctionNotEquatable,
-                expr_span(&arg.value),
-                format!(
-                    "an operand of `assert.equal` has the type `{operand}`, which contains a callable, a plan, or a grant"
-                ),
-            );
-        }
-        true
-    }
-
     fn call_state(
         &mut self,
         callee: Callee,
@@ -3485,9 +3456,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         {
             state.failed = true;
         }
-        if !state.failed && self.unequatable_operands(&state) {
-            state.failed = true;
-        }
+
         for (at, actual, span) in std::mem::take(&mut state.deferred) {
             let expected = state.slot(at).and_then(|pattern| state.instance(pattern));
             let node = state.nodes.get_mut(at).and_then(Option::take);

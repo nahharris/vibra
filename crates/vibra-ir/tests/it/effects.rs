@@ -710,7 +710,8 @@ fn a_plan_constant() {
     assert!(Constant::new(Type::list(plan), Value::List(Vec::new())).is_err());
 }
 
-/// 03 Capability values: "cannot be … used as a dict key".
+/// 03 Capability values: a grant "is no dict key", because it implements no
+/// `Ordered`; the dict-key rule alone refuses it, where a dict is built.
 #[test]
 fn a_grant_dict_key() {
     let member = read_type(relative(), row(&[DIR_READ_TEXT]));
@@ -721,13 +722,16 @@ fn a_grant_dict_key() {
     );
     parts.functions.push(function(
         "keyed",
-        fn_type(vec![dict], Type::Void),
-        void(),
-        1,
+        fn_type(Vec::new(), dict.clone()),
+        node(Expr::Construct {
+            value_type: dict,
+            construction: Construction::Dict(Vec::new()),
+        }),
+        0,
     ));
     assert!(matches!(
         CheckedModuleSet::try_new(parts),
-        Err(IrError::NoEncoding { what: "a dict key", ty }) if *ty == interface_type(DIR_READ_TEXT)
+        Err(IrError::InvalidType(message)) if message.contains("does not implement `Ordered`")
     ));
 }
 

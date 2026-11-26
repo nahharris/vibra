@@ -4,7 +4,7 @@
   modules: [
     {
       path: @std.assert
-      digest: "sha256:015c1a81cbd520f0f27a926aa5a6596296bc0b3fac4fe65c358e50263494d760"
+      digest: "sha256:3b1bda27eab44686174674c93b9824da837752a30db44c6145352cff68d8c9fd"
       languageRoles: []
     }
     {
@@ -24,8 +24,8 @@
     }
     {
       path: @std.core
-      digest: "sha256:fdfb4574bf5f3d008a617f234a40cfea6cca8862ebfd42d968b65af251e30600"
-      languageRoles: [@equatable @ordered]
+      digest: "sha256:ca08993f7a1bdd95304a53dc4d6aec8983581ca1564ee1b7cf4e3351bdf8dc9a"
+      languageRoles: [@encodable @equatable @ordered]
     }
     {
       path: @std.env

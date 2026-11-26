@@ -54,6 +54,7 @@ pub fn path(library: Library) -> &'static str {
         Library::Iter => "std.iter.Iter",
         Library::Equatable => "std.equatable.Equatable",
         Library::Ordered => "std.ordered.Ordered",
+        Library::Encodable => "std.encodable.Encodable",
         Library::Ordering => "std.ordering.Ordering",
         Library::ArithmeticError => "std.number.ArithmeticError",
         Library::ConversionError => "std.number.ConversionError",
@@ -85,12 +86,17 @@ pub fn option(value: Type) -> Type {
     library_type(Library::Option, vec![value])
 }
 
-/// The library bindings of the fixtures: the nine roles but `@equatable`
-/// and `@ordered`, and the three core types.
+/// The library bindings of the fixtures: the ten roles but `@equatable`,
+/// `@ordered`, and `@encodable`, and the three core types.
 pub fn library() -> LibraryTypes {
     Library::ALL
         .into_iter()
-        .filter(|library| !matches!(library, Library::Equatable | Library::Ordered))
+        .filter(|library| {
+            !matches!(
+                library,
+                Library::Equatable | Library::Ordered | Library::Encodable
+            )
+        })
         .fold(LibraryTypes::new(), |bindings, library| {
             bindings.with(library, id(path(library)))
         })

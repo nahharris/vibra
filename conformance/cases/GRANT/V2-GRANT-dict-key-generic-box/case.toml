@@ -1,0 +1,13 @@
+id = "V2-GRANT-dict-key-generic-box"
+rule = "V2-GRANT-dict-key-generic-box"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "02-type-system.md#dict-keys-equality-and-order: a generic declared type that implements Ordered for every argument is a dict key at an argument that is a grant, Box(DirReadText), in the checker and in the checked IR alike; a lookup finds its one entry"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

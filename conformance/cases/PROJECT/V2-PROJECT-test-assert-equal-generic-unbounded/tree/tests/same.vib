@@ -1,0 +1,12 @@
+use @std.assert enduse
+
+// Asserts through `assert.equal`, generic over any type.
+fn same(T)
+  takes {expected: T actual: T}
+  returns done: Void
+  do
+    assert.equal(expected actual)
+    return void
+endfn
+
+test "ints" do same(1i32 1i32) endtest

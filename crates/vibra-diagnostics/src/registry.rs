@@ -309,13 +309,11 @@ diagnostic_registry! {
     TypeTypeArgumentMismatch => "@type.typeArgumentMismatch", Type, Error, None,
         "a type application has the wrong arguments or labels";
     TypeRedundantImplementation => "@type.redundantImplementation", Type, Error, None,
-        "an `impl` inside an interface targets a type of the same module";
+        "an `impl` gives a conformance the language already gives";
     TypeDefaultOverride => "@type.defaultOverride", Type, Error, None,
         "an implementation supplies a default member again";
     TypeMissingAbstractMember => "@type.missingAbstractMember", Type, Error, None,
         "an implementation does not supply an abstract member or an associated type";
-    TypeFunctionNotEquatable => "@type.functionNotEquatable", Type, Error, None,
-        "a callable is used where equality is required";
     TypeNotApplicable => "@type.notApplicable", Type, Error, None,
         "a value that is not applicable is applied";
     TypeUnknownRecordField => "@type.unknownRecordField", Type, Error, None,
@@ -490,7 +488,7 @@ mod tests {
     use std::collections::BTreeSet;
 
     /// The count of the specification table.
-    const REGISTERED_CODES: usize = 118;
+    const REGISTERED_CODES: usize = 117;
 
     #[test]
     fn the_registry_has_every_code_in_the_specification_table() {

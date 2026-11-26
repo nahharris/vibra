@@ -856,10 +856,14 @@ fn the_admissibility_table_is_the_chapters_grammar() {
     for (section, tags) in TAG_SETS {
         match *section {
             "role" => {
-                for role in roles.iter().chain(&["@equatable", "@ordered"]) {
+                for role in
+                    roles
+                        .iter()
+                        .chain(&["@equatable", "@ordered", "@encodable"])
+                {
                     assert!(tags.contains(role), "{role}");
                 }
-                assert_eq!(tags.len(), 9);
+                assert_eq!(tags.len(), 10);
             }
             "external" => assert_eq!(*tags, ["@compiler", "@host"]),
             _ => assert_eq!(*tags, ["@public", "@private"], "{section}"),

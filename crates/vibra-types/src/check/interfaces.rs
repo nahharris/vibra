@@ -600,6 +600,30 @@ impl<'a> Program<'a> {
             );
             return None;
         };
+        // 02 "Implementations": every type conforms to `Any`, and to
+        // `Encodable` when it has an encoding, with no implementation.
+        let redundant = |program: &Self, interface: Option<usize>| {
+            let any = path.dotted() == "Any"
+                && positional.is_empty()
+                && labelled.is_empty()
+                && program.lookup(module, "Any").is_none();
+            let encodable = interface.is_some()
+                && interface == program.prelude_interface("Encodable");
+            (any || encodable).then(|| {
+                Diagnostic::new(
+                    DiagnosticCode::TypeRedundantImplementation,
+                    target.span(),
+                    format!(
+                        "every type that conforms to `{}` does so without an implementation",
+                        path.dotted()
+                    ),
+                )
+            })
+        };
+        if let Some(diagnostic) = redundant(self, None) {
+            self.fault(module, diagnostic);
+            return None;
+        }
         let interface = match self.path_entity(module, &path) {
             Some(Entity::Interface(interface)) => interface,
             Some(_) => {
@@ -618,6 +642,10 @@ impl<'a> Program<'a> {
             }
             None => return None,
         };
+        if let Some(diagnostic) = redundant(self, Some(interface)) {
+            self.fault(module, diagnostic);
+            return None;
+        }
         let idata = self.interfaces.get(interface)?;
         if idata.id.is_none() {
             let what = format!("an implementation in `{host}`");

@@ -20,9 +20,20 @@ const ADDS: &str = "test \"adds\" do assert.equal(3i32 math.add(1i32 2i32)) endt
 const ADDS_WRONG: &str =
     "test \"adds\" do assert.equal(4i32 math.add(1i32 2i32)) endtest\n";
 
-/// A test that names the module `math` as a value, a form this checker does
-/// not support: `math` is 26 bytes into the test.
-const UNAVAILABLE: &str = "test \"static\" do let _ be math endlet endtest\n";
+/// A test whose declaration closure reaches a form this checker does not
+/// support: `pick`'s contract call on `T`, whose bound leaves `Item` open.
+/// The call `Iter.next(source)` is 128 bytes into the text.
+const UNAVAILABLE: &str = "interface Holder(T)\n  given {T: Iter}\n  fn pick\n    \
+                           takes {holder: Self source: T}\n    returns found: I32\n    \
+                           do\n      let _ be Iter.next(source) endlet\n      \
+                           return 1i32\n  endfn\nendinterface\n\n\
+                           type Box of I32\n  impl Holder(List(I32))\n  endimpl\nendtype\n\n\
+                           test \"open\" do assert.equal(1i32 Holder.pick(Box(1i32) [1i32])) \
+                           endtest\n";
+
+/// A test that names the module `math` as a value: `math` is 26 bytes into
+/// the test.
+const MODULE_VALUE: &str = "test \"static\" do let _ be math endlet endtest\n";
 
 /// A library project with `src/app/math.vib` and `files`.
 fn project(label: &str, files: &[(&str, &str)]) -> TempDir {
@@ -360,19 +371,41 @@ fn test_unavailable_item() {
     assert_eq!(code, 4, "{document}");
     assert_eq!(document["result"], "@command.unavailable");
     assert_eq!(document["status"], "unsupported");
-    // `math` in the first test, bytes 72..76.
+    // `Iter.next(source)` in `pick`, bytes 174..191.
     assert_eq!(codes(&document), ["@tool.unavailable"]);
     let span = &document["diagnostics"][0]["primarySpan"];
     assert_eq!(span["sourceId"], "tests/math.vib");
-    assert_eq!((&span["start"], &span["end"]), (&json!(72), &json!(76)));
+    assert_eq!((&span["start"], &span["end"]), (&json!(174), &json!(191)));
     assert_eq!(counts(&document), (2, 1, 1));
     let items = &document["payload"]["tests"];
-    assert_eq!(items[0]["name"], "@tests.math::\"static\"");
+    assert_eq!(items[0]["name"], "@tests.math::\"open\"");
     assert_eq!(items[0]["result"], "@test.unavailable");
     assert_eq!(items[0]["status"], "unsupported");
     assert_eq!(items[0]["diagnostics"], json!(["@tool.unavailable"]));
     assert_eq!(items[1]["result"], "@test.passed");
     assert_eq!(items[1]["diagnostics"], json!([]));
+}
+
+#[test]
+fn test_module_as_value_invalid() {
+    // 02 "Namespaces and resolution": a module in value position is the wrong
+    // kind of entity, an ordinary error, so the whole selection is invalid.
+    let root = project(
+        "test-module-value",
+        &[("tests/math.vib", &math_tests(&[MODULE_VALUE, ADDS]))],
+    );
+    let (code, document) = test(&root, &[]);
+    assert_eq!(code, 1, "{document}");
+    assert_eq!(document["result"], "@command.diagnostics");
+    // `math` in the first test, bytes 72..76.
+    assert_eq!(codes(&document), ["@name.wrongEntityKind"]);
+    let span = &document["diagnostics"][0]["primarySpan"];
+    assert_eq!(span["sourceId"], "tests/math.vib");
+    assert_eq!((&span["start"], &span["end"]), (&json!(72), &json!(76)));
+    assert_eq!(
+        results(&document),
+        [json!("@test.invalid"), json!("@test.invalid")]
+    );
 }
 
 #[test]

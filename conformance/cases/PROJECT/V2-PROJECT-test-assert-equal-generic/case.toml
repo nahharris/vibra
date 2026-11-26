@@ -1,0 +1,13 @@
+id = "V2-PROJECT-test-assert-equal-generic"
+rule = "V2-PROJECT-test-assert-equal-generic"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "02-type-system.md#interfaces: a generic helper bound by T: Encodable calls assert.equal on its own parameter, and both its uses, at I32 and at Str, pass"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

@@ -50,7 +50,9 @@ use vibra_ir::Library;
 use vibra_ir::external::host::{
     HostInterface, HostRow, TestWorldRow, host_row, test_world_row,
 };
-use vibra_ir::external::{CompilerIntrinsic, FloatOp, IntegerOp, RowType};
+use vibra_ir::external::{
+    CompilerIntrinsic, FloatOp, IntegerOp, RowType, spell_generics,
+};
 use vibra_syntax::SyntaxKind;
 use vibra_syntax::source::{
     Callable, CallableKind, Declaration, Module, TypeBody, TypeForm,
@@ -591,11 +593,27 @@ fn signature_fits(
     scope: &Scope<'_>,
 ) -> bool {
     let (parameters, result) = row.signature();
-    let has_bound = callable
+    let generics = callable.params();
+    let mut written_bounds = callable
         .given()
-        .is_some_and(|given| !given.entries().is_empty());
+        .map(|given| given.entries())
+        .unwrap_or_default()
+        .iter()
+        .map(|(name, bound)| {
+            let at = generics
+                .iter()
+                .position(|generic| generic.text() == name.text());
+            (at, scope.read(bound))
+        })
+        .collect::<Vec<_>>();
+    written_bounds.sort_by_key(|(at, _)| *at);
+    let expected_bounds = row
+        .bounds()
+        .iter()
+        .map(|(at, bound)| (Some(*at), Some(Written::Library(*bound, Vec::new()))))
+        .collect::<Vec<_>>();
     if callable.kind() != CallableKind::Fn
-        || has_bound
+        || written_bounds != expected_bounds
         || callable.requires().is_some()
         || callable.ensures().is_some()
         || !callable.labelled().is_empty()
@@ -631,7 +649,7 @@ fn expected_signature(row: CompilerIntrinsic) -> String {
     if generics.is_empty() {
         callable
     } else {
-        format!("{callable} over {}", generics.join(" "))
+        format!("{callable} over {}", spell_generics(generics, row.bounds()))
     }
 }
 

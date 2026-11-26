@@ -21,8 +21,8 @@
 //! | [`members`] | [`members::contract_member`], [`members::contract_row`], [`members::identity_kind`], [`members::member_type`], [`members::impl_member`], [`members::applied`], [`members::named_as_value`] | 08, 19 |
 //! | [`analysis`] | [`analysis::check_bodies`] | 09 |
 //! | [`values`] | [`values::written_type`], [`values::anonymous`] | 10 |
-//! | [`grants`] | [`grants::check_dict_key`], [`grants::check_equatable`] | 22 |
 //! | [`grants`] | [`grants::check_constant`] | fix A |
+//! | [`grants`] | [`grants::is_encodable`] | fix C |
 //! | [`entry`] | [`entry::check_targets`], [`entry::entry_signature`] | 25 |
 //!
 //! The hooks of [`procs`] read rows through [`rows`], and steps 12 and 24

@@ -16,7 +16,7 @@ fn the_embedded_library_loads() {
         stdlib.roles().len()
     );
     assert_eq!(stdlib.modules().len(), 17);
-    assert_eq!(stdlib.roles().len(), 9);
+    assert_eq!(stdlib.roles().len(), 10);
     assert_eq!(stdlib.package_name(), "std");
     assert_eq!(stdlib.package_version(), "0.0.2");
 }
@@ -34,6 +34,7 @@ fn every_role_has_its_declaration() {
         (Role::Iter, "@std.iter", "Iter", "@interface"),
         (Role::Equatable, "@std.core", "Equatable", "@interface"),
         (Role::Ordered, "@std.core", "Ordered", "@interface"),
+        (Role::Encodable, "@std.core", "Encodable", "@interface"),
     ];
     for (role, module, name, kind) in expected {
         let declaration = stdlib.role(role).expect("every role has a declaration");
@@ -84,7 +85,9 @@ fn the_prelude_table_binds_every_declared_name() {
         "Iter" => Some("@std.iter"),
         "Str" => Some("@std.str"),
         "Bytes" => Some("@std.bytes"),
-        "Equatable" | "Ordered" | "From" | "TryFrom" | "Ordering" => Some("@std.core"),
+        "Equatable" | "Ordered" | "Encodable" | "From" | "TryFrom" | "Ordering" => {
+            Some("@std.core")
+        }
         "Any" | "Self" => None,
         name if builtin.contains(&name) => Some("@std.builtin"),
         _ => Some("unexpected"),

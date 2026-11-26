@@ -1,0 +1,13 @@
+id = "V2-PROJECT-test-assert-equal-recursive"
+rule = "V2-PROJECT-test-assert-equal-recursive"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "02-type-system.md#interfaces: the walk of Encodable reads each declared type once, so a recursive declared type with no callable and no grant conforms, and assert.equal on two equal trees passes"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

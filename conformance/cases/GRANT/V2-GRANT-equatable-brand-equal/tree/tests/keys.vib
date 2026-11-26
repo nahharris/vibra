@@ -1,0 +1,36 @@
+use @std.assert enduse
+
+use @std.test.TestWorld enduse
+
+use @std.fs.DirReadText enduse
+
+// A brand over a grant, compared and ordered by the rank its own code reads.
+type Key of {reader: DirReadText rank: I32}
+  impl Equatable
+    fn equal
+      takes {left: Self right: Self}
+      returns same: Bool
+      do
+        return Equatable.equal(left.rank right.rank)
+    endfn
+  endimpl
+  impl Ordered
+    fn compare
+      takes {left: Self right: Self}
+      returns order: Ordering
+      do
+        return Ordered.compare(left.rank right.rank)
+    endfn
+  endimpl
+endtype
+test "equal"
+  takes {world: TestWorld}
+  performs {TestWorld}
+  do
+    let {readText: reader} be await TestWorld.directory(world) endlet
+    let one be Key(reader: reader rank: 1i32) endlet
+    let same be Key(reader: reader rank: 1i32) endlet
+    let two be Key(reader: reader rank: 2i32) endlet
+    assert.true(Equatable.equal(one same))
+    assert.false(Equatable.equal(one two))
+endtest

@@ -1,0 +1,19 @@
+id = "V2-PROJECT-test-module-as-value-invalid"
+rule = "V2-PROJECT-test-module-as-value-invalid"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "02-type-system.md#namespaces-and-resolution: a module named as a value is @name.wrongEntityKind at the name, so every item of the selection is invalid and none runs"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+testRun = "test-run.vibon"
+
+[[expect.diagnostics]]
+code = "@name.wrongEntityKind"
+level = "@error"
+source = "tests/math.vib"
+span = { start = 72, end = 76 }

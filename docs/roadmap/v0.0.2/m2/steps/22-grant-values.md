@@ -41,10 +41,11 @@ check_equatable, check_dict_key}`.
 1. `contains_grant(type)`: an operation interface value type, or a type
    that contains one through records, tuples, `Option`, `List`, wrappers,
    and declared types. Explicit work list.
-2. An `assert.equal` operand whose type contains a grant is
-   `@type.functionNotEquatable`, once per such operand, as for a callable.
-3. A dict key type that contains a grant is `@type.invalidDictKey` at the
-   key type.
+2. A type that contains a grant is not `Encodable`, so an `assert.equal`
+   operand of that type is `@type.unsatisfiedBound` at the operand that
+   fixes `T`, as for a callable.
+3. A dict key is decided by its `Ordered` conformance alone: a grant is no
+   key, and a declared type over one is a key when it implements `Ordered`.
 4. A module value whose type contains a grant is accepted: its initializer
    is pure, so it can hold a model and never a grant. This step adds the
    positive case `V2-GRANT-module-value-holds-model`.
@@ -80,8 +81,8 @@ do the same under `try`. `input` is the `stdinBytes` grant of
 | `V2-GRANT-no-constructor` | negative, `workspaceCheck` | `await notes.countLines({root: "/"} path)` where a `DirReadText` is expected | `@type.argumentMismatch` at the argument | 03: "A path, a policy value, a wrapper type, an `impl`, and decoded data are not grants" |
 | `V2-GRANT-model-is-not-grant` | positive | a `Memory` passed to `notes.countLines` | `@test.passed`; the trace has no event | 03 Operation interfaces: "Implementing an interface makes no grant" |
 | `V2-GRANT-forward-model-reads` | positive | `Forward(inner: dir.readText)` passed where a `DirReadText` is expected; read `a.txt` | `Ok("A")`; one event, whose grant projection is that of `dir.readText` | 06: "A source implementation may model an interface using grants it holds" |
-| `V2-GRANT-assert-equal-grant` | negative, `workspaceCheck` | `assert.equal(dir.readText dir.readText)` | `@type.functionNotEquatable` at each operand | 07: "an `assert.equal` operand whose type contains a callable, plan, or grant" |
-| `V2-GRANT-assert-equal-option-grant` | negative, `workspaceCheck` | `assert.equal(Option.some(value: dir.readText) Option.none())` | `@type.functionNotEquatable` at each operand: both have the type `Option(DirReadText)` | the same |
+| `V2-GRANT-assert-equal-grant` | negative, `workspaceCheck` | `assert.equal(dir.readText dir.readText)` | `@type.unsatisfiedBound` at the first operand | 07: "a type argument that does not meet its bound" |
+| `V2-GRANT-assert-equal-option-grant` | negative, `workspaceCheck` | `assert.equal(Option.some(value: dir.readText) Option.none())` | `@type.unsatisfiedBound` at the first operand, of the type `Option(DirReadText)` | the same |
 | `V2-GRANT-assert-equal-result-ok` | positive | `assert.equal(Result.ok(value: "A") await DirReadText.read(dir.readText aTxt))` | `@test.passed` | 03: "ordinary typed results" |
 | `V2-GRANT-dict-key-grant` | negative, `workspaceCheck` | a parameter of type `Dict(DirReadText Str)` | `@type.invalidDictKey` at the key type | 03: "cannot be … used as a dict key" |
 | `V2-GRANT-required-optional-bundle` | positive | the chapter's `report` shape with `DirReadText`, `Option(StdoutText)`, and `{reader writer}`, called with `Option.none()` | `@test.passed` | 03 Capability values, the three shapes |
@@ -130,7 +131,7 @@ do the same under `try`. `input` is the `stdinBytes` grant of
 
 ## Diagnostics and schema changes
 
-Codes: `@type.functionNotEquatable`, `@type.invalidDictKey`,
+Codes: `@type.unsatisfiedBound`, `@type.invalidDictKey`,
 `@type.argumentMismatch`, `@name.inaccessibleRepresentation`. No schema
 change.
 

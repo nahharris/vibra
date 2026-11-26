@@ -1,9 +1,10 @@
 //! Unit tests of grant types. Expectations come from the effects chapter,
-//! "Capability values" ("A grant has no encoding: it cannot be written to a
-//! file, compared, or used as a dict key"), the programs chapter,
-//! "Assertions" ("An operand of `assert.equal` whose type contains a
-//! callable, plan, or grant type is `@type.functionNotEquatable`, once at
-//! each such operand"), and the runtime chapter, "What has no encoding".
+//! "Capability values" (a type that holds a grant is not `Encodable`; a
+//! declared type that holds one may implement `Equatable` and `Ordered`),
+//! the type chapter, "Interfaces" (`Encodable`) and "Dict keys, equality,
+//! and order", the programs chapter, "Assertions" (`assert.equal` is bound
+//! by `T: Encodable`), and the runtime chapter, "What has no encoding". An
+//! unsatisfied bound is reported once, at the operand that fixes `T`.
 
 use vibra_diagnostics::{ByteSpan, DiagnosticCode};
 use vibra_resolve::{PackageId, ResolveInput, SourceModule, SourceUnit, UnitKind};
@@ -71,30 +72,22 @@ fn inside(source: &str, outer: &str, inner: &str) -> ByteSpan {
     ByteSpan::new(start, start.saturating_add(inner.len()))
 }
 
-/// The two operands of `call`, `left` then `right`, each reported once.
+/// The one `@type.unsatisfiedBound` of `call`, at its first operand `left`,
+/// which fixes `T`. `_right` is the other operand, which is not reported.
 fn both(
     source: &str,
     call: &str,
     left: &str,
-    right: &str,
+    _right: &str,
 ) -> Vec<(DiagnosticCode, ByteSpan)> {
-    let right_at = at(source, call, 0)
-        .start()
-        .saturating_add(call.rfind(right).unwrap_or(usize::MAX));
-    vec![
-        (
-            DiagnosticCode::TypeFunctionNotEquatable,
-            inside(source, call, left),
-        ),
-        (
-            DiagnosticCode::TypeFunctionNotEquatable,
-            ByteSpan::new(right_at, right_at.saturating_add(right.len())),
-        ),
-    ]
+    vec![(
+        DiagnosticCode::TypeUnsatisfiedBound,
+        inside(source, call, left),
+    )]
 }
 
 #[test]
-fn a_bare_grant_is_not_equatable_at_each_operand() -> Result<(), String> {
+fn a_bare_grant_is_not_encodable() -> Result<(), String> {
     let call = "assert.equal(reader reader)";
     let source = with_grants("", call);
     assert_eq!(
@@ -105,7 +98,7 @@ fn a_bare_grant_is_not_equatable_at_each_operand() -> Result<(), String> {
 }
 
 #[test]
-fn an_option_of_a_grant_is_not_equatable() -> Result<(), String> {
+fn an_option_of_a_grant_is_not_encodable() -> Result<(), String> {
     let call = "assert.equal(Option.some(value: reader) Option.none())";
     let source = with_grants("", call);
     assert_eq!(
@@ -116,7 +109,7 @@ fn an_option_of_a_grant_is_not_equatable() -> Result<(), String> {
 }
 
 #[test]
-fn a_record_and_a_list_that_hold_a_grant_are_not_equatable() -> Result<(), String> {
+fn a_record_and_a_list_that_hold_a_grant_are_not_encodable() -> Result<(), String> {
     let call = "assert.equal({held: reader n: 1i32} {held: reader n: 1i32})";
     let source = with_grants("", call);
     assert_eq!(
@@ -138,7 +131,7 @@ fn a_record_and_a_list_that_hold_a_grant_are_not_equatable() -> Result<(), Strin
 }
 
 #[test]
-fn a_declared_type_that_holds_a_grant_is_not_equatable() -> Result<(), String> {
+fn a_declared_type_that_holds_a_grant_is_not_encodable() -> Result<(), String> {
     // A brand, a record type, a variant, a recursive type, and a generic
     // type applied to a grant: each holds one through its representation or
     // its argument.
@@ -179,7 +172,7 @@ fn a_declared_type_that_holds_a_grant_is_not_equatable() -> Result<(), String> {
 }
 
 #[test]
-fn a_result_of_a_grant_read_is_equatable() -> Result<(), String> {
+fn a_result_of_a_grant_read_is_encodable() -> Result<(), String> {
     // The typed result of an operation holds no grant: "ordinary typed
     // results" (03, Capability values).
     let source = format!(
@@ -195,7 +188,7 @@ fn a_result_of_a_grant_read_is_equatable() -> Result<(), String> {
 }
 
 #[test]
-fn a_type_that_holds_no_grant_is_equatable() -> Result<(), String> {
+fn a_type_that_holds_no_grant_is_encodable() -> Result<(), String> {
     // A generic type applied to an ordinary type, and a recursive type with
     // no grant: the walk ends and finds none.
     let declarations = "type Box(T) of {item: T} endtype\n\n\
@@ -235,8 +228,8 @@ fn a_dict_keyed_by_a_grant_is_an_invalid_key() {
 }
 
 #[test]
-fn a_brand_over_a_grant_is_no_key_even_when_it_is_ordered() {
-    // Only the grant rule refuses this key: the type implements `Ordered`.
+fn a_brand_over_a_grant_is_a_key_when_it_is_ordered() {
+    // The bound decides: the type implements `Ordered`, so it is a key.
     let source = "use @std.fs.DirReadText enduse\n\n\
                   type Key of DirReadText\n  \
                   impl Equatable\n    fn equal takes {left: Self right: Self} returns same: Bool \
@@ -244,16 +237,21 @@ fn a_brand_over_a_grant_is_no_key_even_when_it_is_ordered() {
                   impl Ordered\n    fn compare takes {left: Self right: Self} returns order: \
                   Ordering do return Ordering.equal() endfn\n  endimpl\nendtype\n\n\
                   fn size takes {entries: Dict(Key Str)} returns n: U64 do return 0u64 endfn\n";
+    assert_eq!(faults(source), []);
+    // The same type with no `Ordered` of its own is no key.
+    let unordered = source.replace(
+        "  impl Ordered\n    fn compare takes {left: Self right: Self} returns order: \
+         Ordering do return Ordering.equal() endfn\n  endimpl\n",
+        "",
+    );
+    assert_ne!(unordered, source);
     assert_eq!(
-        faults(source),
+        faults(&unordered),
         [(
             DiagnosticCode::TypeInvalidDictKey,
-            inside(source, "Dict(Key Str)", "Key")
+            inside(&unordered, "Dict(Key Str)", "Key")
         )]
     );
-    // The same type over a `Str` is a key.
-    let plain = source.replace("type Key of DirReadText", "type Key of Str");
-    assert_eq!(faults(&plain), []);
 }
 
 #[test]

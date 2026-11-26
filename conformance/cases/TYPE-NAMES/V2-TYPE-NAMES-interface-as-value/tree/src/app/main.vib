@@ -1,0 +1,9 @@
+interface Shown endinterface
+
+fn f
+  takes {}
+  returns r: I32
+  do
+    let _ be Shown endlet
+    return 1i32
+endfn

@@ -84,6 +84,7 @@ role** such a type plays. A role is a closed, compiler-known position:
 | `@iter` | `Iter` | iteration contracts |
 | `@equatable` | `Equatable` | structural equality of key types |
 | `@ordered` | `Ordered` | dict keys |
+| `@encodable` | `Encodable` | the bound of `assert.equal` |
 
 The standard library declares each role exactly once with the `role`
 section, on a declaration of the shape the role requires: `@bool` on a
@@ -93,7 +94,9 @@ cases this chapter names; `@iter` on an interface whose members are exactly
 the associated type `Item`, the abstract `next` of
 [Iteration](#iteration), and default members; `@equatable` and `@ordered` on
 the two interfaces of
-[Dict keys, equality, and order](#dict-keys-equality-and-order). A `role`
+[Dict keys, equality, and order](#dict-keys-equality-and-order); and
+`@encodable` on an interface with no type parameter, no associated type, and
+no member, the one of [Interfaces](#interfaces). A `role`
 section outside the embedded library is `@syntax.invalidSection`.
 A missing, repeated, or wrong-shaped role in the embedded library is a
 toolchain defect, reported as `@runtime.invalidCheckedProgram` when the
@@ -292,9 +295,10 @@ a parameter or result type of depth 64 makes it 65 deep, which is
 limit is part of the language and is the same in every tool.
 
 An anonymous type has no owner: it declares no members and receives no
-`impl`. It conforms to `Any` and, under the structural rule of
-[Dict keys, equality, and order](#dict-keys-equality-and-order), to
-`Equatable` and `Ordered`; to no other interface. It cannot refer to itself.
+`impl`. It conforms to `Any`, under the structural rule of
+[Dict keys, equality, and order](#dict-keys-equality-and-order) to
+`Equatable` and `Ordered`, and under that of [Interfaces](#interfaces) to
+`Encodable`; to no other interface. It cannot refer to itself.
 
 ### Recursive types
 
@@ -376,13 +380,14 @@ to `Equatable` and `Ordered` **structurally**, with no declaration. This
 structural conformance is ordinary evidence: it satisfies a bound, it admits
 the type as a dict key, and it is the implementation `Ordered.compare` and
 `Equatable.equal` dispatch to for such a type. `Void`, `Never`, `F32`,
-`F64`, callable types, `List`, `Dict`, and `Option` are not admissible keys.
-A declared type is admissible only through its own `Ordered`
-implementation. A type that
-[holds a grant](03-effects.md#capability-values) is not admissible, even a
-declared type with its own `Ordered` implementation. An inadmissible key
-type is `@type.invalidDictKey`; a callable key is
-`@type.functionNotEquatable`.
+`F64`, callable types, `List`, `Dict`, and `Option` implement no `Ordered`
+and are not admissible keys. A declared type is admissible only through its
+own `Ordered` implementation, and that implementation alone decides it: a
+declared type that [holds a grant](03-effects.md#capability-values) may write
+one and is then a key. A grant itself is a value of an operation interface
+type, which receives no `impl` and so implements no `Ordered`: it is never a
+key. An inadmissible key type, a callable type or one that contains one
+included, is `@type.invalidDictKey`.
 
 Canonical key order is the only order in which a dict is traversed, rendered,
 or iterated: `false` before `true`; numeric order for integers; scalar value
@@ -459,7 +464,7 @@ A contract member named as a value is instantiated from its written expected
 callable type, which fixes the receiver exactly as a call's operands would;
 without one it is `@type.ambiguousInference`.
 
-Callable values are not `Equatable` and are not dict keys.
+Callable values are not `Equatable` or `Encodable` and are not dict keys.
 
 A named `fn` or `proc` may refer to itself and to other named declarations
 of its module; forward reference and mutual recursion within a module are
@@ -645,11 +650,35 @@ An `interface` declares a nominal set of member signatures over `Self`.
 Conformance is always explicit: matching names and shapes are not enough.
 
 `Any` is the predeclared empty interface. Every type satisfies it without an
-implementation. The only other conformance without an `impl` is the
+implementation. The only other conformances without an `impl` are the
 structural `Equatable` and `Ordered` conformance of atoms and of anonymous
 tuples and records of
-[Dict keys, equality, and order](#dict-keys-equality-and-order). `Never`
-satisfies `Any` and no other interface.
+[Dict keys, equality, and order](#dict-keys-equality-and-order), and the
+structural `Encodable` conformance below. `Never` satisfies `Any` and no
+other interface.
+
+The standard library declares `Encodable` in the prelude, an interface with
+no member:
+
+```vibra
+interface Encodable
+  role @encodable
+  visibility @public
+endinterface
+```
+
+A type conforms to `Encodable` when its static type shows that its values
+have a [canonical encoding](06-runtime.md#what-has-no-encoding), and the
+compiler decides it structurally, with no `impl`. A type other than `Never`
+conforms unless a callable type, a plan type, or a
+[grant](03-effects.md#capability-values) occurs in it, counting the type
+arguments and the representation of every declared type that occurs in it;
+and each type parameter, `Self`, and associated type that occurs in it
+conforms in turn. A type parameter, `Self`,
+or an associated type on its own conforms only through a bound. This
+conformance is ordinary evidence: it satisfies a bound such as the
+`T: Encodable` of `assert.equal`, whose unsatisfied bound is
+`@type.unsatisfiedBound` as any other.
 
 `Self` may be written anywhere in a contract member's parameter types. In a
 member's written result type it may appear only in a position of the
@@ -679,7 +708,9 @@ interface. The target inside a `type` MUST resolve to an interface; the
 target inside an `interface` MUST resolve to a declared or builtin concrete
 type, never an anonymous structural type or an interface. The other kind is
 `@name.wrongEntityKind`. An `impl` inside an `interface` that targets a
-type of the same module is `@type.redundantImplementation`.
+type of the same module is `@type.redundantImplementation`, and so is an
+`impl` whose target is `Any` or `Encodable`, at the target: every type that
+conforms to either does so without one.
 
 The **key** of an implementation has three parts: the interface, the
 receiver type, and the interface's positional arguments. Both nesting forms

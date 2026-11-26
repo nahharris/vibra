@@ -1,0 +1,10 @@
+use @std.assert enduse
+
+fn one takes {} returns r: I32 do return 1i32 endfn
+
+// A record whose field is a callable.
+type Holder of {run: Fn({} I32) label: I32} endtype
+
+test "field" do
+  assert.equal(Holder(run: one label: 1i32) Holder(run: one label: 1i32))
+endtest

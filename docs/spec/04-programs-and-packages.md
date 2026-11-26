@@ -933,15 +933,18 @@ assertion row, as a callee or as a value, is
 | --- | --- | --- |
 | `assert.true` | `Fn({Bool} Void)` | the operand is `true` |
 | `assert.false` | `Fn({Bool} Void)` | the operand is `false` |
-| `assert.equal(T)` | `Fn({T T} Void)`, expected then actual | both operands have the same canonical value encoding |
+| `assert.equal(T)` | `Fn({T T} Void)` with `given {T: Encodable}`, expected then actual | both operands have the same canonical value encoding |
 
-An operand of `assert.equal` whose type contains a callable or plan type,
-or [holds a grant](03-effects.md#capability-values), is
-`@type.functionNotEquatable`, once at each such operand. In
-`assert.equal(Option.some(value: reader) Option.none())` with
-`reader: DirReadText`, both operands have the type `Option(DirReadText)`,
-so both are reported. The comparison uses the canonical value
-encoding and gives ordinary code no equality.
+`assert.equal` is bound by `T: Encodable`, the interface of
+[Interfaces](02-type-system.md#interfaces) whose conforming types have a
+canonical encoding. An operand type that is not `Encodable`, such as one
+that contains a callable type or
+[holds a grant](03-effects.md#capability-values), leaves the bound
+unsatisfied: `@type.unsatisfiedBound` at the operand that fixes `T`, related
+to the bound, as for any bound. A generic helper passes its own parameter to
+`assert.equal` when its `given` bounds that parameter by `Encodable`. The
+comparison uses the canonical value encoding and gives ordinary code no
+equality.
 
 A false assertion records one structured failure, with the assertion's name,
 the canonical encodings of the expected and actual values, and the call's

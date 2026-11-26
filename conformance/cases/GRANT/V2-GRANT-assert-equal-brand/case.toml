@@ -1,10 +1,11 @@
-# F7 of the review of grants. As a dict key the same brand is
-# V2-GRANT-dict-key-ordered-brand.
+# F7 of the review of grants. As a dict key the same kind of brand is
+# V2-GRANT-dict-key-ordered-brand; its own Equatable.equal is
+# V2-GRANT-equatable-brand-equal.
 id = "V2-GRANT-assert-equal-brand"
 rule = "V2-GRANT-assert-equal-brand"
 profile = "staticV2"
 operation = "workspaceCheck"
-description = "04-programs-and-packages.md#assertions: a brand over a grant with its own Equatable is still no assert.equal operand: its type contains a grant, once at each operand"
+description = "04-programs-and-packages.md#assertions: a brand over a grant with its own Equatable still holds a grant and is not Encodable: assert.equal on it is @type.unsatisfiedBound at the operand that fixes T, related to the bound"
 
 [inputs]
 tree = "tree"
@@ -12,15 +13,9 @@ project = "tree/project.vibon"
 
 [expect]
 verdict = "refuted"
-
 [[expect.diagnostics]]
-code = "@type.functionNotEquatable"
+code = "@type.unsatisfiedBound"
 level = "@error"
 source = "tests/grants.vib"
 span = { start = 2723, end = 2740 }
-
-[[expect.diagnostics]]
-code = "@type.functionNotEquatable"
-level = "@error"
-source = "tests/grants.vib"
-span = { start = 2741, end = 2758 }
+related = [{ source = "@std.assert", span = { start = 555, end = 564 } }]

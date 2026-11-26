@@ -1,0 +1,19 @@
+id = "V2-PROJECT-test-assert-equal-generic-argument-function"
+rule = "V2-PROJECT-test-assert-equal-generic-argument-function"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#interfaces: a generic declared type applied to a callable type argument is not Encodable: assert.equal on it is @type.unsatisfiedBound at the operand that fixes T, related to the bound"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.unsatisfiedBound"
+level = "@error"
+source = "tests/math.vib"
+span = { start = 184, end = 192 }
+related = [{ source = "@std.assert", span = { start = 555, end = 564 } }]

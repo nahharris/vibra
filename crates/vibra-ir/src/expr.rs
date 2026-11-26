@@ -695,9 +695,9 @@ fn names_equal<'a>(
 
 impl<'a> Tables<'a> {
     /// Checks the shape of `ty` in `scope`, that every declared type and
-    /// interface it names exists at its arity, with every choice, that every
-    /// row entry is an operation interface, and that no dict key holds an
-    /// operation interface value type, a `Proc`, or an `Intent`.
+    /// interface it names exists at its arity, with every choice, and that
+    /// every row entry is an operation interface. A dict key is decided by its
+    /// `Ordered` conformance alone, where the dict is built.
     pub(crate) fn check_type(
         &self,
         ty: &Type,
@@ -720,11 +720,6 @@ impl<'a> Tables<'a> {
                         expected: definition.parameters().len(),
                         actual: arguments.len(),
                     });
-                }
-                if self.library.get(Library::Dict) == Some(id)
-                    && let Some(key) = arguments.first()
-                {
-                    check_encodable("a dict key", key, self.interfaces)?;
                 }
             }
             Type::Proc(signature) => {

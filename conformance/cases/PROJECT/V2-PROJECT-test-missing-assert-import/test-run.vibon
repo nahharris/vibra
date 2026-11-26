@@ -2,7 +2,7 @@
   format: @testRun.v2
   result: @command.diagnostics
   tests: [
-    {name: "@tests.math::\"first\"" result: @test.invalid auditTrace: {format: @auditTrace.v2 revision: "sha256:b8076fc89fb474962b971cdd687d62537666df866ca0c24bd8d6d72954a85841" drivers: [{provider: @hostWorld.v2 version: "0.0.2"}] policies: [:] redaction: @none events: []}}
-    {name: "@tests.math::\"second\"" result: @test.invalid auditTrace: {format: @auditTrace.v2 revision: "sha256:b8076fc89fb474962b971cdd687d62537666df866ca0c24bd8d6d72954a85841" drivers: [{provider: @hostWorld.v2 version: "0.0.2"}] policies: [:] redaction: @none events: []}}
+    {name: "@tests.math::\"first\"" result: @test.invalid auditTrace: {format: @auditTrace.v2 revision: "sha256:932d08e731d30deac87e9efaf55e1e7dba537a33e14a43970124094c88c73370" drivers: [{provider: @hostWorld.v2 version: "0.0.2"}] policies: [:] redaction: @none events: []}}
+    {name: "@tests.math::\"second\"" result: @test.invalid auditTrace: {format: @auditTrace.v2 revision: "sha256:932d08e731d30deac87e9efaf55e1e7dba537a33e14a43970124094c88c73370" drivers: [{provider: @hostWorld.v2 version: "0.0.2"}] policies: [:] redaction: @none events: []}}
   ]
 }

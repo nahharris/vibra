@@ -1,0 +1,8 @@
+{
+  format: @testRun.v2
+  result: @command.unavailable
+  tests: [
+    {name: "@tests.holder::\"open\"" result: @test.unavailable auditTrace: {format: @auditTrace.v2 revision: "sha256:c88de876a2a496784a0891aebe13a8451b7e6c6246cfb439c0138a99bc722f08" drivers: [{provider: @hostWorld.v2 version: "0.0.2"}] policies: [:] redaction: @none events: []}}
+    {name: "@tests.holder::\"plain\"" result: @test.passed auditTrace: {format: @auditTrace.v2 revision: "sha256:c88de876a2a496784a0891aebe13a8451b7e6c6246cfb439c0138a99bc722f08" drivers: [{provider: @hostWorld.v2 version: "0.0.2"}] policies: [:] redaction: @none events: []}}
+  ]
+}

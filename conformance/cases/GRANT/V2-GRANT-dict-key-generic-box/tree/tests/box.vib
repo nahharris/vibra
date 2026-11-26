@@ -1,0 +1,35 @@
+use @std.assert enduse
+
+use @std.test.TestWorld enduse
+
+use @std.fs.DirReadText enduse
+
+// A generic box ordered for every argument: its own implementations decide,
+// whatever the argument holds.
+type Box(T) of T
+  impl Equatable
+    fn equal
+      takes {left: Self right: Self}
+      returns same: Bool
+      do
+        return true
+    endfn
+  endimpl
+  impl Ordered
+    fn compare
+      takes {left: Self right: Self}
+      returns order: Ordering
+      do
+        return Ordering.equal()
+    endfn
+  endimpl
+endtype
+
+test "box"
+  takes {world: TestWorld}
+  performs {TestWorld}
+  do
+    let {readText: reader} be await TestWorld.directory(world) endlet
+    let names be [Box(reader): "one"] endlet
+    assert.equal(Option.some(value: "one") names(Box(reader)))
+endtest

@@ -1,0 +1,19 @@
+id = "V2-PROJECT-test-assert-equal-generic-unbounded"
+rule = "V2-PROJECT-test-assert-equal-generic-unbounded"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#interfaces: an open type parameter is Encodable only through a bound, so assert.equal on a parameter T with no bound is @type.unsatisfiedBound at the operand that fixes T, related to the bound of assert.equal"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.unsatisfiedBound"
+level = "@error"
+source = "tests/same.vib"
+span = { start = 168, end = 176 }
+related = [{ source = "@std.assert", span = { start = 555, end = 564 } }]

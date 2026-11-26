@@ -16,4 +16,4 @@ code = "@type.defaultOverride"
 level = "@error"
 source = "src/app/main.vib"
 span = { start = 216, end = 220 }
-related = [{ span = { start = 808, end = 812 } }]
+related = [{ span = { start = 846, end = 850 } }]
