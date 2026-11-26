@@ -1,0 +1,2 @@
+call	startUtc	endUtc	seconds	exit	timedOut	outcome	reason	reportedModel	usage	audit
+1	2026-11-26T12:23:33.905Z	2026-11-26T12:23:41.092Z	7.186	0	false	completion	-	notReported	{"input_tokens":5100,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":213,"reasoning_output_tokens":0}	valid=True;messages=2;roles=message/developer,message/user;tools=0;systemSha256=b4797f03db62e8af760bc61f22d60fd4a2d0a25c1a7dc971fb4f33390d825bc9;promptSha256=371f603cd88e4317da9ae592b0f6fc5322025c81c05dccb2786fc2f833198ea1

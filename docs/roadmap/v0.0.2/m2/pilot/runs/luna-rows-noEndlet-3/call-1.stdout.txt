@@ -1,0 +1,4 @@
+{"type":"thread.started","thread_id":"01a217d0-21de-7d63-adca-cc9a2c0b90a7"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"type Row of {key: Str amount: I32}\n  visibility @public\nendtype\n\nfn indexRows\n  takes {rows: List(Row)}\n  returns index: Dict(Str I32)\n  visibility @public\n  do\n    return From.convert(\n      Iter.collect(\n        Iter.map(\n          rows\n          fn\n            takes {row: Row}\n            returns pair: {Str I32}\n            do\n              return {row.key row.amount}\n          endfn\n        )\n      )\n    )\nendfn\n\nfn latest\n  takes {rows: List(Row) key: Str}\n  returns amount: Option(I32)\n  visibility @public\n  do\n    return indexRows(rows)(key)\nendfn"}}
+{"type":"turn.completed","usage":{"input_tokens":5127,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":153,"reasoning_output_tokens":0}}

@@ -1,0 +1,1 @@
+pair	endlet	refuted	closed=-	check=@command.diagnostics	test=@command.diagnostics	codes=@type.mismatch	failed=-

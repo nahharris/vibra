@@ -1,0 +1,1 @@
+gate	noEndlet	refuted	closed=0	check=@command.diagnostics	test=@command.diagnostics	codes=@syntax.invalidForm	failed=-

@@ -1,0 +1,1 @@
+2026-11-26T12:30:23.221884Z ERROR codex_core::tools::router: error=image generation failed: http 400 Bad Request: Some("{\n  \"error\": {\n    \"message\": \"Invalid 'prompt': empty string. Expected a string with minimum length 1, but got an empty string instead.\",\n    \"type\": \"invalid_request_error\",\n    \"param\": \"prompt\",\n    \"code\": \"empty_string\"\n  }\n}")

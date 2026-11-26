@@ -1,0 +1,32 @@
+kind	run
+run	haiku-optional-endlet-5
+index	97
+cohort	haiku
+position	97
+task	optional
+arm	endlet
+attempt	5
+promptSha256	371f603cd88e4317da9ae592b0f6fc5322025c81c05dccb2786fc2f833198ea1
+promptBytes	15910
+requestedModel	claude-haiku-5-5
+setting	effort low
+systemPrompt	You are a test participant. Output only what is asked.
+client	claude
+clientVersion	2.1.318 (Claude Code)
+freezeCommit	156f35cf2a7f10c8d9df37be43053ba74e941605
+vibraSha256	da9854d8fab200db7a96173fb77844a80a10e21fac0665fb7d68afbef107dcea
+startUtc	2026-11-26T12:30:40.125Z
+endUtc	2026-11-26T12:30:49.104Z
+calls	1
+outcome	completion
+reportedModel	claude-haiku-5-5
+usage	{"input_tokens":2,"cache_creation_input_tokens":406,"cache_read_input_tokens":6541,"output_tokens":1836,"output_tokens_details":{"thinking_tokens":1518},"server_tool_use":{"web_search_requests":0,"web_fetch_requests":0},"service_tier":"standard","cache_creation":{"ephemeral_1h_input_tokens":406,"ephemeral_5m_input_tokens":0},"inference_geo":"global","iterations":[{"input_tokens":2,"output_tokens":1836,"cache_read_input_tokens":6541,"cache_creation_input_tokens":406,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":406},"type":"message"}],"speed":"standard","fallback_credit":null}
+outputCap	4096 (CLAUDE_CODE_MAX_OUTPUT_TOKENS)
+overCap	false
+completionSha256	e9697e46a60a0e936703a6d97bc7477d3e1d402463361b1e8e7f1e2851cb9549
+completionBytes	758
+solutionSha256	447b43d3d849560a59287be89453ae4b58de1b42e08ebe794c05bc3e0b34d444
+solutionBytes	746
+command	["claude","-p","--model","claude-haiku-5-5","--effort","low","--output-format","json","--tools","","--strict-mcp-config","--mcp-config","{\"mcpServers\":{}}","--setting-sources","","--disable-slash-commands","--no-session-persistence","--system-prompt","You are a test participant. Output only what is asked."]
+removedEnvironment	CLAUDE_CODE_CHILD_SESSION,CLAUDE_CODE_ENTRYPOINT,CLAUDE_CODE_MESSAGING_SOCKET,CLAUDE_CODE_MESSAGING_TOKEN,CLAUDE_CODE_SESSION_ATTENDED,CLAUDE_CODE_SESSION_ID,CLAUDE_PID,CLAUDECODE
+grade	optional | endlet | passed | closed=- | check=@command.ok | test=@command.ok | codes=- | failed=-

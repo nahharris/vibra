@@ -32,6 +32,16 @@ runs the translation's reader over every .vib file of the conformance
 corpus, the standard library, and the examples, and compares it with the
 corpus expectations; it calls no vibra.
 
+  pwsh -NoProfile -File examples/pilot/grade.ps1 -VerifyRuns <runs.tsv>
+
+checks the run records of step 40 (the runs/ directory beside runs.tsv)
+against the registration: the schedule, one line and one record per
+scheduled run in order, every record with its prompt digest, its calls and
+their whole output, its completion, extraction, and grade, the retry and
+stop rules, the setup calls, and a regrade of the 20 runs the registered
+seed picks. It prints `schedule complete: N of N` and exits 0 only when
+every check holds.
+
 The script reads no network. It writes only under a fresh directory of the
 system's temporary directory, which it removes.
 
@@ -57,8 +67,11 @@ param(
   [switch]$All,
   [Parameter(ParameterSetName = 'Reader', Mandatory)]
   [switch]$CheckReader,
+  [Parameter(ParameterSetName = 'Verify', Mandatory)]
+  [string]$VerifyRuns,
   [Parameter(ParameterSetName = 'One')]
   [Parameter(ParameterSetName = 'All')]
+  [Parameter(ParameterSetName = 'Verify')]
   [string]$Vibra = '',
   [Parameter(ParameterSetName = 'One')]
   [Parameter(ParameterSetName = 'All')]
@@ -1517,7 +1530,262 @@ function Invoke-CheckReader {
   $script:ExitCode = if ($counts.mismatched -eq 0) { 0 } else { 1 }
 }
 
+# The run records of step 40 against the registration. Each check is written
+# here again, apart from the runner, from the registration's sections
+# "Schedule", "Digests", "Extraction", "Grading" (regrading), and "Budget".
+function Read-KeyValues([string]$Path) {
+  $fields = @{}
+  foreach ($line in [IO.File]::ReadAllLines($Path)) {
+    if ($line -eq '') { continue }
+    $key, $value = $line -split "`t", 2
+    $fields[$key] = $value
+  }
+  return $fields
+}
+
+# "Extraction": the lines after the first line that begins with three
+# backticks, up to the next such line or the end; else the whole text.
+function Get-Extracted([byte[]]$Completion) {
+  $lines = [Collections.Generic.List[int[]]]::new()
+  $start = 0
+  for ($i = 0; $i -lt $Completion.Length; $i++) {
+    if ($Completion[$i] -eq 10) { $lines.Add(@($start, $i + 1)); $start = $i + 1 }
+  }
+  if ($start -lt $Completion.Length) { $lines.Add(@($start, $Completion.Length)) }
+  $isFence = { param($line) $line[1] - $line[0] -ge 3 -and $Completion[$line[0]] -eq 0x60 -and $Completion[$line[0] + 1] -eq 0x60 -and $Completion[$line[0] + 2] -eq 0x60 }
+  $first = -1
+  for ($k = 0; $k -lt $lines.Count; $k++) { if (& $isFence $lines[$k]) { $first = $k; break } }
+  if ($first -lt 0) { return , $Completion }
+  $from = if ($first + 1 -lt $lines.Count) { $lines[$first + 1][0] } else { $Completion.Length }
+  $to = $Completion.Length
+  for ($k = $first + 1; $k -lt $lines.Count; $k++) { if (& $isFence $lines[$k]) { $to = $lines[$k][0]; break } }
+  $bytes = [byte[]]::new($to - $from)
+  [Array]::Copy($Completion, $from, $bytes, 0, $to - $from)
+  return , $bytes
+}
+
+function Invoke-VerifyRuns([string]$TablePath) {
+  $tableFile = [IO.Path]::GetFullPath($TablePath, (Get-Location).Path)
+  $records = Join-Path (Split-Path $tableFile) 'runs'
+  $problems = [Collections.Generic.List[string]]::new()
+  $lines = Get-RegistrationLines
+  $text = [IO.File]::ReadAllText((Join-Path $Repository 'docs/roadmap/v0.0.2/m2/pilot/registration.md'))
+  $tasks = @($lines | Where-Object { $_ -match '^\| T\d+ \| `[a-z]+` \| `@pilot\.' } | ForEach-Object { ($_ -split '`')[1] })
+  $models = @($lines | Where-Object { $_ -match '^\| `(haiku|luna)` \| ' } | ForEach-Object {
+      $cells = $_.Split('|') | ForEach-Object { $_.Trim().Replace('`', '') }
+      [pscustomobject]@{ Key = $cells[1]; Identifier = $cells[3]; Setting = $cells[4] }
+    })
+  $digests = @{}
+  foreach ($line in $lines) {
+    if ($line -match '^\| T\d+ `([a-z]+)` \| `(endlet|noEndlet)` \| \d+ \| `([0-9a-f]{64})` \|$') { $digests["$($Matches[1])/$($Matches[2])"] = $Matches[3] }
+  }
+  if ($tasks.Count -ne 10 -or $models.Count -ne 2 -or $digests.Count -ne 20) { throw 'the registration does not give ten tasks, two models, and twenty prompt digests' }
+  if (-not ($text -replace '\s+', ' ').Contains('followed by the identifier, skipping runs with no completion')) { throw 'the registration no longer gives the regrade rule' }
+  if ($text -notmatch 'UTF-8 text `(vibraPilot\d+:)`') { throw 'no regrade seed in the registration' }
+  $seed = $Matches[1]
+
+  # The schedule: per model, attempts 1 to 5, tasks T1 to T10, endlet first
+  # in an odd attempt and noEndlet first in an even one.
+  $schedule = [Collections.Generic.List[object]]::new()
+  foreach ($model in $models) {
+    $position = 0
+    for ($attempt = 1; $attempt -le 5; $attempt++) {
+      foreach ($task in $tasks) {
+        $arms = if ($attempt % 2) { @('endlet', 'noEndlet') } else { @('noEndlet', 'endlet') }
+        foreach ($arm in $arms) {
+          $position++
+          $schedule.Add([pscustomobject]@{
+              Index = $schedule.Count + 1; Cohort = $model.Key; Position = $position; Run = "$($model.Key)-$task-$arm-$attempt"
+              Model = $model.Identifier; Setting = $model.Setting; Task = $task; Arm = $arm; Attempt = $attempt; Digest = $digests["$task/$arm"]
+            })
+        }
+      }
+    }
+  }
+  $byRun = @{}
+  foreach ($entry in $schedule) { $byRun[$entry.Run] = $entry }
+
+  # The schedule file is the registration's schedule.
+  $scheduleFile = Join-Path $records 'schedule.tsv'
+  if (-not (Test-Path -LiteralPath $scheduleFile)) { $problems.Add('no schedule file runs/schedule.tsv') }
+  else {
+    $written = @([IO.File]::ReadAllLines($scheduleFile) | Select-Object -Skip 1 | Where-Object { $_ -ne '' })
+    $expected = @($schedule | ForEach-Object { @($_.Index, $_.Cohort, $_.Position, $_.Run, $_.Model, $_.Setting, $_.Task, $_.Arm, $_.Attempt, $_.Digest) -join "`t" })
+    if (($written -join "`n") -cne ($expected -join "`n")) { $problems.Add('runs/schedule.tsv is not the schedule of the registration') }
+  }
+
+  # Every record directory is a scheduled run.
+  foreach ($directory in (Get-ChildItem -LiteralPath $records -Directory)) {
+    if ($directory.Name -eq 'setup') { continue }
+    if (-not $byRun.ContainsKey($directory.Name)) { $problems.Add("an extra attempt: the record $($directory.Name) has no schedule entry") }
+  }
+
+  # runs.tsv: one line per scheduled run, in schedule order.
+  $table = @()
+  if (Test-Path -LiteralPath $tableFile) { $table = @([IO.File]::ReadAllLines($tableFile) | Select-Object -Skip 1 | Where-Object { $_ -ne '' }) }
+  else { $problems.Add('no runs.tsv') }
+  for ($i = 0; $i -lt $table.Count; $i++) {
+    $run = ($table[$i] -split "`t")[1]
+    if ($i -ge $schedule.Count -or $run -ne $schedule[$i].Run) { $problems.Add("runs.tsv line $($i + 1) is $run, not the scheduled run $(if ($i -lt $schedule.Count) { $schedule[$i].Run } else { '(none)' })"); break }
+  }
+
+  $states = @{}
+  $complete = 0
+  foreach ($entry in $schedule) {
+    $directory = Join-Path $records $entry.Run
+    $recordFile = Join-Path $directory 'record.tsv'
+    if (-not (Test-Path -LiteralPath $recordFile)) { $problems.Add("a missing attempt: $($entry.Run) has no record"); continue }
+    $record = Read-KeyValues $recordFile
+    $before = $problems.Count
+    foreach ($pair in @(@('kind', 'run'), @('run', $entry.Run), @('index', "$($entry.Index)"), @('cohort', $entry.Cohort), @('task', $entry.Task), @('arm', $entry.Arm), @('attempt', "$($entry.Attempt)"), @('requestedModel', $entry.Model), @('setting', $entry.Setting))) {
+      if ($record[$pair[0]] -cne $pair[1]) { $problems.Add("$($entry.Run): the record's $($pair[0]) is '$($record[$pair[0]])', not '$($pair[1])'") }
+    }
+    if ($record['promptSha256'] -cne $entry.Digest) { $problems.Add("$($entry.Run): the prompt digest is not the one registered for $($entry.Task) $($entry.Arm)") }
+    $calls = @()
+    $callsFile = Join-Path $directory 'calls.tsv'
+    if (Test-Path -LiteralPath $callsFile) { $calls = @([IO.File]::ReadAllLines($callsFile) | Select-Object -Skip 1 | Where-Object { $_ -ne '' } | ForEach-Object { , ($_ -split "`t") }) }
+    if ("$($calls.Count)" -ne $record['calls']) { $problems.Add("$($entry.Run): calls.tsv has $($calls.Count) calls, the record $($record['calls'])") }
+    if ($calls.Count -gt 2) { $problems.Add("$($entry.Run): more than one retry") }
+    $outcomes = @()
+    for ($c = 0; $c -lt $calls.Count; $c++) {
+      $call = $calls[$c]
+      if ($call[0] -ne "$($c + 1)") { $problems.Add("$($entry.Run): calls are not numbered in order") }
+      $outcomes += $call[6]
+      $notSent = $call[7] -like 'interrupted*' -or $call[7] -eq 'the context audit failed'
+      $stdout = Join-Path $directory "call-$($c + 1).stdout.txt"
+      if (-not $notSent -and -not (Test-Path -LiteralPath $stdout)) { $problems.Add("$($entry.Run): call $($c + 1) has no output kept") }
+      if ($call[6] -eq 'completion' -and $call[7] -notlike 'interrupted*' -and (Get-Item -LiteralPath $stdout).Length -eq 0) { $problems.Add("$($entry.Run): call $($c + 1) gave a completion and kept no output") }
+      if ($c -lt $calls.Count - 1 -and $call[6] -ne 'failed') { $problems.Add("$($entry.Run): a call after a completion") }
+    }
+    $completionFile = Join-Path $directory 'completion.txt'
+    $outcome = $record['outcome']
+    switch ($outcome) {
+      'completion' {
+        if ($outcomes.Count -eq 0 -or $outcomes[-1] -ne 'completion') { $problems.Add("$($entry.Run): a completion whose last call did not give one") }
+        if (-not (Test-Path -LiteralPath $completionFile)) { $problems.Add("$($entry.Run): no completion kept"); break }
+        $completion = [IO.File]::ReadAllBytes($completionFile)
+        if ((Get-Sha256 $completion) -ne $record['completionSha256']) { $problems.Add("$($entry.Run): completion.txt is not the recorded completion") }
+        $solutionFile = Join-Path $directory 'solution.vib'
+        # Assigned directly, so that an empty solution stays an empty array.
+        $solution = $null
+        if (Test-Path -LiteralPath $solutionFile) { $solution = [IO.File]::ReadAllBytes($solutionFile) }
+        $extracted = Get-Extracted $completion
+        if ($null -eq $solution -or (Get-Sha256 $solution) -ne (Get-Sha256 $extracted) -or (Get-Sha256 $solution) -ne $record['solutionSha256']) { $problems.Add("$($entry.Run): solution.vib is not the extraction of the completion") }
+        $gradeFile = Join-Path $directory 'grade.txt'
+        if (-not (Test-Path -LiteralPath $gradeFile)) { $problems.Add("$($entry.Run): no grade kept"); break }
+        $gradeLine = [IO.File]::ReadAllText($gradeFile).TrimEnd("`n")
+        $fields = $gradeLine -split "`t"
+        if ($fields[0] -ne $entry.Task -or $fields[1] -ne $entry.Arm) { $problems.Add("$($entry.Run): the grade is of another task or arm") }
+        $states[$entry.Run] = @{ Outcome = 'completion'; Grade = $fields[2]; Line = $gradeLine; Solution = $solution }
+      }
+      'providerError' {
+        if ($calls.Count -ne 2 -or ($outcomes | Where-Object { $_ -ne 'failed' })) { $problems.Add("$($entry.Run): a provider error needs two failed calls") }
+        if (Test-Path -LiteralPath $completionFile) { $problems.Add("$($entry.Run): a provider error with a completion") }
+        $states[$entry.Run] = @{ Outcome = 'providerError'; Grade = 'providerError' }
+      }
+      'stopped' {
+        if (Test-Path -LiteralPath $completionFile) { $problems.Add("$($entry.Run): a stopped run with a completion") }
+        $states[$entry.Run] = @{ Outcome = 'stopped'; Grade = 'stopped' }
+      }
+      default { $problems.Add("$($entry.Run): the outcome '$outcome' is not final") }
+    }
+    if ($states.ContainsKey($entry.Run)) { $states[$entry.Run].Outcomes = $outcomes }
+    # The table line holds the record's outcome and the grader's line.
+    $line = if ($entry.Index - 1 -lt $table.Count) { $table[$entry.Index - 1] -split "`t" } else { $null }
+    if ($null -eq $line) { $problems.Add("$($entry.Run): no line in runs.tsv") }
+    elseif ($states.ContainsKey($entry.Run)) {
+      if ($line[1] -ne $entry.Run -or $line[7] -ne $record['promptSha256'] -or $line[8] -ne $record['calls'] -or $line[9] -ne $outcome -or $line[12] -ne $states[$entry.Run].Grade) { $problems.Add("$($entry.Run): its line in runs.tsv does not match its record") }
+    }
+    if ($problems.Count -eq $before -and $null -ne $line) { $complete++ }
+  }
+
+  # The retry and stop rules ("Budget"), cohort by cohort in schedule order.
+  $summary = [Collections.Generic.List[string]]::new()
+  foreach ($model in $models) {
+    $consecutive = 0; $made = 0; $retries = 0; $failedCalls = 0; $stoppedAt = ''
+    foreach ($entry in ($schedule | Where-Object Cohort -eq $model.Key)) {
+      if (-not $states.ContainsKey($entry.Run)) { continue }
+      $state = $states[$entry.Run]
+      if ($consecutive -ge 5) {
+        if ($state.Outcome -ne 'stopped' -or $state.Outcomes.Count) { $problems.Add("$($entry.Run): a call after the cohort stopped") }
+        continue
+      }
+      $n = 0
+      foreach ($outcome in $state.Outcomes) {
+        $n++
+        if ($consecutive -ge 5) { $problems.Add("$($entry.Run): a call after five consecutive provider failures") }
+        $made++
+        if ($n -eq 2) { $retries++ }
+        if ($outcome -eq 'failed') { $consecutive++; $failedCalls++ } else { $consecutive = 0 }
+      }
+      if ($state.Outcome -eq 'stopped') {
+        if ($consecutive -lt 5) { $problems.Add("$($entry.Run): stopped without five consecutive provider failures") }
+        elseif ($stoppedAt -eq '') { $stoppedAt = $entry.Run }
+      }
+    }
+    # The setup calls: at most five, outside the runs, one passed before the
+    # cohort's first call.
+    $setups = @(Get-ChildItem -LiteralPath (Join-Path $records 'setup') -Directory -ErrorAction SilentlyContinue | Where-Object Name -match "^$($model.Key)-\d+$")
+    $passed = @($setups | Where-Object { (Test-Path (Join-Path $_.FullName 'record.tsv')) -and (Read-KeyValues (Join-Path $_.FullName 'record.tsv'))['setupPassed'] -eq 'true' })
+    if ($setups.Count -gt 5) { $problems.Add("$($model.Key): more than five setup calls") }
+    $first = $schedule | Where-Object Cohort -eq $model.Key | Select-Object -First 1
+    $firstCalls = Join-Path (Join-Path $records $first.Run) 'calls.tsv'
+    if ($made -gt 0) {
+      if ($passed.Count -eq 0) { $problems.Add("$($model.Key): runs were called with no passed setup call") }
+      elseif (Test-Path -LiteralPath $firstCalls) {
+        $firstStart = ([IO.File]::ReadAllLines($firstCalls)[1] -split "`t")[1]
+        $setupEnd = (Read-KeyValues (Join-Path $passed[0].FullName 'record.tsv'))['endUtc']
+        if ([string]::CompareOrdinal($setupEnd, $firstStart) -gt 0) { $problems.Add("$($model.Key): the setup call passed after the first run's call") }
+      }
+    }
+    $stopText = if ($stoppedAt) { "; stopped by the stop rule at $stoppedAt" } else { '' }
+    $summary.Add("cohort $($model.Key): $made calls ($retries retries, $failedCalls failed at the provider); $($setups.Count) setup calls$stopText")
+  }
+
+  # The regrade: the first 20 runs with a completion when the identifiers are
+  # sorted by the SHA-256 of the seed followed by the identifier.
+  $vibraSha = Get-Sha256 ([IO.File]::ReadAllBytes($script:VibraPath))
+  $keyed = [Collections.Generic.List[object]]::new()
+  foreach ($entry in $schedule) { $keyed.Add([pscustomobject]@{ Key = Get-Sha256 ([Text.Encoding]::UTF8.GetBytes("$seed$($entry.Run)")); Entry = $entry }) }
+  $keyed.Sort([Comparison[object]] { param($x, $y) [string]::CompareOrdinal($x.Key, $y.Key) })
+  $order = @($keyed | ForEach-Object { $_.Entry })
+  $picked = @($order | Where-Object { $states.ContainsKey($_.Run) -and $states[$_.Run].Outcome -eq 'completion' } | Select-Object -First 20)
+  $sameGrade = 0; $sameLine = 0
+  foreach ($entry in $picked) {
+    $state = $states[$entry.Run]
+    try { $again = Format-Grade (Get-Grade $entry.Task $entry.Arm $state.Solution) }
+    catch { $again = "$($entry.Task)`t$($entry.Arm)`tgraderError" }
+    $grade = ($again -split "`t")[2]
+    if ($grade -ceq $state.Grade) { $sameGrade++ } else { $problems.Add("regrade: $($entry.Run) was $($state.Grade) and is now $grade") }
+    if ($again -ceq $state.Line) { $sameLine++ }
+    "regrade`t$($entry.Run)`t$grade`t$(if ($again -ceq $state.Line) { 'same line' } else { 'same grade, another line' })"
+  }
+  if ($picked.Count -lt 20 -and @($states.Values | Where-Object { $_.Outcome -eq 'completion' }).Count -ge 20) { $problems.Add('regrade: fewer than 20 runs picked') }
+
+  $counts = @{ completion = 0; providerError = 0; stopped = 0 }
+  foreach ($state in $states.Values) { $counts[$state.Outcome]++ }
+  foreach ($line in $summary) { $line }
+  "outcomes`t$($counts.completion) with a completion, $($counts.providerError) providerError, $($counts.stopped) stopped"
+  "regrade`t$sameGrade of $($picked.Count) the same grade; $sameLine of $($picked.Count) the same line"
+  $recorded = @($schedule | Where-Object { Test-Path (Join-Path (Join-Path $records $_.Run) 'record.tsv') } | ForEach-Object { (Read-KeyValues (Join-Path (Join-Path $records $_.Run) 'record.tsv'))['vibraSha256'] } | Sort-Object -Unique)
+  "grader`tvibra sha256 $vibraSha; the records name $($recorded -join ', ')"
+  foreach ($problem in $problems) { "PROBLEM`t$problem" }
+  if ($problems.Count -eq 0 -and $complete -eq $schedule.Count -and $table.Count -eq $schedule.Count) {
+    "schedule complete: $complete of $($schedule.Count)"
+    $script:ExitCode = 0
+  }
+  else {
+    "schedule not complete: $complete of $($schedule.Count) runs verified; $($problems.Count) problems"
+    $script:ExitCode = 1
+  }
+}
+
 switch ($PSCmdlet.ParameterSetName) {
+  'Verify' {
+    $script:VibraPath = Resolve-VibraPath
+    Invoke-VerifyRuns $VerifyRuns
+    exit $script:ExitCode
+  }
   'Reader' {
     Invoke-CheckReader
     exit $script:ExitCode

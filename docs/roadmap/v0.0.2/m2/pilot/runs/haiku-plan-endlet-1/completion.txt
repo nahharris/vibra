@@ -1,0 +1,37 @@
+```vibra
+use @std.fs.DirWriteText enduse
+
+use @std.fs.FsError enduse
+
+use @std.fs.RelativePath enduse
+
+proc emit
+  takes {enabled: Bool writer: DirWriteText at: RelativePath contents: Str}
+  returns outcome: Result(Void FsError)
+  requires enabled else Result.ok(value: void)
+  performs {DirWriteText}
+  visibility @public
+  do
+    return await DirWriteText.write(writer at contents)
+endproc
+
+fn prepare
+  takes {enabled: Bool writer: DirWriteText at: RelativePath contents: Str}
+  returns plan: Intent(Result(Void FsError) {DirWriteText})
+  visibility @public
+  do
+    return emit(enabled writer at contents)
+endfn
+
+proc runTwice
+  takes {enabled: Bool writer: DirWriteText at: RelativePath contents: Str}
+  returns count: Result(U32 FsError)
+  performs {DirWriteText}
+  visibility @public
+  do
+    let plan be prepare(enabled writer at contents) endlet
+    let _ be try await plan endlet
+    let _ be try await plan endlet
+    return Result.ok(value: 2u32)
+endproc
+```

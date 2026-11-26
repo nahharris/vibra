@@ -1,0 +1,12 @@
+fn reversedSpanOr
+  takes {fallback: I32}
+  returns width: I32
+  visibility @public
+  do
+    return match reversed
+      case Result.ok(value: range)
+        I32.sub(range.high range.low)
+      case Result.err(error: _)
+        fallback
+    endmatch
+endfn

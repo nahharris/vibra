@@ -1,0 +1,4 @@
+{"type":"thread.started","thread_id":"01a217c9-b245-7880-a74a-b92fd0afffd6"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"fn normalizePair\n  takes {{low high}: {low: I32 high: I32}}\n  labelled {includeDelta: Bool be true}\n  returns pair: {first: I32 second: I32 delta: Option(I32)}\n  visibility @public\n  do\n    let {first second} be if Ordered.less(low high) then\n      {first: low second: high}\n    else\n      {first: high second: low}\n    endif\n    let delta be if includeDelta then\n      Option.some(value: I32.sub(second first))\n    else\n      Option.none()\n    endif\n    return {first: first second: second delta: delta}\nendfn"}}
+{"type":"turn.completed","usage":{"input_tokens":5125,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":145,"reasoning_output_tokens":0}}
