@@ -23,7 +23,7 @@ Crates: `examples`, `vibra-cli`.
 | `crates/vibra-cli/src/lib.rs:84` | `fn execute` | the command the showings run |
 
 Example projects: `examples/hello/`, and the pure modules of the gate
-in `examples/gate-pure/`, which the exit step of M1 adds.
+in `examples/gate/gate-pure/`.
 
 Proposed: `examples/gate/` (`project.vibon`, `src/gate/`, `tests/`);
 `crates/vibra-cli/tests/it/gate.rs`.
@@ -61,7 +61,7 @@ Proposed: `examples/gate/` (`project.vibon`, `src/gate/`, `tests/`);
    entry and the startup reads. Invariant: the program has no other
    authority, and its project file states all of it.
 2. The body lists the notes, counts lines with the pure modules of
-   `examples/gate-pure/` (a path dependency), and writes the log through
+   `examples/gate/gate-pure/` (a path dependency), and writes the log through
    a callback of type `Proc({Str} Result(Void FsError) {DirWriteText})`
    that closes over `logs` only.
 3. Tests under `examples/gate/tests/`: every grant from `TestWorld`;
@@ -80,7 +80,7 @@ variants the test writes; the directory rows are Windows only.
 
 | Row | Kind | Input | Expected | Specification |
 | --- | --- | --- | --- | --- |
-| check, format, test | positive | `vibra check`, `vibra fmt --check`, `vibra test` in `examples/gate/` | exit 0 each; every test `@test.passed` | release gate 1: "Its tests obtain every grant from `TestWorld`" |
+| check, format, test | positive | `vibra check`, `vibra fmt PATH` for each source file, `vibra test` in `examples/gate/` | exit 0 each; no file changed; every test `@test.passed` | release gate 1: "Its tests obtain every grant from `TestWorld`" |
 | tests take only the world | positive | every `test` of `examples/gate/tests/` | its `takes` is `{world: TestWorld}` or absent | the same |
 | run | positive | a directory with `a.txt` (2 lines) and `b.txt` (3 lines); `vibra run -- <dir>` | exit 0; stdout the two counts; a log file under the log directory | release gate 2: "Run it with `vibra run` under the target's grant bindings" |
 | showing: the callback cannot read | negative | a variant whose log callback awaits `DirReadText.read` | `vibra check` exit 1; `@effect.outsideCeiling` in the callback | release gate 2: "a callback limited to the log grant cannot reach the reader" |

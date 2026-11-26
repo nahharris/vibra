@@ -1264,9 +1264,10 @@ narrowing a grant that the broker has no room left to record is memory
 exhaustion as well. So is an allocation that the operating system refuses
 inside a driver, for a reply the broker had already admitted: the driver
 reports memory exhaustion, never an error case of the operation, and the
-call appends no event that claims it completed. A startup read runs before
-the program and has no program memory budget: only the limits of its
-`source` grant bound it.
+call appends no event that claims it completed. What the adapter moved
+before the operating system refused the allocation is charged as it
+measured it. A startup read runs before the program and has no program
+memory budget: only the limits of its `source` grant bound it.
 
 **Driver faults.** A driver that breaks this protocol is the defect trap
 `@runtime.invalidHostValue`: it acts after a refusal, reports a refusal no

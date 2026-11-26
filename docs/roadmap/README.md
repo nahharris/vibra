@@ -14,8 +14,11 @@
 Only v0.0.1 has shipped. The repository's `vibra` binary implements the
 language of the active [specification](../spec/00-charter.md) as far as the
 milestones of v0.0.2 have landed: milestone 1 checks, formats, and tests pure
-programs. The existing v0.1.x Git tags belong to the
-[archived implementation](../../archive/pre-v1/ARCHIVE.md).
+programs, and milestone 2 checks effect rows and grant bindings and runs a
+command-line program under `vibra run` with the grants its project file binds,
+in a fake world or against the real console, environment, clocks, and random
+source, with real directories on Windows. The existing v0.1.x Git tags belong
+to the [archived implementation](../../archive/pre-v1/ARCHIVE.md).
 
 The [scratchpad](scratchpad/README.md) holds unscheduled research and the
 record of the redesign debate; it is not normative. Use the

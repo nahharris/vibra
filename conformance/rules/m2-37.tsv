@@ -1,0 +1,4 @@
+identity	status	anchor
+V2-GRANT-startup-order-permuted	active	04-programs-and-packages.md#startup-order
+V2-GRANT-test-entries-sorted	active	06-runtime.md#closed-operation-semantics
+V2-RUNTIME-await-twice-two-events	active	03-effects.md#delivery-and-typed-outcomes

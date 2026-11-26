@@ -19,6 +19,7 @@ mod encoding_readback;
 mod exit_evidence;
 mod host_testing_feature;
 mod interpret;
+mod m2_coverage;
 mod manifest;
 mod name_profile;
 mod owner_coverage;

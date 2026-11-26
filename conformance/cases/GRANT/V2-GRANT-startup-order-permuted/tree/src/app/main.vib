@@ -1,0 +1,10 @@
+use @std.io.StdoutText enduse
+
+use @std.process.ExitCode enduse
+
+proc main
+  takes {a: StdoutText b: StdoutText z: StdoutText}
+  returns code: ExitCode
+  do
+    return ExitCode(0u8)
+endproc
