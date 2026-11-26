@@ -4,20 +4,28 @@ For every supported form of the specification this table names the step
 that implements it, the conformance cases planned for it, its diagnostics,
 and its schema. A form without all four is not supported. A bare step number
 is a step of the [M1 plan](../m1/README.md); a number after `M2` is a step
-of the [M2 plan](../m2/README.md). A form owned by a later milestone carries
-that milestone's name and no detail.
+of the [M2 plan](../m2/README.md); a number after `M3` is a step of the
+[M3 plan](../m3/README.md). A form owned by a later milestone carries that
+milestone's name and no detail.
 
 ## Findings
 
-Forms that the release names and no M1 or M2 step can own.
+Forms that the release names and no M1, M2, or M3 step can own, and forms
+an M3 step owns only under a question the owner has not yet ruled.
 
 | Form | Finding |
 | --- | --- |
-| Command `eval` | The M2 scope does not contain it. Its owner is M3, "Bounded evaluation"; it stays `@tool.unavailable` through M2. |
-| Commands `project init`, `inspect`, `add`, `remove`, `sync` | No milestone of the release names them. They stay `@tool.unavailable`; an owner is needed before the release gate is read as complete. |
+| Commands `project init`, `inspect`, `add`, `remove`, `sync` | No milestone of the release names them, and M3's scope does not; they stay `@tool.unavailable`. `inspect` is largely `query @workspace`, and `add` and `remove` would reuse the edit plan of M3 step 07. An owner is needed before the release gate is read as complete. |
 | `@project.staleLock`, `@git` dependencies, the lock | Not in this release. M2 step 27 reports a `@git` dependency as `@tool.unavailable` (`V2-PROJECT-git-dependency-unavailable`). |
-| The `effectWitnesses` query expansion | The witness of `@effect.outsideCeiling` is carried by the diagnostic from M2 step 09. The expansion belongs to `query`, which is M3. |
 | Reserved HTTP items of required coverage 11 | No network operation exists in this release; no step owns them. |
+| Command `edit replace` | Not in the command surface of chapter 05. M3 step 11 owns it under [Q1](../m3/spec-questions.md#q1-no-supported-edit-changes-a-body); without that ruling no command of the surface can make the repair edit of the release gate. |
+| Command `approve` | Not in the command surface. M3 step 13 owns it under [Q8](../m3/spec-questions.md#q8-the-command-that-presents-authority); without that ruling review finding F8 of M2 has no owner. |
+| `@approval.v2`, `@editJournal.v2` | Documents no chapter defines. M3 steps 09 and 14 own them under [Q7](../m3/spec-questions.md#q7-the-approval-document-and-who-writes-it) and [Q15](../m3/spec-questions.md#q15-atomic-application-of-several-files). |
+| A code for a void approval | None is in the registry. [Q9](../m3/spec-questions.md#q9-the-code-of-a-void-approval) proposes `@project.staleApproval`, owned by M3 step 09 once ruled. |
+| `@tool.actionDenied` | Its registry row names MCP, which is not in this release. M3 steps 11, 14, 19, 20, 21, and 24 own it under [Q10](../m3/spec-questions.md#q10-the-code-of-an-edit-the-approval-forbids); otherwise it stays with MCP. |
+| The `eval` and `edit` case operations | Not in the operation table of chapter 07. M3 step 01 adds them under [Q31](../m3/spec-questions.md#q31-case-operations-for-eval-and-edit); without that ruling every `V2-TOOL-eval-*` and `V2-TOOL-edit-*` case becomes a `vibra-cli` host test of the same name. |
+| The limit names `evaluationReductions`, `testReductions`, `outputBytes` | Chapter 05 names `memory` and `sourceNesting`; fix package E names two more. M3 steps 10, 23, and 01 use these three under [Q26](../m3/spec-questions.md#q26-the-limits-of-eval-and-their-names) to [Q28](../m3/spec-questions.md#q28-the-output-limit-of-every-command). |
+| `vibra mcp` and its permission flags; `build` | Not in this release; v0.0.3 ships `vibra build`. |
 
 How to read a row:
 
@@ -273,9 +281,31 @@ intrinsic registry".
 | A case names the profile of its operation | M2 01 | the host tests "manifest: the profile of the operation", "manifest: another profile", and "manifest: a profile with no operation of its own" of M2 step 01 | none | `case.toml` |
 | The JSON spelling of a code | M2 32 | the host test "observation error code in JSON" of M2 step 32 | `@tool.unsupportedValue` | `urn:vibra:schema:v2:command-result` |
 | Case operations of each conformance profile; the `help` inventory derived from them | M2 32 | the host tests "inventory" and "inventory derived from the profiles" of M2 step 32 | none | `urn:vibra:schema:v2:command-result` |
-| Command `eval` | M3 | | | |
+| Command `eval` | M3 10 | `V2-TOOL-eval-*`; the host test `ATK-eval-no-host-context` | `@contract.refuted`, `@tool.limitExceeded`, `@tool.unsupportedValue`, `@runtime.memoryExhausted` | the `eval` payload of `urn:vibra:schema:v2:command-result` |
 | `project` commands | no owner; see the findings | | | |
-| `query`, `edit`, `lint`, the index, snapshot and claim identity | M3 | | | |
+| Command `query`: subjects, the code subject, the `@workspace` subject | M3 05 | `V2-TOOL-query-revision-named`, `V2-TOOL-query-entity-*`, `V2-TOOL-query-code-*`, `V2-TOOL-query-position-compact`, `V2-TOOL-query-position-not-a-module`, `V2-TOOL-query-position-dependency`, `V2-TOOL-query-include-*`, `V2-TOOL-query-nesting-limit`, `V2-TOOL-query-capture-fault`; the host test `ATK-engine-reads-enumerated` | `@tool.limitExceeded` | `urn:vibra:schema:v2:query` |
+| The structural position record | M3 06 | `V2-TOOL-query-position-*` of M3 step 06 | none | `sourcePositionQuery` v2, in `urn:vibra:schema:v2:query` |
+| The semantic envelope and entity metadata | M3 08 / M3 12 | `V2-TOOL-query-type-*`, `V2-TOOL-query-context-*`, `V2-TOOL-query-role-by-slot`, `V2-TOOL-query-discard`, `V2-TOOL-query-local-identity`, `V2-TOOL-query-application-*`, `V2-TOOL-query-pattern-fact`, `V2-TOOL-query-obligations`, `V2-TOOL-query-entity-*`, `V2-TOOL-query-semantic-beside-broken-module`, `V2-TOOL-query-recovered-fact`, `V2-TOOL-query-unavailable-in-trivia`, `V2-TOOL-query-open-type`, `V2-TOOL-query-declared-not-expanded`; the host tests of M3 step 08 | none | `workspacePositionQuery` v2, in `urn:vibra:schema:v2:query` |
+| The effects projection and `effectWitnesses` | M3 15 | `V2-TOOL-query-effects-*`, `V2-TOOL-query-rejected-body-no-rows`; the host test `ATK-query-authority-is-data` | none | the `effects` member and `witnesses` expansion of `urn:vibra:schema:v2:query` |
+| The expansions `references`, `members`, `calls`, `applications`, `declarations` | M3 16 | `V2-TOOL-query-expand-*` | `@tool.limitExceeded` | the `expansions` member of `urn:vibra:schema:v2:query` |
+| The index | M3 22 | `V2-TOOL-index-*`, `V2-TOOL-query-index-bounded` | `@tool.limitExceeded` | `@index.v2`, `urn:vibra:schema:v2:index` |
+| Canonical source text | M3 02 | the host tests of M3 step 02 | none | none; the text is hashed |
+| Claim identity | M3 03 | `V2-TOOL-claim-*`, `V2-TOOL-revision-crlf-differs`; the host tests `ATK-identity-crlf-same-claim`, `ATK-identity-path-independent`, `ATK-claim-record-is-schema-typed` | none | `@claim.v2` |
+| Witness identity | M3 04 | `V2-TOOL-witness-*`; the host tests `ATK-witness-no-self-dependency`, `ATK-witness-deep-chain` | none | `@witness.v2` |
+| Approvals and the protected set | M3 09 | `V2-GRANT-approval-*`, `V2-RUNTIME-run-stale-approval-refused`; the host test `ATK-approval-no-signature-is-data` | `@grant.invalidBinding`, `@project.staleApproval` (Q9), `@data.invalidShape`, `@data.invalidValue`, `@project.ioError` | `@approval.v2` |
+| Command `approve`, the presentation of authority | M3 13 | the host tests `ATK-approve-*`; `V2-TOOL-approve-not-a-target` | `@tool.unavailable` | the `approve` payload of `urn:vibra:schema:v2:command-result` |
+| Edit plans | M3 07 | the host tests of M3 step 07 (`V2-TOOL-edit-plan-*`, `ATK-edit-plan-overlap-is-defect`) | `@runtime.invalidCheckedProgram` (a defect) | `urn:vibra:schema:v2:edit-plan` |
+| Command `edit replace` | M3 11 | `V2-TOOL-edit-replace-*`, `V2-TOOL-edit-dependency-subject-invalid`, `V2-TOOL-edit-std-subject-invalid`; the host tests `ATK-edit-replace-*` | `@tool.actionDenied` (Q10) | `urn:vibra:schema:v2:edit-plan` |
+| Applying a plan: `--write`, `--expect-revision`, the journal, confinement | M3 14 | the host tests `ATK-edit-apply-*`, `ATK-edit-journal-*`, `ATK-fmt-write-*`, `ATK-edit-writers-enumerated` | `@tool.stalePlan`, `@tool.actionDenied`, `@tool.unavailable`, `@module.ioError` | `@editJournal.v2`; the `edit` payload |
+| Command `edit rename` | M3 19 | `V2-TOOL-edit-rename-*`; the host test `ATK-edit-rename-apply-three-files` | `@name.redeclaration`, `@name.privateAccess`, `@style.casing`, `@tool.actionDenied` | `urn:vibra:schema:v2:edit-plan` |
+| Command `edit imports` | M3 20 | `V2-TOOL-edit-imports-*`; the host test `ATK-edit-imports-apply` | `@tool.actionDenied` | `urn:vibra:schema:v2:edit-plan` |
+| Command `edit fix`, fix capabilities and the `fixes` of a diagnostic | M3 21 | `V2-TOOL-fix-capability-*`, `V2-TOOL-edit-fix-*`; the host tests `ATK-edit-fix-apply`, `ATK-edit-fix-stale-fix-revision` | `@effect.duplicateRoot` and `@module.missingRequiredImport` (fix capability `@safe`), `@tool.actionDenied` | `urn:vibra:schema:v2:edit-plan`, `urn:vibra:schema:v2:diagnostic` (`fixes`) |
+| Command `lint` | M3 24 | `V2-TOOL-lint-*`; the host test `ATK-lint-write` | `@tool.actionDenied` | the `lint` payload of `urn:vibra:schema:v2:command-result` |
+| The test work limit and the structured test result | M3 23 | `V2-PROJECT-test-reductions-*`; the host tests of M3 step 23 | `@tool.limitExceeded`, `@runtime.memoryExhausted` | the `test` payload, `@testRun.v2` |
+| The output bound of every command | M3 01 | the host test `ATK-output-bound-asserted`; `V2-TOOL-query-expand-bounded`, `V2-TOOL-query-index-bounded` | `@tool.limitExceeded` | `urn:vibra:schema:v2:command-result` |
+| Generated references: data, card, checked examples | M3 25 / M3 26 | the host tests `ATK-reference-drift-detected`, `ATK-reference-example-verdicts` | none | `docs/reference/data/*.vibon`, `docs/reference/data/schemas/*.json` |
+| The `query`, `eval`, and `edit` case operations and their manifest keys | M3 01 / M3 05, 10, 11 | the host tests "manifest keys", "manifest: wrong profile", "handlers unavailable" of M3 step 01 | none | `case.toml` |
+| The repair scenario | M3 31 / M3 32, 33, 34, 35 | the host tests `ATK-repair-wrapper-refuses-other-commands`, `ATK-repair-seed-sealed` | none | `docs/roadmap/v0.0.2/m3/repair/` |
 | MCP server | not in this release | | | |
 | Native execution slice | M4 | | | |
 
@@ -302,7 +332,7 @@ A code with no step belongs to the milestone named.
 | `@name.wrongEntityKind` | steps 10, 19 |
 | `@name.privateAccess` | steps 10, 16 |
 | `@name.inaccessibleRepresentation` | steps 16, 20 |
-| `@name.redeclaration` | steps 10, 11, 19, 23 |
+| `@name.redeclaration` | steps 10, 11, 19, 23; M3 step 19 |
 | `@name.memberCollision` | steps 10, 16, 19 |
 | `@name.genericRedeclaration` | steps 10, 19 |
 | `@name.reservedLabel` | steps 04, 05, 06, 07 |
@@ -314,7 +344,7 @@ A code with no step belongs to the milestone named.
 | `@module.testOutsideTests` | steps 23 |
 | `@module.assertionOutsideTests` | steps 23 |
 | `@module.unknownPath` | steps 10 |
-| `@module.missingRequiredImport` | steps 23 |
+| `@module.missingRequiredImport` | steps 23; fix capability `@safe` from M3 step 21 |
 | `@module.importCycle` | steps 10 |
 | `@module.invalidSegment` | steps 09 |
 | `@module.pathEscape` | steps 09, 25 |
@@ -357,7 +387,7 @@ A code with no step belongs to the milestone named.
 | `@pattern.invalidConstant` | steps 17 |
 | `@effect.outsideCeiling` | M2 steps 09, 10, 19, 21, 25, 26 |
 | `@effect.invalidReference` | M2 steps 08, 10, 25 |
-| `@effect.duplicateRoot` | M2 steps 08, 10, 25 |
+| `@effect.duplicateRoot` | M2 steps 08, 10, 25; fix capability `@safe` from M3 step 21 |
 | `@effect.invalidAwait` | steps 17 |
 | `@external.unknownSymbol` | steps 14 |
 | `@external.ownerMismatch` | steps 14 |
@@ -376,29 +406,29 @@ A code with no step belongs to the milestone named.
 | `@project.overlappingTargetRoots` | steps 09 |
 | `@project.notFound` | steps 09, 25 |
 | `@project.invalidTargetRoot` | steps 09 |
-| `@project.ioError` | steps 09 |
+| `@project.ioError` | steps 09; M3 step 09 |
 | `@runtime.invalidHostValue` | M2 step 20 |
 | `@runtime.invalidCheckedProgram` | steps 12, 13, 14, 27 |
-| `@runtime.memoryExhausted` | steps 13, 15, 26, 29 |
-| `@style.casing` | steps 02, 10 |
+| `@runtime.memoryExhausted` | steps 13, 15, 26, 29; M3 steps 10, 23 |
+| `@style.casing` | steps 02, 10; M3 step 19 |
 | `@contract.unusedEffect` | M2 steps 09, 10, 25, 26 |
 | `@contract.unproved` | steps 21, 22, 29 |
-| `@contract.refuted` | steps 22, 29 |
+| `@contract.refuted` | steps 22, 29; M3 step 10 |
 | `@contract.unsupportedPredicate` | steps 21, 22 |
 | `@contract.obligationLost` | steps 18, 21, 22 |
 | `@contract.invalidPredicate` | steps 21 |
 | `@contract.invalidConsequence` | steps 21 |
-| `@grant.invalidBinding` | M2 step 26 |
+| `@grant.invalidBinding` | M2 step 26; M3 step 09 |
 | `@grant.bindingCycle` | M2 step 26 |
 | `@grant.requiredUnavailable` | M2 steps 28, 29, 32 |
 | `@grant.acquisitionFailed` | M2 steps 17, 28 |
 | `@grant.invalidPolicy` | M2 step 26 |
 | `@grant.policyTooComplex` | M2 step 26 |
-| `@tool.unavailable` | steps 03, 04, 05, 06, 07, 15, 23, 24, 25, 26, 27 |
-| `@tool.stalePlan` | M3 |
-| `@tool.actionDenied` | M3 |
-| `@tool.limitExceeded` | steps 21, 22 |
-| `@tool.unsupportedValue` | steps 13, 23, 26 |
+| `@tool.unavailable` | steps 03, 04, 05, 06, 07, 15, 23, 24, 25, 26, 27; M3 steps 13, 14 |
+| `@tool.stalePlan` | M3 step 14 |
+| `@tool.actionDenied` | M3 steps 11, 14, 19, 20, 21, 24 (Q10) |
+| `@tool.limitExceeded` | steps 21, 22; M3 steps 01, 05, 10, 16, 22, 23 |
+| `@tool.unsupportedValue` | steps 13, 23, 26; M3 step 10 |
 | `@tool.unsupportedTarget` | M4 |
 | `@tool.missingLinkTool` | M4 |
 | `@tool.linkFailed` | M4 |
