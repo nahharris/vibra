@@ -1,0 +1,150 @@
+// Reading the notes: list the directory a `DirList` grant holds, try to read
+// each listed name through a `DirReadText` grant, and keep what was found.
+// Writing goes only through a callback the caller supplies.
+
+use @std.fs.DirList enduse
+
+use @std.fs.DirReadText enduse
+
+use @std.fs.DirWriteText enduse
+
+use @std.fs.FsError enduse
+
+use @std.fs.RelativePath enduse
+
+use @gatePure.lines enduse
+
+use @gatePure.metric enduse
+
+use @gatePure.paths enduse
+
+// What reading the notes found: the line count of each note read, in listing
+// order; the lines for standard output; and the lines for the log.
+type Tally of {counts: List(U64) shown: Str logged: Str}
+  visibility @public
+endtype
+
+// The names of the entries of the directory `list` holds.
+proc listNotes
+  takes {list: DirList}
+  returns names: Result(List(Str) FsError)
+  performs {DirList}
+  visibility @public
+  do
+    let Result.ok(value: here) be RelativePath([]) endlet
+    return await DirList.entries(list here)
+endproc
+
+// Each of `names` read through `reader`, in order, added to `tally`. A name
+// whose read fails is logged with its error and not counted.
+proc readNotes
+  takes {reader: DirReadText names: List(Str) tally: Tally}
+  returns read: Tally
+  performs {DirReadText}
+  visibility @public
+  do
+    let Option.some(value: {name rest}) be Iter.next(names) else return tally endlet
+    let next be await readNote(reader name tally) endlet
+    return await readNotes(reader rest next)
+endproc
+
+// One name read through `reader` and added to `tally`.
+proc readNote
+  takes {reader: DirReadText name: Str tally: Tally}
+  returns read: Tally
+  performs {DirReadText}
+  do
+    let Tally(counts: counts shown: shown logged: logged) be tally endlet
+    let Result.ok(value: at) be RelativePath([name]) else
+      return Tally(
+        counts: counts
+        shown: shown
+        logged: line(logged name "not a relative path")
+      )
+    endlet
+    let outcome be await DirReadText.read(reader at) endlet
+    match outcome
+      case Result.ok(value: text)
+        let count be lines.countLines(text) endlet
+        let counted be Str.concat(From.convert(count) " lines") endlet
+        return Tally(
+          counts: List.append(counts count)
+          shown: line(shown title(name) counted)
+          logged: line(logged name counted)
+        )
+      case Result.err(error: error)
+        return Tally(
+          counts: counts
+          shown: shown
+          logged: line(logged name describe(error))
+        )
+    endmatch
+endproc
+
+// The log of a tally: its lines, the summary, and the line of the metric.
+// `sink` is the only way the log reaches a file.
+proc record
+  takes {
+    tally: Tally
+    summary: metric.Summary
+    metricLine: Str
+    sink: Proc({Str} Result(Void FsError) {DirWriteText})
+  }
+  returns outcome: Result(Void FsError)
+  performs {DirWriteText}
+  visibility @public
+  do
+    let Tally(counts: _ shown: _ logged: logged) be tally endlet
+    let summarized be Str.concat(metric.render(summary) "\n") endlet
+    return await sink(Str.concat(logged Str.concat(summarized metricLine)))
+endproc
+
+// A note's name without its extension, or the whole name when it has none.
+fn title
+  takes {name: Str}
+  returns shown: Str
+  do
+    let Result.ok(value: stem) be paths.noteName(name) else return name endlet
+    return stem
+endfn
+
+// `text` followed by the line `name: what`.
+fn line
+  takes {text: Str name: Str what: Str}
+  returns longer: Str
+  visibility @public
+  do
+    return Str.concat(text Str.concat(name Str.concat(": " Str.concat(what "\n"))))
+endfn
+
+// A filesystem error in words.
+fn describe
+  takes {error: FsError}
+  returns text: Str
+  visibility @public
+  do
+    return match error
+      case FsError.notFound()
+        "not found"
+      case FsError.permissionDenied()
+        "permission denied"
+      case FsError.notAFile()
+        "not a file"
+      case FsError.notADirectory()
+        "not a directory"
+      case FsError.invalidPath()
+        "invalid path"
+      case FsError.invalidText()
+        "not text"
+      case FsError.other()
+        "failed"
+      case FsError.denied()
+        "denied"
+      case FsError.limitExceeded()
+        "limit exceeded"
+      case FsError.unsupported()
+        "unsupported"
+      case FsError.outcomeUnknown()
+        "outcome unknown"
+    endmatch
+endfn

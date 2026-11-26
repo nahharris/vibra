@@ -14,6 +14,7 @@ mod check;
 mod examples;
 mod exit;
 mod fmt;
+mod gate;
 mod help;
 mod invalid_input;
 mod inventory;

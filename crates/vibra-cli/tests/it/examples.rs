@@ -1,4 +1,4 @@
-//! The example projects of the M1 exit: `examples/gate-pure`, the pure
+//! The example projects of the M1 exit: `examples/gate/gate-pure`, the pure
 //! modules of the release gate program, and `examples/pilot-pure`, the
 //! reference solutions and negative controls of the pilot's pure tasks.
 
@@ -55,12 +55,12 @@ fn codes(document: &Value) -> Vec<String> {
 
 #[test]
 fn gate_pure_tests() {
-    checks_and_tests(&example("gate-pure"));
+    checks_and_tests(&example("gate/gate-pure"));
 }
 
 #[test]
 fn gate_pure_format() {
-    for name in ["gate-pure", "pilot-pure"] {
+    for name in ["gate/gate-pure", "pilot-pure"] {
         let directory = example(name);
         let files = files(&directory);
         assert!(!files.is_empty(), "`examples/{name}` has files");

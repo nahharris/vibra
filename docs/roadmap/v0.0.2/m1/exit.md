@@ -44,7 +44,7 @@ The other commands:
 | `cargo clippy --workspace --all-targets --all-features -- -D warnings` | exit 0, no warning |
 | `cargo doc --workspace --no-deps --all-features` with `RUSTDOCFLAGS=-D warnings` | exit 0 |
 | `cargo run --release -p vibra-conformance --bin fuzz -- --target all` | exit 0; `fuzz: 4 targets, 320000 iterations, deep limit 20000, 0 findings` |
-| `cargo run -p vibra-cli --bin vibra -- --workspace examples/gate-pure test` | exit 0; `passed 14, failed 0, selected 14` |
+| `cargo run -p vibra-cli --bin vibra -- --workspace examples/gate/gate-pure test` | exit 0; `passed 14, failed 0, selected 14` |
 | `cargo run -p vibra-cli --bin vibra -- --workspace examples/pilot-pure test` | exit 0; `passed 26, failed 0, selected 26` |
 
 ## Coverage audit
@@ -287,7 +287,7 @@ The constant is refuted at its predicate, as the diagnostics chapter places
 
 ## Gate program and pilot
 
-[`examples/gate-pure/`](../../../../examples/gate-pure/) holds the pure modules
+[`examples/gate/gate-pure/`](../../../../examples/gate/gate-pure/) holds the pure modules
 of the release gate program: the errors, path, line, and metric modules, with
 tests. [gate-rejections.md](gate-rejections.md) states that the contract rules
 rejected none of their constructions. The one bare guard is discharged by
@@ -299,7 +299,7 @@ negative controls. The host tests in `vibra-cli/tests/it/examples.rs` pass:
 
 | Host test | Shows |
 | --- | --- |
-| `gate_pure_tests` | `check` and `test` in `examples/gate-pure` exit 0 with status `passed` |
+| `gate_pure_tests` | `check` and `test` in `examples/gate/gate-pure` exit 0 with status `passed` |
 | `gate_pure_format` | `fmt` on every file of both examples reports `changed: false` |
 | `pilot_pure_tests` | `check` and `test` in `examples/pilot-pure` exit 0 with status `passed` |
 | `pilot_controls_rejected` | each control, checked as the one module of a library, exits 1 with exactly its diagnostic |
