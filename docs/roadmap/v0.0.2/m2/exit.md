@@ -1,8 +1,7 @@
 # M2 exit record
 
 The evidence that M2 meets the [exit evidence](README.md#exit-evidence) of
-its README, except the model-writing pilot, which steps 38 to 41 run and
-record. Each line names the case, the host test, or the evidence file that
+its README. Each line names the case, the host test, or the evidence file that
 shows it. The commands ran on Windows 11 in the worktree of `m2/fix-c`,
 on `v0.0.2/m2-ops` at `4294c424` with the commits of fix C, with
 `--locked --offline`, `CARGO_BUILD_JOBS=4`, and `RUSTFLAGS=-D warnings` for
@@ -10,9 +9,9 @@ clippy and the tests.
 
 ## Status
 
-The gate of M2 is evidenced: every clause of the table below except the
-pilot has its cases and host tests, and they pass. The pilot's dated
-observation does not exist yet, so the milestone has not exited.
+M2 has exited: every clause of the table below has its cases, host tests,
+or evidence file, and they pass. The pilot's observation is dated
+2026-11-26.
 
 ## Exit clauses
 
@@ -31,7 +30,7 @@ observation does not exist yet, so the milestone has not exited.
 | no grant from data | met | `ATK-ir-grant-constant`, `ATK-trace-decode-grants-nothing`, `V2-GRANT-no-constructor`, `V2-GRANT-brand-forged`; `gate::no_grant_from_data` |
 | no grant from a row alone | met | `V2-GRANT-test-without-world`; `gate::no_grant_from_a_row` |
 | no grant outside a test world by test code | met | `ATK-test-runner-no-system-driver`, `ATK-test-world-op-on-leaf` |
-| the pilot's dated observation | not met | steps 38 to 41 |
+| the pilot's dated observation | met | [registration](pilot/registration.md), frozen at `156f35cf`; [references](pilot/references.md); [run table](pilot/runs.tsv), 200 runs; [observation of 2026-11-26](pilot/observation.md): the default stays, `let … be … endlet` remains the specified form |
 
 ## Both suites
 

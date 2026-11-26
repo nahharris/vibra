@@ -1,8 +1,8 @@
 # v0.0.2 M2: operations and authority
 
-**In progress.** Procedures, effect ceilings, grants, and the entry contract,
-on the interpreter, with fake and real drivers. The gate is evidenced in the
-[exit record](exit.md); the model-writing pilot, steps 38 to 41, remains.
+**Exited.** Procedures, effect ceilings, grants, and the entry contract, on
+the interpreter, with fake and real drivers. The exit record is
+[exit.md](exit.md).
 
 The design is in the [architecture](architecture.md). What the plan assumes
 where the specification is silent is in the
@@ -109,7 +109,7 @@ this one in the dependency graph; no two of them own one file.
 | 38 | [pilot-freeze](steps/38-pilot-freeze.md) | evidence | 37 | — | none | [list](steps/38-pilot-freeze.md#files-owned) | landed |
 | 39 | [pilot-references](steps/39-pilot-references.md) | evidence | 38 | — | `examples` | [list](steps/39-pilot-references.md#files-owned) | landed |
 | 40 | [pilot-runs](steps/40-pilot-runs.md) | evidence | 39 | — | none | [list](steps/40-pilot-runs.md#files-owned) | landed |
-| 41 | [pilot-observation](steps/41-pilot-observation.md) | evidence | 40 | — | none | [list](steps/41-pilot-observation.md#files-owned) | planned |
+| 41 | [pilot-observation](steps/41-pilot-observation.md) | evidence | 40 | — | none | [list](steps/41-pilot-observation.md#files-owned) | landed |
 
 ### How the steps run
 
