@@ -91,15 +91,15 @@ this one in the dependency graph; no two of them own one file.
 | 23 | [review-grants](steps/23-review-grants.md) | evidence | 22 | 13 | none | [list](steps/23-review-grants.md#files-owned) | landed |
 | 24 | [fix-grants](steps/24-fix-grants.md) | evidence | 23 | 13 | `vibra-host`, `vibra-interp`, `vibra-types`, `stdlib`, `conformance/cases` | [list](steps/24-fix-grants.md#files-owned) | landed |
 | 25 | [entry-and-admission](steps/25-entry-and-admission.md) | vertical | 24 | 13, 28, 30, 31 | `vibra-types`, `vibra-workspace`, `conformance/cases` | [list](steps/25-entry-and-admission.md#files-owned) | landed |
-| 26 | [binding-recipes](steps/26-binding-recipes.md) | vertical | 14, 25 | 13, 28, 30, 31 | `vibra-workspace`, `conformance/cases` | [list](steps/26-binding-recipes.md#files-owned) | planned |
-| 27 | [local-dependencies](steps/27-local-dependencies.md) | vertical | 26 | 13, 28, 29, 30, 31, 32, 33 | `vibra-workspace`, `conformance/cases` | [list](steps/27-local-dependencies.md#files-owned) | planned |
+| 26 | [binding-recipes](steps/26-binding-recipes.md) | vertical | 14, 25 | 13, 28, 30, 31 | `vibra-workspace`, `conformance/cases` | [list](steps/26-binding-recipes.md#files-owned) | landed |
+| 27 | [local-dependencies](steps/27-local-dependencies.md) | vertical | 26 | 13, 28, 29, 30, 31, 32, 33 | `vibra-workspace`, `conformance/cases` | [list](steps/27-local-dependencies.md#files-owned) | landed |
 | 28 | [startup-and-release](steps/28-startup-and-release.md) | vertical | 16, 17, 24 | 13, 25, 26, 27 | `vibra-host` | [list](steps/28-startup-and-release.md#files-owned) | landed |
-| 29 | [run-in-world](steps/29-run-in-world.md) | vertical | 20, 21, 26, 28 | 13, 27, 30, 31 | `vibra-workspace`, `vibra-conformance` | [list](steps/29-run-in-world.md#files-owned) | planned |
-| 30 | [system-drivers](steps/30-system-drivers.md) | vertical | 24, 28 | 13, 25, 26, 27, 29 | `vibra-host` | [list](steps/30-system-drivers.md#files-owned) | planned |
-| 31 | [system-fs-driver](steps/31-system-fs-driver.md) | vertical | 13, 30 | 25, 26, 27, 29 | `vibra-host` | [list](steps/31-system-fs-driver.md#files-owned) | planned |
-| 32 | [cli-run](steps/32-cli-run.md) | vertical | 29, 30, 31 | 27, 33 | `vibra-cli`, `vibra-schema` | [list](steps/32-cli-run.md#files-owned) | planned |
-| 33 | [dual-run-and-attacks](steps/33-dual-run-and-attacks.md) | vertical | 29, 31 | 27, 32 | `vibra-workspace` | [list](steps/33-dual-run-and-attacks.md#files-owned) | planned |
-| 34 | [review-drivers](steps/34-review-drivers.md) | evidence | 27, 32, 33 | — | none | [list](steps/34-review-drivers.md#files-owned) | planned |
+| 29 | [run-in-world](steps/29-run-in-world.md) | vertical | 20, 21, 26, 28 | 13, 27, 30, 31 | `vibra-workspace`, `vibra-conformance` | [list](steps/29-run-in-world.md#files-owned) | landed |
+| 30 | [system-drivers](steps/30-system-drivers.md) | vertical | 24, 28 | 13, 25, 26, 27, 29 | `vibra-host` | [list](steps/30-system-drivers.md#files-owned) | landed |
+| 31 | [system-fs-driver](steps/31-system-fs-driver.md) | vertical | 13, 30 | 25, 26, 27, 29 | `vibra-host` | [list](steps/31-system-fs-driver.md#files-owned) | landed |
+| 32 | [cli-run](steps/32-cli-run.md) | vertical | 29, 30, 31 | 27, 33 | `vibra-cli`, `vibra-schema` | [list](steps/32-cli-run.md#files-owned) | landed |
+| 33 | [dual-run-and-attacks](steps/33-dual-run-and-attacks.md) | vertical | 29, 31 | 27, 32 | `vibra-workspace` | [list](steps/33-dual-run-and-attacks.md#files-owned) | landed |
+| 34 | [review-drivers](steps/34-review-drivers.md) | evidence | 27, 32, 33 | — | none | [list](steps/34-review-drivers.md#files-owned) | landed |
 | 35 | [fix-drivers](steps/35-fix-drivers.md) | evidence | 34 | — | `vibra-fs-scope`, `vibra-host`, `vibra-workspace`, `vibra-cli` | [list](steps/35-fix-drivers.md#files-owned) | planned |
 | 36 | [release-program](steps/36-release-program.md) | vertical | 35 | — | `examples`, `vibra-cli` | [list](steps/36-release-program.md#files-owned) | planned |
 | 37 | [m2-exit](steps/37-m2-exit.md) | evidence | 36 | — | `vibra-conformance`, `conformance/cases` | [list](steps/37-m2-exit.md#files-owned) | planned |

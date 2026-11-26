@@ -503,9 +503,10 @@ pub fn run_target(snapshot: &SourceSnapshot, target: Option<&str>,
                   launch: Launch<'_>, budget: MemoryBudget) -> RunOutcome;
 pub enum Launch<'a> {
     World(&'a HostWorld),                  // conformance, tests of the tool
-    System { arguments: Vec<OsString> },   // `vibra run`
+    System { arguments: Vec<OsString>, capture: bool },   // `vibra run`
 }
 pub struct RunOutcome {
+    pub target: Option<String>,            // `None` when none was selected
     pub result: CommandResult,             // the `@command.*` of the run
     pub application_code: Option<u8>,
     pub program_result: Option<String>,
@@ -513,13 +514,23 @@ pub struct RunOutcome {
     pub trace: AuditTrace,
     pub trap: Option<TrapRecord>,
     pub diagnostics: Vec<Diagnostic>,
+    pub limits_reached: Vec<String>,
     pub stdout: Vec<u8>, pub stderr: Vec<u8>,
 }
 ```
 
-`Launch::System` is constructed in `vibra-cli::run` and nowhere else; the
-test runner constructs only a world. `run_target` has one exit path, which
-releases the acquired grants in reverse order before it returns.
+`Launch::System` gives the system driver the process's standard input and
+environment and the given arguments. With `capture: true` the program's
+standard output and error go to in-memory sinks and come back in
+`RunOutcome::stdout` and `stderr`: the JSON form of `vibra run` and the dual
+run use it. With `capture: false` the program writes straight to the
+process and the two fields are empty. `Launch::System` is constructed in
+`vibra-cli::run` and, outside the shipped code, in the dual-run and attack
+tests of `vibra-workspace`, and nowhere else; the test runner constructs
+only a world. The target is selected before the check, so a selector that
+names no binary target ends the run as invalid input with no diagnostic.
+`run_target` has one exit path after admission, which releases the acquired
+grants in reverse order before it returns.
 
 ## 2. The authority argument
 
@@ -556,7 +567,7 @@ corpus. The step in brackets owns the case.
 | A24 | No intermediate handle outlives an operation; authority follows the opened directory | `vibra-fs-scope`: every operation walks from the root handle | the renamed-root and replaced-root cases | `ATK-fs-root-renamed` [13], `ATK-run-root-replaced` [33] | the driver caches a child handle |
 | A25 | Replacing a file with more than one link is `denied` | the gate, from `Found::links` | the adapter reports the count of the opened handle; a replace with no count is `unsupported` | `ATK-fs-hard-link-replace` [31], `ATK-gate-replace-without-link-count` [15], `ATK-run-hard-link-read-allowed` [33] | the gate treats a missing count as one |
 | A26 | Where the platform cannot give the guarantees the result is `unsupported`, before acting | `vibra-fs-scope` (`ScopeError::Unsupported`), `Driver::identity` | admission refuses a provider with no driver as `@tool.unavailable` | `ATK-fs-no-normalized-name` [31], `ATK-driver-absent-at-admission` [30] | a fallback path is added |
-| A27 | A test obtains grants only from its `TestWorld`, and reaches no real provider | the test runner builds a `Context` over a `WorldDriver` only | `Launch::System` is constructed only in `vibra-cli::run`; an architecture test fixes that | `V2-GRANT-test-without-world` [21], `ATK-test-runner-no-system-driver` [21] | the runner is given a system driver |
+| A27 | A test obtains grants only from its `TestWorld`, and reaches no real provider | the test runner builds a `Context` over a `WorldDriver` only | `Launch::System` is constructed only in `vibra-cli::run` and in the dual-run and attack tests; an architecture test fixes that | `V2-GRANT-test-without-world` [21], `ATK-test-runner-no-system-driver` [21] | the runner is given a system driver |
 | A28 | A target cannot obtain a `TestWorld` | no provider issues it (`vibra-workspace::binding`) | `Context::test_world` requires a token of the test root, which only the runner issues | `V2-GRANT-entry-test-world-leaf` [26], `ATK-test-world-op-on-leaf` [21] | `startup` issues a test root |
 | A29 | An `@once` operation is never dispatched twice for one invocation | the interpreter advances the continuation once per reply | the broker has no retry; one event per completed call | `V2-RUNTIME-await-twice-two-events` [20], `ATK-no-redispatch-on-error` [16] | a retry loop is added in a driver |
 | A30 | A completed call is recorded once, in order, after its continuation advanced; a refusal before the adapter and a reply the caller rejects record nothing; a projection restores nothing | `Context::commit`, called by the caller after it accepted the reply and advanced, at an `await` and at a startup read alike | the broker holds one pending event at most and validates the receipt; `vibra-host::trace` has a decoder that yields data only | `V2-RUNTIME-trace-order` [21], `V2-GRANT-denied-no-event` [22], `ATK-trace-uncommitted-no-event` [17], `ATK-trace-commit-once` [17], `ATK-startup-read-malformed-reply` [28], `ATK-trace-decode-grants-nothing` [17] | a caller commits before it advances |
@@ -586,12 +597,6 @@ interpreter.
 
 ### What the argument does not cover
 
-- **Existence under an alias.** A request whose written names the policy
-  permits, for an entry that does not exist below a parent reached by an
-  alias, returns `notFound` without a real-name check, because nothing was
-  opened to check. The chapter's `denied` promises that no content is
-  read, created, or changed; it does not promise that existence is hidden.
-  Gate 34 reads this path.
 - **A model that does not forward.** Narrowing a value that is not a
   sealed grant runs that type's own member
   ([Q1](spec-questions.md#q1-narrowing-members-on-a-value-that-is-not-a-sealed-grant)).
@@ -611,12 +616,14 @@ above the seam, so both drivers are run by the same code.
 a world document, and runs the target twice:
 
 1. under `Launch::World`, with the document;
-2. under `Launch::System`, after writing the document's `files` and
-   `directories` into a new temporary directory, with each `@fixedPath`
-   re-rooted there, the document's `args` as the arguments, and the
-   document's `env` passed as the variable set of the system driver's
-   environment adapter.
+2. under `Launch::System { arguments, capture: true }`, after writing the
+   document's `files` and `directories` into a new temporary directory,
+   with each `@fixedPath` re-rooted there and the document's `args` as the
+   arguments.
 
+`Launch::System` carries only the arguments: the process's own standard
+input and environment reach the system driver. The dual run therefore covers
+only worlds without `stdin` and `env`, and refuses a world that sets either.
 It compares the application code, the captured streams, the startup
 statuses, and the trace with `drivers`, each `driver`, and clock and random
 results removed. Agreement on a case is sampled evidence for that case; the

@@ -53,7 +53,7 @@ Probes, each run from a scratch test and recorded.
 
 | Probe | Kind | Input | Expected | Specification |
 | --- | --- | --- | --- | --- |
-| root through a link | negative | the `@fixedPath` itself is a junction or a symbolic link | a stated behaviour: the root is the opened directory; recorded as the limit "acquired through path rules" | 03: "Authority follows the opened directory, not its path" |
+| root through a link | negative | the `@fixedPath` itself is a junction or a symbolic link | refused, as the [feasibility record](../../m0/file-scope-feasibility.md) states: `open_root` refuses a root that is itself a reparse point, and startup fails with `@grant.acquisitionFailed` | 04: "one that is itself a symbolic link, a junction, or another reparse point" |
 | root on a mapped or UNC volume | negative | a `@fixedPath` on a network share | `@grant.acquisitionFailed` | 04: "a directory on which the driver cannot enforce the leaf's policy" |
 | mount point inside the root | negative | a volume mount point as a component | `denied` | 03: "and without crossing a mount point" |
 | alternate data stream | negative | every way to reach `a.txt:secret` through names | `RelativePath` refuses each | 03 Paths |

@@ -561,7 +561,12 @@ The driver MUST enforce a file rule as follows.
    points and without crossing a mount point.
 2. Check the name the filesystem actually reports for the opened entry and
    its kind. A different-case or short-name alias MUST NOT satisfy a name
-   test the real name fails.
+   test the real name fails. An answer MUST NOT depend on what the policy
+   does not permit: a request decided below a directory whose real names
+   the policy does not permit is `denied`, whether or not the entry it
+   names exists, so `notFound` or any other error decided below a directory
+   is returned only after the real names of the directories already opened
+   are checked.
 3. Perform the access on the object that was opened and checked. Checking a
    path and then reopening it by name is not conforming.
 4. Never truncate or create before authorization. Creating a new file is
@@ -570,6 +575,12 @@ The driver MUST enforce a file rule as follows.
    operation walks from the grant's directory again.
 6. Where the platform cannot provide these guarantees, return
    `FsError.unsupported` before acting. There is no unchecked fallback.
+
+A component that another process renames or swaps while a request walks is
+seen as the walk opens it. The request then reads content inside the held
+directory, is `denied`, or is `notFound` when the name is absent at that
+moment, as it is between the two renames of a swap on a platform with no
+atomic exchange; it never reaches content outside the held directory.
 
 Two limits of this design are part of the contract and MUST appear in what a
 user is shown when approving a target:

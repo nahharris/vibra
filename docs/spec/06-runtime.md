@@ -1073,16 +1073,30 @@ access by itself.
   a completed text read is empty only at the end of input. A byte read
   accepts every count; a `max` of zero returns the empty value and
   consumes nothing, as a zero `count` of random bytes does.
+- To tell a scalar cut off by the end of input from one that continues, a
+  text read of an input of unknown size whose window ends inside a scalar
+  that is valid so far may take one byte past its reservation. That byte,
+  like the bytes of a scalar the read does not return, is kept by the
+  adapter for the next read: it is neither delivered nor charged. A
+  console read may also buffer input ahead inside the process.
 - A rejection before the stream is read (`denied`, `limitExceeded`,
   `unsupported`) consumes nothing.
 - Input that cannot be read is `other`.
+- When the grant is released, a process's standard input that is a regular
+  file is positioned just after the bytes delivered to the program, so a later
+  reader of the same input starts where the program stopped. A pipe or a
+  console cannot take back the bytes the adapter kept: a later reader of it
+  does not see them. This is an accepted limit of the platform, not a
+  guarantee.
 
 **Standard output and error.**
 
 - A write delivers its whole value, in invocation order.
 - A closed stream is `closed`; another failure is `other`.
 - A failed write may have written a prefix. The outcome MUST still say
-  accurately whether the write completed or was submitted.
+  accurately whether the write completed or was submitted. A failed write
+  to a console has uncertain progress, since the process buffers the
+  console stream.
 - These reads and writes consume a stream and are not repeatable.
 
 **Filesystem, common rules.**
@@ -1121,7 +1135,7 @@ access by itself.
 | `permissionDenied` | the operating system refused |
 | `notAFile` | a directory or other non-regular target where a file is required |
 | `notADirectory` | a non-directory where a directory is required |
-| `invalidPath` | a path the native adapter cannot interpret |
+| `invalidPath` | a path the native adapter cannot interpret, such as a name that `RelativePath` accepts and the platform cannot represent, `*` or `?` on Windows |
 | `invalidText` | text or a name that is not Unicode where Unicode is required |
 | `other` | any other ordinary host failure |
 
@@ -1161,7 +1175,11 @@ link, and so gains no wider traversal authority.
   no event is appended and the process environment is not consulted. A
   permitted name that is missing is `notPresent`. So is a name no
   environment can hold: an empty one, or one containing `=` or NUL. A
-  value that is not Unicode is `notUnicode`.
+  value that is not Unicode is `notUnicode`. A name is compared exactly,
+  by Unicode scalar, on every platform, so on Windows `Path` does not find
+  a variable `PATH`. A variable's value is copied from the process's
+  environment block before its size is reserved; the operating system
+  bounds that block, so the copy is not an unbounded payload.
 - `EnvReadArgs.read` returns the program's arguments in their original
   order, without the executable's path, under the
   [program arguments](05-tooling.md#program-arguments-execution-and-evaluation)
@@ -1175,7 +1193,8 @@ link, and so gains no wider traversal authority.
 - `WallClock.read` returns `I64` nanoseconds since the Unix epoch in UTC,
   ignoring leap seconds.
 - `MonotonicClock.read` returns `U64` nanoseconds from an origin fixed for
-  the instance, and never decreases within it.
+  the instance, and never decreases within it. A process's clock fixes its
+  origin when its resource is acquired at startup.
 - A clock that cannot be read, or whose value does not fit its type, is
   `unavailable`.
 - `RandomBytes.generate` returns exactly `count` bytes from its bound
@@ -1242,7 +1261,12 @@ bytes value in it included, is counted against the room the request was
 given before the reply is accepted; a reply that does not fit is memory
 exhaustion, and the call appends no event. Issuing or
 narrowing a grant that the broker has no room left to record is memory
-exhaustion as well.
+exhaustion as well. So is an allocation that the operating system refuses
+inside a driver, for a reply the broker had already admitted: the driver
+reports memory exhaustion, never an error case of the operation, and the
+call appends no event that claims it completed. A startup read runs before
+the program and has no program memory budget: only the limits of its
+`source` grant bound it.
 
 **Driver faults.** A driver that breaks this protocol is the defect trap
 `@runtime.invalidHostValue`: it acts after a refusal, reports a refusal no
@@ -1479,7 +1503,7 @@ is `kind`:
 | `provider` | the issuer's atom |
 | `status` | `@acquired`, `@refused`, or `@failed`: the three outcomes of the [startup order](04-programs-and-packages.md#startup-order) |
 | `grant` | optional, present when acquired: the grant projection |
-| `failure` | optional, present exactly when this leaf stopped startup: `{code: Atom message: Str}`. `code` is `@grant.requiredUnavailable` for a refused required leaf and `@grant.acquisitionFailed` for a failed one. A refused optional leaf, bound to `Option.none()`, has none |
+| `failure` | optional, present exactly when this leaf stopped startup: `{code: Atom message: Str}`. `code` is `@grant.requiredUnavailable` for a refused required leaf and `@grant.acquisitionFailed` for a failed one; `message` is text for a person, not part of the contract, and conformance compares the record by its fields and its `code` only. A refused optional leaf, bound to `Option.none()`, has none |
 
 One `@startup` event is appended for each processed leaf, in processing
 order. A leaf that startup never reached has no event.
@@ -1706,12 +1730,19 @@ signature and its binding recipes.
 - Releasing a grant first makes it and every grant narrowed from it
   unusable, and only then releases its resource.
 - A release that the operating system reports as failed does not fail the
-  run: the binding is still `released`, and the failure goes to the tool's
-  log.
-- A defect trap during startup ends the run as a trap: the result is
-  `@command.trap`, exit 5, with the trap record. Startup has failed, but no
-  leaf stopped it, so the startup record's `failure` is `null`. Every leaf
-  acquired so far is released.
+  run: the binding is still `released`, the result is unchanged, and the
+  failure is one line in the tool's log, which is the command's standard
+  error, as [Streams](05-tooling.md#versioned-envelope-and-results) states.
+- A fault of the broker during startup ends startup as that fault. A
+  driver that breaks the host-call protocol, at an acquisition or at a
+  startup read, is a defect trap: the run ends as a trap, with the trap
+  record and no origin. A grant the broker has no room left to record is
+  memory exhaustion, and the run ends as memory exhausted. The
+  [result table](05-tooling.md#versioned-envelope-and-results) gives the
+  command result of each. Either way startup has failed, but no leaf stopped
+  it: the startup record's status is `failed` and its `failure` is `null`,
+  the leaf being processed has no `@startup` event and no binding record,
+  and every leaf acquired so far is released.
 - The entry MUST NOT have a bare `requires`: no call site exists where it
   could be discharged, so it is `@project.invalidEntrySignature`. A
   `requires … else` and either form of `ensures` behave as on any `proc`.

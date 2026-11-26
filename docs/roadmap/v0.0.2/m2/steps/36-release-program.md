@@ -20,7 +20,7 @@ Crates: `examples`, `vibra-cli`.
 
 | Existing | Symbol | Use |
 | --- | --- | --- |
-| `crates/vibra-cli/src/lib.rs:82` | `fn execute` | the command the showings run |
+| `crates/vibra-cli/src/lib.rs:84` | `fn execute` | the command the showings run |
 
 Example projects: `examples/hello/`, and the pure modules of the gate
 in `examples/gate-pure/`, which the exit step of M1 adds.

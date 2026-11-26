@@ -356,10 +356,10 @@ Every row is an error with no automatic fix.
 | an external symbol not in the registry | `@external.unknownSymbol`, the symbol |
 | an external member on the wrong interface | `@external.ownerMismatch`, the symbol, related to the owner |
 | an external member whose signature or row differs from the registry | `@external.signatureMismatch`, the declaration, with the expected signature |
-| an entry row or startup step row outside the target's `effects` | `@effect.outsideCeiling`, the target's `effects` field in the project file, related to the entry's `performs` entry or to the recipe |
+| an entry row or startup step row outside the target's `effects` | `@effect.outsideCeiling`, the target's `effects` field in the project file, once per interface of the entry's row, related to its `performs` entry, and once per startup step, related to the recipe, as [Targets](04-programs-and-packages.md#targets) states |
 | an `effects` entry that neither the entry nor a startup step performs | `@contract.unusedEffect` (warning), that entry of the list |
-| a missing, extra, ill-typed, or unapproved grant binding; an unknown, repeated, or missing `after` name; a `source` leaf of the wrong kind | `@grant.invalidBinding`, the binding, its field, or the `grants` record |
-| a cycle in `after` | `@grant.bindingCycle`, each entry of `after` that closes a cycle, as [Targets](04-programs-and-packages.md#targets) finds it, related along the cycle |
+| a missing, extra, ill-typed, or unapproved grant binding; an unknown, repeated, or missing `after` name; a `source` leaf of the wrong kind | `@grant.invalidBinding`, the binding, its field, or the `grants` record; a missing or extra key is related to the parameter its first part names, if any |
+| a cycle in `after` | `@grant.bindingCycle`, each entry of `after` that closes a cycle, as [Targets](04-programs-and-packages.md#targets) finds it, related along the shortest chain that Targets defines |
 | a required grant refused at startup, in a case its issuer lists as a refusal | `@grant.requiredUnavailable`, the leaf's binding recipe in the project file; a startup result, not a check result |
 | an acquisition that fails at startup, in a case its issuer lists as a failure, for a required or an optional grant | `@grant.acquisitionFailed`, the leaf's binding recipe in the project file; a startup result, not a check result |
 | an invalid policy, or a policy naming another root | `@grant.invalidPolicy`, the policy value |
@@ -433,7 +433,7 @@ change to this table, with a positive case and a nearest negative case.
 | an invalid, stale, foreign, or wrong-kind boundary value; an unsealed access; a malformed trusted result | `@runtime.invalidHostValue`, the source origin when known, otherwise none |
 | memory exhaustion | `@runtime.memoryExhausted`, no location; a host event, not a trap |
 | a name that departs from the casing convention | `@style.casing` (warning), the name |
-| a valid command or construct outside the tool's profile; a driver the platform does not support, at admission | `@tool.unavailable`, the whole form, or the command-line context |
+| a valid command or construct outside the tool's profile; a driver the platform does not support, at admission | `@tool.unavailable`, the whole form, the command-line context, or, for a driver, the target's `name` value |
 | a plan whose workspace or document revision no longer matches | `@tool.stalePlan`, no location |
 | an MCP or tool action the server's permissions deny | `@tool.actionDenied`, no location |
 | a tool limit reached, with an unknown, incomplete status | `@tool.limitExceeded`; the predicate when the limit stopped an obligation, whose status is then `unknown` and which gets no `@contract.unproved`; otherwise no location |
@@ -666,8 +666,9 @@ Every graph has the `@tests` unit, even when empty.
 A unit record has `name` (atom), `kind` (`@bin`, `@lib`, `@tests`, or
 `@dependency`), and `modules` (list of `{path: Atom sourceId: Str
 bytesHex: Str}` sorted by `path`, where `bytesHex` is the module's exact
-bytes in lower-case hexadecimal). A dependency record has `alias` (`Str`),
-`kind` (`@path` or `@git`), `source` (`Str`, the path or URL), `status`
+bytes in lower-case hexadecimal). A dependency record has `alias` (`Str`,
+the dependency's key, which is the name of the library it binds), `kind`
+(`@path` or `@git`), `source` (`Str`, the path or URL), `status`
 (`@captured`, `@verified`, `@unavailable`, or `@refuted`), and `span` (the
 span record of its project entry).
 
@@ -1084,6 +1085,8 @@ rejects it. A profile that
 includes another covers that profile's operations as well. The
 [`help` inventory](05-tooling.md#command-payloads) is derived from this
 table: a command's `profiles` are the profiles of the operations it offers.
+`help` offers no case operation; its own operation `help` belongs to
+`toolingV2`, whose CLI contract covers it.
 
 `nativeV1` does not include `interpreterV2`; a differential gate needs
 both. The interpreter serves `run`, `test`, `eval`, and compile-time

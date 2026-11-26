@@ -18,8 +18,7 @@ Crates: `vibra-workspace`.
 
 ## Entry points
 
-From step 29: `run_target`, `Launch`. From step 30: `SystemInputs`. From
-step 16: `HostWorld`.
+From step 29: `run_target`, `Launch`. From step 16: `HostWorld`.
 
 | Existing | Symbol | Use |
 | --- | --- | --- |
@@ -37,12 +36,15 @@ Proposed: test-only `dual::{materialize, run_both, compare}` in
 ## Ordered tasks
 
 1. `materialize(world, dir)`: write the world's `directories` and `files`
-   under a new temporary directory; return `SystemInputs` with the
-   world's `stdin`, `env`, and `args`, each argument that is a virtual
-   path re-rooted. Invariant: nothing outside the temporary directory is
-   written.
+   under a new temporary directory; return the world's `args`, each
+   argument that is a virtual path re-rooted. `Launch::System { arguments,
+   capture }` gives the program the process's own standard input and
+   environment, so a world that sets `stdin` or `env` is outside the
+   harness's domain and is refused: the dual run covers worlds without
+   them. Invariant: nothing outside the temporary directory is written.
 2. `run_both(tree, world)`: the target under `Launch::World`, then under
-   `Launch::System` with every `@fixedPath` re-rooted.
+   `Launch::System { arguments, capture: true }` with every `@fixedPath`
+   re-rooted.
 3. `compare`: the `@command.*` result, the application code, both
    captured streams, each binding's status, and the trace's events, their
    source origins included, with `drivers`, each `driver`, and the

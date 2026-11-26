@@ -69,7 +69,7 @@ short, preferably one word: `edit imports` organizes imports.
 | `PATH`, `DEST` | a workspace-relative path, written with `/` in results, confined beneath the workspace root |
 | `TARGET` | the atom naming one validated local target, such as `@app`; never a file path |
 | `DATA` | one canonical VIBON value holding the complete typed target or dependency record |
-| `NAME` | the atom naming a target or dependency alias |
+| `NAME` | the name of a target, or the key of a dependency, which is the name of the library it binds |
 | `SUBJECT` | a [query subject](#workspace-queries) |
 | `NEWNAME` | one valid identifier |
 | `TEST` | a [test selector](#tests-and-selection) |
@@ -104,8 +104,11 @@ short, preferably one word: `edit imports` organizes imports.
   `build` need the project's only binary target; with none or several and no
   selector, the command is invalid input with no source diagnostic. A missing
   target, or a library given to `run` or `build`, is invalid input. So is a
-  `TARGET` that names no local target, as in `check @nope`: the result is
-  `@command.invalidInput`, with no diagnostic.
+  `TARGET` that is not an atom, as in `run tool`, or that names no local
+  target, as in `check @nope`: the result is `@command.invalidInput`, with
+  no diagnostic. `run` selects its target before it checks anything and
+  then checks that target, so a selector that names no binary target is
+  answered with no diagnostic whatever the sources hold.
 - `edit fix` needs exactly one applicable safe fix. `edit rename` needs one
   resolved renameable identity, and checks collisions before planning. A
   subject that matches nothing, or several things, is invalid input. No tool
@@ -323,7 +326,7 @@ Every structured response is a closed object with these fields:
 | `@command.diagnostics` | 1 | `refuted` | static diagnostics prevent admission |
 | `@command.testFailed` | 1 | `refuted` | at least one selected test failed |
 | `@command.invalidInput` | 2 | `unknown` | invalid command, selector, or typed input |
-| `@command.operationalFailure` | 3 | `unknown` | tool, host, or startup failure or exhaustion |
+| `@command.operationalFailure` | 3 | `unknown` | tool, host, or startup failure, or memory exhaustion |
 | `@command.unavailable` | 4 | `unsupported` | a known operation outside the supported profile |
 | `@command.trap` | 5 | `unknown` | a registered toolchain or runtime defect |
 | `@command.programFailed` | 6 | `unknown` | the program returned a non-zero `ExitCode` |
@@ -339,7 +342,8 @@ Every structured response is a closed object with these fields:
   standard output and its logs to standard error. `run` captures the
   program's output into the payload; bytes that are not UTF-8 show as U+FFFD
   there, and the audit trace keeps the exact bytes. In human format the
-  program's bytes go straight through and diagnostics go to standard error.
+  program's bytes go straight through, and diagnostics and the tool's logs
+  go to standard error.
 - **Invalid input.** The response has the recognized command name, or an
   empty one, a `null` `workspaceRevision`, no diagnostic, and the empty
   payload, whether the fault is found before or after a snapshot.
@@ -371,12 +375,12 @@ in the
 | --- | --- |
 | `CommandCapability` | one per line of the command surface, in its order: `command`, the command name; `operations`: string[], the [case operations](07-diagnostics-and-conformance.md#case-operations-and-inputs) whose observation a supported command produces, and its own name for `help`; `profiles`: string[], the profiles of those operations in the [profile table](07-diagnostics-and-conformance.md#conformance-profiles), and `toolingV2`, whose CLI contract covers it, for `help`; `supported`: boolean; `schemaIds`: exact published identifiers of the documents it emits. The three lists are empty for an unsupported command |
 | `TargetSummary` | `name`; `kind`; `root`; `entry` (nullable); `bindingStatus`: `exact`, `recovered`, or `unavailable` |
-| `DependencySummary` | `alias`; `kind`; `source`; `status`: `captured`, `verified`, `unavailable`, or `refuted`; `identity` (nullable) |
+| `DependencySummary` | `alias`, the dependency's key, which is the name of the library it binds; `kind`; `source`; `status`: `captured`, `verified`, `unavailable`, or `refuted`; `identity` (nullable) |
 | `TestItem` | `name`, the selector; `result`, the `@test.*` atom; `failure` (nullable); `trap` (nullable); `auditTrace`: `AuditEvent[]`, the test's events in completion order, each a `@host` event of phase `@entry`, since a test completes only host calls under its own world and has no startup; `diagnostics`: string[], the codes of the envelope's diagnostics attributed to the item; `status`, that of the command result the item's result corresponds to: `passed` for `@test.passed`, `refuted` for `@test.assertionFailed` and `@test.invalid`, `unknown` for `@test.trap` and `@test.exhausted`, and `unsupported` for `@test.unavailable` |
 | `TestItem.failure` | `kind`: `assertion` or `observation`; `assertion`, `expected`, `actual`: canonical text or null; `primarySpan`: `SpanDocument`; `observationError`: null for an assertion |
 | `TrapRecord` | `trapCode`; `origin`: the `SpanDocument` of the trapping operation's [source origin](06-runtime.md#audit-trace), or null |
 | `ObservationError` | `code`: `"@tool.unsupportedValue"`, the observation error; `type`: the canonical `@type.v2` text of the operand's type, or null; `origin`: the `SpanDocument` of the observed expression's source origin, or null |
-| `StartupRecord` | `status`: `notStarted`, `acquired`, or `failed`; `bindings`; `auditTrace`: `AuditEvent[]`, the `@startup` events and the `@host` events of phase `@startup`; `failure`: null or `{binding, code, origin}`, where `origin` is the `SpanDocument` of the leaf's recipe in the project document and `code` is `@grant.requiredUnavailable` for a refused required leaf and `@grant.acquisitionFailed` for a failed acquisition; `null` with the status `failed` when a defect trap ended startup, which no leaf stopped |
+| `StartupRecord` | `status`: `notStarted`, `acquired`, or `failed`; `bindings`; `auditTrace`: `AuditEvent[]`, the `@startup` events and the `@host` events of phase `@startup`; `failure`: null or `{binding, code, origin}`, where `origin` is the `SpanDocument` of the leaf's recipe in the project document and `code` is `@grant.requiredUnavailable` for a refused required leaf and `@grant.acquisitionFailed` for a failed acquisition; `null` with the status `failed` when a [fault of the broker](06-runtime.md#entry-outcome), a defect trap or memory exhaustion, ended startup, which no leaf stopped |
 | `StartupRecord.bindings[]` | one per processed leaf, in processing order: `name`; `recipeIdentity`: `sha256:` and the SHA-256 of `vibraRecipeIdentityV2`, a zero byte, and the canonical bytes of the recipe with its policy normalized, in which `after` keeps its written order, so two recipes that differ only in that order have different identities; `providerIdentity`: `{provider, version}`; `status`: `refused` or `failed`, two outcomes of the [startup order](04-programs-and-packages.md#startup-order), or `released` for an acquired leaf, since every acquired binding of a finished command is released; `acquired` is the status inside the `@startup` event, which is appended before release; `grantProjection` (nullable) |
 
 A summary never executes an acquisition. A grant projection is data that
@@ -388,6 +392,19 @@ run are split by phase, so no event is in both `startup.auditTrace` and the
 payload's `auditTrace`; `drivers` and `policies` are those of the run's
 `@auditTrace.v2` document, so every projection's `policy` hash is a key of
 `policies`.
+
+Two endings of `run` carry the empty payload `{}` instead of a `run`
+payload. A run whose project could not be captured selected no target: it
+answers `@command.diagnostics` with the capture's diagnostics. A run whose
+outcome the payload cannot state, because its trace holds an event of a
+kind that has no JSON projection or a binding is still `acquired` after the
+run, is a toolchain defect: it fails closed as `@command.trap` with the
+run's diagnostics, adding none of its own, and in the human format one line
+on standard error says so. A toolchain defect found after the check and
+before startup, such as an entry that is not lowered or a leaf with no
+host interface, or a value returned by the entry that is no `ExitCode`, is
+`@command.trap` with a `run` payload: its diagnostic and its trap record are
+`@runtime.invalidCheckedProgram` with no origin.
 
 A human test report keeps selectors and result atoms, prints each item that
 did not pass with its diagnostic, failure, or trap, and ends with the
