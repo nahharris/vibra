@@ -15,6 +15,7 @@ mod data;
 mod examples;
 mod expr;
 mod lexer;
+mod nesting;
 mod schema;
 mod source;
 mod tree;

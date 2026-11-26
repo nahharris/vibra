@@ -40,7 +40,7 @@ use vibra_workspace::{Discovery, MemoryBudget, SourceOrigin, WorkspaceCapture};
 use crate::args::{Invocation, OutputFormat};
 use crate::check::{is_target_atom, outcome as check_outcome};
 use crate::refusal;
-use crate::render::{Response, source_text, status_for};
+use crate::render::{Response, reach, source_text, status_for};
 
 /// The memory budget a run's entry runs under: the memory limit of the
 /// published limit profile.
@@ -95,6 +95,7 @@ pub fn run(invocation: &Invocation) -> Response {
         response.result = result;
         response.status = status;
         response.diagnostics = diagnostics;
+        reach(&mut response, capture.limits_reached());
         return response;
     };
     for module in snapshot.modules() {

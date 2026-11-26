@@ -21,8 +21,10 @@
 use vibra_diagnostics::{ByteSpan, Diagnostic};
 use vibra_syntax::{
     FieldSchema, IntegerSuffix, RecordSchema, Schema, Slot, TypedDocument, TypedNode,
-    VariantSchema, decode, is_reserved_word,
+    VariantSchema, decode, is_reserved_word, parse_data,
 };
+
+use crate::nesting::nesting_fault;
 
 /// The name of the project marker.
 pub const PROJECT_FILE_NAME: &str = "project.vibon";
@@ -648,11 +650,15 @@ fn binary(target: &TypedNode) -> Binary {
 }
 
 /// Decodes one `project.vibon`, read as `source_id`, with no discovery and
-/// no path read.
+/// no path read. A document nested past the source nesting limit is that
+/// limit alone ([`crate::nesting_fault`]): it is not decoded.
 pub fn decode_project(
     source_id: &str,
     bytes: &[u8],
 ) -> Result<Project, Vec<Diagnostic>> {
+    if let Some(fault) = nesting_fault(&parse_data(Some(source_id), bytes)) {
+        return Err(vec![fault]);
+    }
     let (document, diagnostics) =
         decode(&project_schema(), Some(source_id), bytes).into_parts();
     let Some(document) = document else {

@@ -1,0 +1,18 @@
+id = "V2-TOOL-nesting-1025-levels"
+rule = "V2-TOOL-nesting-1025-levels"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "05-tooling.md#program-arguments-execution-and-evaluation: a token nested 1,025 levels is @tool.limitExceeded at that token, the first in source order past the source nesting limit, the module's only diagnostic, and the outcome unknown"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "unknown"
+
+[[expect.diagnostics]]
+code = "@tool.limitExceeded"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 3089, end = 3093 }

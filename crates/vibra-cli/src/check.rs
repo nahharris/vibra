@@ -25,7 +25,7 @@ use vibra_workspace::{
 
 use crate::args::Invocation;
 use crate::refusal;
-use crate::render::{Response, status_for};
+use crate::render::{Response, reach, status_for};
 
 /// Whether `text` is an atom of one identifier part, such as `@app`: the
 /// spelling of a target name.
@@ -184,6 +184,7 @@ pub fn run(invocation: &Invocation) -> Response {
     }
     let Some(snapshot) = capture.snapshot() else {
         checked(&mut response, capture.diagnostics().to_vec(), Vec::new());
+        reach(&mut response, capture.limits_reached());
         return response;
     };
     for module in snapshot.modules() {
@@ -198,6 +199,7 @@ pub fn run(invocation: &Invocation) -> Response {
         .map(|result| records(result.obligations(), &response.sources))
         .unwrap_or_default();
     checked(&mut response, check.diagnostics().to_vec(), obligations);
+    reach(&mut response, capture.limits_reached());
     if response.result == CommandOutcome::Ok {
         response.notice = Some("check passed".to_owned());
     }

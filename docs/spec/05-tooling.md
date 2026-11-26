@@ -162,6 +162,40 @@ premises, or one comparison of two constants, whether or not its conclusion
 is new. A discharge that this limit stops before the rules reach a verdict
 is reported as [Bare guards](02-type-system.md#bare-guards) states.
 
+`m1Default` also bounds **source nesting** at 1,024 levels. A *form*
+encloses the tokens written inside it:
+
+- a bracket form `(…)`, `[…]`, or `{…}`, and a construct of an expression
+  or a statement (`do … enddo`, `if … endif`, `match … endmatch`, a
+  `let … endlet` statement, an anonymous `fn … endfn` or `proc … endproc`),
+  the tokens between its opener and its closer;
+- `return`, `try`, and `await`, the tokens of the expression after them;
+- each application `(…)` and field read `.name` of a `postfix`, the tokens
+  of the form it applies to, so in `f(a)(b)` the second application
+  encloses `f(a)`.
+
+A declaration encloses nothing, and neither does its `do` section, which
+its own closer ends. A token is nested one level in each form that encloses
+it: in `let x: I32 be do [y] enddo endlet`, `y` is nested two levels. Each
+link of a chain is a form, so in `return try await y`, `y.a.b`, and
+`y()()`, `y` is nested three, two, and two levels, and in `if c then 1i32
+else if d then 2i32 else 3i32 endif endif` the second `if` is nested one
+level and `d` two. The limit is the tool's, not the language's: the source
+grammar nests without bound, and the reader and `fmt` read any depth.
+
+- Each source module and data document a command reads, a project file
+  included, is measured once after it is read, before any later stage.
+- A document with a token other than whitespace or a comment nested more
+  than 1,024 levels is `@tool.limitExceeded` at the first such token in
+  source order. That is the document's only diagnostic, the status is
+  `unknown`, `limits.reached` names `sourceNesting`, and `complete` is
+  `false`.
+- No later stage runs on the snapshot that holds such a document: `check`,
+  `test`, and `run` report the limit alone, and `fmt` formats by syntax
+  alone, as when checking is unavailable.
+- A type nested more than 64 levels, at most 1,024, is still
+  [`@type.depthExceeded`](02-type-system.md#structural-types).
+
 ### Initialization and project operations
 
 **Init.** `DEST` defaults to the workspace. It MUST be absent, or an empty
@@ -225,8 +259,9 @@ canonical.
   lossily.
 - A captured module is formatted with a semantic check of the candidate text
   in place of the captured bytes. A file that is not a module is formatted
-  by syntax alone. When checking is unavailable, formatting proceeds from
-  exact syntax facts; no incomplete fact authorizes a semantic edit.
+  by syntax alone. When checking is unavailable, or a module of the snapshot
+  is over the source nesting limit, formatting proceeds from exact syntax
+  facts; no incomplete fact authorizes a semantic edit.
 
 ### Tests and selection
 
@@ -237,9 +272,10 @@ input (exit 2, no diagnostics).
 
 1. Tests are discovered in canonical module order, then declaration order.
    With no selector, a missing or empty test root is an empty passing suite.
-2. Project, source-graph, and required parse errors are reported first, with
-   zero counts and no items. Without a selector every test module is parsed;
-   with one, its module is.
+2. Project, source-graph, and required parse errors, and a document over the
+   [source nesting](#program-arguments-execution-and-evaluation) limit, are
+   reported first, with zero counts and no items. Without a selector every
+   test module is parsed; with one, its module is.
 3. A selector that then names no module or no test is invalid input.
 4. Every selected test is checked before any runs. An ordinary error in the
    selection invalidates all of it: every item is `@test.invalid` and none

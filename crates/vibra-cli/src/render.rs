@@ -97,6 +97,23 @@ pub const fn status_for(result: CommandOutcome) -> Status {
     }
 }
 
+/// Records the limits `reached`, by name, in `response`: a reached limit is
+/// an unknown outcome and an incomplete observation (05 "Limits").
+pub(crate) fn reach(response: &mut Response, reached: Vec<String>) {
+    if reached.is_empty() {
+        return;
+    }
+    for limit in reached {
+        if !response.limits.reached.contains(&limit) {
+            response.limits.reached.push(limit);
+        }
+    }
+    response.limits.complete = false;
+    if response.status != Status::Unsupported {
+        response.status = Status::Unknown;
+    }
+}
+
 fn limits() -> Limits {
     Limits {
         profile: LIMIT_PROFILE.to_owned(),

@@ -434,7 +434,7 @@ change to this table, with a positive case and a nearest negative case.
 | a valid command or construct outside the tool's profile; a driver the platform does not support, at admission | `@tool.unavailable`, the whole form, the command-line context, or, for a driver, the target's `name` value |
 | a plan whose workspace or document revision no longer matches | `@tool.stalePlan`, no location |
 | an MCP or tool action the server's permissions deny | `@tool.actionDenied`, no location |
-| a tool limit reached, with an unknown, incomplete status | `@tool.limitExceeded`; the predicate when the limit stopped an obligation, whose status is then `unknown` and which gets no `@contract.unproved`; otherwise no location |
+| a tool limit reached, with an unknown, incomplete status | `@tool.limitExceeded`; the predicate when the limit stopped an obligation, whose status is then `unknown` and which gets no `@contract.unproved`; for [source nesting](05-tooling.md#program-arguments-execution-and-evaluation), the first token in source order nested more than the limit, the document's only diagnostic; otherwise no location |
 | a value that cannot be shown: a function, a plan, or a grant, including one an interface value holds | `@tool.unsupportedValue`, the observed expression when one exists |
 | a build for a platform the toolchain does not emit | `@tool.unsupportedTarget`, no location |
 | a missing platform linker | `@tool.missingLinkTool`, no location |

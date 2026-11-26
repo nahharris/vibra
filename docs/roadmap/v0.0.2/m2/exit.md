@@ -2,8 +2,8 @@
 
 The evidence that M2 meets the [exit evidence](README.md#exit-evidence) of
 its README. Each line names the case, the host test, or the evidence file that
-shows it. The commands ran on Windows 11 in the worktree of `m2/fix-c`,
-on `v0.0.2/m2-ops` at `4294c424` with the commits of fix C, with
+shows it. The commands ran on Windows 11 in the worktree of `m2/fix-d`,
+on `v0.0.2/m2-ops` at `7cb804f1` with the commits of fix D, with
 `--locked --offline`, `CARGO_BUILD_JOBS=4`, and `RUSTFLAGS=-D warnings` for
 clippy and the tests.
 
@@ -40,27 +40,30 @@ conformance/cases` exits 0:
 | Profile | Passed | Failed | Unknown | Unavailable |
 | --- | --- | --- | --- | --- |
 | `readerV2` | 178 | 0 | 0 | 0 |
-| `staticV2` | 699 | 0 | 0 | 0 |
+| `staticV2` | 704 | 0 | 0 | 0 |
 | `interpreterV2` | 342 | 0 | 0 | 0 |
-| `toolingV2` | 9 | 0 | 0 | 0 |
-| total | 1228 | 0 | 0 | 0 |
+| `toolingV2` | 10 | 0 | 0 | 0 |
+| total | 1234 | 0 | 0 | 0 |
 
 No required case under `staticV2` or `interpreterV2` is failed, unknown, or
 unavailable. The two cases whose expected verdict is `unsupported` hold no
 M2 form ([What stays unavailable](#what-stays-unavailable)).
 
 The host suite is the test command of step 37 over the nine crates M2
-touched:
+touched, with the three other crates that read the nesting measure:
 
 ```powershell
-cargo test --locked --offline -p vibra-ir -p vibra-interp -p vibra-types -p vibra-fs-scope -p vibra-host -p vibra-workspace -p vibra-schema -p vibra-cli -p vibra-conformance --all-features
+cargo test --locked --offline -p vibra-syntax -p vibra-fmt -p vibra-resolve -p vibra-ir -p vibra-interp -p vibra-types -p vibra-fs-scope -p vibra-host -p vibra-workspace -p vibra-schema -p vibra-cli -p vibra-conformance --all-features
 ```
 
-It exits 0. It prints 30 `test result:` lines, all `ok`, with 1744 tests
-passed, 0 failed, and 1 ignored: `vibra-fs-scope`
+It exits 0. It prints 39 `test result:` lines, all `ok`, with 2109 tests
+passed, 0 failed, and 5 ignored: `vibra-fs-scope`
 `controls::no_handle_kept_child`, which `controls::no_handle_kept` runs
-in a child process. The output holds one `NOT RUN` line, listed under
-[NOT RUN](#not-run).
+in a child process; `vibra-workspace` `stack::probe` and
+`recursion::child`, the children of the two measurements below; and
+`stack::stack_per_level` and `recursion::recursion_probes`, the
+measurements, which take minutes. One row is not run on Windows, listed
+under [NOT RUN](#not-run).
 
 The other commands:
 
@@ -70,6 +73,40 @@ The other commands:
 | `cargo clippy --workspace --all-targets --all-features -- -D warnings` | exit 0, no warning |
 | `cargo doc --workspace --no-deps --all-features` with `RUSTDOCFLAGS=-D warnings` | exit 0 |
 | `pwsh -NoProfile -File conformance/tools/revisions.ps1 -Root conformance/cases -Check` | exit 0 |
+
+## Source nesting
+
+`m1Default` bounds source nesting at 1,024 levels
+([Limits](../../../spec/05-tooling.md#program-arguments-execution-and-evaluation)).
+Every module and data document a command reads is measured once after it is
+read, and a command runs its stages on a thread sized for the limit, so no
+depth of nesting overflows a command's stack. The cases are written by hand from the
+chapter, with their rows in `conformance/rules/m2-fixD.tsv`:
+
+| Case or host test | Shows | Result |
+| --- | --- | --- |
+| `V2-TOOL-nesting-1024-levels` | a token in 1,024 nested `do` blocks checks | case, passed |
+| `V2-TOOL-nesting-1025-levels` | one more level is `@tool.limitExceeded` alone at that token, `unknown` | case, passed |
+| `V2-TOOL-nesting-lists-type-depth` | 65 nested lists are still `@type.depthExceeded` | case, passed |
+| `V2-TOOL-nesting-lists-limit` | 1,025 nested lists are the limit alone, with no `@type.depthExceeded` | case, passed |
+| `V2-TOOL-nesting-project-file` | a project file is measured before it is decoded | case, passed |
+| `V2-TOOL-nesting-format` | a snapshot with a module past the limit is formatted by syntax alone | case, passed |
+| `vibra-syntax` `nesting::*` | the definition of a level, form by form, and each example of 05; the first token past the limit in source order; 100,000 levels measured on a 256 KiB stack | 9 tests, passed |
+| `vibra-cli` `nesting::*` | `check`, `test`, and `run` past the limit give the limit alone with `limits.reached` `sourceNesting`; `build`, `eval`, and `project inspect` stay unavailable; `fmt` formats 3,000 levels; `check` answers 1,000,000 nested brackets and each chain kind at 100,000 links with the limit alone, and each recursion probe with its document | 9 tests, passed |
+| `vibra-workspace` `stack::stages_fit_a_quarter_of_the_command_stack` | every stage on ten nesting shapes at 1,024 levels fits a quarter of the command stack | passed |
+| `vibra-workspace` `recursion::chains_past_the_limit_are_the_limit_alone` | application, field-read, and prefix-word chains of 100,000 links are the limit alone, at the token the definition names, and every stage answers them on a quarter of the command stack | passed |
+| `vibra-workspace` `recursion::probes_check_and_pass_when_small` | every probe of [the chains the limit does not bound](#what-stays-unavailable) checks and passes at 20 | passed |
+| `vibra-resolve` `bodies::a_long_chain_of_module_values_is_decided_without_host_recursion` | a chain of 20,000 module values, across which a chain of imports or of path dependencies also runs, is decided constant on a 256 KiB stack | passed |
+
+The command stack is 32 MiB: four times the deepest stage a debug build
+needs at the limit, 5,060 KiB, for checking 1,024 nested `do` blocks
+(`vibra_workspace::COMMAND_STACK`).
+
+The limit bounds how deeply one document nests, not how long a chain of
+declarations, calls, imports, or packages is, or how many statements one
+body holds. `recursion::recursion_probes` probes those; one overflows a
+command's stack, and some take minutes, both listed under
+[What stays unavailable](#what-stays-unavailable).
 
 ## Coverage audit
 
@@ -263,6 +300,8 @@ runs it.
 | `@git` dependencies and the lock | not in this release | `V2-PROJECT-git-dependency-unavailable` |
 | native execution | M4 | owner table, "Native execution slice" |
 | a contract call on an interface's type parameter whose bound leaves an associated type open | the checker of M1 | `V2-PROJECT-test-unavailable-closure` |
+| a body of 15,000 sequential `let`s: `check` overflows the 32 MiB command stack, and 1,000 overflow a 1 MiB stack (10,000 fit the command stack) | fix package E: every walk of a sequence in the checked program without host recursion | the checked program nests each `let` around the rest of its sequence (`vibra_ir::Node::Let`, `LetElse`), so every walk after the checker recurses once per statement, at 2 to 4 KiB each in a debug build; `recursion::recursion_probes`, `sequentialLets` |
+| a `check` that ends within 180 s in a debug build: 100,000 declared types, 10,000 calls that each ensure their result, 100,000 module values, 10,000 imports | no milestone names it | no overflow: 10,000 types check in 40 s, 1,000 calls in 70 s, 10,000 module values in 145 to 175 s, 1,000 imports in 8 to 33 s; `recursion::recursion_probes` |
 | a command that presents a target's authority before a run | M3, approvals | review finding F8: 03 asks that a target's authority be "presentable in plain terms"; coverage 11, "hard-link and opened-object limits shown at approval", has the limits enforced (`ATK-fs-hard-link-replace`, `ATK-gate-replace-without-link-count`) and no command that shows them |
 
 ## Specification questions

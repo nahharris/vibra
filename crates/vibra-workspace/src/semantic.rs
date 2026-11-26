@@ -73,12 +73,21 @@ impl WorkspaceCheck {
 
 /// Checks `snapshot`: every local target and the `@tests` unit when
 /// `target` is `None`, otherwise the target of that unit name only. A name
-/// that is no target selects nothing.
+/// that is no target selects nothing. A snapshot with a module nested past
+/// the source nesting limit is not checked: its diagnostics are the limit's
+/// alone ([`SourceSnapshot::limit_faults`]).
 #[must_use]
 pub fn check_snapshot(
     snapshot: &SourceSnapshot,
     target: Option<&str>,
 ) -> WorkspaceCheck {
+    if !snapshot.limit_faults().is_empty() {
+        return WorkspaceCheck {
+            diagnostics: snapshot.limit_faults().to_vec(),
+            check: None,
+            entries: Vec::new(),
+        };
+    }
     let project = snapshot.project().project();
     let covered = project
         .targets()

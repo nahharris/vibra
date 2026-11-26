@@ -28,6 +28,9 @@
 //! 5. The bytes. No source byte is read before the walk's checks pass; the
 //!    bytes are then copied exactly, sorted by project-relative path. One
 //!    source identity in two units is `@module.sourceIdCollision`.
+//! 6. Nesting. Each module is measured against the source nesting limit
+//!    ([`crate::nesting_fault`]); a module nested past it is kept, with its fault
+//!    in [`SourceSnapshot::limit_faults`], so that its text can be shown.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
@@ -36,10 +39,11 @@ use std::io::ErrorKind;
 use std::path::{Component, Path, PathBuf};
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
-use vibra_syntax::is_reserved_word;
+use vibra_syntax::{is_reserved_word, parse_source};
 
 use crate::dependencies::{Dependencies, name_faults};
 use crate::discovery::DiscoveredProject;
+use crate::nesting::nesting_fault;
 use crate::project::{PROJECT_FILE_NAME, Package, TargetKind};
 use crate::revision::{RevisionKind, RevisionRecord, embedded_toolchain_record};
 
@@ -152,6 +156,9 @@ pub struct SourceSnapshot {
     /// Each dependency's project file, by its path from the project root.
     dependency_files: Vec<(String, Vec<u8>)>,
     unavailable: Vec<Diagnostic>,
+    /// `@tool.limitExceeded` for each module nested past the source nesting
+    /// limit, in module order.
+    limit_faults: Vec<Diagnostic>,
 }
 
 impl SourceSnapshot {
@@ -215,11 +222,13 @@ impl SourceSnapshot {
         if !collisions.is_empty() {
             return Err(collisions);
         }
+        let limit_faults = limit_faults(&units);
         Ok(Self {
             project,
             units,
             dependency_files: dependencies.files().to_vec(),
             unavailable: dependencies.unavailable().to_vec(),
+            limit_faults,
         })
     }
 
@@ -228,6 +237,15 @@ impl SourceSnapshot {
     #[must_use]
     pub fn unavailable(&self) -> &[Diagnostic] {
         &self.unavailable
+    }
+
+    /// `@tool.limitExceeded` at the first token past the source nesting limit
+    /// of each module nested deeper ([`crate::nesting_fault`]), in module order.
+    /// When there is one, no later stage reads the snapshot: the check, the
+    /// tests, and the run report these alone.
+    #[must_use]
+    pub fn limit_faults(&self) -> &[Diagnostic] {
+        &self.limit_faults
     }
 
     /// The discovered project.
@@ -259,6 +277,7 @@ impl SourceSnapshot {
             .flat_map(|unit| unit.modules.iter_mut())
             .find(|module| module.source_id == source_id)?;
         module.bytes = bytes.to_vec();
+        replaced.limit_faults = limit_faults(&replaced.units);
         Some(replaced)
     }
 
@@ -309,6 +328,17 @@ impl SourceSnapshot {
         }));
         records
     }
+}
+
+/// The nesting fault of each module of `units` read past the limit.
+fn limit_faults(units: &[SourceUnit]) -> Vec<Diagnostic> {
+    units
+        .iter()
+        .flat_map(|unit| unit.modules.iter())
+        .filter_map(|module| {
+            nesting_fault(&parse_source(Some(&module.source_id), &module.bytes))
+        })
+        .collect()
 }
 
 fn module_path(unit: &str, segments: &[String]) -> String {

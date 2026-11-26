@@ -40,7 +40,7 @@ use vibra_workspace::{
 
 use crate::args::Invocation;
 use crate::refusal;
-use crate::render::{Response, source_text, status_for};
+use crate::render::{Response, reach, source_text, status_for};
 
 /// The memory budget each test runs under: the memory limit of the published
 /// limit profile.
@@ -87,6 +87,7 @@ pub fn run(invocation: &Invocation) -> Response {
             Vec::new(),
             capture.diagnostics(),
         );
+        reach(&mut response, capture.limits_reached());
         return response;
     };
     for module in snapshot.modules() {
@@ -112,6 +113,7 @@ pub fn run(invocation: &Invocation) -> Response {
     let mut result = run.result();
     inject(&mut items, &mut result);
     finish(&mut response, result, items, traces, run.diagnostics());
+    reach(&mut response, capture.limits_reached());
     response
 }
 
@@ -333,6 +335,14 @@ thread_local! {
     /// The fault-injection hook of the trap test: the first selected test of
     /// a checked selection ends in `@runtime.invalidCheckedProgram`.
     static TRAP_FIRST: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// The calling thread's test hook, to set on the thread a command runs on
+/// ([`crate::run`] runs every command on its own thread).
+#[cfg(test)]
+pub(crate) fn carry_hook() -> impl FnOnce() + Send {
+    let trap_first = TRAP_FIRST.get();
+    move || TRAP_FIRST.set(trap_first)
 }
 
 /// Applies the test hook to a run's items and suite result.

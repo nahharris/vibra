@@ -458,6 +458,16 @@ pub fn run_tests_in(
     budget: MemoryBudget,
 ) -> Result<TestRun, InvalidSelection> {
     let revision = workspace_revision(&snapshot.revision_records()).unwrap_or_default();
+    if !snapshot.limit_faults().is_empty() {
+        // A module nested past the source nesting limit stops the run before
+        // any test module is read, as a parse error would.
+        return Ok(TestRun {
+            result: SuiteResult::Diagnostics,
+            items: Vec::new(),
+            diagnostics: snapshot.limit_faults().to_vec(),
+            revision,
+        });
+    }
     let modules = test_modules(snapshot, selector)?;
     let mut parse_errors = Vec::new();
     let mut discovered = Vec::new();

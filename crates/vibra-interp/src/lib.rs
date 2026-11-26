@@ -92,12 +92,16 @@ pub struct LimitProfile {
     /// integer fact to one premise or one pair of premises, or one
     /// comparison of two constants, whether or not its conclusion is new.
     pub proof_derivations: u64,
+    /// The most levels a token of a source or data document may be nested,
+    /// as `docs/spec/05-tooling.md`, "Limits", counts them. A command
+    /// measures every document it reads against it before any later stage.
+    pub source_nesting: usize,
 }
 
 impl LimitProfile {
     /// `m1Default`: 10,000,000 reductions for one compile-time evaluation,
-    /// with the default memory budget, and 100,000 attempted derivations
-    /// for the proof of one obligation.
+    /// with the default memory budget, 100,000 attempted derivations for
+    /// the proof of one obligation, and a source nesting of 1,024 levels.
     pub const M1_DEFAULT: Self = Self {
         name: "m1Default",
         compile_time: Limits {
@@ -105,6 +109,7 @@ impl LimitProfile {
             memory: MemoryBudget::DEFAULT,
         },
         proof_derivations: 100_000,
+        source_nesting: 1_024,
     };
 }
 

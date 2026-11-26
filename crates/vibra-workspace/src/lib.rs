@@ -40,6 +40,7 @@ pub mod run;
 mod discovery;
 mod format_plan;
 mod library;
+mod nesting;
 mod project;
 mod resolve;
 mod revision;
@@ -53,6 +54,7 @@ pub use format_plan::{
     Discovery, FormatPlan, InvalidPath, WorkspaceCapture, format_mode, plan_format,
 };
 pub use library::library_source;
+pub use nesting::{COMMAND_STACK, SOURCE_NESTING, nesting_fault, source_nesting_limit};
 pub use project::{
     Availability, Dependency, DependencyKind, PROJECT_FILE_NAME, PROJECT_FORMAT,
     Package, Project, Recipe, Target, TargetKind, decode_project, project_schema,

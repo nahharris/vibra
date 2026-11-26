@@ -23,6 +23,7 @@
 //! | a refused required leaf, a failed acquisition | `@command.operationalFailure` | the startup diagnostic, no `programResult` |
 //! | a defect trap | `@command.trap` | the trap record with its source origin, when known |
 //! | memory exhaustion | `@command.operationalFailure` | `@runtime.memoryExhausted`, the limit `memory` reached |
+//! | a module nested past the source nesting limit | `@command.diagnostics` | `@tool.limitExceeded` alone, the limit `sourceNesting` reached, no startup |
 //! | no driver for a provider | `@command.unavailable` | `@tool.unavailable` |
 //!
 //! Under [`Launch::World`] the program's streams are the world's, and the
@@ -61,6 +62,7 @@ use vibra_syntax::canonical_string;
 use vibra_types::{GrantShape, load_stdlib};
 
 use crate::entry::EntryFacts;
+use crate::nesting::SOURCE_NESTING;
 use crate::project::TargetKind;
 use crate::revision::workspace_revision;
 use crate::semantic::check_snapshot;
@@ -433,13 +435,14 @@ fn prepare(
         } else {
             CommandResult::Diagnostics
         };
-        return Err(before_startup(
-            revision,
-            Some(name),
-            result,
-            diagnostics,
-            None,
-        ));
+        let mut outcome =
+            before_startup(revision, Some(name), result, diagnostics, None);
+        if !snapshot.limit_faults().is_empty() {
+            // A module nested past the source nesting limit is the limit
+            // alone: an unknown, incomplete observation.
+            outcome.limits_reached.push(SOURCE_NESTING.to_owned());
+        }
+        return Err(outcome);
     }
     let library = match load_stdlib() {
         Ok(stdlib) => StdlibIdentity {

@@ -1,0 +1,12 @@
+id = "V2-TOOL-nesting-1024-levels"
+rule = "V2-TOOL-nesting-1024-levels"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "05-tooling.md#program-arguments-execution-and-evaluation: a token nested 1,024 levels, in 1,024 do blocks of a module value, is within the source nesting limit of m1Default, and the module checks"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

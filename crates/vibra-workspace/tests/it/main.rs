@@ -13,10 +13,13 @@ mod support;
 mod discovery;
 mod format;
 mod graph;
+mod probes;
 mod project;
+mod recursion;
 mod resolve;
 mod revision;
 mod snapshot;
+mod stack;
 mod test_runner;
 
 // The tests of M2 steps 25 (`entry`), 26 (`binding`), 27 (`dependencies`),
