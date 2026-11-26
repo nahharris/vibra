@@ -4,8 +4,8 @@ Kind: vertical. The structural record of a position query: the smallest
 node that contains the offset, its kind and category, the forms and labels
 the grammar permits there, with the tie rules of the chapter; the
 `--include syntax` member.
-Depends on: 01.
-Crates: `vibra-syntax`, `vibra-workspace`, `conformance/cases`.
+Depends on: 05.
+Crates: `vibra-syntax`, `vibra-workspace`, `vibra-schema`, `conformance/cases`.
 
 ## Prerequisites
 
@@ -25,8 +25,9 @@ Crates: `vibra-syntax`, `vibra-workspace`, `conformance/cases`.
 | `crates/vibra-syntax/src/source/keyword.rs:158` | `pub const TAG_SETS` | the permitted labels of a tag section |
 | `crates/vibra-syntax/src/document.rs:53` | `pub struct Document` | the parsed document |
 
-Proposed: `vibra_syntax::position::{at, Structural, Category}`;
-`query::structural::record`.
+From step 05: the `query` command and its handler. Proposed:
+`vibra_syntax::position::{at, Structural, Category}`;
+`query::structural::record`, filled into the dispatcher's `syntax` entry.
 
 ## Files owned
 
@@ -35,6 +36,7 @@ Proposed: `vibra_syntax::position::{at, Structural, Category}`;
 - `crates/vibra-workspace/src/query/structural.rs`
 - `crates/vibra-workspace/tests/it/query_structural.rs`
 - `crates/vibra-cli/tests/it/query_structural.rs`
+- `crates/vibra-schema/schemas/v2/query/syntax.json`
 - `conformance/rules/m3-06.tsv`
 - the case directories of the matrix below
 
@@ -56,7 +58,8 @@ Proposed: `vibra_syntax::position::{at, Structural, Category}`;
    grammar gives none, `[]` where known empty.
 3. `record`: `{schemaVersion: 2, offset, sourceId, span, mode, syntaxKind,
    category, status, permittedForms, permittedLabels}`, the
-   `--include syntax` member; `mode` `source` or `data`.
+   `--include syntax` member and its schema file; `mode` `source` or
+   `data`.
 
 ## Positions
 
@@ -87,8 +90,8 @@ Cases are `query` with `--include syntax`.
 
 ## Diagnostics and schema changes
 
-Codes: none. Schema: the `sourcePositionQuery` `$def` of the query schema is
-produced.
+Codes: none. Schema: the `sourcePositionQuery` member of the query schema
+is produced, in `schemas/v2/query/syntax.json`.
 
 ## Validation
 
@@ -96,7 +99,7 @@ produced.
 $env:RUSTFLAGS='-D warnings'
 cargo fmt --all --check
 cargo clippy --locked --offline --workspace --all-targets --all-features -- -D warnings
-cargo test --locked --offline -p vibra-syntax -p vibra-fmt -p vibra-resolve -p vibra-types -p vibra-workspace -p vibra-cli -p vibra-conformance --all-features
+cargo test --locked --offline -p vibra-syntax -p vibra-fmt -p vibra-resolve -p vibra-types -p vibra-workspace -p vibra-schema -p vibra-cli -p vibra-conformance --all-features
 cargo run --locked --offline -p vibra-conformance --bin vibra-conformance -- --root conformance/cases
 pwsh -NoProfile -File conformance/tools/revisions.ps1 -Root conformance/cases -Check
 $env:RUSTDOCFLAGS='-D warnings'

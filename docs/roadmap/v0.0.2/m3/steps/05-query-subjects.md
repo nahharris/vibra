@@ -6,7 +6,7 @@ validated, the diagnostic-code and `@workspace` subjects are answered, and
 a position or entity subject is resolved to its node or declaration with
 compact metadata. The structural record is step 06 and the semantic
 members step 12; until they land their includes answer `unavailable`
-fields, never a wrong fact.
+fields through the dispatcher of step 01, never a wrong fact.
 Depends on: 01.
 Crates: `vibra-workspace`, `vibra-cli`, `vibra-schema`, `vibra-conformance`,
 `conformance/cases`, `conformance/tools`.
@@ -16,6 +16,7 @@ Crates: `vibra-workspace`, `vibra-cli`, `vibra-schema`, `vibra-conformance`,
 - Read: [05 Workspace queries](../../../../spec/05-tooling.md#workspace-queries);
   [05 Command payloads](../../../../spec/05-tooling.md#command-payloads) (`query`);
   [05 Program arguments, execution and evaluation](../../../../spec/05-tooling.md#program-arguments-execution-and-evaluation) ("Limits");
+  [05 Versioned envelope and results](../../../../spec/05-tooling.md#versioned-envelope-and-results) (`workspaceRevision`);
   [07 Case operations and inputs](../../../../spec/07-diagnostics-and-conformance.md#case-operations-and-inputs);
   [questions](../spec-questions.md) Q30, Q32, Q33, Q36, Q37.
 
@@ -31,20 +32,22 @@ Crates: `vibra-workspace`, `vibra-cli`, `vibra-schema`, `vibra-conformance`,
 | `crates/vibra-cli/src/check.rs:146` | `pub fn run` | the shape of a command over a capture, with limits reached |
 | `crates/vibra-conformance/src/format.rs:23` | `pub struct FormatHandler` | the model of a `toolingV2` handler |
 
-Proposed: `query::subject::{Subject, parse_subject}`, `query::{query,
-QueryOptions, QueryResult, Include, Expand}`; `vibra-cli::query::run`;
-`vibra-schema::query_payload::QueryPayload` with the schema
-`urn:vibra:schema:v2:query`; `vibra-conformance::query::QueryHandler`.
+From step 01: the dispatcher table of `query::mod`. Proposed:
+`query::subject::{Subject, parse_subject, resolve_subject}`,
+`query::{query, QueryOptions, QueryResult, Include, Expand}`;
+`vibra-cli::query::run`; `vibra-schema::query_payload::QueryPayload` with
+the schema `urn:vibra:schema:v2:query`;
+`vibra-conformance::query::QueryHandler`.
 
 ## Files owned
 
-- `crates/vibra-workspace/src/query/mod.rs`
 - `crates/vibra-workspace/src/query/subject.rs`
 - `crates/vibra-workspace/tests/it/query_subject.rs`
 - `crates/vibra-cli/src/query.rs`
 - `crates/vibra-cli/tests/it/query_subject.rs`
 - `crates/vibra-schema/src/query_payload.rs`
-- `crates/vibra-schema/schemas/v2/payloads/query.json`
+- `crates/vibra-schema/schemas/v2/query/compact.json`
+- `crates/vibra-schema/schemas/v2/query/diagnostic.json`
 - `crates/vibra-schema/tests/it/query_payload.rs`
 - `crates/vibra-conformance/src/query.rs`
 - `crates/vibra-conformance/tests/it/engine_reads.rs`
@@ -58,21 +61,21 @@ QueryOptions, QueryResult, Include, Expand}`; `vibra-cli::query::run`;
    decimal offset), a canonical entity atom, a registered diagnostic code,
    or `@workspace`; anything else is invalid input. Invariant: the parse
    touches no file.
-2. `query`: a code subject reads the registry and takes no snapshot
-   (`workspaceRevision` null, Q37); every other subject needs the capture.
-   A capture fault is `@command.diagnostics` with the empty payload; a
-   snapshot with a document over the nesting limit answers the limit alone
-   (Q36). A path that is no module of the snapshot, an offset past the end
-   or inside a scalar, an atom that resolves to nothing, an unknown
-   include or expand name: invalid input. Invariant: the result names the
-   capture's revision.
+2. `resolve_subject` and `query`: a code subject reads the registry and
+   takes no snapshot (`workspaceRevision` null, Q37); every other subject
+   needs the capture. A capture fault is `@command.diagnostics` with the
+   empty payload and `workspaceRevision: null`; a snapshot with a document
+   over the nesting limit answers the limit alone with the captured
+   snapshot's revision (Q36). A path that is no module of the snapshot, an
+   offset past the end or inside a scalar, an atom that resolves to
+   nothing, an unknown include or expand name: invalid input. Invariant:
+   the result names the capture's revision whenever a snapshot was taken.
 3. The compact metadata with no include: `{nodeId, identity,
    resolvedKind}`; `identity` of an entity subject from the resolution, of
-   a position the declaration whose span contains it. Each include not yet
-   produced (steps 06, 12, 15, 16, 22) answers `{status: "unavailable",
-   value: null}` under its member.
-4. `QueryPayload`, its schema with the two position records as `$defs`
-   (shapes from the chapter; their producers are steps 06 and 12), and the
+   a position the declaration whose span contains it. Each member not yet
+   produced (steps 06, 12, 17, 25, 29) answers `{status: "unavailable",
+   value: null}` through the dispatcher's table.
+4. `QueryPayload`, the `compact` and `diagnostic` member schemas, and the
    envelope's validation.
 5. `vibra-cli::query::run`, `SUPPORTED = true`; the human format prints
    the subject, kind, identity, and each present member as text.
@@ -82,8 +85,7 @@ QueryOptions, QueryResult, Include, Expand}`; `vibra-cli::query::run`;
    `"workspaceRevision": "sha256:…"` in a case's JSON expectations.
 7. The architecture test `engine_reads.rs`: every call of `std::fs` read
    functions in `vibra-workspace/src` is in `discovery.rs`, `snapshot.rs`,
-   `approval.rs`, `format_plan.rs`, or `edit/journal.rs`; no `query` module
-   reads a file.
+   `approval.rs`, or `format_plan.rs`; no `query` module reads a file.
 
 ## Test matrix
 
@@ -101,8 +103,8 @@ Cases are `query` under `toolingV2`; a row with no case id is a host test.
 | `V2-TOOL-query-position-dependency` | positive | a position in a `@path` dependency's module | answered | Q32 |
 | `V2-TOOL-query-include-unknown` | negative | `--include types` | `@command.invalidInput` | 05: the option table is closed |
 | `V2-TOOL-query-include-pending` | positive | `@app.math.double --include type` before step 12 | `metadata.type` is `{status: "unavailable", value: null}` | 05: "`unavailable` (with a `null` value)" |
-| `V2-TOOL-query-nesting-limit` | negative | a tree with a module nested 1,025 levels; subject `@workspace` | `@tool.limitExceeded` alone, status `unknown`, `limits.reached: ["sourceNesting"]`, empty payload | 05 Limits: "No later stage runs on the snapshot that holds such a document" |
-| `V2-TOOL-query-capture-fault` | negative | a tree whose `project.vibon` has an invalid shape | `@command.diagnostics` with the capture's one diagnostic, empty payload | 05: "A run whose project could not be captured … answers `@command.diagnostics`" |
+| `V2-TOOL-query-nesting-limit` | negative | a tree with a module nested 1,025 levels; subject `@workspace` | `@tool.limitExceeded` alone, status `unknown`, `limits.reached: ["sourceNesting"]`, empty payload, `workspaceRevision` the captured tree's revision | 05 Limits: "No later stage runs on the snapshot that holds such a document"; 05: "`workspaceRevision` is `null` only when no snapshot was taken" |
+| `V2-TOOL-query-capture-fault` | negative | a tree whose `project.vibon` has an invalid shape | `@command.diagnostics` with the capture's one diagnostic, empty payload, `workspaceRevision: null` | 05: "A run whose project could not be captured … answers `@command.diagnostics`" |
 | `ATK-engine-reads-enumerated` | negative | the architecture test given a `query/subject.rs` containing `std::fs::read` | the test reports it | 05 One workspace engine: "Semantic phases consume immutable inputs they are given" |
 | subject grammar | negative | `src/app/main.vib:x`, `src/app/main.vib`, `main.vib:3`, `@`, a code without its `@` | each `@command.invalidInput` | 05 Workspace queries |
 | JSON validates | positive | every envelope of the rows above | validates against the command-result schema with the query payload | 05: "A producer MUST validate every document it emits" |
@@ -110,9 +112,9 @@ Cases are `query` under `toolingV2`; a row with no case id is a host test.
 
 ## Diagnostics and schema changes
 
-Codes: `@tool.limitExceeded`, `@tool.unavailable` (the pending includes
-answer a status, not a diagnostic). Schema: `urn:vibra:schema:v2:query`
-(new), the `query` payload of the command-result schema.
+Codes: `@tool.limitExceeded` (the pending includes answer a status, not a
+diagnostic). Schema: `urn:vibra:schema:v2:query` (new), the `query` payload
+of the command-result schema with its `compact` and `diagnostic` members.
 
 ## Validation
 
@@ -132,8 +134,8 @@ Read: all exit 0; `help` now lists `query` as supported with `["query"]`.
 ## Stays unavailable
 
 The includes `syntax` (06), `context`, `source`, `signature`, `type`,
-`visibility`, `diagnostics` (12), `effects` (15), `index` (22); every
-expansion (15, 16). Each answers the unavailable status.
+`visibility`, `diagnostics` (12), `effects` (17), `index` (29); every
+expansion (17, 25). Each answers the unavailable status.
 
 ## Excluded
 

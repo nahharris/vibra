@@ -3,9 +3,10 @@
 Kind: vertical. The semantic members of a query: `context`, `source`,
 `signature`, `type`, `visibility`, `diagnostics`, for a position and for an
 entity, projected from the checker's facts, the resolution, and the
-diagnostics, each field `exact`, `recovered`, or `unavailable` on its own.
+diagnostics, each field `exact`, `recovered`, or `unavailable` with the
+status the checker gave it.
 Depends on: 05, 06, 08.
-Crates: `vibra-workspace`, `conformance/cases`.
+Crates: `vibra-workspace`, `vibra-schema`, `conformance/cases`.
 
 ## Prerequisites
 
@@ -25,13 +26,20 @@ Crates: `vibra-workspace`, `conformance/cases`.
 | `crates/vibra-types/src/check/obligation.rs:62` | `pub struct Obligation` | `obligations` |
 | `crates/vibra-schema/src/diagnostic.rs:144` | `pub fn render` | the diagnostics member |
 
-Proposed: `query::semantic::{envelope, entity_metadata}`.
+Proposed: `query::semantic::{envelope, entity_metadata}`, filled into the
+dispatcher's entries for the six members.
 
 ## Files owned
 
 - `crates/vibra-workspace/src/query/semantic.rs`
 - `crates/vibra-workspace/tests/it/query_semantic.rs`
 - `crates/vibra-cli/tests/it/query_semantic.rs`
+- `crates/vibra-schema/schemas/v2/query/context.json`
+- `crates/vibra-schema/schemas/v2/query/source.json`
+- `crates/vibra-schema/schemas/v2/query/signature.json`
+- `crates/vibra-schema/schemas/v2/query/type.json`
+- `crates/vibra-schema/schemas/v2/query/visibility.json`
+- `crates/vibra-schema/schemas/v2/query/diagnostics.json`
 - `conformance/rules/m3-12.tsv`
 - the case directories of the matrix below
 
@@ -39,24 +47,26 @@ Proposed: `query::semantic::{envelope, entity_metadata}`.
 
 1. For a position: the node's fact (08) gives `role`, `context`,
    `identity`, `expectedType`, `observedType`, `application`, `pattern`,
-   each as `{status, value}`; the resolution gives `visibleLocals` (lexical
-   order), `visibleImports` (written order), `declarationCandidates`
-   (identity order, private ones excluded where not visible); the check's
-   obligations whose span contains the position give `obligations`. A
-   missing fact is `unavailable`.
+   each as `{status, value}` with the status the fact carries; the
+   resolution gives `visibleLocals` (lexical order), `visibleImports`
+   (written order), `declarationCandidates` (identity order, private ones
+   excluded where not visible); the check's obligations whose span
+   contains the position give `obligations`. A missing fact is
+   `unavailable`. Invariant: the projection assigns no status of its own.
 2. For an entity: `signature` (the signature record), `type` (the open
    type), `visibility` `{access, representation}`, `source` `{span,
    text}`, `diagnostics` (those whose primary span lies in the
    declaration), `context` with the declaration's `kind` and `module`.
 3. Types as the JSON projection of the open type encoding, binder
    references indexing the enclosing signature's binders.
-4. The members placed as Q33 says; the default compact metadata unchanged.
+4. The members placed as Q33 says, each with its schema file; the default
+   compact metadata unchanged.
 
 ## Positions
 
 | Rule | Positions, each with a positive and a negative row |
 | --- | --- |
-| a semantic fact has its own status | an exact node; a node in a body with an error; a node in a module beside a broken module; against: a node whose type the checker could not fix |
+| a semantic fact has its own status | an exact node; a node in a body with an error; a node in a module beside a broken module; against: a node whose type the checker could not fix; one node with three statuses |
 
 ## Test matrix
 
@@ -82,14 +92,16 @@ Cases are `query` under `toolingV2`.
 | `V2-TOOL-query-entity-diagnostics` | positive | `--include diagnostics` on a declaration with a warning | the diagnostic rendered | 05: "diagnostics and fix capability" |
 | `V2-TOOL-query-semantic-beside-broken-module` | positive | a workspace with a type error in module B; a position in sound module A | every fact `exact` | 05: "A complete fact stays `exact` beside an unrelated broken module" |
 | `V2-TOOL-query-recovered-fact` | positive | a position in a body with a type error | `observedType.status: "recovered"` | 05: "An incomplete fact is `recovered`" |
+| `V2-TOOL-query-mixed-status-node` | positive | `--include context,type,signature` at `double("x")` where `double` takes `I32` | `role` and `context` `exact`; `observedType` `recovered`; `application.dispatch` `unavailable` with `null` | 05: "Each semantic field is `{status, value}`"; 07 Recovery: "Each fact is `exact`, `recovered`, or `unavailable` on its own" |
 | `V2-TOOL-query-unavailable-in-trivia` | positive | `--include type` in a comment | `{status: "unavailable", value: null}` | 05: "`unavailable` (with a `null` value)" |
 | `V2-TOOL-query-open-type` | positive | inside `fn first(T) takes {xs: List(T)}` at `xs` | `observedType` is `{kind: @list, arguments: [{kind: @binder, index: 0}]}` | 05 Type document: "whose binder references index the binders of the enclosing declaration's signature record" |
 | `V2-TOOL-query-declared-not-expanded` | positive | at a `User` value | `{kind: @declared, path, seed, arguments: []}`, no fields | 05: "A declared type is referenced by its path and identity, never expanded" |
-| JSON validates | positive | every envelope | validates against the query schema with the `workspacePositionQuery` `$def` | 05 |
+| JSON validates | positive | every envelope | validates against the query schema with the six members' `$defs` | 05 |
 
 ## Diagnostics and schema changes
 
-Codes: none. Schema: the `workspacePositionQuery` `$def` is produced.
+Codes: none. Schema: the six member schemas of the query payload are
+produced, one file each under `schemas/v2/query/`.
 
 ## Validation
 
@@ -108,7 +120,7 @@ Read: all exit 0.
 
 ## Stays unavailable
 
-`effects` (15); every expansion (15, 16); `index` (22).
+`effects` (17); every expansion (17, 25); `index` (29).
 
 ## Excluded
 
@@ -119,5 +131,5 @@ Effects; expansions; the index.
 - [ ] `conformance/rules/m3-12.tsv` has one `active` row per case id.
 - [ ] Every row of "Positions" has its case.
 - [ ] The report shows that no function of `semantic.rs` calls the checker
-      or the resolver: it reads results.
+      or the resolver, and that it assigns no status: it reads results.
 - [ ] The validation commands exit 0.
