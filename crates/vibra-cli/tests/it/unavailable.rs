@@ -70,14 +70,14 @@ fn unavailable_each() {
         checked += 1;
     }
     assert_eq!(
-        checked, 14,
-        "every line of the inventory but `help`, `fmt`, `check`, and `test`"
+        checked, 13,
+        "every line of the inventory but `help`, `fmt`, `check`, `test`, and `run`"
     );
 }
 
 #[test]
 fn well_formed_lines_with_operands_and_options_are_unavailable() {
-    let lines: [&[&str]; 19] = [
+    let lines: [&[&str]; 17] = [
         &["project", "init"],
         &["project", "init", "dest"],
         &["project", "inspect"],
@@ -86,8 +86,6 @@ fn well_formed_lines_with_operands_and_options_are_unavailable() {
         &["project", "sync"],
         &["lint", "@app", "--write"],
         &["build"],
-        &["run"],
-        &["run", "@app", "--", "-x", "--", "y"],
         &["eval", "@app.main.f", "--arg", "1", "--arg", "2"],
         &["build", "@app", "--target", "x86_64-pc-windows-msvc"],
         &["query", "@app.main.f", "--include", "m", "--expand", "r"],
@@ -98,7 +96,7 @@ fn well_formed_lines_with_operands_and_options_are_unavailable() {
         &["mcp", "--read-only", "x"],
         &["check", "--write-nothing"],
     ];
-    for line in &lines[..18] {
+    for line in &lines[..16] {
         let mut arguments = vec!["--format", "json"];
         arguments.extend_from_slice(line);
         let (code, document) = envelope(&arguments);
@@ -107,7 +105,7 @@ fn well_formed_lines_with_operands_and_options_are_unavailable() {
     }
     // The last row is not well formed: it names an option no line has.
     let mut arguments = vec!["--format", "json"];
-    arguments.extend_from_slice(lines[18]);
+    arguments.extend_from_slice(lines[16]);
     assert_eq!(run(&arguments).code, 2);
 }
 

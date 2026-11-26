@@ -217,7 +217,7 @@ fn a_test_item_projects_the_test_record() {
     validate_command_result(&observed).expect("an observation failure validates");
     assert_eq!(
         observed["payload"]["tests"][0]["failure"]["observationError"],
-        json!({"code": "unsupportedValue", "type": null, "origin": null})
+        json!({"code": "@tool.unsupportedValue", "type": null, "origin": null})
     );
 }
 
@@ -261,7 +261,7 @@ fn a_test_item_relates_its_result_to_its_fields() {
         ("/payload/tests/0/status", json!("passed")),
         (
             "/payload/tests/0/failure/observationError",
-            json!({"code": "unsupportedValue", "type": null, "origin": null}),
+            json!({"code": "@tool.unsupportedValue", "type": null, "origin": null}),
         ),
         ("/payload/tests/0/failure/kind", json!("@assertion")),
         ("/payload/tests/0/auditTrace", json!([{"kind": "@host"}])),

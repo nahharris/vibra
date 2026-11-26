@@ -28,6 +28,7 @@
 mod capability;
 mod diagnostic;
 mod envelope;
+mod run_payload;
 mod test_payload;
 mod validate;
 
@@ -39,6 +40,10 @@ pub use diagnostic::{
 pub use envelope::{
     CheckPayload, CommandOutcome, Envelope, FmtPayload, HelpPayload, Limits,
     ObligationKind, ObligationRecord, Payload, Status,
+};
+pub use run_payload::{
+    BindingRecordDocument, BindingStatus, DriverRecord, RunPayload,
+    StartupFailureDocument, StartupRecordDocument, StartupStatus,
 };
 pub use test_payload::{
     AuditEvent, ObservationError, ObservationErrorCode, TestFailure, TestFailureKind,

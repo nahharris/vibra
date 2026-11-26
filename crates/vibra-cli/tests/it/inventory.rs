@@ -5,7 +5,7 @@ use std::path::Path;
 
 use serde_json::Value;
 use vibra_cli::args::parse;
-use vibra_cli::inventory::{LINES, capabilities};
+use vibra_cli::inventory::{LINES, OPERATION_PROFILES, capabilities, profile_of};
 
 /// The specification chapter the command surface is written in.
 const TOOLING: &str = include_str!("../../../../docs/spec/05-tooling.md");
@@ -68,16 +68,144 @@ fn every_parsed_command_has_an_inventory_row() {
 }
 
 #[test]
-fn the_capabilities_are_the_rows_and_help_fmt_check_and_test_are_supported() {
+fn the_capabilities_are_the_rows_and_help_fmt_check_test_and_run_are_supported() {
     let capabilities = capabilities();
     assert_eq!(capabilities.len(), LINES.len());
     for (capability, line) in capabilities.iter().zip(&LINES) {
         assert_eq!(capability.command, line.name());
         assert_eq!(
             capability.supported,
-            ["help", "fmt", "check", "test"].contains(&line.name().as_str())
+            ["help", "fmt", "check", "test", "run"].contains(&line.name().as_str())
         );
         assert_eq!(capability.supported, line.supported);
+    }
+}
+
+/// The profile table of the diagnostics chapter: each row's profile and the
+/// case operations it lists as its own.
+fn specified_profiles() -> Vec<(String, String)> {
+    let chapter =
+        include_str!("../../../../docs/spec/07-diagnostics-and-conformance.md");
+    let section = chapter
+        .split("## Conformance profiles")
+        .nth(1)
+        .expect("the chapter has the profile table");
+    let mut rows = Vec::new();
+    for line in section.lines().skip_while(|line| !line.starts_with("| `")) {
+        let Some(cells) = line.strip_prefix('|') else {
+            break;
+        };
+        let cells = cells.split('|').map(str::trim).collect::<Vec<_>>();
+        let profile = cells[0].trim_matches('`');
+        for operation in cells[2].split(", ") {
+            if let Some(operation) = operation
+                .strip_prefix('`')
+                .and_then(|rest| rest.strip_suffix('`'))
+            {
+                rows.push((operation.to_owned(), profile.to_owned()));
+            }
+        }
+    }
+    rows
+}
+
+#[test]
+fn the_operation_table_is_the_profile_table_of_the_chapter_and_help() {
+    let mut expected = specified_profiles();
+    assert_eq!(expected.len(), 10, "{expected:?}");
+    expected.push(("help".to_owned(), "toolingV2".to_owned()));
+    let mut table = OPERATION_PROFILES
+        .iter()
+        .map(|(operation, profile)| ((*operation).to_owned(), (*profile).to_owned()))
+        .collect::<Vec<_>>();
+    expected.sort();
+    table.sort();
+    assert_eq!(table, expected);
+}
+
+#[test]
+fn inventory_derived_from_the_profiles() {
+    let capabilities = capabilities();
+    let profiles = |command: &str| {
+        capabilities
+            .iter()
+            .find(|capability| capability.command == command)
+            .map(|capability| capability.profiles.clone())
+            .expect("a row")
+    };
+    assert_eq!(profiles("fmt"), ["toolingV2"]);
+    assert_eq!(profiles("test"), ["interpreterV2"]);
+    assert_eq!(profiles("run"), ["interpreterV2"]);
+    assert_eq!(profiles("check"), ["staticV2"]);
+    assert_eq!(profiles("help"), ["toolingV2"]);
+    for (capability, line) in capabilities.iter().zip(&LINES) {
+        let derived = line
+            .operations
+            .iter()
+            .map(|operation| profile_of(operation).expect("a known operation"))
+            .collect::<Vec<_>>();
+        assert_eq!(capability.profiles, derived, "{}", capability.command);
+    }
+}
+
+#[test]
+fn inventory() {
+    let (code, document) = crate::support::envelope(&["--format", "json", "help"]);
+    assert_eq!(code, 0);
+    let capabilities = document["payload"]["capabilities"]
+        .as_array()
+        .expect("capabilities");
+    let run = capabilities
+        .iter()
+        .find(|capability| capability["command"] == "run")
+        .expect("the run row");
+    assert_eq!(run["supported"], true);
+    assert_eq!(run["operations"], serde_json::json!(["workspaceRun"]));
+    assert_eq!(run["profiles"], serde_json::json!(["interpreterV2"]));
+    assert_eq!(
+        run["schemaIds"],
+        serde_json::json!([
+            "urn:vibra:schema:v2:command-result",
+            "urn:vibra:schema:v2:diagnostic"
+        ])
+    );
+    let profiles = |command: &str| {
+        capabilities
+            .iter()
+            .find(|capability| capability["command"] == command)
+            .map(|capability| capability["profiles"].clone())
+            .expect("a row")
+    };
+    assert_eq!(profiles("fmt"), serde_json::json!(["toolingV2"]));
+    assert_eq!(profiles("test"), serde_json::json!(["interpreterV2"]));
+    assert_eq!(profiles("check"), serde_json::json!(["staticV2"]));
+    assert_eq!(profiles("help"), serde_json::json!(["toolingV2"]));
+}
+
+/// No row of the inventory names a profile by hand: the `Line` record has no
+/// field for one, and the source of the inventory spells a profile only in
+/// the operation table.
+#[test]
+fn no_command_names_a_profile_by_hand() {
+    let source = include_str!("../../src/inventory.rs");
+    let table = source
+        .split("pub static OPERATION_PROFILES")
+        .nth(1)
+        .and_then(|rest| rest.split("];").next())
+        .expect("the operation table");
+    let outside = source.replacen(table, "", 1);
+    for profile in [
+        "readerV2",
+        "staticV2",
+        "interpreterV2",
+        "toolingV2",
+        "nativeV1",
+        "fullV2",
+    ] {
+        assert!(
+            !outside.contains(&format!("\"{profile}\"")),
+            "`{profile}` is named outside the operation table"
+        );
     }
 }
 

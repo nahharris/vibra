@@ -44,10 +44,9 @@ pub struct Line {
     pub passthrough: bool,
     /// Whether this tool supports the command.
     pub supported: bool,
-    /// The operations a supported command offers.
+    /// The operations a supported command offers. Its profiles are derived
+    /// from them by [`OPERATION_PROFILES`].
     pub operations: &'static [&'static str],
-    /// The conformance profiles that cover a supported command.
-    pub profiles: &'static [&'static str],
     /// The schemas a supported command's documents use.
     pub schema_ids: &'static [&'static str],
 }
@@ -78,7 +77,6 @@ const UNSUPPORTED: Line = Line {
     passthrough: false,
     supported: false,
     operations: &[],
-    profiles: &[],
     schema_ids: &[],
 };
 
@@ -123,7 +121,6 @@ pub static LINES: [Line; 18] = [
         options: &[WRITE],
         supported: true,
         operations: &["format"],
-        profiles: &["readerV2"],
         schema_ids: &[COMMAND_RESULT_SCHEMA_ID, DIAGNOSTIC_SCHEMA_ID],
         ..UNSUPPORTED
     },
@@ -133,7 +130,6 @@ pub static LINES: [Line; 18] = [
         optional: 1,
         supported: true,
         operations: &["workspaceCheck"],
-        profiles: &["staticV2"],
         schema_ids: &[COMMAND_RESULT_SCHEMA_ID, DIAGNOSTIC_SCHEMA_ID],
         ..UNSUPPORTED
     },
@@ -150,7 +146,6 @@ pub static LINES: [Line; 18] = [
         optional: 1,
         supported: true,
         operations: &["workspaceTest"],
-        profiles: &["staticV2", "interpreterV2"],
         schema_ids: &[COMMAND_RESULT_SCHEMA_ID, DIAGNOSTIC_SCHEMA_ID],
         ..UNSUPPORTED
     },
@@ -159,6 +154,9 @@ pub static LINES: [Line; 18] = [
         synopsis: "run [TARGET] [-- ARG...]",
         optional: 1,
         passthrough: true,
+        supported: true,
+        operations: &["workspaceRun"],
+        schema_ids: &[COMMAND_RESULT_SCHEMA_ID, DIAGNOSTIC_SCHEMA_ID],
         ..UNSUPPORTED
     },
     Line {
@@ -234,7 +232,6 @@ pub static LINES: [Line; 18] = [
         synopsis: "help",
         supported: true,
         operations: &["help"],
-        profiles: &["toolingV2"],
         schema_ids: &[COMMAND_RESULT_SCHEMA_ID],
         ..UNSUPPORTED
     },
@@ -244,6 +241,50 @@ pub static LINES: [Line; 18] = [
 #[must_use]
 pub fn help_line() -> &'static Line {
     &LINES[17]
+}
+
+/// The one table from an operation to the conformance profile it belongs to.
+///
+/// `docs/spec/07-diagnostics-and-conformance.md`, "Conformance profiles":
+/// each case operation is the own operation of exactly one profile, and a
+/// command's `profiles` are the profiles of the operations it offers. `help`
+/// offers its own name, which `docs/spec/05-tooling.md`, `CommandCapability`,
+/// gives `toolingV2`, whose CLI contract covers it. No row of [`LINES`]
+/// names a profile.
+pub static OPERATION_PROFILES: [(&str, &str); 11] = [
+    ("reader", "readerV2"),
+    ("projectDecode", "staticV2"),
+    ("sourceGraph", "staticV2"),
+    ("resolve", "staticV2"),
+    ("workspaceCheck", "staticV2"),
+    ("interpret", "interpreterV2"),
+    ("workspaceRun", "interpreterV2"),
+    ("workspaceTest", "interpreterV2"),
+    ("format", "toolingV2"),
+    ("query", "toolingV2"),
+    ("help", "toolingV2"),
+];
+
+/// The profile of `operation`; `None` for a name the table does not hold.
+#[must_use]
+pub fn profile_of(operation: &str) -> Option<&'static str> {
+    OPERATION_PROFILES
+        .iter()
+        .find(|(name, _)| *name == operation)
+        .map(|(_, profile)| *profile)
+}
+
+/// The profiles of `line`'s operations, each once, in the order the
+/// operations first name them.
+#[must_use]
+pub fn profiles(line: &Line) -> Vec<String> {
+    let mut profiles: Vec<String> = Vec::new();
+    for profile in line.operations.iter().filter_map(|name| profile_of(name)) {
+        if !profiles.iter().any(|known| known == profile) {
+            profiles.push(profile.to_owned());
+        }
+    }
+    profiles
 }
 
 /// The `CommandCapability` of every row, in order.
@@ -258,11 +299,7 @@ pub fn capabilities() -> Vec<CommandCapability> {
                 .iter()
                 .map(|text| (*text).to_owned())
                 .collect(),
-            profiles: line
-                .profiles
-                .iter()
-                .map(|text| (*text).to_owned())
-                .collect(),
+            profiles: profiles(line),
             supported: line.supported,
             schema_ids: line
                 .schema_ids

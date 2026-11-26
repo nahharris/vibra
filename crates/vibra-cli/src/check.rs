@@ -29,7 +29,7 @@ use crate::render::{Response, status_for};
 
 /// Whether `text` is an atom of one identifier part, such as `@app`: the
 /// spelling of a target name.
-fn is_target_atom(text: &str) -> bool {
+pub(crate) fn is_target_atom(text: &str) -> bool {
     let Some(name) = text.strip_prefix('@') else {
         return false;
     };

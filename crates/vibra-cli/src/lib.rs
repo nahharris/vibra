@@ -1,9 +1,10 @@
 //! The `vibra` command line: the argument grammar of the whole command
-//! surface, `help`, `fmt`, `check`, `test`, the support inventory, invalid
-//! input, and the unavailable outcome of every command no step has landed yet.
+//! surface, `help`, `fmt`, `check`, `test`, `run`, the support inventory,
+//! invalid input, and the unavailable outcome of every command no step has
+//! landed yet.
 //!
 //! `docs/spec/05-tooling.md`, "Command surface" and "Versioned envelope and
-//! results", are the normative definitions. [`run`] is a pure function of its
+//! results", are the normative definitions. [`run()`] is a pure function of its
 //! arguments, working directory, and two writers; the process entry point in
 //! `main.rs` only supplies the process's own.
 
@@ -26,6 +27,7 @@ pub mod fmt;
 pub mod help;
 pub mod inventory;
 pub mod render;
+pub mod run;
 pub mod test;
 
 use std::ffi::OsString;
@@ -95,6 +97,7 @@ fn execute(invocation: &Invocation) -> Response {
         ["fmt"] => fmt::run(invocation),
         ["check"] => check::run(invocation),
         ["test"] => test::run(invocation),
+        ["run"] => run::run(invocation),
         _ => unavailable(format, line.name()),
     }
 }

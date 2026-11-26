@@ -27,7 +27,7 @@ fn help_json() {
         .filter(|capability| capability["supported"] == true)
         .map(|capability| capability["command"].as_str().expect("command"))
         .collect::<Vec<_>>();
-    assert_eq!(supported, ["fmt", "check", "test", "help"]);
+    assert_eq!(supported, ["fmt", "check", "test", "run", "help"]);
     assert!(
         document["payload"]["usage"]
             .as_str()
@@ -52,7 +52,7 @@ fn help_names_what_it_supports_and_nothing_else() {
                 ),
                 Some("fmt") => (
                     json!(["format"]),
-                    json!(["readerV2"]),
+                    json!(["toolingV2"]),
                     json!([
                         "urn:vibra:schema:v2:command-result",
                         "urn:vibra:schema:v2:diagnostic"
@@ -68,7 +68,15 @@ fn help_names_what_it_supports_and_nothing_else() {
                 ),
                 Some("test") => (
                     json!(["workspaceTest"]),
-                    json!(["staticV2", "interpreterV2"]),
+                    json!(["interpreterV2"]),
+                    json!([
+                        "urn:vibra:schema:v2:command-result",
+                        "urn:vibra:schema:v2:diagnostic"
+                    ]),
+                ),
+                Some("run") => (
+                    json!(["workspaceRun"]),
+                    json!(["interpreterV2"]),
                     json!([
                         "urn:vibra:schema:v2:command-result",
                         "urn:vibra:schema:v2:diagnostic"
@@ -139,6 +147,7 @@ fn help_marks_unavailable() {
             "fmt PATH [--write]",
             "check [TARGET]",
             "test [TEST]",
+            "run [TARGET] [-- ARG...]",
         ]
         .contains(line)
         {
@@ -152,8 +161,8 @@ fn help_marks_unavailable() {
             .iter()
             .filter(|line| !line.contains("unavailable"))
             .count(),
-        4,
-        "exactly help, fmt, check, and test are shown as working"
+        5,
+        "exactly help, fmt, check, test, and run are shown as working"
     );
     assert!(outcome.stderr.is_empty());
 }

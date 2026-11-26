@@ -183,7 +183,7 @@ fn test_observation_error() {
                 "endPosition": {"line": 3, "column": 181}
             },
             "observationError": {
-                "code": "unsupportedValue",
+                "code": "@tool.unsupportedValue",
                 "type": "@any",
                 "origin": null
             }

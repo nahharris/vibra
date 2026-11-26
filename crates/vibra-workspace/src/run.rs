@@ -27,11 +27,16 @@
 //!
 //! Under [`Launch::World`] the program's streams are the world's, and the
 //! outcome's `stdout` and `stderr` are what the entry wrote. Under
-//! [`Launch::System`] they are the process's own, and the outcome holds no
-//! copy of them.
+//! [`Launch::System`] the program's input is the process's own; its output
+//! goes to the process's own streams, and the outcome holds no copy of it,
+//! unless the launch captures it, as `vibra run` does in JSON format: then
+//! the outcome's `stdout` and `stderr` are what the entry wrote, and nothing
+//! reaches the process's streams.
 
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::ffi::OsString;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
@@ -41,7 +46,9 @@ use vibra_host::recipe::LeafName;
 use vibra_host::startup::{
     self, AdmissionRefusal, EntryLeaf, EntryShape, Started, StartupRecord,
 };
-use vibra_host::system::{SystemDriver, SystemInputs};
+use vibra_host::system::{
+    Output, OutputSink, SystemDriver, SystemInputs, WriteFailure,
+};
 use vibra_host::trace::{
     self, AuditTrace, Event, FailureCode, NO_REDACTION, StdlibIdentity, TraceHeader,
 };
@@ -72,7 +79,28 @@ pub enum Launch<'a> {
     System {
         /// The program's arguments, in order.
         arguments: Vec<OsString>,
+        /// Whether the program's standard output and standard error are
+        /// kept in the outcome instead of written to the process's own.
+        capture: bool,
     },
+}
+
+/// A standard output or error kept in memory, shared with the run that
+/// reads it once every grant is released.
+#[derive(Clone, Debug, Default)]
+struct Captured(Rc<RefCell<Vec<u8>>>);
+
+impl Captured {
+    fn bytes(&self) -> Vec<u8> {
+        self.0.borrow().clone()
+    }
+}
+
+impl OutputSink for Captured {
+    fn write(&mut self, bytes: &[u8]) -> Result<(), WriteFailure> {
+        self.0.borrow_mut().extend_from_slice(bytes);
+        Ok(())
+    }
 }
 
 /// The `@command.*` result of a run.
@@ -240,11 +268,21 @@ pub fn run_target(
                     (output.stdout.to_vec(), output.stderr.to_vec())
                 })
             }
-            Launch::System { arguments } => prepared.run(
-                &mut SystemDriver::new(SystemInputs::process(arguments)),
-                budget,
-                |_| (Vec::new(), Vec::new()),
-            ),
+            Launch::System { arguments, capture } => {
+                let mut inputs = SystemInputs::process(arguments);
+                let captured = capture.then(|| {
+                    let streams = (Captured::default(), Captured::default());
+                    inputs.stdout = Output::Replaced(Box::new(streams.0.clone()));
+                    inputs.stderr = Output::Replaced(Box::new(streams.1.clone()));
+                    streams
+                });
+                prepared.run(&mut SystemDriver::new(inputs), budget, |_| {
+                    captured.map_or_else(
+                        || (Vec::new(), Vec::new()),
+                        |(stdout, stderr)| (stdout.bytes(), stderr.bytes()),
+                    )
+                })
+            }
         },
     }
 }

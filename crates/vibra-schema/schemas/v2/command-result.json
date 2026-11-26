@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:vibra:schema:v2:command-result",
   "title": "Vibra command result",
-  "description": "The versioned envelope of every structured command response. The payload is keyed by the command; this version publishes the help, fmt, check, and test payloads and the empty payload.",
+  "description": "The versioned envelope of every structured command response. The payload is keyed by the command; this version publishes the help, fmt, check, test, and run payloads and the empty payload.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -286,6 +286,121 @@
       }
     },
     {
+      "description": "run that selected its target carries the run payload. A trap the tool itself raises because its own document failed validation, and a run whose project could not be captured, keep the empty payload. The result relates to the payload: ok is the code 0, programFailed a non-zero code, trap a trap record, diagnostics no startup, and every other ending no code and no trap.",
+      "if": { "$ref": "#/$defs/runResponse" },
+      "then": {
+        "if": {
+          "properties": {
+            "result": { "enum": ["@command.trap", "@command.diagnostics"] }
+          },
+          "required": ["result"]
+        },
+        "then": {
+          "properties": {
+            "payload": {
+              "anyOf": [
+                { "$ref": "#/$defs/runPayload" },
+                { "$ref": "#/$defs/emptyPayload" }
+              ]
+            }
+          }
+        },
+        "else": {
+          "properties": { "payload": { "$ref": "#/$defs/runPayload" } }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": { "result": { "const": "@command.ok" } },
+              "required": ["result"]
+            },
+            "then": {
+              "properties": {
+                "payload": {
+                  "properties": {
+                    "applicationCode": { "const": 0 },
+                    "trap": { "type": "null" },
+                    "startup": { "properties": { "status": { "const": "acquired" } } }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": { "result": { "const": "@command.programFailed" } },
+              "required": ["result"]
+            },
+            "then": {
+              "properties": {
+                "payload": {
+                  "properties": {
+                    "applicationCode": { "type": "integer", "minimum": 1 },
+                    "trap": { "type": "null" }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": { "result": { "const": "@command.trap" } },
+              "required": ["result"]
+            },
+            "then": {
+              "properties": {
+                "payload": {
+                  "properties": {
+                    "applicationCode": { "type": "null" },
+                    "trap": { "type": "object" }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": { "result": { "const": "@command.diagnostics" } },
+              "required": ["result"]
+            },
+            "then": {
+              "properties": {
+                "diagnostics": { "minItems": 1 },
+                "payload": {
+                  "properties": {
+                    "applicationCode": { "type": "null" },
+                    "trap": { "type": "null" },
+                    "auditTrace": { "maxItems": 0 },
+                    "startup": { "properties": { "status": { "const": "notStarted" } } }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "result": {
+                  "enum": ["@command.operationalFailure", "@command.unavailable"]
+                }
+              },
+              "required": ["result"]
+            },
+            "then": {
+              "properties": {
+                "payload": {
+                  "properties": {
+                    "applicationCode": { "type": "null" },
+                    "trap": { "type": "null" }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
       "description": "Every other response carries the empty payload.",
       "if": {
         "not": {
@@ -293,7 +408,8 @@
             { "$ref": "#/$defs/helpResponse" },
             { "$ref": "#/$defs/fmtResponse" },
             { "$ref": "#/$defs/checkResponse" },
-            { "$ref": "#/$defs/testResponse" }
+            { "$ref": "#/$defs/testResponse" },
+            { "$ref": "#/$defs/runResponse" }
           ]
         }
       },
@@ -373,6 +489,221 @@
         }
       },
       "required": ["command", "result"]
+    },
+    "runResponse": {
+      "properties": {
+        "command": { "const": "run" },
+        "result": {
+          "enum": [
+            "@command.ok",
+            "@command.diagnostics",
+            "@command.operationalFailure",
+            "@command.unavailable",
+            "@command.trap",
+            "@command.programFailed"
+          ]
+        }
+      },
+      "required": ["command", "result"]
+    },
+    "runPayload": {
+      "description": "The run payload. auditTrace holds the events of phase @entry and startup.auditTrace the startup events and the startup reads, so no event is in both; drivers and policies are those of the run's @auditTrace.v2 document, and every policy hash of a grant projection is a key of policies, which the validator checks. stdout and stderr show bytes that are not UTF-8 as U+FFFD.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target",
+        "programResult",
+        "applicationCode",
+        "stdout",
+        "stderr",
+        "auditTrace",
+        "drivers",
+        "policies",
+        "startup",
+        "trap"
+      ],
+      "properties": {
+        "target": { "type": "string", "pattern": "^@[A-Za-z][A-Za-z0-9]*$" },
+        "programResult": { "type": ["string", "null"] },
+        "applicationCode": {
+          "oneOf": [
+            { "type": "null" },
+            { "type": "integer", "minimum": 0, "maximum": 255 }
+          ]
+        },
+        "stdout": { "type": "string" },
+        "stderr": { "type": "string" },
+        "auditTrace": { "type": "array", "items": { "$ref": "#/$defs/hostEvent" } },
+        "drivers": { "type": "array", "items": { "$ref": "#/$defs/driverRecord" } },
+        "policies": {
+          "type": "object",
+          "propertyNames": { "pattern": "^sha256:[0-9a-f]{64}$" },
+          "additionalProperties": { "type": "string", "minLength": 1 }
+        },
+        "startup": { "$ref": "#/$defs/startupRecord" },
+        "trap": {
+          "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/trapRecord" }]
+        }
+      },
+      "allOf": [
+        {
+          "description": "The program result and the application code are known together: the entry returned.",
+          "if": { "properties": { "applicationCode": { "type": "null" } } },
+          "then": { "properties": { "programResult": { "type": "null" } } },
+          "else": { "properties": { "programResult": { "type": "string" } } }
+        },
+        {
+          "description": "With no startup, or after a startup failure, the entry did not run.",
+          "if": {
+            "properties": {
+              "startup": {
+                "properties": { "status": { "enum": ["notStarted", "failed"] } }
+              }
+            }
+          },
+          "then": { "properties": { "applicationCode": { "type": "null" } } }
+        }
+      ]
+    },
+    "driverRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "version"],
+      "properties": {
+        "provider": { "type": "string", "pattern": "^@" },
+        "version": { "type": "string" }
+      }
+    },
+    "startupRecord": {
+      "description": "StartupRecord: notStarted has no binding, no event, and no failure; acquired processed every leaf, none of which stopped startup; failed is a leaf that stopped it, or a defect trap with a null failure.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "bindings", "auditTrace", "failure"],
+      "properties": {
+        "status": { "enum": ["notStarted", "acquired", "failed"] },
+        "bindings": { "type": "array", "items": { "$ref": "#/$defs/bindingRecord" } },
+        "auditTrace": {
+          "type": "array",
+          "items": {
+            "anyOf": [
+              { "$ref": "#/$defs/startupEvent" },
+              { "$ref": "#/$defs/startupReadEvent" }
+            ]
+          }
+        },
+        "failure": {
+          "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/startupFailure" }]
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "const": "notStarted" } } },
+          "then": {
+            "properties": {
+              "bindings": { "maxItems": 0 },
+              "auditTrace": { "maxItems": 0 },
+              "failure": { "type": "null" }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "status": { "const": "acquired" } } },
+          "then": {
+            "properties": {
+              "failure": { "type": "null" },
+              "bindings": {
+                "items": {
+                  "properties": { "status": { "enum": ["refused", "released"] } }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "startupFailure": {
+      "description": "The leaf that stopped startup, and its recipe in the project document.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["binding", "code", "origin"],
+      "properties": {
+        "binding": { "type": "string", "pattern": "^@" },
+        "code": {
+          "enum": ["@grant.requiredUnavailable", "@grant.acquisitionFailed"]
+        },
+        "origin": { "$ref": "urn:vibra:schema:v2:diagnostic#/$defs/span" }
+      }
+    },
+    "bindingRecord": {
+      "description": "One processed leaf: every acquired binding of a finished command is released, and only a released one has a grant projection.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "recipeIdentity",
+        "providerIdentity",
+        "status",
+        "grantProjection"
+      ],
+      "properties": {
+        "name": { "type": "string", "pattern": "^@" },
+        "recipeIdentity": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "providerIdentity": { "$ref": "#/$defs/driverRecord" },
+        "status": { "enum": ["refused", "failed", "released"] },
+        "grantProjection": {
+          "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/grantProjection" }]
+        }
+      },
+      "if": { "properties": { "status": { "const": "released" } } },
+      "then": { "properties": { "grantProjection": { "type": "object" } } },
+      "else": { "properties": { "grantProjection": { "type": "null" } } }
+    },
+    "startupEvent": {
+      "description": "A @startup event: a grant exactly when acquired, and a failure always for a failed leaf.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "binding", "provider", "status", "grant", "failure"],
+      "properties": {
+        "kind": { "const": "@startup" },
+        "binding": { "type": "string", "pattern": "^@" },
+        "provider": { "type": "string", "pattern": "^@" },
+        "status": { "enum": ["@acquired", "@refused", "@failed"] },
+        "grant": {
+          "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/grantProjection" }]
+        },
+        "failure": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["code", "message"],
+              "properties": {
+                "code": {
+                  "enum": ["@grant.requiredUnavailable", "@grant.acquisitionFailed"]
+                },
+                "message": { "type": "string" }
+              }
+            }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "const": "@acquired" } } },
+          "then": {
+            "properties": {
+              "grant": { "type": "object" },
+              "failure": { "type": "null" }
+            }
+          },
+          "else": { "properties": { "grant": { "type": "null" } } }
+        },
+        {
+          "if": { "properties": { "status": { "const": "@failed" } } },
+          "then": { "properties": { "failure": { "type": "object" } } }
+        }
+      ]
     },
     "testPayload": {
       "description": "The test payload. selected counts the items, passed only the items whose result is @test.passed, and failed is their difference; the validator checks these counts, which a schema cannot state.",
@@ -579,6 +910,30 @@
       "else": { "properties": { "observationError": { "type": "object" } } }
     },
     "hostEvent": {
+      "description": "A @host event of phase @entry, which has the invocation whose body performed its await as its parent.",
+      "allOf": [
+        { "$ref": "#/$defs/anyHostEvent" },
+        {
+          "properties": {
+            "phase": { "const": "@entry" },
+            "parent": { "type": "integer" }
+          }
+        }
+      ]
+    },
+    "startupReadEvent": {
+      "description": "A @host event of phase @startup: a read a recipe performs, which has no parent.",
+      "allOf": [
+        { "$ref": "#/$defs/anyHostEvent" },
+        {
+          "properties": {
+            "phase": { "const": "@startup" },
+            "parent": { "type": "null" }
+          }
+        }
+      ]
+    },
+    "anyHostEvent": {
       "description": "A @host event of the audit trace: each field its own member, an atom a string keeping its @, an argument and the result their canonical VIBON text inside a string.",
       "type": "object",
       "additionalProperties": false,
@@ -587,17 +942,9 @@
         "kind": { "const": "@host" },
         "invocation": { "type": "integer", "minimum": 0 },
         "parent": { "oneOf": [{ "type": "null" }, { "type": "integer", "minimum": 0 }] },
-        "phase": { "const": "@entry" },
+        "phase": { "enum": ["@startup", "@entry"] },
         "op": { "type": "string", "minLength": 1 },
-        "driver": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["provider", "version"],
-          "properties": {
-            "provider": { "type": "string", "pattern": "^@" },
-            "version": { "type": "string" }
-          }
-        },
+        "driver": { "$ref": "#/$defs/driverRecord" },
         "origin": {
           "oneOf": [{ "type": "null" }, { "$ref": "urn:vibra:schema:v2:diagnostic#/$defs/span" }]
         },
@@ -665,7 +1012,7 @@
       }
     },
     "trapRecord": {
-      "description": "TrapRecord: one of the two defect traps, and the source origin of the trapping operation when it is known.",
+      "description": "TrapRecord: one of the two defect traps that ended a test or a run, and the source origin of the trapping operation when it is known.",
       "type": "object",
       "additionalProperties": false,
       "required": ["trapCode", "origin"],
@@ -679,12 +1026,12 @@
       }
     },
     "observationError": {
-      "description": "ObservationError: a value that cannot be shown.",
+      "description": "ObservationError: a value that cannot be shown. Its code is spelled as its full atom text, as every code in JSON is.",
       "type": "object",
       "additionalProperties": false,
       "required": ["code", "type", "origin"],
       "properties": {
-        "code": { "const": "unsupportedValue" },
+        "code": { "const": "@tool.unsupportedValue" },
         "type": { "type": ["string", "null"] },
         "origin": {
           "oneOf": [{ "type": "null" }, { "$ref": "urn:vibra:schema:v2:diagnostic#/$defs/span" }]
