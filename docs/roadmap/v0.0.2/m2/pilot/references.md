@@ -204,7 +204,12 @@ The robustness subjects:
   fails there, and the file is placed unchanged with a closed count of
   zero. In both arms `check` and `test` then overflow the toolchain's own
   stack and end with exit `0xC00000FD` and no document, so the grade is
-  `unknown` with the reason "the toolchain gave no document".
+  `unknown` with the reason "the toolchain gave no document". That is the
+  toolchain at the freeze commit, which graded the pilot. A toolchain with
+  the source nesting limit of the
+  [tooling chapter](../../../../spec/05-tooling.md) answers the same file
+  with `@tool.limitExceeded`, which is also `unknown`, so the self-check
+  asks this subject for its grade alone.
 
 ## The reader
 

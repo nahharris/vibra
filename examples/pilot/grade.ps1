@@ -1421,12 +1421,14 @@ function Invoke-All {
   # The packet reference with its stop code nested in a million list
   # brackets, deeper than the reader's stack: the reading fails, so the
   # file is placed unchanged with a closed count of zero. The toolchain
-  # ends `check` on it without a document, which is unknown.
+  # at the freeze commit ends `check` on it without a document, and one
+  # with the source nesting limit answers `@tool.limitExceeded`: both are
+  # unknown, so the subject asks for the grade alone.
   foreach ($arm in 'endlet', 'noEndlet') {
     $reference = [IO.File]::ReadAllText((Join-Path $Pilot "packet/$arm/reference.vib"))
     $depth = 1000000
     $nested = $reference.Replace('be 99i32', 'be ' + ('[' * $depth) + '99i32' + (']' * $depth))
-    $subjects.Add(@{ Subject = 'deep'; Task = 'packet'; Arm = $arm; Bytes = $Utf8.GetBytes($nested); Grade = 'unknown'; Shows = 'reason noDocument'; Deep = $true })
+    $subjects.Add(@{ Subject = 'deep'; Task = 'packet'; Arm = $arm; Bytes = $Utf8.GetBytes($nested); Grade = 'unknown'; Shows = 'any'; Deep = $true })
   }
   $met = 0
   foreach ($subject in $subjects) {
