@@ -1,0 +1,19 @@
+id = "V2-PROJECT-entry-generic"
+rule = "V2-PROJECT-entry-generic"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "04-programs-and-packages.md#targets: a type parameter is no grant shape, so a generic proc has no entry signature"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@project.invalidEntrySignature"
+level = "@error"
+source = "project.vibon"
+span = { start = 119, end = 133 }
+related = [{ source = "src/app/main.vib", span = { start = 39, end = 43 } }]

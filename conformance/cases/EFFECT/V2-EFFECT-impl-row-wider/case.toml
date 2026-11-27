@@ -1,0 +1,19 @@
+id = "V2-EFFECT-impl-row-wider"
+rule = "V2-EFFECT-impl-row-wider"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#operation-interfaces: an implementation member whose row is wider than its contract member's is a mismatch at its performs section"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.mismatch"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 379, end = 395 }
+related = [{ source = "src/app/main.vib", span = { start = 21, end = 27 } }]

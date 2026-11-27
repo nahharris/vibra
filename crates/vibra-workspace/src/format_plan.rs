@@ -31,6 +31,7 @@ use vibra_fmt::format_document;
 use vibra_syntax::{DocumentMode, parse};
 
 use crate::discovery::{DiscoveredProject, discover_project, discover_project_at};
+use crate::nesting::SOURCE_NESTING;
 use crate::revision::workspace_revision;
 use crate::semantic::check_snapshot;
 use crate::snapshot::SourceSnapshot;
@@ -60,8 +61,8 @@ impl WorkspaceCapture {
     /// Discovers the project of `workspace` and captures its snapshot.
     ///
     /// The revision is that of the snapshot. When the walk fails, it covers
-    /// the project record alone, the only input admitted; when discovery
-    /// fails there is none.
+    /// the project record, the only input admitted, and the toolchain record;
+    /// when discovery fails there is none.
     #[must_use]
     pub fn capture(workspace: &Path, discovery: Discovery) -> Self {
         let discovered = match discovery {
@@ -90,11 +91,12 @@ impl WorkspaceCapture {
                 }
             }
             Err(diagnostics) => {
-                let records = [crate::revision::RevisionRecord::new(
+                let mut records = vec![crate::revision::RevisionRecord::new(
                     crate::revision::RevisionKind::Project,
                     crate::project::PROJECT_FILE_NAME,
                     project.bytes(),
                 )];
+                records.extend(crate::revision::embedded_toolchain_record());
                 Self {
                     revision: workspace_revision(&records).ok(),
                     project: Some(project),
@@ -121,6 +123,26 @@ impl WorkspaceCapture {
     #[must_use]
     pub fn diagnostics(&self) -> &[Diagnostic] {
         &self.diagnostics
+    }
+
+    /// The limits the capture reached, by the name `limits.reached` gives
+    /// them: `sourceNesting` when the project file or a module is nested past
+    /// the source nesting limit, the only limit capture measures.
+    #[must_use]
+    pub fn limits_reached(&self) -> Vec<String> {
+        let project = self
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code() == DiagnosticCode::ToolLimitExceeded);
+        let module = self
+            .snapshot
+            .as_ref()
+            .is_some_and(|snapshot| !snapshot.limit_faults().is_empty());
+        if project || module {
+            vec![SOURCE_NESTING.to_owned()]
+        } else {
+            Vec::new()
+        }
     }
 
     /// The workspace revision, `None` only when discovery failed.
@@ -445,7 +467,9 @@ pub fn plan_format(
 
 /// The diagnostics of the captured module `source_id` when `candidate`
 /// replaces its bytes, named by `path`: none when the check of the module
-/// is unavailable.
+/// is unavailable, or when a module of the snapshot is nested past the source
+/// nesting limit, so that no check runs and the text is formatted by its
+/// syntax alone.
 fn check_candidate(
     snapshot: &SourceSnapshot,
     source_id: &str,
@@ -456,6 +480,9 @@ fn check_candidate(
     else {
         return Vec::new();
     };
+    if !replaced.limit_faults().is_empty() {
+        return Vec::new();
+    }
     let check = check_snapshot(&replaced, None);
     let own = check
         .diagnostics()

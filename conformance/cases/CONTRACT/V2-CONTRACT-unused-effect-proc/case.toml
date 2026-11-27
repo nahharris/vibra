@@ -1,0 +1,18 @@
+id = "V2-CONTRACT-unused-effect-proc"
+rule = "V2-CONTRACT-unused-effect-proc"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#effect-ceilings: an interface in a ceiling that the body cannot perform is the warning at the entry"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+
+[[expect.diagnostics]]
+code = "@contract.unusedEffect"
+level = "@warning"
+source = "src/app/main.vib"
+span = { start = 693, end = 696 }

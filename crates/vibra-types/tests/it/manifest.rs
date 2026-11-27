@@ -166,5 +166,5 @@ fn language_roles_that_differ_from_the_claims_are_a_fault() {
 #[test]
 fn a_module_the_reader_rejects_is_a_fault() {
     let notes = notes(load_with_module("@std.option", "type Option(T)\n").as_ref());
-    assert!(notes.contains("stdlib/src/std/option.vib"), "{notes}");
+    assert!(notes.contains("@std.option"), "{notes}");
 }

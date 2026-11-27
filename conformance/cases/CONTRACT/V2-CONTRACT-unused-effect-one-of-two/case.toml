@@ -1,0 +1,18 @@
+id = "V2-CONTRACT-unused-effect-one-of-two"
+rule = "V2-CONTRACT-unused-effect-one-of-two"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#effect-ceilings: only the entry the body does not perform is the warning"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+
+[[expect.diagnostics]]
+code = "@contract.unusedEffect"
+level = "@warning"
+source = "src/app/main.vib"
+span = { start = 697, end = 702 }

@@ -13,6 +13,7 @@ use std::str::FromStr;
 
 use serde::Deserialize;
 use vibra_diagnostics::{ByteSpan, DiagnosticCode, FixCapability, Level};
+use vibra_workspace::{HostWorld, decode_world};
 
 use crate::profile::{ConformanceOperation, ConformanceProfile};
 use crate::rules::{is_suffix, parse_identity};
@@ -186,6 +187,8 @@ pub struct CaseExpectations {
     pub result: Option<String>,
     /// The `@testRun.v2` snapshot.
     pub test_run: Option<String>,
+    /// The `@targetRun.v2` snapshot.
+    pub target_run: Option<String>,
     /// The atom of the host event the execution ends with, such as
     /// `@runtime.memoryExhausted`.
     pub host_event: Option<DiagnosticCode>,
@@ -203,6 +206,7 @@ impl CaseExpectations {
             ("types", self.types.as_deref()),
             ("result", self.result.as_deref()),
             ("testRun", self.test_run.as_deref()),
+            ("targetRun", self.target_run.as_deref()),
         ]
         .into_iter()
         .filter_map(|(key, path)| path.map(|path| (key, path)))
@@ -218,7 +222,8 @@ pub struct CaseManifest {
     pub id: String,
     /// The rule identity the case addresses.
     pub rule: String,
-    /// The profile the case requires.
+    /// The profile the case requires: always the profile of its operation,
+    /// [`ConformanceOperation::profile`].
     pub profile: ConformanceProfile,
     /// The operation the case selects.
     pub operation: ConformanceOperation,
@@ -290,6 +295,13 @@ impl TryFrom<RawCaseManifest> for CaseManifest {
             .operation
             .parse::<ConformanceOperation>()
             .map_err(|error| ManifestError::Invalid(error.to_string()))?;
+        if profile != operation.profile() {
+            return Err(ManifestError::Invalid(format!(
+                "operation `{operation}` belongs to profile `{}`, and a case names the \
+                 profile of its operation, not `{profile}`",
+                operation.profile()
+            )));
+        }
 
         let inputs = CaseInputs {
             source: raw.inputs.source,
@@ -484,6 +496,31 @@ fn validate_host_world(
     Ok(())
 }
 
+/// Decodes the `hostWorld` input `source_id` of a case, whose bytes are
+/// `bytes`, as the `@hostWorld.v2` document a `workspaceRun` or
+/// `workspaceTest` runs in.
+///
+/// # Errors
+///
+/// [`ManifestError::Invalid`], with every diagnostic of the decoder, for a
+/// document that is not a host world.
+pub(crate) fn decode_host_world(
+    source_id: &str,
+    bytes: &[u8],
+) -> Result<HostWorld, ManifestError> {
+    decode_world(Some(source_id), bytes).map_err(|diagnostics| {
+        let faults = diagnostics
+            .iter()
+            .map(|diagnostic| {
+                format!("{} {}", diagnostic.code().as_atom(), diagnostic.message())
+            })
+            .collect::<Vec<_>>();
+        ManifestError::Invalid(format!(
+            "hostWorld input `{source_id}` is not a host world: {}",
+            faults.join("; ")
+        ))
+    })
+}
 fn is_declared_input(inputs: &CaseInputs, source_id: &str) -> bool {
     inputs.source.as_deref() == Some(source_id)
         || inputs.project.as_deref() == Some(source_id)
@@ -538,6 +575,7 @@ fn decode_expectations(
         types: raw.types,
         result: raw.result,
         test_run: raw.test_run,
+        target_run: raw.target_run,
         host_event,
     })
 }
@@ -666,6 +704,8 @@ struct RawExpectations {
     result: Option<String>,
     #[serde(default)]
     test_run: Option<String>,
+    #[serde(default)]
+    target_run: Option<String>,
     #[serde(default)]
     host_event: Option<String>,
 }

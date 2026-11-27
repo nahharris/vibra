@@ -1,0 +1,13 @@
+id = "V2-RUNTIME-ensures-else-on-await"
+rule = "V2-RUNTIME-ensures-else-on-await"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "06-runtime.md#callable-contract-execution: a false ensures with else replaces the candidate with its consequence at the await"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

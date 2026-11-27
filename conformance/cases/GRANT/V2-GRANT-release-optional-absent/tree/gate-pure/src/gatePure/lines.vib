@@ -1,0 +1,19 @@
+fn countLines
+  takes {text: Str}
+  returns count: U64
+  visibility @public
+  do
+    let Str(scalars) be text endlet
+    let {breaks open} be Iter.fold(scalars {0u64 false} step) endlet
+    if open then return U64.add(breaks 1u64) endif
+    return breaks
+endfn
+
+fn step
+  takes {state: {U64 Bool} scalar: Char}
+  returns next: {U64 Bool}
+  do
+    let {breaks _} be state endlet
+    if Equatable.equal(scalar '\n') then return {U64.add(breaks 1u64) false} endif
+    return {breaks true}
+endfn

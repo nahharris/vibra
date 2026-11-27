@@ -1,0 +1,9 @@
+use @std.fs.DirReadText enduse
+
+use @std.fs.FsPolicy enduse
+
+use @std.policy.GrantLimits enduse
+
+use @std.policy.ScopeError enduse
+
+fn f takes {d: DirReadText p: FsPolicy l: GrantLimits} returns r: Result(DirReadText ScopeError) do let n be DirReadText.limit(d l) endlet return DirReadText.restrict(n p) endfn

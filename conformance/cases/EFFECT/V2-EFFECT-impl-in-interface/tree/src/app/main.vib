@@ -1,0 +1,11 @@
+use @app.note.Note enduse
+
+interface Log
+  proc append
+    takes {log: Self entry: Str}
+    returns done: Void
+  endproc
+  impl Note
+    proc append takes {log: Self entry: Str} returns done: Void do return void endproc
+  endimpl
+endinterface

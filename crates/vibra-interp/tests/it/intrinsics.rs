@@ -3,7 +3,7 @@
 //! registry").
 //!
 //! A row with vectors runs every vector through `evaluate`: the vectors are
-//! the registry's hand-written samples. The sixteen rows without vectors
+//! the registry's hand-written samples. The nineteen rows without vectors
 //! have tests written here by hand from the chapter.
 
 use vibra_diagnostics::DiagnosticCode;
@@ -323,8 +323,140 @@ const HAND_ROWS: &[&str] = &[
     "assert.true",
     "assert.false",
     "assert.equal",
+    "grant.restrict",
+    "grant.sub",
+    "grant.limit",
+    "fs.validNames",
 ];
 
+/// The text of a VIBON string literal of `names.tsv`: the escapes `\\`,
+/// `\"`, `\t`, `\n`, `\r`, and `\u{…}`.
+fn string_literal(literal: &str) -> String {
+    let inner = literal
+        .strip_prefix('"')
+        .and_then(|rest| rest.strip_suffix('"'))
+        .unwrap_or_else(|| panic!("{literal} is a string literal"));
+    let mut text = String::new();
+    let mut characters = inner.chars();
+    while let Some(character) = characters.next() {
+        if character != '\\' {
+            text.push(character);
+            continue;
+        }
+        match characters.next() {
+            Some('\\') => text.push('\\'),
+            Some('"') => text.push('"'),
+            Some('t') => text.push('\t'),
+            Some('n') => text.push('\n'),
+            Some('r') => text.push('\r'),
+            Some('u') => {
+                let hex = characters
+                    .by_ref()
+                    .skip(1)
+                    .take_while(|digit| *digit != '}')
+                    .collect::<String>();
+                let scalar = u32::from_str_radix(&hex, 16)
+                    .ok()
+                    .and_then(char::from_u32)
+                    .unwrap_or_else(|| panic!("{literal}: a scalar escape"));
+                text.push(scalar);
+            }
+            other => panic!("{literal}: unknown escape {other:?}"),
+        }
+    }
+    text
+}
+
+fn valid_names(names: &[&str]) -> Evaluation {
+    apply(
+        CompilerIntrinsic::FsValidNames,
+        Vec::new(),
+        vec![(
+            Type::list(str_type()),
+            Value::List(names.iter().map(|name| text_value(name)).collect()),
+        )],
+    )
+}
+
+/// `fs.validNames` is held to the name vectors of the broker
+/// (`vibra-host/tests/it/names.tsv`): a one-name list is valid exactly when
+/// the name is accepted, the empty list is valid, and a list is valid only
+/// when every name is.
+#[test]
+fn fs_valid_names() {
+    let vectors = include_str!("../../../vibra-host/tests/it/names.tsv");
+    let mut lines = vectors.lines();
+    assert_eq!(lines.next(), Some("name\tverdict"));
+    let mut seen = 0;
+    for line in lines {
+        let (literal, verdict) = line.split_once('\t').expect("two columns");
+        let name = string_literal(literal);
+        let accepted = match verdict {
+            "accepted" => true,
+            "rejected" => false,
+            other => panic!("unknown verdict {other:?}"),
+        };
+        assert_eq!(
+            valid_names(&[&name]),
+            Evaluation::Value(Value::bool(accepted)),
+            "{literal}"
+        );
+        assert_eq!(
+            valid_names(&["a.txt", &name]),
+            Evaluation::Value(Value::bool(accepted)),
+            "{literal} after a valid name"
+        );
+        seen += 1;
+    }
+    assert!(seen > 80, "{seen} vectors");
+    assert_eq!(valid_names(&[]), Evaluation::Value(Value::bool(true)));
+}
+
+/// A grant row narrows a sealed grant through the host context, so its test
+/// runs in the fixture of `host.rs`: one narrowing request, and a result
+/// that holds the grant the context returned.
+#[test]
+fn grant_restrict() {
+    crate::host::narrowing_row(CompilerIntrinsic::GrantRestrict);
+}
+
+#[test]
+fn grant_sub() {
+    crate::host::narrowing_row(CompilerIntrinsic::GrantSub);
+}
+
+#[test]
+fn grant_limit() {
+    crate::host::narrowing_row(CompilerIntrinsic::GrantLimit);
+}
+
+/// A grant row outside a host context is unavailable: `evaluate` holds no
+/// context, so it reports a defect of the evaluation.
+#[test]
+fn a_grant_row_without_a_context_is_no_value() {
+    for intrinsic in [
+        CompilerIntrinsic::GrantRestrict,
+        CompilerIntrinsic::GrantSub,
+        CompilerIntrinsic::GrantLimit,
+    ] {
+        let node = generic_row(
+            intrinsic,
+            vec![Type::Void],
+            vec![var(0, Type::Void), var(1, Type::Void)],
+        );
+        assert_eq!(
+            evaluate(
+                &library_set(),
+                &node.expr,
+                &[Value::Void, Value::Void],
+                LIMITS
+            ),
+            Evaluation::Defect(Trap::InvalidCheckedProgram),
+            "{}",
+            intrinsic.symbol()
+        );
+    }
+}
 #[test]
 fn every_registry_row_has_a_test_named_after_its_wire_symbol() {
     let mut tested = VECTOR_ROWS
@@ -656,6 +788,8 @@ fn assert_true() {
             CompilerIntrinsic::AssertTrue,
             vec![crate::boolean(true)],
         )]),
+        None,
+        None,
         MemoryBudget::DEFAULT,
     )
     .unwrap();
@@ -666,6 +800,8 @@ fn assert_true() {
             assertion(CompilerIntrinsic::AssertTrue, vec![crate::boolean(false)]),
             equal_at(Type::I32, int(1), int(2)),
         ]),
+        None,
+        None,
         MemoryBudget::DEFAULT,
     )
     .unwrap()
@@ -683,6 +819,8 @@ fn assert_false() {
             CompilerIntrinsic::AssertFalse,
             vec![crate::boolean(false)],
         )]),
+        None,
+        None,
         MemoryBudget::DEFAULT,
     )
     .unwrap();
@@ -692,6 +830,8 @@ fn assert_false() {
             CompilerIntrinsic::AssertFalse,
             vec![crate::boolean(true)],
         )]),
+        None,
+        None,
         MemoryBudget::DEFAULT,
     )
     .unwrap()
@@ -706,12 +846,16 @@ fn assert_false() {
 fn assert_equal() {
     let passed = run_test(
         &test_body(vec![equal_at(Type::I32, int(1), int(1)), void()]),
+        None,
+        None,
         MemoryBudget::DEFAULT,
     )
     .unwrap();
     assert_eq!(passed.failure, None);
     let failed = run_test(
         &test_body(vec![equal_at(Type::I32, int(1), int(2))]),
+        None,
+        None,
         MemoryBudget::DEFAULT,
     )
     .unwrap()
@@ -741,6 +885,8 @@ fn assert_equal_of_an_unobservable_operand_is_an_observation_failure() {
     };
     let failed = run_test(
         &test_body(vec![equal_at(Type::Any, held(), held())]),
+        None,
+        None,
         MemoryBudget::DEFAULT,
     )
     .unwrap()

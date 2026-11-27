@@ -23,12 +23,12 @@ Crates: `vibra-workspace`, `vibra-conformance`.
 
 | Existing | Symbol | Use |
 | --- | --- | --- |
-| `crates/vibra-workspace/src/semantic.rs:69` | `pub fn check_snapshot` | the check a run starts with |
-| `crates/vibra-ir/src/program.rs:91` | `pub fn for_entry` | the reachable program of the entry |
+| `crates/vibra-workspace/src/semantic.rs:79` | `pub fn check_snapshot` | the check a run starts with |
+| `crates/vibra-ir/src/program.rs:113` | `pub fn for_entry` | the reachable program of the entry |
 | `crates/vibra-conformance/src/profile.rs:170` | `WorkspaceRun` | the operation, declared and unhandled |
 | `crates/vibra-conformance/src/standard.rs:192` | `pub fn standard_dispatcher` | registers the handler |
-| `crates/vibra-conformance/src/manifest.rs:170` | `pub struct CaseExpectations` | gains `targetRun` |
-| `crates/vibra-conformance/src/workspace_test.rs:28` | `pub struct WorkspaceTestHandler` | the model for the handler |
+| `crates/vibra-conformance/src/manifest.rs:171` | `pub struct CaseExpectations` | gains `targetRun` |
+| `crates/vibra-conformance/src/workspace_test.rs:32` | `pub struct WorkspaceTestHandler` | the model for the handler |
 
 From step 20: `run_entry`. From step 26: `binding::plan_of`. From step
 28: `startup::{admit, start, release}`.
@@ -49,10 +49,11 @@ architecture gives them; `vibra-conformance::workspace_run`.
 
 ## Ordered tasks
 
-1. `run_target`: check the snapshot (static diagnostics end the run with
-   `@command.diagnostics` and startup `notStarted`); select the target
-   (the only binary target when none is named; an unknown or library
-   target is `@command.invalidInput`); take `plan_of`; build the driver
+1. `run_target`: select the target (the only binary target when none is
+   named; an unknown or library target is `@command.invalidInput`, with
+   no diagnostic); check the snapshot for that target (static diagnostics
+   end the run with `@command.diagnostics` and startup `notStarted`);
+   take `plan_of`; build the driver
    for the `Launch`; `admit` with the plan, the `EntryShape` of the
    checked entry (its written row and its leaves), and the target's
    `effects` (no driver: `@command.unavailable` with
@@ -68,7 +69,7 @@ architecture gives them; `vibra-conformance::workspace_run`.
    | `ExitCode` zero | `@command.ok` | `applicationCode: 0`, `programResult` its canonical text |
    | `ExitCode` non-zero | `@command.programFailed` | `applicationCode` the code, no trap |
    | refused required leaf, failed acquisition | `@command.operationalFailure` | the startup diagnostic; `programResult` absent |
-   | a defect trap | `@command.trap` | the trap record with its origin ordinal |
+   | a defect trap | `@command.trap` | the trap record with its source origin, when one is known |
    | memory exhaustion | `@command.operationalFailure` | `@runtime.memoryExhausted`; limits reached `memory` |
 
 3. Under `Launch::World` the program's streams are the world's; `stdout`
@@ -97,7 +98,7 @@ with the recipe `@out` from `@host.io.stdout`.
 | `V2-RUNTIME-run-static-error` | negative | `H` with a type error | `@command.diagnostics`; startup `notStarted`; an empty trace | 05: "static diagnostics prevent admission" |
 | `V2-RUNTIME-run-required-refused` | negative | `M` of step 26 with world `args: ["/missing"]` | `@command.operationalFailure`; `@grant.requiredUnavailable` at the `@notes` recipe; `programResult` absent; the `@args` events are kept | 05: "After a startup failure `programResult` is `null`"; "A failed command keeps the startup events that completed" |
 | `V2-RUNTIME-run-optional-absent` | positive | an entry with `metrics: Option(DirWriteText)` from a `@variablePath` whose variable is absent; it returns `ExitCode(0u8)` when it matches `Option.none()` | `@command.ok`; `@metrics` `refused` | 03: "An optional grant refused in the way its provider specifies becomes `Option.none()`" |
-| `V2-RUNTIME-run-trap` | negative | an entry that divides by zero after one write | `@command.trap`; the trap record's origin ordinal; one `@host` event; bindings `released` | 06: "a defect trap" |
+| `V2-RUNTIME-run-trap` | negative, host test | an entry whose second host call meets a wrapper driver that reports a refusal its gate did not make; the trap cannot come from division, since no trap follows from user data | `@command.trap`; the trap `@runtime.invalidHostValue`, its source origin the span of the trapping `await`, written by hand from the source; one `@host` event; bindings `released` | 06: "a defect trap" |
 | `V2-RUNTIME-run-exhausted` | negative | an entry that recurses without end, under a small budget | `@command.operationalFailure`; `@runtime.memoryExhausted`; `applicationCode` absent | 06: "Memory exhaustion, startup failure, and tool failure keep their own categories" |
 | `ATK-release-on-trap` | negative | the trap row, with a wrapper driver counting releases | every acquired leaf released once, in reverse | 06: "On every ending of the process" |
 | `ATK-release-on-exhaustion` | negative | the exhaustion row, the same wrapper | the same | the same |
@@ -139,8 +140,7 @@ all passing.
 
 ## Stays unavailable
 
-`vibra run` (32). `Launch::System` exists as a type and has no driver
-until step 30.
+`vibra run` (32).
 
 ## Excluded
 

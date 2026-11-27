@@ -1,0 +1,18 @@
+id = "V2-EFFECT-await-in-requires"
+rule = "V2-EFFECT-await-in-requires"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#cold-plans-and-performed-rows: await in a requires predicate of a proc is invalid"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@effect.invalidAwait"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 143, end = 158 }

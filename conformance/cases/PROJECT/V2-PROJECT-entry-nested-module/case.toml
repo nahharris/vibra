@@ -1,0 +1,12 @@
+id = "V2-PROJECT-entry-nested-module"
+rule = "V2-PROJECT-entry-nested-module"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "04-programs-and-packages.md#targets: the entry may be declared in a nested module of the target"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

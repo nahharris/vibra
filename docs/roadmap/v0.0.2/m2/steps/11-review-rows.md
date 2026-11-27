@@ -19,8 +19,8 @@ Crates: none.
 | Existing | Symbol | Use |
 | --- | --- | --- |
 | `crates/vibra-ir/src/types.rs:152` | `pub struct Row` | row equality and containment |
-| `crates/vibra-ir/src/module_set.rs:482` | `pub fn try_new` | where the IR is validated |
-| `crates/vibra-interp/src/machine.rs:1166` | `pub(crate) fn invoke` | what an `await` enters |
+| `crates/vibra-ir/src/module_set.rs:529` | `pub fn try_new` | where the IR is validated |
+| `crates/vibra-interp/src/machine.rs:1221` | `pub(crate) fn invoke` | what an `await` enters |
 
 It reads `crates/vibra-ir/src/effects.rs`,
 `crates/vibra-types/src/check/effects/`, and
@@ -57,7 +57,8 @@ Probes; each is run and its result recorded, pass or fail.
 | row through an associated type | negative | an associated type bound to a `Proc` type with a row, awaited at the interface | a diagnostic, never acceptance | 03: "A plan's type always carries its complete row" |
 | await in a guard consequence | negative | `ensures … else await p()` on a `proc` | `@effect.invalidAwait` | 03 Cold plans |
 | await in a compile-time context | negative | a module value whose initializer calls a `fn` that returns a plan, then awaits | `@effect.invalidAwait` | 03: "A module-value initializer is pure" |
-| compile-time evaluation of a plan | negative | a module value of an `Intent` type | the constant diagnostic of the type chapter | 06 What has no encoding |
+| a plan as a module value | positive | a module value of an `Intent` type | accepted: building a plan is pure, and a module value needs no encoding | 03: "A module-value initializer is pure"; 01 Module values |
+| a plan where a constant is required | negative | a labelled default that builds a plan | `@type.notConstant` | 01 `fn` and `proc`: "a default that MUST be a constant expression" |
 | the IR accepts what the checker rejects | negative | each negative case of steps 05 to 10, lowered by hand | `IrError` | architecture, trust table |
 | deep rows | boundary | a row of 1,000 interfaces; a chain of 10,000 procedures | accepted or a documented limit, no overflow | 07 Required coverage 13 |
 | plan identity | positive | one plan awaited from two closures | two invocations | 06 Cold plans |

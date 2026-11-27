@@ -1,0 +1,24 @@
+fn normalizePair
+  takes {{low: low high: high}: {low: I32 high: I32}}
+  labelled {includeDelta: Bool be false}
+  returns pair: {first: I32 second: I32 delta: Option(I32)}
+  visibility @public
+  do
+    let {first second} be ordered(low high) endlet
+    if includeDelta then
+      return {
+        first: first
+        second: second
+        delta: Option.some(value: I32.sub(second first))
+      }
+    endif
+    return {first: first second: second delta: Option.none()}
+endfn
+
+fn ordered
+  takes {a: I32 b: I32}
+  returns pair: {I32 I32}
+  do
+    if Ordered.greater(a b) then return {b a} endif
+    return {a b}
+endfn

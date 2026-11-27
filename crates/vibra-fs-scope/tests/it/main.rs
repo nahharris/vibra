@@ -1,12 +1,13 @@
-//! The feasibility tests of the Windows file-scope adapter, on the real
-//! filesystem under the temporary directory. The record
-//! `docs/roadmap/v0.0.2/m0/file-scope-feasibility.md` maps each test to its
-//! case.
+//! The host tests of the Windows file-scope adapter, on the real filesystem
+//! under the temporary directory. Each case creates its objects in a new
+//! directory. `r` is the scoped root (`Sandbox::inside`); `outside` is a
+//! sibling directory the attacks aim at.
 //!
 //! A case that needs something the machine lacks (symbolic-link creation,
-//! junctions, 8.3 short names) prints `NOT RUN <case>: <reason>` to standard
-//! error and returns. Run with `--nocapture` to see whether any case was not
-//! run; a NOT RUN case is never counted as passed in the record.
+//! junctions, 8.3 short names, case-sensitive directories, `fsutil`) prints
+//! `NOT RUN <case>: <reason>` to standard error and returns. Run with
+//! `--nocapture` to see whether any case was not run; a NOT RUN case is never
+//! counted as passed.
 
 #![cfg(windows)]
 #![allow(
@@ -28,7 +29,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use vibra_fs_scope::{ScopeError, ScopedDir};
+use vibra_fs_scope::{ScopeError, ScopedDir, ScopedFile};
 
 /// The bytes of the file outside the root that every attack aims at.
 pub const SECRET: &[u8] = b"outside secret";
@@ -60,6 +61,7 @@ impl Sandbox {
         &self.base
     }
 
+    /// The scoped root `r`.
     pub fn inside(&self) -> PathBuf {
         self.base.join("inside")
     }
@@ -76,8 +78,13 @@ impl Sandbox {
         ScopedDir::open_root(&self.inside()).expect("the inside root opens")
     }
 
-    /// Every entry under `outside`, with the contents of each file.
-    pub fn outside_snapshot(&self) -> BTreeMap<PathBuf, Option<Vec<u8>>> {
+    /// Every entry under `r`, with the bytes of each file.
+    pub fn inside_snapshot(&self) -> BTreeMap<PathBuf, Node> {
+        snapshot(&self.inside())
+    }
+
+    /// Every entry under `outside`, with the bytes of each file.
+    pub fn outside_snapshot(&self) -> BTreeMap<PathBuf, Node> {
         snapshot(&self.outside())
     }
 
@@ -100,7 +107,18 @@ impl Drop for Sandbox {
     }
 }
 
-fn snapshot(directory: &Path) -> BTreeMap<PathBuf, Option<Vec<u8>>> {
+/// One entry of a snapshot.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Node {
+    Directory,
+    File(Vec<u8>),
+    /// A symbolic link or junction, recorded and not followed.
+    Link,
+}
+
+/// The recursive listing of `directory` and the bytes of every file, read
+/// with `std::fs` and following no link.
+pub fn snapshot(directory: &Path) -> BTreeMap<PathBuf, Node> {
     let mut found = BTreeMap::new();
     let mut pending = vec![directory.to_path_buf()];
     while let Some(next) = pending.pop() {
@@ -108,11 +126,13 @@ fn snapshot(directory: &Path) -> BTreeMap<PathBuf, Option<Vec<u8>>> {
             let entry = entry.unwrap();
             let path = entry.path();
             let kind = entry.file_type().unwrap();
-            if kind.is_dir() {
+            if kind.is_symlink() {
+                found.insert(path, Node::Link);
+            } else if kind.is_dir() {
                 pending.push(path.clone());
-                found.insert(path, None);
+                found.insert(path, Node::Directory);
             } else {
-                found.insert(path.clone(), Some(fs::read(&path).unwrap()));
+                found.insert(path.clone(), Node::File(fs::read(&path).unwrap()));
             }
         }
     }
@@ -180,14 +200,69 @@ pub fn short_name(path: &Path) -> Result<String, String> {
     }
 }
 
+/// Makes the empty directory `directory` case-sensitive, or says why the
+/// machine cannot.
+pub fn case_sensitive(directory: &Path) -> Result<(), String> {
+    let status = Command::new("fsutil")
+        .args(["file", "setCaseSensitiveInfo"])
+        .arg(directory)
+        .arg("enable")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map_err(|error| format!("cannot run fsutil: {error}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "fsutil file setCaseSensitiveInfo failed with {status}"
+        ))
+    }
+}
+
+/// The file identity of `path` (its NTFS file ID), or why it cannot be read.
+pub fn file_id(path: &Path) -> Result<String, String> {
+    let output = Command::new("fsutil")
+        .args(["file", "queryFileID"])
+        .arg(path)
+        .output()
+        .map_err(|error| format!("cannot run fsutil: {error}"))?;
+    let text = String::from_utf8_lossy(&output.stdout);
+    match text
+        .split_whitespace()
+        .find(|token| token.starts_with("0x"))
+    {
+        Some(id) if output.status.success() => Ok(id.to_owned()),
+        _ => Err(format!(
+            "fsutil file queryFileID failed with {}",
+            output.status
+        )),
+    }
+}
+
+/// Creates the file `names` as a driver does: holds the parent, then creates
+/// the leaf relative to it. An empty request is `DeniedName`.
+pub fn create(root: &ScopedDir, names: &[&str]) -> Result<ScopedFile, ScopeError> {
+    let Some((leaf, parent)) = names.split_last() else {
+        return Err(ScopeError::DeniedName);
+    };
+    root.open_parent(parent)?.create_new(leaf)
+}
+
+/// Reads the whole of an opened file, as much as its size at open.
+pub fn read_opened(file: &mut ScopedFile) -> Vec<u8> {
+    let size = file.size();
+    file.read_at_most(size).unwrap()
+}
+
 /// Asserts the exact denial, with the case named in the message.
 #[track_caller]
-pub fn assert_denied<T: std::fmt::Debug>(
-    result: Result<T, ScopeError>,
+pub fn assert_denied<T: std::fmt::Debug, E: Into<ScopeError>>(
+    result: Result<T, E>,
     expected: fn(&ScopeError) -> bool,
     case: &str,
 ) {
-    match result {
+    match result.map_err(Into::into) {
         Err(error) if expected(&error) => {}
         other => panic!("{case}: expected the typed denial, got {other:?}"),
     }
@@ -203,4 +278,16 @@ pub fn is_denied_name(error: &ScopeError) -> bool {
 
 pub fn is_already_exists(error: &ScopeError) -> bool {
     matches!(error, ScopeError::AlreadyExists)
+}
+
+pub fn is_not_found(error: &ScopeError) -> bool {
+    matches!(error, ScopeError::NotFound)
+}
+
+pub fn is_not_a_file(error: &ScopeError) -> bool {
+    matches!(error, ScopeError::NotAFile)
+}
+
+pub fn is_not_a_directory(error: &ScopeError) -> bool {
+    matches!(error, ScopeError::NotADirectory)
 }

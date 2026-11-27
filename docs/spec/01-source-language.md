@@ -575,9 +575,13 @@ parameter takes their place.
 
 A top-level `let name: Type be expr endlet` declares an immutable module
 value. Its name is one identifier, not a pattern; its type is mandatory; it
-admits no `else`. Its initializer is pure. `visibility` and `doc` sit between
-the type and `be`. The [runtime chapter](06-runtime.md) defines when the
-initializer runs. There is no separate constant form.
+admits no `else`. Its initializer is pure. A module value is held in memory
+and needs no encoding, so its type may be one that has none: an `Intent`
+type is accepted, since building a plan is pure, and an operation
+interface type is accepted, since a pure initializer can only produce a
+model, never a grant. `visibility` and `doc` sit between the type and
+`be`. The [runtime chapter](06-runtime.md) defines when the initializer
+runs. There is no separate constant form.
 
 ### `test`
 
@@ -725,12 +729,17 @@ Each of an `if` branch, a `match` arm, a `do` block, and a `let` fallback is
 its own scope: a binding made in it ends with it. A callable body is one
 scope together with its parameters.
 
-An expression statement has type `Void` or `Never`. One whose value is
-fallible, as the type chapter defines (a `Result` that can hold an error),
-is `@type.unhandledFallible`. Any other value is `@type.mismatch` at the
-statement, such as a plan whose `await` was forgotten: applying a `proc`
-only builds the plan. `let _ be risky() endlet` discards a value
-explicitly.
+An expression statement whose value is not used has type `Void` or
+`Never`. The only statement whose value is used is the last one of a
+branch, arm, or block whose form's value is used, as
+[`if`, `match`, `do`](#if-match-do) defines; every statement of a callable body,
+a `test` body, and a `let` fallback, the last one included, has its value
+unused. One
+whose value is fallible, as the type chapter defines (a `Result` that can
+hold an error), is `@type.unhandledFallible`. Any other value is
+`@type.mismatch` at the statement, such as a plan whose `await` was
+forgotten: applying a `proc` only builds the plan. `let _ be risky() endlet`
+discards a value explicitly.
 
 ### `let`
 

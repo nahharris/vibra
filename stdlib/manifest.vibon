@@ -4,7 +4,7 @@
   modules: [
     {
       path: @std.assert
-      digest: "sha256:015c1a81cbd520f0f27a926aa5a6596296bc0b3fac4fe65c358e50263494d760"
+      digest: "sha256:3b1bda27eab44686174674c93b9824da837752a30db44c6145352cff68d8c9fd"
       languageRoles: []
     }
     {
@@ -24,8 +24,23 @@
     }
     {
       path: @std.core
-      digest: "sha256:fdfb4574bf5f3d008a617f234a40cfea6cca8862ebfd42d968b65af251e30600"
-      languageRoles: [@equatable @ordered]
+      digest: "sha256:ca08993f7a1bdd95304a53dc4d6aec8983581ca1564ee1b7cf4e3351bdf8dc9a"
+      languageRoles: [@encodable @equatable @ordered]
+    }
+    {
+      path: @std.env
+      digest: "sha256:7580b660bc1e57774fbc58e6c6fd7edd9611aca2cf2ecb2301916ed28e585b41"
+      languageRoles: []
+    }
+    {
+      path: @std.fs
+      digest: "sha256:bfe8de5d0ccb2be343f2160b1e1d2f001defa8a9c2a415f9bacd4619823ac3b4"
+      languageRoles: []
+    }
+    {
+      path: @std.io
+      digest: "sha256:f1335e16a178239801cad3dcc018873adc66b62107c2b60d72b969d1c2bb5612"
+      languageRoles: []
     }
     {
       path: @std.iter
@@ -38,6 +53,21 @@
       languageRoles: [@option]
     }
     {
+      path: @std.policy
+      digest: "sha256:9c2986aa7fd2ed4177ee976ccfa2bb22893780412c6b12a8333ec429354408ff"
+      languageRoles: []
+    }
+    {
+      path: @std.process
+      digest: "sha256:404a618cdef3c83f9c9d48507cb589b68fe5b4b5a9460a9d124a931a809c407c"
+      languageRoles: []
+    }
+    {
+      path: @std.random
+      digest: "sha256:eee207c30d45df1d7f73758f686a753400063b5cc21df55fe04bbbe194afbf71"
+      languageRoles: []
+    }
+    {
       path: @std.result
       digest: "sha256:65e3263072955285b838492df574a49afbb958acfadea7c0881d33377b2e224f"
       languageRoles: [@result]
@@ -46,6 +76,16 @@
       path: @std.str
       digest: "sha256:7b82f2b6d0ddc4c4ce7a08831ba7fa6ad72b4218f127e6b332ed934471b805ad"
       languageRoles: [@str]
+    }
+    {
+      path: @std.test
+      digest: "sha256:29d0bbddc0efe64db0dfd1a168df24b123054f3fda68b70b7c9502d8c08cdb70"
+      languageRoles: []
+    }
+    {
+      path: @std.time
+      digest: "sha256:47f80f2efc8b93b78437dff06921f804782ca30a1d743652f3c4d55c0c73ab1a"
+      languageRoles: []
     }
   ]
   symbols: {
@@ -80,6 +120,10 @@
       "f64.parse"
       "f64.sub"
       "f64.toStr"
+      "fs.validNames"
+      "grant.limit"
+      "grant.restrict"
+      "grant.sub"
       "i16.add"
       "i16.addChecked"
       "i16.compare"
@@ -284,7 +328,31 @@
       "u8.toU32"
       "u8.toU64"
     ]
-    host: []
+    host: [
+      "env.readArgs"
+      "env.readVar"
+      "fs.metadataStat"
+      "fs.readEntries"
+      "fs.readFile"
+      "fs.readText"
+      "fs.writeFile"
+      "fs.writeText"
+      "io.stderrBytes"
+      "io.stderrText"
+      "io.stdinBytes"
+      "io.stdinText"
+      "io.stdoutBytes"
+      "io.stdoutText"
+      "random.generateBytes"
+      "testWorld.clocks"
+      "testWorld.directory"
+      "testWorld.environment"
+      "testWorld.output"
+      "testWorld.random"
+      "testWorld.streams"
+      "time.nowMonotonic"
+      "time.nowWall"
+    ]
     nativeSymbol: []
   }
 }

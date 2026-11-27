@@ -1,8 +1,0 @@
-{
-  format: @testRun.v2
-  result: @command.unavailable
-  tests: [
-    {name: "@tests.math::\"effects\"" result: @test.unavailable auditTrace: {format: @auditTrace.v2 revision: "sha256:4cf0a728032bcc31bc82d2c7eeecf197f5536524e567a4d28a72f70702f78050" drivers: [{provider: @hostWorld.v2 version: "0.0.2"}] policies: [:] redaction: @none events: []}}
-    {name: "@tests.math::\"plain\"" result: @test.passed auditTrace: {format: @auditTrace.v2 revision: "sha256:4cf0a728032bcc31bc82d2c7eeecf197f5536524e567a4d28a72f70702f78050" drivers: [{provider: @hostWorld.v2 version: "0.0.2"}] policies: [:] redaction: @none events: []}}
-  ]
-}

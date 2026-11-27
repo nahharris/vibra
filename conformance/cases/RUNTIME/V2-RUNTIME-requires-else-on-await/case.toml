@@ -1,0 +1,13 @@
+id = "V2-RUNTIME-requires-else-on-await"
+rule = "V2-RUNTIME-requires-else-on-await"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "06-runtime.md#callable-contract-execution: a false requires with else yields its consequence at the await and skips the body, which would return 1"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

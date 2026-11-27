@@ -1,0 +1,20 @@
+use @std.assert enduse
+
+use @std.test.TestWorld enduse
+
+use @std.io.StdoutText enduse
+
+use @std.io.StdoutBytes enduse
+
+use @std.io.StderrText enduse
+
+test "output"
+  takes {world: TestWorld}
+  performs {TestWorld StdoutText StdoutBytes StderrText}
+  do
+    let {stdoutText: out stdoutBytes: raw stderrText: err} be await TestWorld.streams(world) endlet
+    assert.equal(Result.ok(value: void) await StdoutText.write(out "a"))
+    assert.equal(Result.ok(value: void) await StdoutBytes.write(raw Bytes([98u8])))
+    assert.equal(Result.ok(value: void) await StderrText.write(err "e"))
+    assert.equal({stdout: Bytes([97u8 98u8]) stderr: Bytes([101u8])} await TestWorld.output(world))
+endtest

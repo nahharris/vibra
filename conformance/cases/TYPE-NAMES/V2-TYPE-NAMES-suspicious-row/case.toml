@@ -1,0 +1,18 @@
+id = "V2-TYPE-NAMES-suspicious-row"
+rule = "V2-TYPE-NAMES-suspicious-row"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "01-source-language.md#grammar: the result operand of a written Proc type whose row is omitted is a tuple of operation interfaces, the warning at the type"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+
+[[expect.diagnostics]]
+code = "@type.suspiciousRow"
+level = "@warning"
+source = "src/app/main.vib"
+span = { start = 657, end = 674 }

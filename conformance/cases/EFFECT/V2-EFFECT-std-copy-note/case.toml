@@ -1,0 +1,12 @@
+id = "V2-EFFECT-std-copy-note"
+rule = "V2-EFFECT-std-copy-note"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#effect-ceilings: the chapter's copyNote through the standard interfaces DirReadText and DirWriteText is accepted"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

@@ -1,0 +1,12 @@
+id = "V2-EFFECT-await-in-match-and-do"
+rule = "V2-EFFECT-await-in-match-and-do"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#cold-plans-and-performed-rows: await is valid in a match arm and in a do initializer of a proc body"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

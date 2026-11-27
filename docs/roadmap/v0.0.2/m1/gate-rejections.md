@@ -6,7 +6,7 @@ its predicate, its diagnostic, the rule that would have had to apply, and its
 repair.
 
 The modules are those of
-[`examples/gate-pure/`](../../../../examples/gate-pure/):
+[`examples/gate/gate-pure/`](../../../../examples/gate/gate-pure/):
 
 - `errors`: the error type `GateError` and its description;
 - `paths`: a note's name from its file name, and a note's log file;

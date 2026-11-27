@@ -1,0 +1,3 @@
+interface Sink
+  proc p takes {s: Self} returns r: Void external @host symbol "io.stdoutText" endproc
+endinterface

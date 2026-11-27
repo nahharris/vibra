@@ -1,0 +1,3 @@
+use @std.process.ExitCode enduse
+
+proc main labelled {verbose: Bool be false} returns code: ExitCode do return ExitCode(0u8) endproc

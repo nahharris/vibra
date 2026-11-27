@@ -1,0 +1,22 @@
+use @std.assert enduse
+
+use @std.test.TestWorld enduse
+
+use @std.time.WallClock enduse
+
+use @std.time.TimeError enduse
+
+proc readWall
+  takes {wall: WallClock}
+  returns at: Result(I64 TimeError)
+  performs {WallClock}
+  do
+    return await WallClock.read(wall)
+endproc
+test "parent"
+  takes {world: TestWorld}
+  performs {TestWorld WallClock}
+  do
+    let {wall: wall} be await TestWorld.clocks(world) endlet
+    assert.equal(Result.ok(value: 0i64) await readWall(wall))
+endtest

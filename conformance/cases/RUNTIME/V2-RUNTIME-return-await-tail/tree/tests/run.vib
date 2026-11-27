@@ -1,0 +1,5 @@
+use @std.assert enduse
+
+use @app.main enduse
+
+test "down" do assert.equal(0i32 await main.down(100000i32)) endtest

@@ -1,0 +1,18 @@
+id = "V2-EFFECT-anon-fn-performs"
+rule = "V2-EFFECT-anon-fn-performs"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "01-source-language.md#grammar: an anonymous fn admits no performs section"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@syntax.invalidSection"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 711, end = 725 }

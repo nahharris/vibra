@@ -1,0 +1,3 @@
+use @a.x enduse
+
+use @b.x as y enduse

@@ -6,13 +6,14 @@
 //! target and the `@tests` unit, and the `@types.v2` document. A case whose
 //! only errors are `@tool.unavailable` is `unsupported`; one with a bare
 //! guard that is not established or a reached tool limit is `unknown`; any
-//! other error refutes it.
+//! other error refutes it. A project that is not discovered or captured is
+//! judged by the same rule over the diagnostics that stopped it, so a project
+//! file past the source nesting limit is `unknown`.
 
 use vibra_workspace::{SourceSnapshot, check_snapshot, discover_project_at};
 
 use crate::corpus::Case;
 use crate::interpret::check_verdict;
-use crate::manifest::Verdict;
 use crate::profile::{
     CaseObservation, ConformanceOperation, HandlerError, ProfileHandler,
 };
@@ -34,15 +35,16 @@ impl ProfileHandler for WorkspaceCheckHandler {
             .ok_or_else(|| {
                 HandlerError::new("a workspaceCheck case declares one tree")
             })?;
-        let snapshot =
-            match discover_project_at(&tree).and_then(SourceSnapshot::capture) {
-                Ok(snapshot) => snapshot,
-                Err(diagnostics) => {
-                    let mut observation = CaseObservation::new(Verdict::Refuted);
-                    observation.diagnostics = diagnostics;
-                    return Ok(observation);
-                }
-            };
+        let snapshot = match discover_project_at(&tree)
+            .and_then(SourceSnapshot::capture)
+        {
+            Ok(snapshot) => snapshot,
+            Err(diagnostics) => {
+                let mut observation = CaseObservation::new(check_verdict(&diagnostics));
+                observation.diagnostics = diagnostics;
+                return Ok(observation);
+            }
+        };
         let check = check_snapshot(&snapshot, None);
         let mut observation = CaseObservation::new(check_verdict(check.diagnostics()));
         observation.diagnostics = check.diagnostics().to_vec();

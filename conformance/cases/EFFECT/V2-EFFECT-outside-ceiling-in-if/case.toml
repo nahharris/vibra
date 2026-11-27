@@ -1,0 +1,19 @@
+id = "V2-EFFECT-outside-ceiling-in-if"
+rule = "V2-EFFECT-outside-ceiling-in-if"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#effect-ceilings: an await inside an if branch contributes to the body"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@effect.outsideCeiling"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 710, end = 733 }
+related = [{ source = "src/app/main.vib", span = { start = 716, end = 733 } }]

@@ -171,6 +171,7 @@ pub const TAG_SETS: &[(&str, &[&str])] = &[
             "@iter",
             "@equatable",
             "@ordered",
+            "@encodable",
         ],
     ),
 ];

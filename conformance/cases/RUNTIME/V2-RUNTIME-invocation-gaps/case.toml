@@ -1,0 +1,13 @@
+id = "V2-RUNTIME-invocation-gaps"
+rule = "V2-RUNTIME-invocation-gaps"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "06-runtime.md#audit-trace: every await takes an ordinal, so the one event counts the awaits before it"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

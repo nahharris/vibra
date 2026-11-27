@@ -1,0 +1,4 @@
+{"type":"thread.started","thread_id":"01a217d3-bba3-7b72-acc2-4c080c6a7e76"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"type Packet\n  case empty\n  case item {points: List(I32) code: I32}\n  visibility @public\nendtype\n\nlet stopCode: I32 be 99i32 endlet\n\nfn packetScore\n  takes {packet: Packet}\n  returns score: Option(I32)\n  visibility @public\n  do\n    return match packet\n      case Packet.empty()\n        Option.none()\n      case Packet.item(points: _ code: stopCode)\n        Option.none()\n      case Packet.item(points: [first second] code: code)\n        Option.some(value: I32.add(I32.add(first second) code))\n      case Packet.item(points: _ code: _)\n        Option.none()\n    endmatch\nendfn"}}
+{"type":"turn.completed","usage":{"input_tokens":5102,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":156,"reasoning_output_tokens":0}}

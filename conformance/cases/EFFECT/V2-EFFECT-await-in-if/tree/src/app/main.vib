@@ -1,0 +1,4 @@
+proc double takes {n: I32} returns twice: I32 do
+  return I32.add(n n)
+endproc
+proc run takes {n: I32 go: Bool} returns r: I32 do if go then return await double(n) endif return n endproc

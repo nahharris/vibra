@@ -1,0 +1,26 @@
+# Task: pair
+
+Write the module `@pilot.pair`. Each declaration named below has exactly
+the name, parameters, and result written here, and has
+`visibility @public` unless this task says it is private. You may add
+declarations of your own. Write no `test`.
+
+- The function `normalizePair`, which takes one parameter of the record
+  type `{low: I32 high: I32}`, whose fields it binds by a record pattern
+  in `takes`, and the labelled parameter `includeDelta: Bool` with the
+  default `true`, and returns
+  `pair: {first: I32 second: I32 delta: Option(I32)}`.
+
+`first` is the lesser of `low` and `high` and `second` the greater; when
+they are equal both are that value. `delta` is
+`Option.some(value: I32.sub(second first))` when `includeDelta` is true,
+and `Option.none()` when it is false.
+
+Examples:
+
+- `normalizePair({low: 8i32 high: 3i32})` is
+  `{first: 3i32 second: 8i32 delta: Option.some(value: 5i32)}`.
+- `normalizePair({low: 8i32 high: 3i32} includeDelta: false)` is
+  `{first: 3i32 second: 8i32 delta: Option.none()}`.
+- `normalizePair({low: 4i32 high: 4i32})` is
+  `{first: 4i32 second: 4i32 delta: Option.some(value: 0i32)}`.

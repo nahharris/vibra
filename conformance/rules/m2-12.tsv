@@ -1,0 +1,5 @@
+identity	status	anchor
+V2-EFFECT-module-value-plan	active	03-effects.md#effect-ceilings
+V2-EFFECT-outside-ceiling-cycle	active	03-effects.md#effect-ceilings
+V2-EFFECT-plan-default-not-constant	active	01-source-language.md#fn-and-proc
+V2-TYPE-CONTROL-let-else-value-statement	active	01-source-language.md#bodies-and-statements

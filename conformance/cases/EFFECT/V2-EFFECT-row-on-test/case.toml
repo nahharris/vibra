@@ -1,0 +1,19 @@
+id = "V2-EFFECT-row-on-test"
+rule = "V2-EFFECT-row-on-test"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "03-effects.md#effect-ceilings: a test row names operation interfaces and the test runs; the body performs nothing, so the root is the unused-effect warning"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"
+
+[[expect.diagnostics]]
+code = "@contract.unusedEffect"
+level = "@warning"
+source = "tests/run.vib"
+span = { start = 321, end = 324 }

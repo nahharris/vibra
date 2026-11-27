@@ -1,0 +1,19 @@
+id = "V2-PROJECT-path-dependency-private"
+rule = "V2-PROJECT-path-dependency-private"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "04-programs-and-packages.md#modules-and-imports: an import of a private declaration of a dependency is @name.privateAccess, related to the declaration"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@name.privateAccess"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 4, end = 24 }
+related = [{ source = "lib/money/src/money/amount.vib", span = { start = 105, end = 111 } }]

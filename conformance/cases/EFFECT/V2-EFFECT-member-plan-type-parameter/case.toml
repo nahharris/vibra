@@ -1,0 +1,12 @@
+id = "V2-EFFECT-member-plan-type-parameter"
+rule = "V2-EFFECT-member-plan-type-parameter"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#dispatch: a fn may build a plan of a contract proc member at a type parameter"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

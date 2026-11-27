@@ -1,0 +1,6 @@
+// The result of the entry of a binary target: a wrapper over `U8`, whose zero
+// is success and whose every other value is an application failure.
+
+type ExitCode of U8
+  visibility @public
+endtype

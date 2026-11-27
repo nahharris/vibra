@@ -1,0 +1,5 @@
+use @std.fs.DirReadText enduse
+
+use @std.fs.RelativePath enduse
+
+fn f takes {d: DirReadText p: RelativePath} returns r: DirReadText do let d2: DirReadText be DirReadText.sub(d p) endlet return d2 endfn

@@ -1,0 +1,8 @@
+identity	status	anchor
+V2-GRANT-assert-equal-brand	active	04-programs-and-packages.md#assertions
+V2-GRANT-generic-bound	active	02-type-system.md#generics
+V2-GRANT-generic-identity	active	02-type-system.md#generics
+V2-GRANT-model-restrict-keeps-itself	active	03-effects.md#narrowing
+V2-GRANT-model-restrict-swaps-grant	active	03-effects.md#narrowing
+V2-GRANT-module-value-cannot-await	active	03-effects.md#capability-values
+V2-GRANT-sub-file-prefix	active	03-effects.md#filesystem-policies

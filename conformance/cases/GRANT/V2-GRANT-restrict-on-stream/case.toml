@@ -1,0 +1,19 @@
+id = "V2-GRANT-restrict-on-stream"
+rule = "V2-GRANT-restrict-on-stream"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#narrowing: restrict is a member of the six Dir interfaces only, so StdoutText.restrict names no member"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@name.unknownSymbol"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 198, end = 206 }
+related = [{ source = "@std.io", span = { start = 1343, end = 1353 } }]

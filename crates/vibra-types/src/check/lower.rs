@@ -12,9 +12,9 @@ use std::sync::Arc;
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 use vibra_ir::{
-    Arguments, Binder, Bound, CallTarget, Case, CheckedFunction, CheckedGlobal,
-    CheckedModuleSet, Constant, ExitGuard, Expr, FnType, FunctionBody, Guard,
-    Implementation, ImplementationRecord, InterfaceDefinition, InterfaceKey,
+    Arguments, Binder, BodyContext, Bound, CallTarget, Case, CheckedFunction,
+    CheckedGlobal, CheckedModuleSet, Constant, ExitGuard, Expr, FnType, FunctionBody,
+    Guard, Implementation, ImplementationRecord, InterfaceDefinition, InterfaceKey,
     InterfaceMember, Invariant, Library, LibraryTypes, ModuleSetParts, NamedTypes,
     Node, SignatureRecord, SourceOrigin, Type, TypeBody, TypeDefinition, Value,
     Visibility, encode_open_type, encode_type,
@@ -28,6 +28,7 @@ use super::contract::{
 };
 use super::cycle::initializer_cycles;
 use super::declare::{BoundData, Entity, FnData, Program, TypeKind};
+use super::effects;
 use super::expr::{
     BodyChecker, CallableScope, Checked, GuardViews, Layout, Reference, Target,
     fallible_construction,
@@ -38,14 +39,17 @@ use super::testing::{self, TestFaults};
 use super::{CheckResult, CheckedTest};
 
 /// The bodies of one pass.
-struct Pass {
-    functions: BTreeMap<usize, Checked>,
-    values: BTreeMap<usize, Checked>,
-    tests: BTreeMap<usize, Checked>,
+pub(crate) struct Pass {
+    /// The checked body of each function, by program index.
+    pub(crate) functions: BTreeMap<usize, Checked>,
+    /// The checked initializer of each module value, by program index.
+    pub(crate) values: BTreeMap<usize, Checked>,
+    /// The checked body of each test, by program index.
+    pub(crate) tests: BTreeMap<usize, Checked>,
     /// The diagnostics of each declaration.
-    faults: BTreeMap<Target, Vec<Diagnostic>>,
+    pub(crate) faults: BTreeMap<Target, Vec<Diagnostic>>,
     /// The references of each declaration.
-    references: BTreeMap<Target, Vec<Reference>>,
+    pub(crate) references: BTreeMap<Target, Vec<Reference>>,
     /// Every instantiation of a generic function inside a body.
     instantiations: Vec<Instantiation>,
     /// The diagnostics of the labelled defaults of abstract contract
@@ -66,6 +70,9 @@ struct Pass {
     /// own declaration, in the interface's module and at the span given,
     /// has an error.
     unchecked: Vec<(Diagnostic, usize, ByteSpan)>,
+    /// The labelled defaults of each interface member bound with
+    /// `external @host`, which has no body to hold them, by program index.
+    host_defaults: BTreeMap<usize, Vec<(String, vibra_ir::Constant)>>,
 }
 
 fn layout(program: &Program<'_>) -> Layout {
@@ -112,10 +119,15 @@ fn check_bodies(
         errors: BTreeMap::new(),
         sites: Vec::new(),
         unchecked: Vec::new(),
+        host_defaults: BTreeMap::new(),
     };
     invariants(program, documents, layout, &mut pass);
     for (index, data) in program.functions.iter().enumerate() {
         if !program.supported_fn(index) || data.external.is_some() {
+            continue;
+        }
+        if let Some(defaults) = host_defaults(program, documents, layout, data) {
+            pass.host_defaults.insert(index, defaults);
             continue;
         }
         let (Some(signature), Some(body), Some(text)) = (
@@ -134,6 +146,7 @@ fn check_bodies(
             result_span: data.view.result().map(|(_, written)| written.span()),
         };
         let mut checker = BodyChecker::new(program, layout, data.module, text);
+        checker.context = effects::procs::lower(program, data);
         let patterns = data
             .view
             .takes()
@@ -246,7 +259,8 @@ fn check_bodies(
             continue;
         };
         let mut checker = BodyChecker::new(program, layout, data.module, text);
-        let checked = checker.test_body(body);
+        let checked =
+            checker.test_body(body, effects::procs::test_world(program, data));
         pass.tests.insert(index, checked);
         pass.sites.extend(
             checker
@@ -408,6 +422,40 @@ fn scope_at(program: &Program<'_>, module: usize, span: ByteSpan) -> CallableSco
     }
 }
 
+/// The labelled defaults of the function `data` when it is an interface
+/// member bound with `external @host` that has labelled parameters, checked
+/// as a contract member's are with `Self` open. `None` for any other
+/// function.
+fn host_defaults(
+    program: &Program<'_>,
+    documents: &[Document],
+    layout: &Layout,
+    data: &FnData<'_>,
+) -> Option<Vec<(String, vibra_ir::Constant)>> {
+    let labelled = data.view.labelled();
+    if labelled.is_empty() || data.view.external()?.tag()?.text() != "@host" {
+        return None;
+    }
+    let signature = data.signature.as_ref()?;
+    let text = documents.get(data.module).and_then(Document::text)?;
+    let mut checker = BodyChecker::new(program, layout, data.module, text);
+    let patterns = data
+        .view
+        .takes()
+        .into_iter()
+        .map(|(pattern, _)| pattern)
+        .collect::<Vec<_>>();
+    let scope = CallableScope {
+        binders: data.binders.clone(),
+        bounds: data.bounds.clone(),
+        self_type: Some(Type::SelfType),
+        associated: data.associated.clone(),
+        self_interface: data.contract,
+        result_span: None,
+    };
+    Some(checker.contract_defaults(signature, &patterns, &labelled, scope))
+}
+
 /// The diagnostics of the labelled defaults of every abstract member of an
 /// interface outside the embedded library, each checked once as a constant
 /// of its label's type with the interface's parameters and `Self` open.
@@ -546,7 +594,7 @@ fn abstract_guards(
                         &source.path,
                         source.embedded,
                         &interface.name,
-                        "@fn",
+                        effects::procs::identity_kind(&view),
                         &member.name,
                     ),
                     qualified: format!("{}.{}", interface.name, member.name),
@@ -877,7 +925,8 @@ pub(crate) fn check_program(
     layout.constants_known = true;
     layout.errors = first.errors.clone();
     drop(first);
-    let pass = check_bodies(&program, documents, &layout);
+    let mut pass = check_bodies(&program, documents, &layout);
+    let warnings = effects::analysis::check_bodies(&program, &mut pass);
     let inputs = Inputs {
         program: &program,
         layout: &layout,
@@ -902,6 +951,7 @@ pub(crate) fn check_program(
             diagnostics.extend(faults.iter().cloned());
         }
     }
+    diagnostics.extend(warnings);
     diagnostics.extend(pass.contract.iter().cloned());
     diagnostics.extend(reviewed.diagnostics);
     for (diagnostic, module, contract) in &pass.unchecked {
@@ -961,6 +1011,9 @@ pub(crate) fn check_program(
         tests: Vec::new(),
         test_set: None,
         obligations: Vec::new(),
+        library_faults: reviewed.library,
+        targets: Vec::new(),
+        limits_reached: reviewed.limits,
     };
     if result.types_known() {
         result.types = types_document(&program, &obligations);
@@ -1253,7 +1306,7 @@ fn assemble(
                 &member.binders,
                 &member.bounds,
                 member.receiver,
-                member.signature.clone(),
+                effects::members::member_type(member),
                 &associated,
             )?;
             // A default body the checker skipped leaves its member out of
@@ -1336,9 +1389,18 @@ fn assemble(
                 data.qualified.clone(),
                 record,
                 intrinsic,
-                (0..data.binders.len()).map(Type::Binder).collect(),
+                effects::members::type_arguments(data, intrinsic),
                 origin,
             ),
+            None if let Some(host) = effects::members::host_function(
+                data,
+                record.clone(),
+                pass.host_defaults.get(&index).cloned().unwrap_or_default(),
+                origin.clone(),
+            ) =>
+            {
+                host
+            }
             None => match pass
                 .functions
                 .get(&index)
@@ -1372,11 +1434,18 @@ fn assemble(
                         exit_guard,
                         slot_count: checked.slot_count,
                         origin,
+                        context: effects::procs::lower(program, data),
                     }
                 }
-                None if stubs => {
-                    stub(at, &signature, data.binders.len(), record, origin, data)
-                }
+                None if stubs => stub(
+                    program,
+                    at,
+                    &signature,
+                    data.binders.len(),
+                    record,
+                    origin,
+                    data,
+                ),
                 None => {
                     return Err(format!(
                         "the function `{}` was not lowered",
@@ -1408,7 +1477,13 @@ fn assemble(
                 program,
                 &[],
                 &[],
-                FnType::new(Vec::new(), Type::Void),
+                FnType::new(
+                    effects::procs::test_world(program, data)
+                        .map(|(_, world)| world)
+                        .into_iter()
+                        .collect(),
+                    Type::Void,
+                ),
             )?,
             defaults: Vec::new(),
             body: FunctionBody::Expr(Box::new(body)),
@@ -1416,6 +1491,7 @@ fn assemble(
             exit_guard: None,
             slot_count,
             origin: origin(program, data.module, data.view.construct().span()),
+            context: effects::procs::test_context(program, data),
         });
     }
     for (ty, at) in &anonymous {
@@ -1449,6 +1525,7 @@ fn assemble(
             exit_guard: closure.exit_guard.clone(),
             slot_count: closure.slot_count,
             origin: origin(program, data.module, span),
+            context: BodyContext::Pure,
         });
     }
     let mut implementations = Vec::new();
@@ -1491,6 +1568,7 @@ fn assemble(
             library = library.with(*binding, id);
         }
     }
+    let library = effects::members::bind_narrowing(program, library, &in_scope);
     let set = CheckedModuleSet::try_new(ModuleSetParts {
         library,
         types,
@@ -1545,6 +1623,7 @@ fn lower_guard(
 /// arguments: the stand-in for a body that was not lowered, in a module set
 /// that compile-time evaluations run over and that never runs it.
 fn stub(
+    program: &Program<'_>,
     at: usize,
     signature: &FnType,
     binders: usize,
@@ -1576,18 +1655,21 @@ fn stub(
             (name.clone(), read(signature.parameters.len() + at, ty))
         })
         .collect();
-    let body = Node::new(
-        Expr::TailCall {
-            target: CallTarget::Direct {
-                function: at,
-                type_arguments: (0..binders).map(Type::Binder).collect(),
+    let body = effects::procs::stub(
+        data,
+        Node::new(
+            Expr::TailCall {
+                target: CallTarget::Direct {
+                    function: at,
+                    type_arguments: (0..binders).map(Type::Binder).collect(),
+                },
+                arguments: Arguments {
+                    positional,
+                    labelled,
+                },
             },
-            arguments: Arguments {
-                positional,
-                labelled,
-            },
-        },
-        origin.clone(),
+            origin.clone(),
+        ),
     );
     CheckedFunction {
         name: data.qualified.clone(),
@@ -1598,6 +1680,7 @@ fn stub(
         exit_guard: None,
         slot_count: signature.slot_count(),
         origin,
+        context: effects::procs::lower(program, data),
     }
 }
 
@@ -1647,21 +1730,21 @@ fn signature_record(
         .map_err(|error| error.to_string())
 }
 
-/// The signature record of a member of an interface with the associated
-/// types `associated`.
+/// The signature record of a member of an interface of the callable type
+/// `ty`, with the associated types `associated`.
 fn member_record(
     program: &Program<'_>,
     binders: &[String],
     bounds: &[Option<BoundData>],
     receiver: Option<usize>,
-    signature: FnType,
+    ty: Type,
     associated: &[String],
 ) -> Result<SignatureRecord, String> {
     let binders = binders_of(program, binders, bounds)?;
     SignatureRecord::interface_member(
         binders,
         receiver.and_then(|slot| u64::try_from(slot).ok()),
-        Type::function(signature),
+        ty,
         associated.to_vec(),
     )
     .map_err(|error| error.to_string())
@@ -1678,7 +1761,12 @@ fn function_record(
         .contract
         .and_then(|index| program.interfaces.get(index))
     else {
-        return signature_record(program, &data.binders, &data.bounds, signature);
+        let binders = binders_of(program, &data.binders, &data.bounds)?;
+        return SignatureRecord::new(
+            binders,
+            effects::procs::callable_type(program, data, signature),
+        )
+        .map_err(|error| error.to_string());
     };
     let associated = interface
         .associated
@@ -1693,7 +1781,7 @@ fn function_record(
         &data.binders,
         &data.bounds,
         receiver,
-        signature,
+        effects::procs::callable_type(program, data, signature),
         &associated,
     )
 }
@@ -1778,6 +1866,49 @@ fn types_document(program: &Program<'_>, obligations: &[Obligation]) -> Option<S
                 record.encode().ok()?
             ),
         ));
+    }
+    // An abstract member has no function; a default member is one above.
+    for data in &program.interfaces {
+        let Some(source) = program.modules.get(data.module) else {
+            continue;
+        };
+        if !local(data.module) || data.id.is_none() {
+            continue;
+        }
+        let associated = data
+            .associated
+            .iter()
+            .map(|(name, _)| name.clone())
+            .collect::<Vec<_>>();
+        for member in data
+            .members
+            .iter()
+            .filter(|member| member.default.is_none())
+        {
+            let identity = program.identity_of(
+                &source.path,
+                source.embedded,
+                &data.name,
+                effects::members::identity_kind(member),
+                &member.name,
+            );
+            let record = member_record(
+                program,
+                &member.binders,
+                &member.bounds,
+                member.receiver,
+                effects::members::member_type(member),
+                &associated,
+            )
+            .ok()?;
+            callables.push((
+                identity.clone(),
+                format!(
+                    "{{declaration: \"{identity}\" signature: {}}}",
+                    record.encode().ok()?
+                ),
+            ));
+        }
     }
     let mut implementations = Vec::new();
     for data in &program.impls {

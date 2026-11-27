@@ -1,0 +1,12 @@
+id = "V2-EFFECT-proc-type-empty-row"
+rule = "V2-EFFECT-proc-type-empty-row"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#effect-ceilings: an omitted row is empty, so a proc with no performs is a value of Proc({I32} I32)"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

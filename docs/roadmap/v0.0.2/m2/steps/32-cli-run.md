@@ -26,8 +26,8 @@ Crates: `vibra-cli`, `vibra-schema`.
 | `crates/vibra-cli/src/args.rs:130` | `pub fn parse` | accepts `--` after `run` |
 | `crates/vibra-cli/src/args.rs:46` | `program_arguments` | the tokens after `--` |
 | `crates/vibra-cli/src/inventory.rs:158` | `run` | the command line marked supported |
-| `crates/vibra-cli/src/test.rs:52` | `pub fn run` | the model for a command module |
-| `crates/vibra-schema/src/test_payload.rs:127` | `pub struct TestItem` | the model for a payload type |
+| `crates/vibra-cli/src/test.rs:54` | `pub fn run` | the model for a command module |
+| `crates/vibra-schema/src/test_payload.rs:129` | `pub struct TestItem` | the model for a payload type |
 
 From step 29: `run_target`, `Launch::System`, `RunOutcome`.
 
@@ -57,13 +57,14 @@ StartupRecordDocument, BindingRecordDocument, TrapRecordDocument}`.
    arguments, kept as operating-system strings. `--` on another command
    stays invalid input.
 2. `run::run`: take the snapshot; call `run_target` with
-   `Launch::System { arguments }`. This is the only place in the
-   workspace that constructs `Launch::System`.
+   `Launch::System { arguments, capture }`, `capture` true in the JSON
+   format. This is the only place in the shipped code that constructs
+   `Launch::System`.
 3. The payload: `target`, `programResult`, `applicationCode`, `stdout`,
    `stderr`, `auditTrace` (the `@host` events, Q18), `startup` (status,
    bindings, the `@startup` events and startup-phase reads, failure),
-   `trap`. Unavailable facts are `null`. Bytes that are not UTF-8 show
-   as U+FFFD in `stdout` and `stderr`.
+   `trap`, `drivers`, and `policies`. Unavailable facts are `null`. Bytes
+   that are not UTF-8 show as U+FFFD in `stdout` and `stderr`.
 4. JSON format: one envelope on standard output; the program's output is
    captured into the payload. Human format: the program's bytes go
    straight through and diagnostics go to standard error.
@@ -95,18 +96,18 @@ print `NOT RUN` elsewhere.
 | envelope validates | positive | every JSON row of this table | valid against `urn:vibra:schema:v2:command-result` | 05: "A producer MUST validate every document it emits" |
 | non-zero code | positive | an entry returning `ExitCode(3u8)` | exit 6; `@command.programFailed`; `status: "unknown"`; `applicationCode: 3`; `trap: null` | 05: "maps any non-zero code to `@command.programFailed`, exit 6" |
 | static error | negative | a type error | exit 1; `@command.diagnostics`; `startup.status: "notStarted"`; `programResult: null` | 05, the result table |
-| required refused | negative | `M` run as `vibra run -- C:\missing` | exit 3; `@command.operationalFailure`; `failure.code: "@grant.requiredUnavailable"`; `programResult: null` | 05: "tool, host, or startup failure or exhaustion" |
-| trap | negative | the dividing entry | exit 5; `@command.trap`; `trap.trapCode` set | 05, the result table |
+| required refused | negative | `M` run as `vibra run -- C:\missing` | exit 3; `@command.operationalFailure`; `failure.code: "@grant.requiredUnavailable"`; `programResult: null` | 05: "tool, host, or startup failure, or memory exhaustion" |
+| trap | negative, unit test | a run whose outcome is a defect trap; no trap follows from user data (division is checked), and the built binary has no driver to fault | exit 5; `@command.trap`; `trap.trapCode` set | 05, the result table |
 | exhaustion | negative | the recursing entry | exit 3; `limits.reached: ["memory"]`; `complete: false` | 05: "the memory limit is `\"memory\"`" |
 | arguments after `--` | positive | an entry echoing its arguments; `vibra run -- a -- -b` | stdout lists `a`, `--`, `-b` | 05: "Every token after it is a program argument, in order" |
 | `--` with nothing | positive | `vibra run --` | the argument list is empty | 05: "`--` with nothing after it supplies no arguments" |
-| target then `--` | positive | two binary targets; `vibra run tool -- x` | runs `tool` with `["x"]` | 05: "after its optional target" |
+| target then `--` | positive | two binary targets; `vibra run @tool -- x` | runs `@tool` with `["x"]` | 05: "after its optional target" |
 | `--` on another command | negative | `vibra check -- x` | exit 2; `@command.invalidInput` | 05: "Only `run` accepts `--`" |
-| unknown target | negative | `vibra run nope` | exit 2; `@command.invalidInput` | 05, the result table |
+| unknown target | negative | `vibra run @nope`, `vibra run nope`, and `vibra run @app` on a library | exit 2; `@command.invalidInput`, with no diagnostic | 05: "a selector that names no binary target is answered with no diagnostic" |
 | stdin passes through | positive | `echo x \| vibra run` on the entry of `V2-RUNTIME-run-stdin` | stdout `x` and the line ending the shell wrote (Q10) | 06 Standard input |
 | invalid UTF-8 output, JSON | boundary | an entry writing the byte 255 | `payload.stdout` holds U+FFFD; the trace's `args` hold the exact byte | 05: "bytes that are not UTF-8 show as U+FFFD there, and the audit trace keeps the exact bytes" |
-| directory target, Windows | positive | `M` with a real directory holding `a.txt`; `vibra run -- <dir>` | exit 0; stdout the file's text; `drivers` lists `@host.fs.directory` | 05 Run: "and then invokes the entry" |
-| directory target, other platforms | boundary | the same on Linux and macOS | exit 4; `@command.unavailable`; `@tool.unavailable`; nothing acquired | 04: "rejected at admission, as `@tool.unavailable`" |
+| directory target, Windows | positive | `M` with a real directory holding `a.txt`; `vibra run -- <dir>` | exit 0; stdout the file's text; `payload.drivers` lists `@host.fs.directory` | 05 Run: "and then invokes the entry" |
+| directory target, other platforms | boundary | the same on Linux and macOS | exit 4; `@command.unavailable`; `@tool.unavailable`; nothing acquired | 04: "In this release `@host.fs.directory` has a driver on Windows only" |
 | no permission flag | negative | `vibra run --allow-all` | exit 2 | 05: "A tool permission flag never approves a program's resource policy" |
 | no world switch | negative | `vibra run --world w.vibon` | exit 2 | 06: "The shipped launcher has no user-selectable world or replay switch" |
 | inventory | positive | `vibra help --format json` | the `run` capability has `supported: true`, `operations: ["workspaceRun"]`, and `profiles: ["interpreterV2"]` | 05 `CommandCapability`: "the profiles of those operations in the" |

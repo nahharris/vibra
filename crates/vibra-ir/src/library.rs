@@ -6,6 +6,7 @@
 
 use std::collections::BTreeMap;
 
+use crate::external::compiler::NarrowingType;
 use crate::{IrError, Type, TypeId};
 
 /// A standard-library declaration the IR names by what it does, never by
@@ -31,6 +32,10 @@ pub enum Library {
     Equatable,
     /// The interface playing `@ordered`.
     Ordered,
+    /// The interface playing `@encodable`, which a type conforms to
+    /// structurally, with no implementation, when it has a canonical value
+    /// encoding as far as its static type shows.
+    Encodable,
     /// `Ordering`, with the cases `less`, `equal`, and `greater`.
     Ordering,
     /// `ArithmeticError`, with `overflow`, `divisionByZero`, and
@@ -42,9 +47,9 @@ pub enum Library {
 }
 
 impl Library {
-    /// Every library declaration, the nine roles first in the order of the
+    /// Every library declaration, the ten roles first in the order of the
     /// role table.
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 13] = [
         Self::Bool,
         Self::Str,
         Self::Bytes,
@@ -54,6 +59,7 @@ impl Library {
         Self::Iter,
         Self::Equatable,
         Self::Ordered,
+        Self::Encodable,
         Self::Ordering,
         Self::ArithmeticError,
         Self::ConversionError,
@@ -72,6 +78,7 @@ impl Library {
             Self::Iter => "Iter",
             Self::Equatable => "Equatable",
             Self::Ordered => "Ordered",
+            Self::Encodable => "Encodable",
             Self::Ordering => "Ordering",
             Self::ArithmeticError => "ArithmeticError",
             Self::ConversionError => "ConversionError",
@@ -92,6 +99,7 @@ impl Library {
             Self::Iter => "@iter",
             Self::Equatable => "@equatable",
             Self::Ordered => "@ordered",
+            Self::Encodable => "@encodable",
             Self::Ordering | Self::ArithmeticError | Self::ConversionError => {
                 return None;
             }
@@ -101,7 +109,10 @@ impl Library {
     /// Whether the declaration is an interface rather than a type.
     #[must_use]
     pub const fn is_interface(self) -> bool {
-        matches!(self, Self::Iter | Self::Equatable | Self::Ordered)
+        matches!(
+            self,
+            Self::Iter | Self::Equatable | Self::Ordered | Self::Encodable
+        )
     }
 
     /// The number of type parameters the declaration has.
@@ -116,41 +127,70 @@ impl Library {
 }
 
 /// The identity bound to each library declaration, as the checker binds
-/// them when it loads the standard library.
+/// them when it loads the standard library, and to each
+/// [narrowing type](NarrowingType) the grant rows of the compiler intrinsic
+/// registry name.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct LibraryTypes(BTreeMap<Library, TypeId>);
+pub struct LibraryTypes {
+    roles: BTreeMap<Library, TypeId>,
+    narrowing: BTreeMap<NarrowingType, TypeId>,
+}
 
 impl LibraryTypes {
     /// No binding.
     #[must_use]
     pub const fn new() -> Self {
-        Self(BTreeMap::new())
+        Self {
+            roles: BTreeMap::new(),
+            narrowing: BTreeMap::new(),
+        }
     }
 
     /// The same bindings with `library` bound to `id`.
     #[must_use]
     pub fn with(mut self, library: Library, id: TypeId) -> Self {
-        self.0.insert(library, id);
+        self.roles.insert(library, id);
+        self
+    }
+
+    /// The same bindings with the narrowing type `declaration` bound to
+    /// `id`.
+    #[must_use]
+    pub fn with_narrowing(mut self, declaration: NarrowingType, id: TypeId) -> Self {
+        self.narrowing.insert(declaration, id);
         self
     }
 
     /// The identity bound to `library`.
     #[must_use]
     pub fn get(&self, library: Library) -> Option<&TypeId> {
-        self.0.get(&library)
+        self.roles.get(&library)
+    }
+
+    /// The identity bound to the narrowing type `declaration`.
+    #[must_use]
+    pub fn narrowing(&self, declaration: NarrowingType) -> Option<&TypeId> {
+        self.narrowing.get(&declaration)
     }
 
     /// The library declaration bound to `id`, if any.
     #[must_use]
     pub fn library_of(&self, id: &TypeId) -> Option<Library> {
-        self.0
+        self.roles
             .iter()
             .find_map(|(library, bound)| (bound == id).then_some(*library))
     }
 
-    /// Every binding.
+    /// Every binding of a library declaration.
     pub fn bindings(&self) -> impl Iterator<Item = (Library, &TypeId)> {
-        self.0.iter().map(|(library, id)| (*library, id))
+        self.roles.iter().map(|(library, id)| (*library, id))
+    }
+
+    /// Every binding of a narrowing type.
+    pub fn narrowing_bindings(&self) -> impl Iterator<Item = (NarrowingType, &TypeId)> {
+        self.narrowing
+            .iter()
+            .map(|(declaration, id)| (*declaration, id))
     }
 
     /// The library type `library` applied to `arguments`.

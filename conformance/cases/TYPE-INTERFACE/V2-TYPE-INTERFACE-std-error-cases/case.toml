@@ -1,0 +1,12 @@
+id = "V2-TYPE-INTERFACE-std-error-cases"
+rule = "V2-TYPE-INTERFACE-std-error-cases"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "06-runtime.md#error-types: a match over the seven own cases of FsError and the four shared cases is exhaustive"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

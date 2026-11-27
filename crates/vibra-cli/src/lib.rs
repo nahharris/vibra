@@ -1,9 +1,10 @@
 //! The `vibra` command line: the argument grammar of the whole command
-//! surface, `help`, `fmt`, `check`, `test`, the support inventory, invalid
-//! input, and the unavailable outcome of every command no step has landed yet.
+//! surface, `help`, `fmt`, `check`, `test`, `run`, the support inventory,
+//! invalid input, and the unavailable outcome of every command no step has
+//! landed yet.
 //!
 //! `docs/spec/05-tooling.md`, "Command surface" and "Versioned envelope and
-//! results", are the normative definitions. [`run`] is a pure function of its
+//! results", are the normative definitions. [`run()`] is a pure function of its
 //! arguments, working directory, and two writers; the process entry point in
 //! `main.rs` only supplies the process's own.
 
@@ -26,6 +27,7 @@ pub mod fmt;
 pub mod help;
 pub mod inventory;
 pub mod render;
+pub mod run;
 pub mod test;
 
 use std::ffi::OsString;
@@ -34,6 +36,7 @@ use std::path::Path;
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 use vibra_schema::{CommandOutcome, HelpPayload, Payload};
+use vibra_workspace::COMMAND_STACK;
 
 pub use args::OutputFormat;
 use args::{Invocation, Rejection, parse};
@@ -70,12 +73,57 @@ pub fn run<W: Write, E: Write>(
 ) -> i32 {
     let arguments = arguments.into_iter().collect::<Vec<_>>();
     let response = match parse(&arguments, current_directory) {
-        Ok(invocation) => execute(&invocation),
+        Ok(invocation) => on_command_stack(&invocation),
         Err(rejection) => invalid_input(&rejection),
     };
     emit(&response, &mut stdout, &mut stderr, &|envelope| {
         envelope.to_validated_json()
     })
+}
+
+/// Runs `invocation` on a thread with [`COMMAND_STACK`] bytes of stack, the
+/// size the workspace engine's stages are measured to need at the source
+/// nesting limit.
+///
+/// A thread the platform cannot start is an operational failure; a panic
+/// of the toolchain is a trap. Neither ends the process without a
+/// document.
+fn on_command_stack(invocation: &Invocation) -> Response {
+    let format = invocation.globals.format;
+    let name = invocation.line.name();
+    #[cfg(test)]
+    let hook = test::carry_hook();
+    let ended = std::thread::scope(|scope| {
+        std::thread::Builder::new()
+            .name("vibra-command".to_owned())
+            .stack_size(COMMAND_STACK)
+            .spawn_scoped(scope, move || {
+                #[cfg(test)]
+                hook();
+                execute(invocation)
+            })
+            .map(|handle| handle.join())
+    });
+    match ended {
+        Ok(Ok(response)) => response,
+        Ok(Err(_)) => {
+            let mut response =
+                Response::new(format, name, CommandOutcome::Trap, Payload::Empty {});
+            response.notice = Some("internal error: the command panicked".to_owned());
+            response
+        }
+        Err(error) => {
+            let mut response = Response::new(
+                format,
+                name,
+                CommandOutcome::OperationalFailure,
+                Payload::Empty {},
+            );
+            response.notice =
+                Some(format!("the command's thread cannot be started: {error}"));
+            response
+        }
+    }
 }
 
 /// The response to a well-formed command line.
@@ -95,6 +143,7 @@ fn execute(invocation: &Invocation) -> Response {
         ["fmt"] => fmt::run(invocation),
         ["check"] => check::run(invocation),
         ["test"] => test::run(invocation),
+        ["run"] => run::run(invocation),
         _ => unavailable(format, line.name()),
     }
 }

@@ -1,0 +1,18 @@
+id = "V2-SRC-DECL-host-outside-std"
+rule = "V2-SRC-DECL-host-outside-std"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#operation-interfaces: only the embedded standard library declares members bound to the host, so an external section in a project module is invalid"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@syntax.invalidSection"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 56, end = 70 }

@@ -1,0 +1,14 @@
+id = "V2-GRANT-test-random-vector"
+rule = "V2-GRANT-test-random-vector"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "07-diagnostics-and-conformance.md#required-coverage: the random grant of the world gives the SplitMix64 vector of its seed"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+hostWorld = "world.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

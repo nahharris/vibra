@@ -1,0 +1,183 @@
+use @std.io.StdinText enduse
+
+use @std.io.StdinBytes enduse
+
+use @std.io.StdoutText enduse
+
+use @std.io.StdoutBytes enduse
+
+use @std.io.StderrText enduse
+
+use @std.io.StderrBytes enduse
+
+use @std.fs.DirReadBytes enduse
+
+use @std.fs.DirReadText enduse
+
+use @std.fs.DirList enduse
+
+use @std.fs.DirWriteBytes enduse
+
+use @std.fs.DirWriteText enduse
+
+use @std.fs.DirStat enduse
+
+use @std.env.EnvReadVar enduse
+
+use @std.env.EnvReadArgs enduse
+
+use @std.time.WallClock enduse
+
+use @std.time.MonotonicClock enduse
+
+use @std.random.RandomBytes enduse
+
+use @std.env.EnvError enduse
+
+use @std.fs.FsError enduse
+
+use @std.fs.FsMetadata enduse
+
+use @std.fs.RelativePath enduse
+
+use @std.io.IoError enduse
+
+use @std.random.RandomError enduse
+
+use @std.time.TimeError enduse
+
+proc readStdinText
+  takes {grant: StdinText}
+  returns outcome: Result(Str IoError)
+  performs {StdinText}
+  do
+    return await StdinText.read(grant 4096u64)
+endproc
+
+proc readStdinBytes
+  takes {grant: StdinBytes}
+  returns outcome: Result(Bytes IoError)
+  performs {StdinBytes}
+  do
+    return await StdinBytes.read(grant 4096u64)
+endproc
+
+proc writeStdoutText
+  takes {grant: StdoutText value: Str}
+  returns outcome: Result(Void IoError)
+  performs {StdoutText}
+  do
+    return await StdoutText.write(grant value)
+endproc
+
+proc writeStdoutBytes
+  takes {grant: StdoutBytes value: Bytes}
+  returns outcome: Result(Void IoError)
+  performs {StdoutBytes}
+  do
+    return await StdoutBytes.write(grant value)
+endproc
+
+proc writeStderrText
+  takes {grant: StderrText value: Str}
+  returns outcome: Result(Void IoError)
+  performs {StderrText}
+  do
+    return await StderrText.write(grant value)
+endproc
+
+proc writeStderrBytes
+  takes {grant: StderrBytes value: Bytes}
+  returns outcome: Result(Void IoError)
+  performs {StderrBytes}
+  do
+    return await StderrBytes.write(grant value)
+endproc
+
+proc readFileBytes
+  takes {grant: DirReadBytes at: RelativePath}
+  returns outcome: Result(Bytes FsError)
+  performs {DirReadBytes}
+  do
+    return await DirReadBytes.read(grant at)
+endproc
+
+proc readFileText
+  takes {grant: DirReadText at: RelativePath}
+  returns outcome: Result(Str FsError)
+  performs {DirReadText}
+  do
+    return await DirReadText.read(grant at)
+endproc
+
+proc listEntries
+  takes {grant: DirList at: RelativePath}
+  returns outcome: Result(List(Str) FsError)
+  performs {DirList}
+  do
+    return await DirList.entries(grant at)
+endproc
+
+proc writeFileBytes
+  takes {grant: DirWriteBytes at: RelativePath contents: Bytes}
+  returns outcome: Result(Void FsError)
+  performs {DirWriteBytes}
+  do
+    return await DirWriteBytes.write(grant at contents)
+endproc
+
+proc writeFileText
+  takes {grant: DirWriteText at: RelativePath contents: Str}
+  returns outcome: Result(Void FsError)
+  performs {DirWriteText}
+  do
+    return await DirWriteText.write(grant at contents)
+endproc
+
+proc statEntry
+  takes {grant: DirStat at: RelativePath}
+  returns outcome: Result(FsMetadata FsError)
+  performs {DirStat}
+  do
+    return await DirStat.stat(grant at)
+endproc
+
+proc readVariable
+  takes {grant: EnvReadVar name: Str}
+  returns outcome: Result(Str EnvError)
+  performs {EnvReadVar}
+  do
+    return await EnvReadVar.read(grant name)
+endproc
+
+proc readArguments
+  takes {grant: EnvReadArgs}
+  returns outcome: Result(List(Str) EnvError)
+  performs {EnvReadArgs}
+  do
+    return await EnvReadArgs.read(grant)
+endproc
+
+proc readWall
+  takes {grant: WallClock}
+  returns outcome: Result(I64 TimeError)
+  performs {WallClock}
+  do
+    return await WallClock.read(grant)
+endproc
+
+proc readMonotonic
+  takes {grant: MonotonicClock}
+  returns outcome: Result(U64 TimeError)
+  performs {MonotonicClock}
+  do
+    return await MonotonicClock.read(grant)
+endproc
+
+proc generateBytes
+  takes {grant: RandomBytes count: U64}
+  returns outcome: Result(Bytes RandomError)
+  performs {RandomBytes}
+  do
+    return await RandomBytes.generate(grant count)
+endproc

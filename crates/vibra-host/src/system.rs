@@ -1,353 +1,483 @@
-//! The system provider of `run`.
+//! The drivers over the process: the standard streams, the environment, the
+//! arguments, the clocks, the random source, and the scoped directories.
 //!
-//! `docs/spec/06-runtime.md`, "Host world": `run` uses the real standard
-//! streams, filesystem, environment, clocks, and the operating system's random
-//! source. This is the one module of the toolchain's execution crates that reads
-//! ambient state, so that every ambient read of a running program passes through
-//! a provider and a registry row; a host test scans the other crates for these
-//! APIs.
+//! `docs/spec/06-runtime.md`, "Closed operation semantics", fixes what each
+//! adapter does, and `docs/spec/04-programs-and-packages.md`, "Startup
+//! order", what acquiring its resource answers. [`SystemDriver`] is the one
+//! [`Driver`] over the process; the broker of [`crate::broker::Context`]
+//! runs it exactly as it runs the driver of a host world.
+//!
+//! Every read of the process is in the five submodules: `streams`, `env`,
+//! `clock`, `random`, and `fs`. This module names no ambient API; it
+//! dispatches a call to the adapter of the resource it holds.
+//!
+//! **Construction reads nothing.** [`SystemDriver::new`] keeps its
+//! [`SystemInputs`]; a stream of the process is opened when its provider
+//! first acquires it, a monotonic clock takes its origin when it is
+//! acquired, and a directory is opened once, when it is acquired.
+//!
+//! **Directories on Windows only.** `@host.fs.directory` is the file-scope
+//! adapter of `vibra-fs-scope`, which exists on Windows. On every other
+//! platform [`Driver::identity`] answers `None` for it, so admission refuses
+//! a target that binds it as `@tool.unavailable` before anything is
+//! acquired.
+//!
+//! **No adapter ends the process.** An operating-system error becomes a typed
+//! reply, a refusal, or a failure to acquire; no adapter calls an exit
+//! function, aborts, or panics.
 
+mod clock;
+mod env;
+mod fs;
+mod random;
+mod streams;
+
+use std::collections::BTreeMap;
 use std::ffi::OsString;
-use std::io::{ErrorKind, Read, Write};
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::fmt;
+use std::rc::Rc;
 
-use crate::provider::{
-    Done, EnvError, Failure, FsError, FsKind, HostProvider, IoError, Metadata,
-    RandomError, TimeError, try_zeroed,
+use vibra_fs_scope::ScopedDir;
+use vibra_ir::authority::{HostErrorCase, HostOk, HostReply};
+use vibra_ir::external::host::HostOp;
+
+use crate::driver::{
+    Acquire, Action, Completion, Driver, DriverIdentity, Gate, Measured, Progress,
+    Resolved, ResourceId,
 };
+use crate::recipe::Provider;
+use crate::world::DRIVER_VERSION;
 
-/// The provider over the real host.
-#[derive(Debug)]
-pub struct SystemProvider {
-    arguments: Vec<OsString>,
-    origin: Instant,
-    /// Where standard output and error go, chosen by the command.
-    sink: Sink,
+use self::fs as directory;
+
+pub use streams::{InputSource, OutputSink, WriteFailure};
+
+/// Where the standard input comes from.
+pub enum Input {
+    /// The process's own standard input.
+    Process,
+    /// The process has no standard input: acquiring it is refused.
+    Absent,
+    /// A replacement, for the tests.
+    Replaced(Box<dyn InputSource>),
 }
 
-/// Where the system provider delivers standard output and error: the command
-/// chooses, and the language has no such switch. `run` in human mode inherits
-/// the process's streams; in JSON mode it captures the bytes for the envelope.
-#[derive(Debug)]
-enum Sink {
-    Inherit,
-    Capture { stdout: Vec<u8>, stderr: Vec<u8> },
-}
-
-impl Default for SystemProvider {
-    fn default() -> Self {
-        Self::new()
+impl fmt::Debug for Input {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Process => "Process",
+            Self::Absent => "Absent",
+            Self::Replaced(_) => "Replaced(..)",
+        })
     }
 }
 
-impl SystemProvider {
-    /// A provider with no program arguments. The monotonic clock counts from
-    /// this instant, the origin the instance fixes.
-    #[must_use]
-    pub fn new() -> Self {
-        Self::with_arguments(Vec::new())
-    }
+/// Where the standard output or the standard error goes.
+pub enum Output {
+    /// The process's own stream.
+    Process,
+    /// The process has no such stream: acquiring it is refused.
+    Absent,
+    /// A replacement, for the tests.
+    Replaced(Box<dyn OutputSink>),
+}
 
-    /// A provider whose `env.read-args` returns `arguments`, which the command
-    /// line supplied after `--`.
+impl fmt::Debug for Output {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Process => "Process",
+            Self::Absent => "Absent",
+            Self::Replaced(_) => "Replaced(..)",
+        })
+    }
+}
+
+/// The environment variables an `EnvReadVar` grant reads.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Variables {
+    /// The process's environment.
+    Process,
+    /// A fixed set, for the tests and the dual run: each name and its value;
+    /// the first entry of a name wins.
+    Fixed(Vec<(OsString, OsString)>),
+}
+
+/// What a [`SystemDriver`] acts on: the program's arguments, and the three
+/// streams and the variable set, each the process's own unless replaced.
+#[derive(Debug)]
+pub struct SystemInputs {
+    /// The program's arguments, in order, without the executable's path.
+    pub arguments: Vec<OsString>,
+    /// The standard input.
+    pub stdin: Input,
+    /// The standard output.
+    pub stdout: Output,
+    /// The standard error.
+    pub stderr: Output,
+    /// The environment variables.
+    pub variables: Variables,
+}
+
+impl SystemInputs {
+    /// The process's streams and environment, with `arguments` as the
+    /// program's arguments.
     #[must_use]
-    pub fn with_arguments(arguments: Vec<OsString>) -> Self {
+    pub const fn process(arguments: Vec<OsString>) -> Self {
         Self {
             arguments,
-            origin: Instant::now(),
-            sink: Sink::Inherit,
-        }
-    }
-
-    /// The same provider with standard output and error captured instead of
-    /// delivered to the process, for a command that reports them itself.
-    #[must_use]
-    pub fn capturing(mut self) -> Self {
-        self.sink = Sink::Capture {
-            stdout: Vec::new(),
-            stderr: Vec::new(),
-        };
-        self
-    }
-
-    /// The bytes written to standard output so far, when it is captured.
-    #[must_use]
-    pub fn captured_stdout(&self) -> &[u8] {
-        match &self.sink {
-            Sink::Capture { stdout, .. } => stdout,
-            Sink::Inherit => &[],
-        }
-    }
-
-    /// The bytes written to standard error so far, when it is captured.
-    #[must_use]
-    pub fn captured_stderr(&self) -> &[u8] {
-        match &self.sink {
-            Sink::Capture { stderr, .. } => stderr,
-            Sink::Inherit => &[],
+            stdin: Input::Process,
+            stdout: Output::Process,
+            stderr: Output::Process,
+            variables: Variables::Process,
         }
     }
 }
 
-fn io_error(error: &std::io::Error) -> IoError {
-    match error.kind() {
-        ErrorKind::BrokenPipe => IoError::Closed,
-        _ => IoError::Other,
+/// One standard stream: the process's own until it is first acquired, then
+/// the opened stream.
+enum Stream<T> {
+    /// Not opened yet: the process's own stream when it is acquired.
+    Process,
+    /// The process has no such stream.
+    Absent,
+    /// Opened, or given as a replacement.
+    Open(T),
+}
+
+/// What one acquired resource is.
+#[derive(Clone, Debug)]
+enum Held {
+    Stdin,
+    Stdout,
+    Stderr,
+    Variables,
+    Arguments,
+    Wall,
+    Monotonic(clock::Monotonic),
+    Random,
+    /// A held directory: the root handle, closed when the resource is
+    /// released.
+    Directory(Rc<ScopedDir>),
+}
+
+/// The driver over the process for the nine providers of the streams, the
+/// environment, the arguments, the clocks, random, and the directories.
+pub struct SystemDriver {
+    arguments: Vec<OsString>,
+    variables: Variables,
+    stdin: Stream<streams::Reader>,
+    stdout: Stream<Box<dyn OutputSink>>,
+    stderr: Stream<Box<dyn OutputSink>>,
+    directories: directory::Directories,
+    held: BTreeMap<ResourceId, Held>,
+    next: u64,
+}
+
+impl fmt::Debug for SystemDriver {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SystemDriver")
+            .field("arguments", &self.arguments.len())
+            .field("held", &self.held)
+            .field("file_reads", &self.directories.reads)
+            .finish_non_exhaustive()
     }
 }
 
-fn fs_error(error: &std::io::Error) -> FsError {
-    match error.kind() {
-        ErrorKind::NotFound => FsError::NotFound,
-        ErrorKind::PermissionDenied => FsError::PermissionDenied,
-        ErrorKind::NotADirectory => FsError::NotADirectory,
-        ErrorKind::IsADirectory => FsError::NotAFile,
-        ErrorKind::InvalidInput | ErrorKind::InvalidFilename => FsError::InvalidPath,
-        _ => FsError::Other,
+fn output(output: Output) -> Stream<Box<dyn OutputSink>> {
+    match output {
+        Output::Process => Stream::Process,
+        Output::Absent => Stream::Absent,
+        Output::Replaced(sink) => Stream::Open(sink),
     }
 }
 
-/// The error of an operation on `path`. A path that is missing is `not-found`,
-/// unless the nearest ancestor that exists is a file, which is
-/// `not-a-directory` whatever the platform reports for it: Unix says so itself
-/// and Windows says the path was not found, and the registry has one meaning.
-fn fs_error_at(path: &std::path::Path, error: &std::io::Error) -> FsError {
-    let kind = fs_error(error);
-    if kind != FsError::NotFound {
-        return kind;
-    }
-    let nearest = path
-        .ancestors()
-        .skip(1)
-        .find_map(|ancestor| std::fs::metadata(ancestor).ok());
-    if nearest.is_some_and(|metadata| !metadata.is_dir()) {
-        FsError::NotADirectory
-    } else {
-        FsError::NotFound
-    }
-}
-
-fn path_text(at: &str) -> Result<&std::path::Path, FsError> {
-    if at.contains('\0') {
-        Err(FsError::InvalidPath)
-    } else {
-        Ok(std::path::Path::new(at))
-    }
-}
-
-fn read_all(reader: &mut impl Read, length: u64) -> Result<Vec<u8>, ReadFailure> {
-    let mut bytes = Vec::new();
-    let reserve = usize::try_from(length).map_err(|_| ReadFailure::Memory)?;
-    bytes
-        .try_reserve_exact(reserve)
-        .map_err(|_| ReadFailure::Memory)?;
-    let mut chunk = [0_u8; 8192];
-    loop {
-        let count = reader.read(&mut chunk).map_err(ReadFailure::Io)?;
-        let Some(read) = chunk.get(..count).filter(|read| !read.is_empty()) else {
-            return Ok(bytes);
-        };
-        bytes
-            .try_reserve(read.len())
-            .map_err(|_| ReadFailure::Memory)?;
-        bytes.extend_from_slice(read);
-    }
-}
-
-enum ReadFailure {
-    Memory,
-    Io(std::io::Error),
-}
-
-impl SystemProvider {
-    /// Delivers `value` to standard output, or to standard error when `error`.
-    fn deliver(&mut self, error: bool, value: &[u8]) -> Done<(), IoError> {
-        match &mut self.sink {
-            Sink::Inherit if error => {
-                Self::write_stream(&mut std::io::stderr().lock(), value)
-            }
-            Sink::Inherit => Self::write_stream(&mut std::io::stdout().lock(), value),
-            Sink::Capture { stdout, stderr } => {
-                let buffer = if error { stderr } else { stdout };
-                buffer
-                    .try_reserve(value.len())
-                    .map_err(|_| Failure::MemoryExhausted)?;
-                buffer.extend_from_slice(value);
+/// Opens a standard output or error the first time it is acquired.
+fn open_output(
+    slot: &mut Stream<Box<dyn OutputSink>>,
+    which: streams::Which,
+) -> Result<(), Acquire> {
+    match slot {
+        Stream::Open(_) => Ok(()),
+        Stream::Absent => Err(Acquire::Refused),
+        Stream::Process => match streams::process_output(which) {
+            streams::Opened::Open(sink) => {
+                *slot = Stream::Open(sink);
                 Ok(())
             }
-        }
+            streams::Opened::Missing => Err(Acquire::Refused),
+            streams::Opened::Failed(why) => Err(Acquire::Failed(why)),
+        },
     }
 }
 
-impl SystemProvider {
-    fn file_bytes(at: &str) -> Done<Vec<u8>, FsError> {
-        let path = path_text(at)?;
-        let metadata =
-            std::fs::metadata(path).map_err(|error| fs_error_at(path, &error))?;
-        if metadata.is_dir() {
-            return Err(Failure::Error(FsError::NotAFile));
-        }
-        let mut file =
-            std::fs::File::open(path).map_err(|error| fs_error_at(path, &error))?;
-        read_all(&mut file, metadata.len()).map_err(|failure| match failure {
-            ReadFailure::Memory => Failure::MemoryExhausted,
-            ReadFailure::Io(error) => Failure::Error(fs_error(&error)),
-        })
-    }
-
-    fn write(at: &str, contents: &[u8]) -> Done<(), FsError> {
-        let path = path_text(at)?;
-        if std::fs::metadata(path).is_ok_and(|metadata| metadata.is_dir()) {
-            return Err(Failure::Error(FsError::NotAFile));
-        }
-        std::fs::write(path, contents)
-            .map_err(|error| Failure::Error(fs_error_at(path, &error)))
-    }
-
-    fn write_stream(stream: &mut impl Write, value: &[u8]) -> Done<(), IoError> {
-        stream
-            .write_all(value)
-            .and_then(|()| stream.flush())
-            .map_err(|error| Failure::Error(io_error(&error)))
-    }
-
-    fn stdin_all() -> Done<Vec<u8>, IoError> {
-        read_all(&mut std::io::stdin().lock(), 0).map_err(|failure| match failure {
-            ReadFailure::Memory => Failure::MemoryExhausted,
-            ReadFailure::Io(_) => Failure::Error(IoError::Other),
-        })
-    }
-}
-
-impl HostProvider for SystemProvider {
-    fn stdin_text(&mut self) -> Done<String, IoError> {
-        String::from_utf8(Self::stdin_all()?)
-            .map_err(|_| Failure::Error(IoError::InvalidText))
-    }
-
-    fn stdin_bytes(&mut self) -> Done<Vec<u8>, IoError> {
-        Self::stdin_all()
-    }
-
-    fn stdout_text(&mut self, value: &str) -> Done<(), IoError> {
-        self.deliver(false, value.as_bytes())
-    }
-
-    fn stdout_bytes(&mut self, value: &[u8]) -> Done<(), IoError> {
-        self.deliver(false, value)
-    }
-
-    fn stderr_text(&mut self, value: &str) -> Done<(), IoError> {
-        self.deliver(true, value.as_bytes())
-    }
-
-    fn stderr_bytes(&mut self, value: &[u8]) -> Done<(), IoError> {
-        self.deliver(true, value)
-    }
-
-    fn read_file(&mut self, at: &str) -> Done<Vec<u8>, FsError> {
-        Self::file_bytes(at)
-    }
-
-    fn read_text(&mut self, at: &str) -> Done<String, FsError> {
-        String::from_utf8(Self::file_bytes(at)?)
-            .map_err(|_| Failure::Error(FsError::InvalidText))
-    }
-
-    fn read_entries(&mut self, at: &str) -> Done<Vec<String>, FsError> {
-        let path = path_text(at)?;
-        let entries =
-            std::fs::read_dir(path).map_err(|error| fs_error_at(path, &error))?;
-        let mut names = Vec::new();
-        for entry in entries {
-            let entry = entry.map_err(|error| fs_error(&error))?;
-            let name = entry
-                .file_name()
-                .into_string()
-                .map_err(|_| FsError::InvalidText)?;
-            names.try_reserve(1).map_err(|_| Failure::MemoryExhausted)?;
-            names.push(name);
-        }
-        // Sorted by Unicode scalar order, which is the byte order of UTF-8, so
-        // the result does not depend on the order the host lists them in.
-        names.sort();
-        Ok(names)
-    }
-
-    fn write_file(&mut self, at: &str, contents: &[u8]) -> Done<(), FsError> {
-        Self::write(at, contents)
-    }
-
-    fn write_text(&mut self, at: &str, contents: &str) -> Done<(), FsError> {
-        Self::write(at, contents.as_bytes())
-    }
-
-    fn stat(&mut self, at: &str) -> Done<Metadata, FsError> {
-        let path = path_text(at)?;
-        // `metadata` follows symbolic links.
-        let metadata =
-            std::fs::metadata(path).map_err(|error| fs_error_at(path, &error))?;
-        Ok(if metadata.is_file() {
-            Metadata {
-                kind: FsKind::File,
-                size: metadata.len(),
-            }
-        } else if metadata.is_dir() {
-            Metadata {
-                kind: FsKind::Directory,
-                size: 0,
-            }
-        } else {
-            Metadata {
-                kind: FsKind::Other,
-                size: 0,
-            }
-        })
-    }
-
-    fn env_var(&mut self, name: &str) -> Done<String, EnvError> {
-        // A name that no environment can hold is not present, and the standard
-        // library would reject it.
-        if name.is_empty() || name.contains('=') || name.contains('\0') {
-            return Err(Failure::Error(EnvError::NotPresent));
-        }
-        let value = std::env::var_os(name).ok_or(EnvError::NotPresent)?;
-        value
-            .into_string()
-            .map_err(|_| Failure::Error(EnvError::NotUnicode))
-    }
-
-    fn env_args(&mut self) -> Done<Vec<String>, EnvError> {
-        let mut arguments = Vec::new();
-        for argument in &self.arguments {
-            let text = argument.to_str().ok_or(EnvError::NotUnicode)?;
-            arguments
-                .try_reserve(1)
-                .map_err(|_| Failure::MemoryExhausted)?;
-            arguments.push(text.to_owned());
-        }
-        Ok(arguments)
-    }
-
-    fn now_wall(&mut self) -> Done<i64, TimeError> {
-        let nanoseconds = match SystemTime::now().duration_since(UNIX_EPOCH) {
-            Ok(after) => i128::try_from(after.as_nanos()),
-            Err(before) => i128::try_from(before.duration().as_nanos()).map(|n| -n),
+impl SystemDriver {
+    /// A driver over `inputs`. It reads nothing until a resource is
+    /// acquired.
+    #[must_use]
+    pub fn new(inputs: SystemInputs) -> Self {
+        let stdin = match inputs.stdin {
+            Input::Process => Stream::Process,
+            Input::Absent => Stream::Absent,
+            Input::Replaced(source) => Stream::Open(streams::Reader::new(source)),
         };
-        nanoseconds
-            .ok()
-            .and_then(|value| i64::try_from(value).ok())
-            .ok_or(Failure::Error(TimeError::Unavailable))
+        Self {
+            arguments: inputs.arguments,
+            variables: inputs.variables,
+            stdin,
+            stdout: output(inputs.stdout),
+            stderr: output(inputs.stderr),
+            directories: directory::Directories::default(),
+            held: BTreeMap::new(),
+            next: 0,
+        }
     }
 
-    fn now_monotonic(&mut self) -> Done<u64, TimeError> {
-        u64::try_from(self.origin.elapsed().as_nanos())
-            .map_err(|_| Failure::Error(TimeError::Unavailable))
+    /// Holds `held` under a new resource; `None` when the identities are
+    /// exhausted.
+    fn hold(&mut self, held: Held) -> Option<ResourceId> {
+        self.next = self.next.checked_add(1)?;
+        let resource = ResourceId(self.next);
+        self.held.insert(resource, held);
+        Some(resource)
     }
 
-    fn random_bytes(&mut self, count: u64) -> Done<Vec<u8>, RandomError> {
-        let mut bytes = try_zeroed(count).ok_or(Failure::MemoryExhausted)?;
-        getrandom::fill(&mut bytes).map_err(|_| RandomError::Unavailable)?;
-        Ok(bytes)
+    /// Opens the standard input the first time it is acquired.
+    fn open_stdin(&mut self) -> Result<(), Acquire> {
+        match &self.stdin {
+            Stream::Open(_) => Ok(()),
+            Stream::Absent => Err(Acquire::Refused),
+            Stream::Process => match streams::process_stdin() {
+                streams::Opened::Open(source) => {
+                    self.stdin = Stream::Open(streams::Reader::new(source));
+                    Ok(())
+                }
+                streams::Opened::Missing => Err(Acquire::Refused),
+                streams::Opened::Failed(why) => Err(Acquire::Failed(why)),
+            },
+        }
+    }
+
+    /// The adapter call for a resource held as `held`, other than a
+    /// monotonic clock.
+    fn answer(
+        &mut self,
+        held: &Held,
+        action: &Action<'_>,
+        gate: &mut dyn Gate,
+    ) -> Answer {
+        match (held, action.op) {
+            (Held::Stdin, HostOp::IoStdinText | HostOp::IoStdinBytes) => {
+                match &mut self.stdin {
+                    Stream::Open(reader) => reader.read(action, gate),
+                    Stream::Process | Stream::Absent => {
+                        Answer::NotSubmitted("unsupported")
+                    }
+                }
+            }
+            (Held::Stdout, HostOp::IoStdoutText | HostOp::IoStdoutBytes) => {
+                write(&mut self.stdout, action)
+            }
+            (Held::Stderr, HostOp::IoStderrText | HostOp::IoStderrBytes) => {
+                write(&mut self.stderr, action)
+            }
+            (Held::Variables, HostOp::EnvReadVar) => {
+                env::read_var(&self.variables, action.operand, gate)
+            }
+            (Held::Arguments, HostOp::EnvReadArgs) => {
+                env::read_args(&self.arguments, gate)
+            }
+            (Held::Wall, HostOp::TimeNowWall) => clock::wall(),
+            (Held::Random, HostOp::RandomGenerateBytes) => {
+                random::generate(action.operand)
+            }
+            (Held::Directory(root), _) => self.directories.call(root, action, gate),
+            _ => Answer::NotSubmitted("unsupported"),
+        }
+    }
+}
+
+/// Test hooks of the directory driver.
+#[cfg(feature = "testing")]
+impl SystemDriver {
+    /// From now on every call of the directory adapter that reports the
+    /// names the filesystem gives, the acquisition of a root included,
+    /// answers as a volume that does not report normalized names: the
+    /// adapter's `Unsupported`, before it opens anything.
+    pub fn fail_name_queries_for_tests(&mut self) {
+        self.directories.names_unsupported = true;
+    }
+
+    /// The number of times the directory driver read a file's contents.
+    #[must_use]
+    pub const fn file_reads_for_tests(&self) -> u64 {
+        self.directories.reads
+    }
+}
+
+/// A write to an opened standard output or error.
+fn write(slot: &mut Stream<Box<dyn OutputSink>>, action: &Action<'_>) -> Answer {
+    match slot {
+        Stream::Open(sink) => streams::write(sink.as_mut(), action.operand),
+        Stream::Process | Stream::Absent => Answer::NotSubmitted("unsupported"),
+    }
+}
+
+/// What an adapter answers, before it is a [`Completion`] of the row's error
+/// type.
+#[derive(Debug)]
+enum Answer {
+    /// The gate refused.
+    Refused,
+    /// Known not submitted, with a refusal case.
+    NotSubmitted(&'static str),
+    /// Completed with a value.
+    Ok(HostOk, Progress),
+    /// Completed with a case of the row's error type.
+    Err(&'static str, Progress),
+    /// The operating system refused an allocation for an admitted reply.
+    MemoryExhausted(Progress),
+}
+
+/// The progress of an adapter that took `input` bytes and sent `output`.
+const fn moved(input: u64, output: u64) -> Progress {
+    Progress {
+        input: Measured::Known(input),
+        output: Measured::Known(output),
+    }
+}
+
+/// A byte count as a `u64`.
+fn length(bytes: usize) -> u64 {
+    u64::try_from(bytes).unwrap_or(u64::MAX)
+}
+
+impl Driver for SystemDriver {
+    fn identity(&self, provider: Provider) -> Option<DriverIdentity> {
+        if provider == Provider::FsDirectory && !directory::SUPPORTED {
+            return None;
+        }
+        Some(DriverIdentity {
+            provider: provider.atom().to_owned(),
+            version: DRIVER_VERSION.to_owned(),
+        })
+    }
+
+    fn acquire(&mut self, provider: Provider, resource: &Resolved) -> Acquire {
+        let opened = match (provider, resource) {
+            (Provider::IoStdin, Resolved::ProcessStream) => {
+                self.open_stdin().map(|()| Held::Stdin)
+            }
+            (Provider::IoStdout, Resolved::ProcessStream) => {
+                open_output(&mut self.stdout, streams::Which::Stdout)
+                    .map(|()| Held::Stdout)
+            }
+            (Provider::IoStderr, Resolved::ProcessStream) => {
+                open_output(&mut self.stderr, streams::Which::Stderr)
+                    .map(|()| Held::Stderr)
+            }
+            (Provider::EnvVars, Resolved::VariableSet { .. }) => Ok(Held::Variables),
+            (Provider::EnvArgs, Resolved::ProcessArguments) => Ok(Held::Arguments),
+            (Provider::TimeWall, Resolved::SystemClock) => Ok(Held::Wall),
+            (Provider::TimeMonotonic, Resolved::SystemClock) => {
+                Ok(Held::Monotonic(clock::Monotonic::start()))
+            }
+            (Provider::Random, Resolved::SystemRandom) => random::probe()
+                .map(|()| Held::Random)
+                .map_err(Acquire::Failed),
+            (Provider::FsDirectory, Resolved::Directory { path }) => self
+                .directories
+                .open_root(path)
+                .map(|root| Held::Directory(Rc::new(root))),
+            (provider, _) => Err(Acquire::Failed(format!(
+                "the system driver does not issue `{}` for this resource",
+                provider.atom()
+            ))),
+        };
+        let held = match opened {
+            Ok(held) => held,
+            Err(answer) => return answer,
+        };
+        match self.hold(held) {
+            Some(resource) => Acquire::Acquired(resource),
+            None => {
+                Acquire::Failed("the driver has no resource identity left".to_owned())
+            }
+        }
+    }
+
+    fn release(&mut self, resource: ResourceId) -> Result<(), String> {
+        match self.held.remove(&resource) {
+            // No call is running, so the driver holds the root's only
+            // reference, and closes it explicitly.
+            Some(Held::Directory(root)) => match Rc::try_unwrap(root) {
+                Ok(root) => root.close().map_err(|error| {
+                    format!("the directory could not be closed: {error}")
+                }),
+                Err(_) => Ok(()),
+            },
+            // The last hold of the standard input gives back the bytes the
+            // adapter kept and did not deliver.
+            Some(Held::Stdin)
+                if !self.held.values().any(|held| matches!(held, Held::Stdin)) =>
+            {
+                match &mut self.stdin {
+                    Stream::Open(reader) => reader.release().map_err(|error| {
+                        format!(
+                            "the standard input could not be positioned after the \
+                             bytes delivered: {error}"
+                        )
+                    }),
+                    Stream::Process | Stream::Absent => Ok(()),
+                }
+            }
+            _ => Ok(()),
+        }
+    }
+
+    fn call(
+        &mut self,
+        resource: ResourceId,
+        action: &Action<'_>,
+        gate: &mut dyn Gate,
+    ) -> Completion {
+        let answer = match self.held.get_mut(&resource) {
+            None => Answer::NotSubmitted("unsupported"),
+            Some(Held::Monotonic(clock)) => match action.op {
+                HostOp::TimeNowMonotonic => clock.read(),
+                _ => Answer::NotSubmitted("unsupported"),
+            },
+            Some(held) => {
+                let held = held.clone();
+                self.answer(&held, action, gate)
+            }
+        };
+        let error = action.op.row().error;
+        // Every case an adapter names is a refusal case of every host error
+        // type or a case of the row's own type; `unsupported` is a case of
+        // all five.
+        let case = |name: &str| {
+            HostErrorCase::new(error, name)
+                .or_else(|| HostErrorCase::new(error, "unsupported"))
+        };
+        let completion = match answer {
+            Answer::Refused => Some(Completion::Refused),
+            Answer::NotSubmitted(name) => case(name).map(Completion::NotSubmitted),
+            Answer::MemoryExhausted(progress) => {
+                Some(Completion::MemoryExhausted(progress))
+            }
+            Answer::Ok(value, progress) => Some(Completion::Completed {
+                reply: HostReply::Ok(value),
+                progress,
+            }),
+            Answer::Err(name, progress) => {
+                case(name).map(|case| Completion::Completed {
+                    reply: HostReply::Err(case),
+                    progress,
+                })
+            }
+        };
+        // Unreachable: every error type has `unsupported`. The broker reports
+        // a refusal its gate did not make as a defect of the driver.
+        completion.unwrap_or(Completion::Refused)
     }
 }

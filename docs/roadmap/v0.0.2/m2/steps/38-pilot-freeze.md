@@ -17,7 +17,7 @@ Crates: none.
 
 | Existing | Symbol | Use |
 | --- | --- | --- |
-| `crates/vibra-cli/src/lib.rs:82` | `fn execute` | the grader's only interface: `check` and `test` in machine mode |
+| `crates/vibra-cli/src/lib.rs:84` | `fn execute` | the grader's only interface: `check` and `test` in machine mode |
 
 Material of M1's exit step: `examples/pilot-pure/`, the reference
 solutions and controls of the pure tasks.

@@ -80,7 +80,8 @@ fn run(result: &CheckResult, name: &str) -> Result<TestExecution, String> {
         .ok_or_else(|| format!("`{name}` was not lowered"))?;
     let program = CheckedProgram::for_entry(Arc::clone(set), function)
         .map_err(|error| error.to_string())?;
-    run_test(&program, MemoryBudget::DEFAULT).map_err(|error| error.to_string())
+    run_test(&program, None, None, MemoryBudget::DEFAULT)
+        .map_err(|error| error.to_string())
 }
 
 #[test]
@@ -199,30 +200,27 @@ fn a_test_body_has_no_return_and_no_try() -> Result<(), String> {
 }
 
 #[test]
-fn an_operand_of_assert_equal_that_holds_a_callable_is_not_equatable()
+fn an_operand_of_assert_equal_that_holds_a_callable_is_not_encodable()
 -> Result<(), String> {
+    // A callable type is not `Encodable`: the bound of `assert.equal` is
+    // unsatisfied at the operand that fixes `T`.
     let source = "use @std.assert enduse\n\nuse @app.math enduse\n\n\
                   test \"x\" do assert.equal(math.add math.add) endtest\n";
     let result = check(MATH, &[("@tests.math", source)], &["@tests"])?;
     assert_eq!(
         faults(&result),
-        [
-            (
-                DiagnosticCode::TypeFunctionNotEquatable,
-                at(source, "math.add", 0)
-            ),
-            (
-                DiagnosticCode::TypeFunctionNotEquatable,
-                at(source, "math.add", 1)
-            ),
-        ]
+        [(
+            DiagnosticCode::TypeUnsatisfiedBound,
+            at(source, "math.add", 0)
+        )]
     );
     Ok(())
 }
 
 #[test]
-fn a_test_reaching_an_unsupported_form_is_unavailable_and_the_others_run()
--> Result<(), String> {
+fn a_test_reaching_an_anonymous_proc_through_the_library_runs() -> Result<(), String> {
+    // A library function that builds an anonymous `proc` lowers, so the test
+    // that reaches it runs beside the others.
     let app = format!(
         "{MATH}\nfn viaClosure\n  takes {{}}\n  returns r: I32\n  visibility @public\n  \
          do\n    let f be proc takes {{x: I32}} returns s: I32 \
@@ -233,38 +231,71 @@ fn a_test_reaching_an_unsupported_form_is_unavailable_and_the_others_run()
                  test \"closure\" do assert.equal(1i32 math.viaClosure()) endtest\n\n\
                  test \"plain\" do assert.equal(3i32 math.add(1i32 2i32)) endtest\n";
     let result = check(&app, &[("@tests.math", tests)], &["@tests"])?;
-    assert!(result.only_unavailable(), "{:#?}", result.diagnostics());
+    assert_eq!(faults(&result), []);
     let [closure, plain] = result.tests() else {
         return Err(format!("two tests: {:#?}", result.tests()));
     };
-    assert_eq!(closure.function(), None);
-    let reason = closure.unavailable().ok_or("a reason")?;
-    assert_eq!(reason.code(), DiagnosticCode::ToolUnavailable);
-    assert_eq!(reason.source_id(), Some("src/app/math.vib"));
+    assert_eq!(closure.unavailable(), None);
     assert_eq!(plain.unavailable(), None);
+    assert_eq!(run(&result, "closure")?.failure, None);
     assert_eq!(run(&result, "plain")?.failure, None);
     Ok(())
 }
-
 #[test]
-fn a_test_that_takes_or_performs_is_unavailable_over_the_test() -> Result<(), String> {
+fn a_test_takes_one_test_world_under_any_name() -> Result<(), String> {
     let tests = "use @std.assert enduse\n\n\
-                 test \"effects\" performs {} do endtest\n\n\
+                 use @std.test.TestWorld enduse\n\n\
+                 test \"world\" takes {sandbox: TestWorld} do endtest\n\n\
                  test \"plain\" do assert.true(true) endtest\n";
     let result = check(MATH, &[("@tests.math", tests)], &["@tests"])?;
-    assert_eq!(
-        faults(&result),
-        [(
-            DiagnosticCode::ToolUnavailable,
-            at(tests, "test \"effects\" performs {} do endtest", 0)
-        )]
-    );
+    assert_eq!(faults(&result), []);
     let names = result
         .tests()
         .iter()
         .map(|test| (test.name(), test.function().is_some()))
         .collect::<Vec<_>>();
-    assert_eq!(names, [("effects", false), ("plain", true)]);
+    assert_eq!(names, [("world", true), ("plain", true)]);
+    Ok(())
+}
+
+#[test]
+fn a_test_that_takes_another_type_is_an_invalid_form_at_the_section()
+-> Result<(), String> {
+    let tests = "use @std.assert enduse\n\n\
+                 type World of I32 endtype\n\n\
+                 test \"world\" takes {world: World} do endtest\n\n\
+                 test \"plain\" do assert.true(true) endtest\n";
+    let result = check(MATH, &[("@tests.math", tests)], &["@tests"])?;
+    assert_eq!(
+        faults(&result),
+        [(
+            DiagnosticCode::SyntaxInvalidForm,
+            at(tests, "takes {world: World}", 0)
+        )]
+    );
+    // An error makes every test invalid: none is lowered.
+    assert!(result.tests().iter().all(|test| test.function().is_none()));
+    Ok(())
+}
+
+/// A test's row names operation interfaces (`docs/spec/03-effects.md`,
+/// "Effect ceilings"): one that names a plain type is
+/// `@effect.invalidReference` at the entry, an error, so no test runs.
+#[test]
+fn a_test_row_that_names_a_type_is_an_invalid_reference() -> Result<(), String> {
+    let tests = "use @std.assert enduse\n\n\
+                 type Missing of I32 endtype\n\n\
+                 test \"effects\" performs {Missing} do endtest\n\n\
+                 test \"plain\" do assert.true(true) endtest\n";
+    let result = check(MATH, &[("@tests.math", tests)], &["@tests"])?;
+    assert_eq!(
+        faults(&result),
+        [(
+            DiagnosticCode::EffectInvalidReference,
+            at(tests, "Missing", 1)
+        )]
+    );
+    assert!(result.tests().is_empty());
     Ok(())
 }
 

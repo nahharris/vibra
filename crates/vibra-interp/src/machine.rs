@@ -8,6 +8,7 @@
 //! continuation and returning to the loop.
 
 use std::collections::{HashMap, HashSet};
+use std::ops::ControlFlow;
 use std::rc::Rc;
 
 use vibra_diagnostics::DiagnosticCode;
@@ -21,7 +22,9 @@ use vibra_ir::{
 use crate::compare::{DictBuild, DictFind, Structural};
 use crate::encode::{ObserveError, encoding, from_neutral};
 use crate::frame::{Frame, TypeEnv};
+use crate::host::HostSlot;
 use crate::ingress::{Check, Ingress, Then, checks_of, needs_checks, refused};
+use crate::plan::Invocation;
 use crate::types::{mentions_self, type_of};
 use crate::value::{ClosureVal, FunctionVal, Held, Repr, Val, neutral_storage, same};
 use crate::{FailureKind, Instrumentation, Reads, TestAssertionFailure, intrinsics};
@@ -32,17 +35,35 @@ pub(crate) enum Halt {
     /// The checked program is not one the checker accepts:
     /// `@runtime.invalidCheckedProgram`.
     Invalid(String),
-    /// A value the host handed in is not a value of its type:
-    /// `@runtime.invalidHostValue`.
+    /// A value the host handed in is not a value of its type, or the host
+    /// context faulted: `@runtime.invalidHostValue`.
     HostValue(String),
     /// The memory budget is exhausted.
     Memory,
     /// The reduction limit of an evaluation is reached.
     Reductions,
-    /// A form of a later milestone, such as applying a `proc`.
+    /// A form of a later milestone, such as a host-bound member reached
+    /// with no host context.
     Unavailable(String),
     /// An assertion did not hold, which ends a test body.
     Failed(Box<TestAssertionFailure>),
+    /// The encoder reached a value that has no value encoding: a plan or a
+    /// grant.
+    NoEncoding,
+    /// The fixture of a `TestWorld.directory` call conflicts, which ends a
+    /// test body `@test.invalid`.
+    Fixture(Box<Fixture>),
+}
+
+/// A `TestWorld.directory` fixture whose paths conflict, and the `await`
+/// that ran it.
+#[derive(Debug)]
+pub(crate) struct Fixture {
+    /// The path, by its names, held as a file and a directory; empty for
+    /// the empty path.
+    pub(crate) names: Vec<String>,
+    /// The source origin of the `await`.
+    pub(crate) origin: Option<SourceOrigin>,
 }
 
 pub(crate) fn invalid<T>(message: impl Into<String>) -> Result<T, Halt> {
@@ -107,6 +128,11 @@ pub(crate) enum Work<'a> {
         tail: bool,
         origin: &'a SourceOrigin,
     },
+    /// `await plan`: the plan is its one operand.
+    Await {
+        plan: &'a Node,
+        origin: &'a SourceOrigin,
+    },
 }
 
 impl<'a> Work<'a> {
@@ -136,6 +162,7 @@ impl<'a> Work<'a> {
                 1 => Some(key),
                 _ => None,
             },
+            Self::Await { plan, .. } => (index == 0).then_some(plan),
             Self::Call {
                 target, arguments, ..
             } => {
@@ -191,6 +218,7 @@ pub(crate) enum Kont<'a> {
     Requires {
         function: &'a CheckedFunction,
         guard: &'a Guard,
+        origin: Option<&'a SourceOrigin>,
     },
     ClosureRequires {
         body: &'a ClosureBody,
@@ -220,6 +248,11 @@ pub(crate) enum Kont<'a> {
     Rebox {
         result: Type,
         held_type: Type,
+    },
+    /// A restoration boundary: the invocation to restore when the awaited
+    /// one returns. A non-tail `await` pushes one; a tail `await` none.
+    Await {
+        caller: Invocation,
     },
 }
 
@@ -276,24 +309,76 @@ pub(crate) struct Machine<'a> {
     globals: Vec<GlobalState<'a>>,
     dispatch: HashMap<DispatchKey, Resolved<'a>>,
     pub(crate) empty_env: Rc<TypeEnv>,
-    origin: Option<&'a SourceOrigin>,
+    pub(crate) origin: Option<&'a SourceOrigin>,
     reduction_limit: u64,
     budget: u64,
     frame_bytes: u64,
     live_bytes: u64,
     allocated_bytes: u64,
+    /// The accounted footprint above which the live bytes are measured
+    /// again: twice the last measurement, and at least
+    /// [`MEASURE_FLOOR`] above it.
+    next_measure: u64,
     /// The constants already admitted, by address: each is checked once.
     admitted: HashSet<usize>,
     pub(crate) stats: Instrumentation,
     /// What an evaluation read: the functions it entered and the module
     /// values it read. Kept only in [`Mode::Evaluate`].
     pub(crate) reads: Reads,
+    /// The invocation running now. It lives here, not in a frame: a tail
+    /// `await` replaces it, and a `Kont::Await` restores it.
+    pub(crate) invocation: Invocation,
+    /// The function whose every entry records the current invocation in
+    /// `probed`, when one is set.
+    pub(crate) probe: Option<usize>,
+    /// The invocation current at each entry of `probe`, in order.
+    pub(crate) probed: Vec<Invocation>,
+    /// The host context, when the execution has one, and the receipt of a
+    /// completed host call whose value has not yet reached its
+    /// continuation.
+    pub(crate) host: HostSlot<'a>,
 }
+
+/// The least growth of the accounted footprint, above the last
+/// measurement, that measures the live bytes again.
+const MEASURE_FLOOR: u64 = 4 * 1024;
 
 const FRAME_BYTES: u64 = size_of::<Frame<'static>>() as u64;
 const SLOT_BYTES: u64 = size_of::<Option<Val<'static>>>() as u64;
 const KONT_BYTES: u64 = size_of::<Kont<'static>>() as u64;
 const VAL_BYTES: u64 = size_of::<Val<'static>>() as u64;
+
+/// The bytes of every part of `value`, a value the host built whole, each
+/// shared part counted once, as the memory accounting counts them.
+pub(crate) fn whole_bytes(value: &Val<'_>) -> u64 {
+    let mut seen = HashSet::new();
+    let mut parts = vec![value.clone()];
+    let mut total: u64 = 0;
+    while let Some(part) = parts.pop() {
+        if let Some((address, bytes)) = part.storage() {
+            if !seen.insert(address) {
+                continue;
+            }
+            total = total.saturating_add(as_u64(bytes));
+        }
+        match &part.0 {
+            Repr::Case(case) => {
+                parts.extend(case.fields.iter().map(|(_, field)| field.clone()))
+            }
+            Repr::Record(fields) => {
+                parts.extend(fields.iter().map(|(_, field)| field.clone()))
+            }
+            Repr::List(items) | Repr::Tuple(items) => {
+                parts.extend(items.iter().cloned())
+            }
+            Repr::Opt(Some(inner)) | Repr::Wrapper(inner) => {
+                parts.push(Val::clone(inner))
+            }
+            _ => {}
+        }
+    }
+    total
+}
 
 fn as_u64(n: usize) -> u64 {
     u64::try_from(n).unwrap_or(u64::MAX)
@@ -324,9 +409,20 @@ impl<'a> Machine<'a> {
             frame_bytes: 0,
             live_bytes: 0,
             allocated_bytes: 0,
+            next_measure: 0,
             admitted: HashSet::new(),
-            stats: Instrumentation::default(),
+            stats: Instrumentation {
+                invocation_count: match mode {
+                    Mode::Run | Mode::Test => Invocation::ROOT.ordinal,
+                    Mode::Evaluate => 0,
+                },
+                ..Instrumentation::default()
+            },
             reads: Reads::default(),
+            invocation: Invocation::ROOT,
+            probe: None,
+            probed: Vec::new(),
+            host: HostSlot::default(),
         }
     }
 
@@ -357,16 +453,32 @@ impl<'a> Machine<'a> {
                     self.origin = Some(origin);
                     self.eval(expr, origin)?
                 }
-                Step::Ret(value) => match self.konts.pop() {
-                    None => return invalid("a value with no continuation"),
-                    Some(Kont::End) => return Ok(value),
-                    Some(kont) => self.resume(kont, value)?,
-                },
+                Step::Ret(value) => {
+                    // The receipt of a host call whose value this is: it is
+                    // committed once the continuation has taken the value,
+                    // and never when taking it halts.
+                    let pending = self.host.pending.take();
+                    let next = match self.konts.pop() {
+                        None => return invalid("a value with no continuation"),
+                        Some(Kont::End) => ControlFlow::Break(value),
+                        Some(kont) => ControlFlow::Continue(self.resume(kont, value)?),
+                    };
+                    if pending.is_some() {
+                        self.host.deliver();
+                    }
+                    self.commit(pending)?;
+                    match next {
+                        ControlFlow::Break(value) => return Ok(value),
+                        ControlFlow::Continue(next) => next,
+                    }
+                }
             };
+            self.stats.max_continuation_depth =
+                self.stats.max_continuation_depth.max(self.konts.len());
         }
     }
 
-    fn frame(&self) -> Result<&Frame<'a>, Halt> {
+    pub(crate) fn frame(&self) -> Result<&Frame<'a>, Halt> {
         self.frames
             .last()
             .ok_or_else(|| Halt::Invalid("no activation".to_owned()))
@@ -476,24 +588,56 @@ impl<'a> Machine<'a> {
         Ok(())
     }
 
+    /// Accounts a newly built value that the host built whole, which no root
+    /// holds yet: every part of it, each shared part once, enters the
+    /// accounted footprint at once, not only its top.
+    pub(crate) fn allocated_whole(&mut self, value: &Val<'a>) -> Result<(), Halt> {
+        let bytes = whole_bytes(value);
+        if bytes > 0 {
+            self.allocated_bytes = self.allocated_bytes.saturating_add(bytes);
+            self.reserve(0, std::slice::from_ref(value))?;
+        }
+        Ok(())
+    }
+
     /// Checks that `pending` more bytes fit the budget beside what is
-    /// accounted. When they do not at first, the live bytes are measured
-    /// again from the roots and from `in_flight`, the values built that no
-    /// root holds yet.
+    /// accounted. When they do not at first, or when the accounted
+    /// footprint has passed the point of the next measurement, the live
+    /// bytes are measured again from the roots and from `in_flight`, the
+    /// values built that no root holds yet. Each measurement is at least
+    /// twice the last one apart, so measuring costs a constant per byte
+    /// allocated.
     fn reserve(&mut self, pending: u64, in_flight: &[Val<'a>]) -> Result<(), Halt> {
         let accounted = self.accounted().saturating_add(pending);
-        if accounted <= self.budget {
+        if accounted <= self.budget && accounted <= self.next_measure {
             self.stats.peak_memory_bytes = self.stats.peak_memory_bytes.max(accounted);
             return Ok(());
         }
-        self.live_bytes = self.measure(in_flight);
-        self.allocated_bytes = 0;
-        let accounted = self.accounted().saturating_add(pending);
-        self.stats.peak_memory_bytes = self.stats.peak_memory_bytes.max(accounted);
-        if accounted > self.budget {
+        if self.remeasure(pending, in_flight) > self.budget {
             return Err(Halt::Memory);
         }
         Ok(())
+    }
+
+    /// Measures the live bytes again from the roots and from `in_flight`,
+    /// and gives the footprint with `pending` more bytes.
+    fn remeasure(&mut self, pending: u64, in_flight: &[Val<'a>]) -> u64 {
+        self.live_bytes = self.measure(in_flight);
+        self.allocated_bytes = 0;
+        let live = self.accounted().saturating_add(pending);
+        self.stats.peak_memory_bytes = self.stats.peak_memory_bytes.max(live);
+        self.stats.peak_live_bytes = self.stats.peak_live_bytes.max(live);
+        self.next_measure = live
+            .saturating_mul(2)
+            .max(live.saturating_add(MEASURE_FLOOR));
+        live
+    }
+
+    /// The bytes the budget can still account, from a fresh measurement of
+    /// the live footprint: the `room` of a host request.
+    pub(crate) fn room(&mut self) -> u64 {
+        let live = self.remeasure(0, &[]);
+        self.budget.saturating_sub(live)
     }
 
     /// A frame of `slot_count` slots, its bytes reserved before it is built;
@@ -772,6 +916,7 @@ impl<'a> Machine<'a> {
             Expr::Default(_) => {
                 return invalid("a default outside a labelled argument");
             }
+            Expr::Await { plan } => self.start_await(plan, origin)?,
         })
     }
 
@@ -821,7 +966,7 @@ impl<'a> Machine<'a> {
     }
 
     /// Evaluates the operands of `work` from the first not yet `done`.
-    fn operands(
+    pub(crate) fn operands(
         &mut self,
         work: Work<'a>,
         mut done: Vec<Val<'a>>,
@@ -891,6 +1036,7 @@ impl<'a> Machine<'a> {
                 tail,
                 origin,
             } => self.call(target, arguments, tail, origin, done),
+            Work::Await { origin, .. } => self.await_plan(single(done)?, origin),
         }
     }
 
@@ -1024,14 +1170,35 @@ impl<'a> Machine<'a> {
                 let receiver = env.apply(&call.receiver);
                 let interface_arguments = env.apply_all(&call.arguments);
                 let member_arguments = env.apply_all(&call.member_arguments);
-                if receiver.is_interface_value() {
+                let choices = env.apply_all_named(&call.choices)?;
+                let sealed = if receiver.is_interface_value() {
+                    self.sealed(&call.interface, &call.member, &args)?
+                } else {
+                    None
+                };
+                if let Some(function) = sealed {
+                    // A sealed grant is its interface's value itself: the
+                    // interface binds its members, and nothing is reboxed.
+                    Resolved {
+                        target: Target::Function(function),
+                        env: Rc::new(TypeEnv {
+                            binders: interface_arguments
+                                .iter()
+                                .chain(&member_arguments)
+                                .cloned()
+                                .collect(),
+                            self_type: Some(receiver.clone()),
+                            associated: Some(choices),
+                        }),
+                    }
+                } else if receiver.is_interface_value() {
                     let (held_type, result) = self.unbox(
                         &call.interface,
                         &call.member,
                         &mut args,
                         &interface_arguments,
                         &member_arguments,
-                        &env.apply_all_named(&call.choices)?,
+                        &choices,
                     )?;
                     // Reboxing is work after the return, so only a result
                     // that holds `Self` keeps the call out of tail position.
@@ -1088,6 +1255,9 @@ impl<'a> Machine<'a> {
                 };
                 args.push(value);
             }
+        }
+        if self.builds_plan(&resolved.target)? {
+            return self.build_plan(resolved, args, rebox);
         }
         let tail = tail && rebox.is_none() && self.prepare_tail();
         if let Some((result, held_type)) = rebox {
@@ -1147,7 +1317,7 @@ impl<'a> Machine<'a> {
     /// Whether the call being made may replace the current activation: no
     /// continuation remains but the activation's end, and no `ensures …
     /// else` is pending. A `return` around the call leaves nothing either.
-    fn prepare_tail(&mut self) -> bool {
+    pub(crate) fn prepare_tail(&mut self) -> bool {
         if matches!(self.konts.last(), Some(Kont::Return)) {
             let boundary = self.konts.iter().rposition(|kont| {
                 matches!(kont, Kont::Leave | Kont::End | Kont::Global(_))
@@ -1175,13 +1345,11 @@ impl<'a> Machine<'a> {
             Target::Structural { order, ty } => self.structural(order, ty, args),
             Target::Closure(closure) => {
                 let body: &'a ClosureBody = closure.body;
-                if matches!(body.value_type, Type::Proc(_)) {
-                    return Err(unavailable_plan());
-                }
                 let mut frame = self.new_frame(body.slot_count, env, &args)?;
                 for (slot, value) in args.into_iter().enumerate() {
                     frame.set(slot, value)?;
                 }
+                frame.procedure = matches!(body.value_type, Type::Proc(_));
                 frame.closure = Some(closure);
                 self.push_frame(frame, tail)?;
                 if let Some(guard) = &body.entry_guard {
@@ -1194,10 +1362,10 @@ impl<'a> Machine<'a> {
                 if matches!(self.mode, Mode::Evaluate) {
                     self.reads.functions.insert(index);
                 }
-                let function = self.function(index)?;
-                if matches!(function.signature.type_info(), Type::Proc(_)) {
-                    return Err(unavailable_plan());
+                if self.probe == Some(index) {
+                    self.probed.push(self.invocation);
                 }
+                let function = self.function(index)?;
                 if let FunctionBody::Intrinsic {
                     intrinsic,
                     type_arguments,
@@ -1213,12 +1381,17 @@ impl<'a> Machine<'a> {
                 for (slot, value) in args.into_iter().enumerate() {
                     frame.set(slot, value)?;
                 }
+                frame.procedure = self.runs_in_procedure(&Target::Function(index))?;
                 self.push_frame(frame, tail)?;
                 if let Some(guard) = &function.entry_guard {
-                    self.konts.push(Kont::Requires { function, guard });
+                    self.konts.push(Kont::Requires {
+                        function,
+                        guard,
+                        origin,
+                    });
                     return Ok(Step::Eval(&guard.predicate));
                 }
-                self.start_body(function)
+                self.start_body(function, origin)
             }
         }
     }
@@ -1229,29 +1402,48 @@ impl<'a> Machine<'a> {
         Ok(Step::Eval(&body.body))
     }
 
-    /// Runs a function's body in its activation, arming its `ensures`.
-    fn start_body(&mut self, function: &'a CheckedFunction) -> Result<Step<'a>, Halt> {
+    /// Runs a function's body in its activation, arming its `ensures`. A
+    /// host body runs for the `await` written at `origin`.
+    fn start_body(
+        &mut self,
+        function: &'a CheckedFunction,
+        origin: Option<&'a SourceOrigin>,
+    ) -> Result<Step<'a>, Halt> {
         let frame = self.frame_mut()?;
         frame.exit = function.exit_guard.as_ref();
+        let parameters = |frame: &Frame<'a>, count: usize| {
+            frame
+                .slots
+                .iter()
+                .take(count)
+                .map(|slot| {
+                    slot.clone()
+                        .ok_or_else(|| Halt::Invalid("an unset parameter".to_owned()))
+                })
+                .collect::<Result<Vec<_>, _>>()
+        };
         match &function.body {
             FunctionBody::Expr(body) => Ok(Step::Eval(body)),
             FunctionBody::Intrinsic {
                 intrinsic,
                 type_arguments,
             } => {
-                let count = intrinsic.row().parameters.len();
-                let args = frame
-                    .slots
-                    .iter()
-                    .take(count)
-                    .map(|slot| {
-                        slot.clone().ok_or_else(|| {
-                            Halt::Invalid("an unset parameter".to_owned())
-                        })
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
+                let args = parameters(frame, intrinsic.row().parameters.len())?;
                 let type_arguments = frame.env.apply_all(type_arguments);
                 self.intrinsic(*intrinsic, &type_arguments, args, &function.origin)
+            }
+            FunctionBody::Host(binding) => {
+                let count = match function.signature.type_info() {
+                    Type::Proc(signature) => signature
+                        .parameters
+                        .len()
+                        .saturating_add(signature.labels.entries().len()),
+                    other => {
+                        return invalid(format!("a host-bound member of {other}"));
+                    }
+                };
+                let args = parameters(frame, count)?;
+                self.host_body(*binding, function, &args, origin)
             }
         }
     }
@@ -1416,9 +1608,12 @@ impl<'a> Machine<'a> {
                     self_type: None,
                     associated: Some(choices),
                 });
+        // A `proc` member builds a plan, and the plan's result is reboxed
+        // when it is awaited.
         let result = match &signature {
             Type::Fn(signature) => signature.result.clone(),
-            _ => return invalid(format!("`{member}` is not a function")),
+            Type::Proc(signature) => signature.result.clone(),
+            _ => return invalid(format!("`{member}` is not a callable")),
         };
         Ok((held.held_type.clone(), result))
     }
@@ -1629,6 +1824,9 @@ impl<'a> Machine<'a> {
                 })?);
                 self.fold(function, items, 0, initial)
             }
+            CompilerIntrinsic::GrantRestrict
+            | CompilerIntrinsic::GrantSub
+            | CompilerIntrinsic::GrantLimit => self.narrow(intrinsic, args),
             CompilerIntrinsic::DictFromList => {
                 let [key, _] = type_arguments else {
                     return invalid("`dict.fromList` takes two type arguments");
@@ -1826,9 +2024,13 @@ impl<'a> Machine<'a> {
                 done.push(value);
                 self.operands(work, done)?
             }
-            Kont::Requires { function, guard } => {
+            Kont::Requires {
+                function,
+                guard,
+                origin,
+            } => {
                 if truth(&value)? {
-                    self.start_body(function)?
+                    self.start_body(function, origin)?
                 } else {
                     Step::Eval(&guard.consequence)
                 }
@@ -1873,6 +2075,10 @@ impl<'a> Machine<'a> {
             Kont::Rebox { result, held_type } => {
                 let value = self.rebox(value, &result, &held_type)?;
                 self.allocated(&value)?;
+                Step::Ret(value)
+            }
+            Kont::Await { caller } => {
+                self.invocation = caller;
                 Step::Ret(value)
             }
         })
@@ -2038,13 +2244,6 @@ pub(crate) const fn is_structural(ty: &Type) -> bool {
     matches!(
         ty,
         Type::Atom | Type::AtomSingleton(_) | Type::Tuple(_) | Type::Record(_)
-    )
-}
-
-fn unavailable_plan() -> Halt {
-    Halt::Unavailable(
-        "applying a `proc` builds a plan, which this interpreter does not run"
-            .to_owned(),
     )
 }
 

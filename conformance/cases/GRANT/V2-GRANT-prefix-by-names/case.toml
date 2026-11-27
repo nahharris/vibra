@@ -1,0 +1,13 @@
+id = "V2-GRANT-prefix-by-names"
+rule = "V2-GRANT-prefix-by-names"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "03-effects.md#filesystem-policies: a prefix sub does not cover subOld: prefixes compare name by name"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

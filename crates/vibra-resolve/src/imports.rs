@@ -14,9 +14,10 @@
 //! along the cycle.
 //!
 //! "Packages, units, and targets": a module names its own unit, `@std`, and
-//! its project's dependencies; a module of `@tests` also names every local
-//! target. Any other unit is `@module.unknownPath` at the reference. The
-//! modules of `@std` are the embedded unit's, walked like any other unit's.
+//! its project's dependencies (the units its [`crate::SourceUnit`] lists); a
+//! module of `@tests` also names every local target. Any other unit is
+//! `@module.unknownPath` at the reference. The modules of `@std` are the
+//! embedded unit's, walked like any other unit's.
 
 use std::collections::VecDeque;
 
@@ -99,11 +100,12 @@ fn resolve_import(
     let unit = format!("@{first}");
     let visible = unit == module.unit
         || unit == graph.embedded_unit
+        || module.dependencies.contains(&unit)
         || (module.unit_kind == UnitKind::Tests
-            && graph
-                .modules
-                .iter()
-                .any(|other| other.unit == unit && other.unit_kind != UnitKind::Tests));
+            && graph.modules.iter().any(|other| {
+                other.unit == unit
+                    && matches!(other.unit_kind, UnitKind::Bin | UnitKind::Lib)
+            }));
     if !visible {
         return unknown_path(
             out,

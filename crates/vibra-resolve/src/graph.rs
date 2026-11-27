@@ -68,6 +68,8 @@ pub(crate) struct ModuleData<'a> {
     /// The package the module belongs to: the local one, or the embedded
     /// standard library's.
     pub(crate) package: &'a PackageId,
+    /// The dependency units the module may name, `@` included.
+    pub(crate) dependencies: &'a [String],
     /// Whether the module is a module of the embedded standard library.
     pub(crate) embedded: bool,
     pub(crate) source_id: String,
@@ -260,8 +262,16 @@ impl<'a> Graph<'a> {
             prelude: BTreeMap::new(),
         };
         let local = input.units().iter().flat_map(|unit| {
+            let package = unit.package().unwrap_or(input.package());
             unit.modules().iter().map(move |module| {
-                (input.package(), unit.name(), unit.kind(), false, module)
+                (
+                    package,
+                    unit.name(),
+                    unit.kind(),
+                    unit.dependencies(),
+                    false,
+                    module,
+                )
             })
         });
         let standard = embedded.modules().iter().map(|module| {
@@ -269,11 +279,12 @@ impl<'a> Graph<'a> {
                 embedded.package(),
                 embedded.name(),
                 UnitKind::Lib,
+                &[][..],
                 true,
                 module,
             )
         });
-        for ((package, unit, unit_kind, is_embedded, module), document) in
+        for ((package, unit, unit_kind, dependencies, is_embedded, module), document) in
             local.chain(standard).zip(documents)
         {
             let name = module.path().rsplit('.').next().unwrap_or_default();
@@ -291,6 +302,7 @@ impl<'a> Graph<'a> {
                 unit: unit.to_owned(),
                 unit_kind,
                 package,
+                dependencies,
                 embedded: is_embedded,
                 source_id: module.source_id().to_owned(),
                 identity,

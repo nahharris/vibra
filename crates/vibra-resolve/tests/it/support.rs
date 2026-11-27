@@ -97,10 +97,7 @@ pub(crate) fn embedded() -> EmbeddedUnit {
         "@std",
         STD_MODULES
             .iter()
-            .map(|(path, bytes)| {
-                let file = path.trim_start_matches("@std.");
-                SourceModule::new(*path, format!("stdlib/src/std/{file}.vib"), *bytes)
-            })
+            .map(|(path, bytes)| SourceModule::new(*path, *path, *bytes))
             .collect(),
         PRELUDE
             .iter()

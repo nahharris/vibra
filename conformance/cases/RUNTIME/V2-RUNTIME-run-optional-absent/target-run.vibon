@@ -1,0 +1,9 @@
+{
+  format: @targetRun.v2
+  result: @command.ok
+  applicationCode: 0u8
+  stdout: {kind: @bytes values: []}
+  stderr: {kind: @bytes values: []}
+  startup: [{binding: @vars status: @released} {binding: @metrics status: @refused}]
+  auditTrace: {format: @auditTrace.v2 revision: "sha256:0eef8dbde52a1034c5aaa14b40298b7b5303bb4c3100a0223a6f5d752fb609b2" target: @app drivers: [{provider: @hostWorld.v2 version: "0.0.2"}] policies: [:] redaction: @none events: [{kind: @startup binding: @vars provider: @host.env.vars status: @acquired grant: {issuedBy: {kind: @binding leaf: @vars} policy: "" rights: [{path: @std.env.EnvReadVar seed: "sha256:fb8b1322e37f4a9d465d8764db06da82be824cccbcf365be4f5ea933d0baaf78"}] root: 1u64}} {kind: @host invocation: 1u64 phase: @startup op: "env.readVar" driver: {provider: @hostWorld.v2 version: "0.0.2"} grant: {issuedBy: {kind: @binding leaf: @vars} policy: "" rights: [{path: @std.env.EnvReadVar seed: "sha256:fb8b1322e37f4a9d465d8764db06da82be824cccbcf365be4f5ea933d0baaf78"}] root: 1u64} args: ["METRICS"] result: {kind: @enum typeInfo: {kind: @declared path: @std.result.Result seed: "sha256:b138394632da413ed9cb78cdc2c9b874f324077f447ccd5f5c9e455a066af761" arguments: [{kind: @declared path: @std.str.Str seed: "sha256:29dc059689d38a6e1e8b843c7c518b7bfe2d16d9f596ef242d758b9b970b1d8a" arguments: []} {kind: @declared path: @std.env.EnvError seed: "sha256:084f02af7bed4bd7416097401e712b15c2a20f8b881e306a6ca34fb7ce5b233a" arguments: []}]} variant: @err payload: {error: {kind: @enum typeInfo: {kind: @declared path: @std.env.EnvError seed: "sha256:084f02af7bed4bd7416097401e712b15c2a20f8b881e306a6ca34fb7ce5b233a" arguments: []} variant: @notPresent}}}} {kind: @startup binding: @metrics provider: @host.fs.directory status: @refused}]}
+}

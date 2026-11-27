@@ -57,8 +57,8 @@ declaration checks).
    type `Void`; `return` or `try` directly in the body is
    `@type.invalidReturn` / `@type.invalidTry`; `takes` in M1 is
    `@tool.unavailable` over the test (M2); `performs` likewise.
-3. `assert.equal` operands: an operand whose type contains a callable,
-   plan, or grant type is `@type.functionNotEquatable` at the operand;
+3. `assert.equal` operands: `assert.equal` is bound by `T: Encodable`, so
+   an operand type that is not `Encodable` is `@type.unsatisfiedBound`;
    the first operand is typed from the second by the joint inference of
    step 18; comparison by canonical value encoding.
 4. Runner: discovery in ascending module identity by UTF-8 bytes then
@@ -109,7 +109,7 @@ declaration checks).
 | `V2-PROJECT-test-return-in-anon-fn` | positive | a test whose body defines an anonymous `fn` with `return` | accepted |
 | `V2-PROJECT-test-invalid-selection` | negative, workspaceTest | one test with a type error, one valid | both `@test.invalid`; none runs |
 | `V2-PROJECT-test-unavailable-item` | boundary, workspaceTest | one test using `takes {world: TestWorld}`, one plain | the first `@test.unavailable`, the second runs and passes |
-| `V2-PROJECT-test-function-not-equatable` | negative | `assert.equal(inc inc)` | `@type.functionNotEquatable` |
+| `V2-PROJECT-test-assert-equal-function` | negative | `assert.equal(inc inc)` | `@type.unsatisfiedBound` at the first operand |
 | `V2-PROJECT-test-unobservable` | negative, workspaceTest | `assert.equal(a b)` where both are `Any` holding closures | `@test.assertionFailed` with `failure.kind: @observation` and an `observationError`; the error is `@tool.unsupportedValue`; not a trap |
 | `V2-PROJECT-test-empty-suite` | positive, workspaceTest | a project with no `tests/` | result `@command.ok`, no items |
 | `V2-PROJECT-test-exhaustion-isolated` | boundary, workspaceTest | a test that exhausts memory and one that passes (the exhausting one runs first by order) | `expect.host_event` names the memory event for the first, with no dependence on the allocation at which it happens; the second still passes; the suite result follows precedence |
@@ -120,7 +120,7 @@ declaration checks).
 
 Codes: `@module.assertionOutsideTests`, `@module.testOutsideTests`,
 `@module.missingRequiredImport`, `@name.redeclaration`,
-`@type.invalidReturn`, `@type.invalidTry`, `@type.functionNotEquatable`,
+`@type.invalidReturn`, `@type.invalidTry`, `@type.unsatisfiedBound`,
 `@tool.unavailable`, `@tool.unsupportedValue`. Schema: `@testRun.v2`.
 
 ## Validation

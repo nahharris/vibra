@@ -1,0 +1,32 @@
+kind	run
+run	luna-order-noEndlet-2
+index	129
+cohort	luna
+position	29
+task	order
+arm	noEndlet
+attempt	2
+promptSha256	4a8a465ea1926d23b25d312905d830b85c9d60c2411c906f9f4538800e8a0e0e
+promptBytes	16024
+requestedModel	gpt-6-luna
+setting	reasoning effort low
+systemPrompt	You are a test participant. Output only what is asked.
+client	codex
+clientVersion	codex-cli 0.168.0
+freezeCommit	156f35cf2a7f10c8d9df37be43053ba74e941605
+vibraSha256	da9854d8fab200db7a96173fb77844a80a10e21fac0665fb7d68afbef107dcea
+startUtc	2026-11-26T12:18:04.336Z
+endUtc	2026-11-26T12:18:10.763Z
+calls	1
+outcome	completion
+reportedModel	notReported
+usage	{"input_tokens":5113,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":187,"reasoning_output_tokens":0}
+outputCap	none (the client offers no output cap)
+overCap	false
+completionSha256	b74900e76b032809b53119d5b6fbc63618be0c637805b140e1172bcf594b9251
+completionBytes	641
+solutionSha256	b74900e76b032809b53119d5b6fbc63618be0c637805b140e1172bcf594b9251
+solutionBytes	641
+command	["codex","--no-daemon","exec","--ignore-user-config","--ignore-rules","--ephemeral","--skip-git-repo-check","--json","--model","gpt-6-luna","-C","<empty temporary directory>","-c","model_catalog_json=\"<records>/setup/luna-catalog.json\"","-c","model=\"gpt-6-luna\"","-c","model_reasoning_effort=\"low\"","-c","developer_instructions=\"\"","-c","project_doc_max_bytes=0","-c","skills.include_instructions=false","-c","skills.bundled.enabled=false","-c","include_environment_context=false","-c","include_permissions_instructions=false","-c","include_collaboration_mode_instructions=false","-c","include_apps_instructions=false","-c","web_search=\"disabled\"","-c","tools.experimental_request_user_input.enabled=false","-c","suppress_unstable_features_warning=true","-c","features.memories=false","-c","features.plugins=false","-c","features.apps=false","-c","features.shell_tool=false","-c","features.unified_exec=false","-c","features.multi_agent=false","-c","features.multi_agent_v2=false","-c","features.sleep_tool=false","-c","features.goals=false","-c","features.view_image=false","-c","features.tool_suggest=false","-c","features.skill_search=false","-c","features.hooks=false","-c","features.workspace_dependencies=false","-c","features.code_mode_host=false","-c","features.skip_host_skill_discovery=true","-"]
+removedEnvironment	CLAUDE_CODE_CHILD_SESSION,CLAUDE_CODE_ENTRYPOINT,CLAUDE_CODE_MESSAGING_SOCKET,CLAUDE_CODE_MESSAGING_TOKEN,CLAUDE_CODE_SESSION_ATTENDED,CLAUDE_CODE_SESSION_ID,CLAUDE_PID,CLAUDECODE
+grade	order | noEndlet | passed | closed=0 | check=@command.ok | test=@command.ok | codes=- | failed=-

@@ -1,0 +1,8 @@
+proc clamp
+  takes {n: I32}
+  returns r: I32
+  ensures Ordered.greaterOrEqual(r 0i32) else 0i32
+  visibility @public
+  do
+    return n
+endproc

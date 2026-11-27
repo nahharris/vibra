@@ -86,7 +86,7 @@ impl OwnerRow {
 }
 
 /// The cells of a Markdown table row, split at the bars outside code spans.
-fn cells(line: &str) -> Option<Vec<String>> {
+pub(super) fn cells(line: &str) -> Option<Vec<String>> {
     let line = line.trim();
     if !line.starts_with('|') {
         return None;
@@ -110,14 +110,14 @@ fn cells(line: &str) -> Option<Vec<String>> {
     Some(cells)
 }
 
-fn is_separator(cells: &[String]) -> bool {
+pub(super) fn is_separator(cells: &[String]) -> bool {
     cells
         .iter()
         .all(|cell| !cell.is_empty() && cell.chars().all(|c| c == '-' || c == ':'))
 }
 
 /// The code spans of `text`, in order.
-fn code_spans(text: &str) -> Vec<&str> {
+pub(super) fn code_spans(text: &str) -> Vec<&str> {
     text.split('`')
         .enumerate()
         .filter(|(index, _)| index % 2 == 1)
@@ -126,7 +126,7 @@ fn code_spans(text: &str) -> Vec<&str> {
 }
 
 /// The registry codes written in `text`, in order, each once.
-fn codes_in(text: &str, registry: &BTreeSet<String>) -> Vec<String> {
+pub(super) fn codes_in(text: &str, registry: &BTreeSet<String>) -> Vec<String> {
     let mut found = Vec::new();
     let bytes = text.as_bytes();
     let mut index = 0;
@@ -149,14 +149,14 @@ fn codes_in(text: &str, registry: &BTreeSet<String>) -> Vec<String> {
     found
 }
 
-fn read(relative: &str) -> String {
+pub(super) fn read(relative: &str) -> String {
     std::fs::read_to_string(workspace_root().join(relative))
         .unwrap_or_else(|error| panic!("`{relative}` reads: {error}"))
         .replace("\r\n", "\n")
 }
 
 /// The codes of the registry table of chapter 07.
-fn registry(chapter: &str) -> BTreeSet<String> {
+pub(super) fn registry(chapter: &str) -> BTreeSet<String> {
     let mut codes = BTreeSet::new();
     for line in chapter.lines() {
         if line.starts_with("## ") && !codes.is_empty() {
@@ -451,7 +451,7 @@ fn matches<'a>(pattern: &str, cases: &'a BTreeMap<String, CaseFacts>) -> Vec<&'a
 }
 
 /// `true` when the pattern names `id`, as [`matches`] reads it.
-fn matches_id(pattern: &str, id: &str) -> bool {
+pub(super) fn matches_id(pattern: &str, id: &str) -> bool {
     match pattern.strip_suffix('*') {
         Some(prefix) => id.starts_with(prefix),
         None => {
@@ -498,7 +498,7 @@ fn names_rule(text: &str, rule: &str) -> bool {
 
 /// `true` for a host test's name as an owner row writes it:
 /// `module::function`, in snake case.
-fn is_test_path(span: &str) -> bool {
+pub(super) fn is_test_path(span: &str) -> bool {
     span.split_once("::").is_some_and(|(module, function)| {
         [module, function].iter().all(|part| {
             !part.is_empty()
@@ -511,7 +511,7 @@ fn is_test_path(span: &str) -> bool {
 
 /// Every `module::function` of the workspace's crates: a `fn` written in a
 /// file `module.rs`, or in a `mod module` block, under `crates/`.
-fn host_test_names() -> BTreeSet<String> {
+pub(super) fn host_test_names() -> BTreeSet<String> {
     let mut names = BTreeSet::new();
     let mut pending = vec![workspace_root().join("crates")];
     while let Some(directory) = pending.pop() {
@@ -578,7 +578,7 @@ fn audit() -> Findings {
     let chapter_07 = read("docs/spec/07-diagnostics-and-conformance.md");
     let chapter_01 = read("docs/spec/01-source-language.md");
     let owners_document = read("docs/roadmap/v0.0.2/m0/owners.md");
-    let rules = RuleIndex::from_path(workspace_root().join("conformance/rules.tsv"))
+    let rules = RuleIndex::from_root(workspace_root().join("conformance"))
         .expect("the rule index loads");
     let registry = registry(&chapter_07);
     let (rows, owners) = owner_rows(&owners_document, &registry);

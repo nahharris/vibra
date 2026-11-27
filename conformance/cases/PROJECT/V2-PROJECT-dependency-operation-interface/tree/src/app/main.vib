@@ -1,0 +1,5 @@
+use @money.log.Log enduse
+
+proc note(L) takes {sink: L} returns done: Void given {L: Log} performs {Log} do
+  return await Log.append(sink "x")
+endproc

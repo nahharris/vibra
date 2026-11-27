@@ -1,0 +1,18 @@
+id = "V2-PROJECT-test-takes-other-type"
+rule = "V2-PROJECT-test-takes-other-type"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "01-lexical-and-syntax.md#declarations: the one parameter of a test is a TestWorld"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@syntax.invalidForm"
+level = "@error"
+source = "tests/run.vib"
+span = { start = 37, end = 55 }

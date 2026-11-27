@@ -134,11 +134,13 @@ const READINGS: &[Row] = &[
     row(TYPES, 1, Reading::StandardLibrary),
     // `Equatable` and `Ordered`, which claim their roles.
     row(TYPES, 3, Reading::StandardLibrary),
+    // `Encodable`, which claims its role.
+    row(TYPES, 6, Reading::StandardLibrary),
     // `Iter`, which claims its role.
-    row(TYPES, 7, Reading::StandardLibrary),
+    row(TYPES, 8, Reading::StandardLibrary),
     // The `try` examples: the `let` with a type is a module value; the `let`
     // without a type, whose `if` fixes the expected type, is a body statement.
-    row(TYPES, 9, Reading::Rejected(&[FORM])),
+    row(TYPES, 10, Reading::Rejected(&[FORM])),
     // Two body statements: `let` with a pattern and `let` without a type.
     row(EFFECTS, 6, Reading::Rejected(&[FORM, FORM])),
     // Two body statements: `let` without a type, twice.

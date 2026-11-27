@@ -2,6 +2,6 @@
   format: @testRun.v2
   result: @command.testFailed
   tests: [
-    {name: "@tests.observe::\"closures\"" result: @test.assertionFailed failure: {kind: @observation assertion: "assert.equal" primarySpan: {sourceId: "tests/observe.vib" start: 265u64 end: 282u64} observationError: {code: @tool.unsupportedValue typeInfo: @any}} auditTrace: {format: @auditTrace.v2 revision: "sha256:c4d14815307a93f907689e6a619f16cf438182816455969f2b66461e4e16e77e" drivers: [{provider: @hostWorld.v2 version: "0.0.2"}] policies: [:] redaction: @none events: []}}
+    {name: "@tests.observe::\"closures\"" result: @test.assertionFailed failure: {kind: @observation assertion: "assert.equal" primarySpan: {sourceId: "tests/observe.vib" start: 265u64 end: 282u64} observationError: {code: @tool.unsupportedValue typeInfo: @any}} auditTrace: {format: @auditTrace.v2 revision: "sha256:94cbf1a0cff161a8516cf1d65f5c0e9678b7363ca5da95440370651000eeefd0" drivers: [{provider: @hostWorld.v2 version: "0.0.2"}] policies: [:] redaction: @none events: []}}
   ]
 }

@@ -1,0 +1,33 @@
+id = "V2-GRANT-binding-bundle-by-parameter"
+rule = "V2-GRANT-binding-bundle-by-parameter"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "04-programs-and-packages.md#targets: the keys MUST be exactly the entry's leaves: a record parameter is not one"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@grant.invalidBinding"
+level = "@error"
+source = "project.vibon"
+span = { start = 154, end = 406 }
+related = [{ source = "src/app/main.vib", span = { start = 116, end = 120 } }]
+
+[[expect.diagnostics]]
+code = "@grant.invalidBinding"
+level = "@error"
+source = "project.vibon"
+span = { start = 154, end = 406 }
+related = [{ source = "src/app/main.vib", span = { start = 116, end = 120 } }]
+
+[[expect.diagnostics]]
+code = "@grant.invalidBinding"
+level = "@error"
+source = "project.vibon"
+span = { start = 154, end = 406 }
+related = [{ source = "src/app/main.vib", span = { start = 116, end = 120 } }]

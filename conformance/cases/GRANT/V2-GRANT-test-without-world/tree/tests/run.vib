@@ -1,0 +1,5 @@
+use @std.assert enduse
+
+use @std.test.TestWorld enduse
+
+test "no world" do let _ be TestWorld.clocks(world) endlet endtest

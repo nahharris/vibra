@@ -52,7 +52,6 @@ its level MUST agree with it.
 | `@type.redundantImplementation` | `@error` |
 | `@type.defaultOverride` | `@error` |
 | `@type.missingAbstractMember` | `@error` |
-| `@type.functionNotEquatable` | `@error` |
 | `@type.notApplicable` | `@error` |
 | `@type.unknownRecordField` | `@error` |
 | `@type.numericOutOfRange` | `@error` |
@@ -99,9 +98,7 @@ its level MUST agree with it.
 | `@project.staleLock` | `@error` |
 | `@project.dependencyCycle` | `@error` |
 | `@project.entryOutsideTarget` | `@error` |
-| `@project.entryOnLibrary` | `@error` |
 | `@project.invalidEntrySignature` | `@error` |
-| `@project.ambiguousDependencyTarget` | `@error` |
 | `@project.reservedUnitName` | `@error` |
 | `@project.duplicateName` | `@error` |
 | `@project.overlappingTargetRoots` | `@error` |
@@ -134,6 +131,7 @@ its level MUST agree with it.
 | `@tool.missingLinkTool` | `@error` |
 | `@tool.linkFailed` | `@error` |
 | `@tool.incompatibleArtifact` | `@error` |
+| `@test.conflictingFixture` | `@error` |
 
 The compiler owns this closed registry. Each entry has a level, a domain
 (the code's first component), a summary, and a **fix capability**, which is
@@ -148,9 +146,11 @@ every code any chapter cites is in the registry.
 - No source declaration and no data file creates a code.
 - A retired code is never reused for another meaning. Changing a level is a
   versioned change of the registry.
-- `@command.*` results, `@test.*` results, document format atoms, and the
-  cases of ordinary error types are not diagnostics and are not in the
-  registry.
+- `@command.*` results, the six test results of the
+  [test command](05-tooling.md#tests-and-selection) (`@test.passed` and the
+  others), document format atoms, and the cases of ordinary error types are
+  not diagnostics and are not in the registry. `@test.conflictingFixture`
+  is a diagnostic code.
 
 ### Diagnostic documents and spans
 
@@ -210,7 +210,9 @@ command-line context.
 | a target or test root that is missing, not a directory, absolute, or escapes | `@project.invalidTargetRoot`, the target's `root` value; for the test root, offset 0 of the source `tests` |
 | target roots that overlap each other or `tests` | `@project.overlappingTargetRoots`, the later target's `root` value, or the `root` value of the target that overlaps `tests`; no related span |
 | a target or dependency named `tests` or `std` | `@project.reservedUnitName`, the target's `name` value or the dependency's key |
-| two targets with one name, or a target and a dependency with one name | `@project.duplicateName`, the later name, a target's `name` value or a dependency's key, related to the earlier one |
+| two different units with one name anywhere in the snapshot, including a transitive dependency named like a root target | `@project.duplicateName`, the later name in discovery order, a target's `name` value or a dependency's key, related to the earlier one |
+| a dependency key that names no target of its package, or a binary target | `@name.unknownSymbol` or `@name.wrongEntityKind`, the key |
+| a path dependency whose directory holds no `project.vibon` | `@project.notFound`, its `path` value |
 | other project input or output failure | `@project.ioError` |
 | module enumeration or read failure, unreadable or dangling entry | `@module.ioError`, at offset 0 of the entry's project-relative path |
 | an invalid source path segment | `@module.invalidSegment`, at offset 0 of that source |
@@ -218,14 +220,12 @@ command-line context.
 | a link that leaves the source root | `@module.pathEscape`, at offset 0 of the entry's project-relative path |
 | one source identity for two modules, including dependency inputs | `@module.sourceIdCollision`, at offset 0 of the project module |
 | an import cycle | `@module.importCycle`: primary span on the later edge, related spans along the cycle |
-| a dependency cycle | `@project.dependencyCycle`, the later dependency entry in the project file, related along the cycle |
+| a dependency cycle | `@project.dependencyCycle`, the entry that closes it in discovery order, related along the cycle; an entry that names its own package has no related span |
 | a `.vib` file beside a directory of the same name | `@module.fileDirectoryCollision`, at offset 0 of that source |
 | a path whose unit is not visible to the importing module, or that reaches no module | `@module.unknownPath`, the reference |
 | a lock whose `project` digest or dependency set differs from the project; a missing vendor directory or vendored content whose content hash differs from the lock | `@project.staleLock`, the lock's `format` field or the lock entry |
 | a target `entry` whose first part is not the target's name | `@project.entryOutsideTarget`, the `entry` field |
-| an `entry` on a library target | `@project.entryOnLibrary`, the `entry` field |
 | an `entry` that is not a module-level `proc` with an entry signature, or that has a bare `requires` | `@project.invalidEntrySignature`, the `entry` field, related to the declaration |
-| a dependency without `target` on a package with several library targets | `@project.ambiguousDependencyTarget`, the dependency entry |
 | access to a private declaration, a static member reached through its type included | `@name.privateAccess`, the reference, or the member's name in the path, related to the declaration |
 | use of a hidden constructor, pattern, or field read | `@name.inaccessibleRepresentation`, the use, related to the type |
 | a name that resolves to nothing: a path part, a `given` key, an `impl` member or choice that is no member of the interface, an entity reference slot | `@name.unknownSymbol`, the name |
@@ -281,10 +281,9 @@ Resolution reads only the captured source graph.
 | a type nested more than 64 levels, a declared callable's own type included | `@type.depthExceeded`, the written type, the expression whose type it is, or a callable's deepest written parameter or result type |
 | a generic callable that reaches itself at a type built around one of its own type parameters | `@type.expandingInstantiation`, the call or callable reference with the expanding type argument, related along the cycle |
 | an inadmissible dict key type | `@type.invalidDictKey`, the key type, or the first key when none is written |
-| a callable as a dict key, or an `assert.equal` operand whose type contains a callable, plan, or grant | `@type.functionNotEquatable`, the type, or each such operand |
 | `try` on a wrong carrier, in a callable with another carrier, or directly in a test | `@type.invalidTry`, the `try` |
 | a fallible value left unused as a statement | `@type.unhandledFallible`, the statement |
-| an `impl` inside an interface that targets a type of the same module | `@type.redundantImplementation`, the `impl` head |
+| an `impl` inside an interface that targets a type of the same module; an `impl` whose target is `Any` or `Encodable` | `@type.redundantImplementation`, the `impl` head, or the target |
 | a default member supplied again by an implementation | `@type.defaultOverride`, the member's name, related to the default |
 | an abstract member or an associated type an implementation does not supply | `@type.missingAbstractMember`, the `impl` head, related to the contract member |
 | two implementations of one receiver whose targets unify | `@type.overlappingImplementation`, the later `impl` head, related to the earlier |
@@ -294,7 +293,8 @@ Resolution reads only the captured source graph.
 | a destination-dispatched call with no expected type | `@type.ambiguousDestination`, the application |
 | `From` and `TryFrom` sources of one receiver that unify | `@type.redundantConversion`, the later `impl` head, related to the earlier |
 | a receiver or destination with no implementation for the selected key; a call on a type parameter of a member its bound does not give; a label-bound parameter that fails its own bound | `@type.unsatisfiedBound`, the operand or the expected type, related to the interface or bound |
-| a declared type or case named in value position without being applied, whatever is expected there; an implementation member whose signature differs from the contract; a widening whose label differs from the implementation's choice; a label-bound parameter fixed to two types; a deferred associated equality or a complete result that disagrees after selection; a destination-dispatched call whose expected type has no position for `Self` or gives `Self` two types, at the application | `@type.mismatch`, the differing type or expression |
+| an implementation member whose signature, kind, or row differs from its contract member | `@type.mismatch`, where [Implementations](02-type-system.md#implementations) places it, related to the contract member's name, or to the contract's bound for a differing bound the contract writes |
+| a declared type or case named in value position without being applied, whatever is expected there; a widening whose label differs from the implementation's choice; a label-bound parameter fixed to two types; a deferred associated equality or a complete result that disagrees after selection; a destination-dispatched call whose expected type has no position for `Self` or gives `Self` two types, at the application | `@type.mismatch`, the differing type or expression |
 
 ### Binding, return and pattern diagnostics
 
@@ -307,8 +307,8 @@ Every row is an error with no automatic fix.
 | a repeated section; a section the declaration does not admit | `@syntax.duplicateSection`, the keyword of the later section; `@syntax.invalidSection`, the section |
 | a `let` or parameter pattern that can fail, with no `else` | `@pattern.refutableBinding`, the pattern |
 | a `let … else` whose pattern cannot fail | `@pattern.irrefutableLetElse`, the pattern |
-| an `else` of a `let` that can complete normally | `@type.mismatch`, the `else` body |
-| an expression statement whose type is neither `Void` nor `Never` and is not fallible, such as a plan whose `await` was forgotten | `@type.mismatch`, the statement |
+| an `else` of a `let` that can complete normally | `@type.mismatch`, the `else` body; an `else` that is one expression statement already reported by the next row at the same span is not reported again |
+| an expression statement whose type is neither `Void` nor `Never` and is not fallible, such as a plan whose `await` was forgotten, its value unused as [Bodies and statements](01-source-language.md#bodies-and-statements) defines | `@type.mismatch`, the statement |
 | a callable body that can run off its end | `@type.missingReturn`, the body; an empty body is the zero-width span right after `do` |
 | a `return` operand of the wrong type | `@type.mismatch`, the operand |
 | a `return` outside a callable, in a module value, or directly in a test | `@type.invalidReturn`, the `return` |
@@ -344,29 +344,50 @@ Every row is an error with no automatic fix.
 | a conversion to a plain callable type that would hide a bare `requires` | `@contract.obligationLost`, the conversion, related to the guard |
 | a type invariant that is not a predicate over the representation | `@type.invalidInvariant`, the `where` |
 | a row, or a target's `effects` list, names one interface twice, under any spelling | `@effect.duplicateRoot`, the second entry, related to the first |
+| the owner of an interface member written in the member's own `performs` | `@effect.duplicateRoot`, that entry, related to the interface's name, since the owner's own entry is never written |
 | a row entry or an `effects` entry that is not an operation interface, one that resolves to nothing included | `@effect.invalidReference`, the entry |
 | a body performs an interface outside its ceiling | `@effect.outsideCeiling`, the first `await` that contributes it |
 | `await` outside a `proc` or test, or of a value that is not a plan; an `await` that is both is reported once, and its operand never as `@type.mismatch` | `@effect.invalidAwait`, the `await` |
-| a ceiling written on a body (a `proc`, an anonymous `proc`, a `test`, or the additive `performs` of a default member) names an interface the body cannot perform | `@contract.unusedEffect` (warning), the entry |
+| a ceiling written on a body (a `proc`, an anonymous `proc`, a `test`, or the additive `performs` of a default member) names an interface the body cannot perform, except where [Effect ceilings](03-effects.md#effect-ceilings) withholds the warning | `@contract.unusedEffect` (warning), the entry |
 | the result operand of a written `Proc` or `Intent` type whose row is omitted is a tuple of at least one component, each an operation interface | `@type.suspiciousRow` (warning), the type |
 | an `external` section outside the embedded library | `@syntax.invalidSection`, the section |
 | an external symbol not in the registry | `@external.unknownSymbol`, the symbol |
 | an external member on the wrong interface | `@external.ownerMismatch`, the symbol, related to the owner |
 | an external member whose signature or row differs from the registry | `@external.signatureMismatch`, the declaration, with the expected signature |
-| an entry row or startup step row outside the target's `effects` | `@effect.outsideCeiling`, the target's `effects` field in the project file, related to the entry's `performs` entry or to the recipe |
+| an entry row or startup step row outside the target's `effects` | `@effect.outsideCeiling`, the target's `effects` field in the project file, once per interface of the entry's row, related to its `performs` entry, and once per startup step, related to the recipe, as [Targets](04-programs-and-packages.md#targets) states |
 | an `effects` entry that neither the entry nor a startup step performs | `@contract.unusedEffect` (warning), that entry of the list |
-| a missing, extra, ill-typed, or unapproved grant binding; an unknown, repeated, or missing `after` name; a `source` leaf of the wrong kind | `@grant.invalidBinding`, the binding, its field, or the `grants` record |
-| a cycle in `after` | `@grant.bindingCycle`, the later edge, related along the cycle |
+| a missing, extra, ill-typed, or unapproved grant binding; an unknown, repeated, or missing `after` name; a `source` leaf of the wrong kind | `@grant.invalidBinding`, the binding, its field, or the `grants` record; a missing or extra key is related to the parameter its first part names, if any |
+| a cycle in `after` | `@grant.bindingCycle`, each entry of `after` that closes a cycle, as [Targets](04-programs-and-packages.md#targets) finds it, related along the shortest chain that Targets defines |
 | a required grant refused at startup, in a case its issuer lists as a refusal | `@grant.requiredUnavailable`, the leaf's binding recipe in the project file; a startup result, not a check result |
 | an acquisition that fails at startup, in a case its issuer lists as a failure, for a required or an optional grant | `@grant.acquisitionFailed`, the leaf's binding recipe in the project file; a startup result, not a check result |
 | an invalid policy, or a policy naming another root | `@grant.invalidPolicy`, the policy value |
 | a policy over the size or depth limit | `@grant.policyTooComplex`, the policy |
 
 An `@effect.outsideCeiling` is reported once per body and interface. Its
-related spans are the shortest remaining chain of calls, ties in source
-order, each with the note `performs <root> via <callee>`; a hop through a
-callback or interface member is marked indirect. The query expansion
-`effectWitnesses` returns the same chain.
+related spans are its **witness chain**: the shortest chain of calls from
+the reporting `await` to an operation member of the interface, ties in
+source order. Each hop is one related span with the note
+`performs <root> via <callee>`. The first hop is the operand of the
+reporting `await`; each later hop is an awaited operand in the body of the
+callee before it.
+
+- A hop whose callee is not statically known is marked indirect: its note
+  ends with ` (indirect)`. Such a callee is a callback (a procedure value
+  bound to a name, which the note names), a stored plan or any other plan
+  value, or an interface member applied at an open or `Self` receiver or
+  through an interface value. A member applied at a closed receiver is
+  statically resolved and is not marked.
+- An operand that has an error of its own is one indirect hop at the
+  operand.
+- A chain that reaches no operation member of the interface ends at the
+  first hop it cannot follow: a plan value or a callback, which the chain
+  never traces back to where the plan was built, a member of another
+  interface, or a `proc` whose body performs the interface nowhere.
+- A chain that meets only cycles keeps its hops up to and including the
+  first repeated one.
+- The chain is never empty.
+
+The query expansion `effectWitnesses` returns the same chain.
 
 A grant that denies a request at run time returns the operation's typed
 error. That is never a diagnostic and never a trap. A check-time failure of
@@ -410,15 +431,16 @@ change to this table, with a positive case and a nearest negative case.
 | an invalid, stale, foreign, or wrong-kind boundary value; an unsealed access; a malformed trusted result | `@runtime.invalidHostValue`, the source origin when known, otherwise none |
 | memory exhaustion | `@runtime.memoryExhausted`, no location; a host event, not a trap |
 | a name that departs from the casing convention | `@style.casing` (warning), the name |
-| a valid command or construct outside the tool's profile; a driver the platform does not support, at admission | `@tool.unavailable`, the whole form, or the command-line context |
+| a valid command or construct outside the tool's profile; a driver the platform does not support, at admission | `@tool.unavailable`, the whole form, the command-line context, or, for a driver, the target's `name` value |
 | a plan whose workspace or document revision no longer matches | `@tool.stalePlan`, no location |
 | an MCP or tool action the server's permissions deny | `@tool.actionDenied`, no location |
-| a tool limit reached, with an unknown, incomplete status | `@tool.limitExceeded`; the predicate when the limit stopped an obligation, whose status is then `unknown` and which gets no `@contract.unproved`; otherwise no location |
+| a tool limit reached, with an unknown, incomplete status | `@tool.limitExceeded`; the predicate when the limit stopped an obligation, whose status is then `unknown` and which gets no `@contract.unproved`; for [source nesting](05-tooling.md#program-arguments-execution-and-evaluation), the first token in source order nested more than the limit, the document's only diagnostic; otherwise no location |
 | a value that cannot be shown: a function, a plan, or a grant, including one an interface value holds | `@tool.unsupportedValue`, the observed expression when one exists |
 | a build for a platform the toolchain does not emit | `@tool.unsupportedTarget`, no location |
 | a missing platform linker | `@tool.missingLinkTool`, no location |
 | a failed link step | `@tool.linkFailed`, no location |
 | an artifact whose ABI, registry, or identities the runtime cannot admit | `@tool.incompatibleArtifact`, no location |
+| a [conflicting fixture](04-programs-and-packages.md#test-worlds-and-grants) of `TestWorld.directory`: a `files` key that is empty or a proper prefix of another key | `@test.conflictingFixture`, the `await` of the call; the test is `@test.invalid` |
 
 - Both traps mean the toolchain or runtime is wrong, not the program's
   input. A trap has a source origin only when the runtime can identify the
@@ -637,15 +659,16 @@ Every graph has the `@tests` unit, even when empty.
 | --- | --- | --- |
 | `format` | `@sourceGraph.v1` | required |
 | `units` | list of unit records sorted by `name` | every unit of the snapshot |
-| `dependencies` | list of dependency records sorted by `alias` | every declared dependency |
+| `dependencies` | list of dependency records sorted by `name` | every dependency the root project file declares |
 
 A unit record has `name` (atom), `kind` (`@bin`, `@lib`, `@tests`, or
 `@dependency`), and `modules` (list of `{path: Atom sourceId: Str
 bytesHex: Str}` sorted by `path`, where `bytesHex` is the module's exact
-bytes in lower-case hexadecimal). A dependency record has `alias` (`Str`),
-`kind` (`@path` or `@git`), `source` (`Str`, the path or URL), `target`
-(optional atom), `status` (`@captured`, `@verified`, `@unavailable`, or
-`@refuted`), and `span` (the span record of its project entry).
+bytes in lower-case hexadecimal). A dependency record has `name` (`Str`,
+the dependency's key, which is the name of the library it binds), `kind`
+(`@path` or `@git`), `source` (`Str`, the path or URL), `status`
+(`@captured`, `@verified`, `@unavailable`, or `@refuted`), and `span` (the
+span record of its project entry).
 
 ```vibon
 {
@@ -723,16 +746,19 @@ of its path.
 | --- | --- | --- |
 | `format` | `@types.v2` | required |
 | `moduleValues` | list of `{declaration: Str typeInfo: T}` sorted by `declaration` | the type of every module value |
-| `callables` | list of `{declaration: Str signature: G}` sorted by `declaration` | for every `fn`, `proc`, and member, `G` is its [signature record](06-runtime.md#open-signatures): its binders with their bounds, its receiver slot, and its complete callable type with its row, open where the declaration is |
+| `callables` | list of `{declaration: Str signature: G}` sorted by `declaration` | for every `fn`, `proc`, and member, abstract members included, `G` is its [signature record](06-runtime.md#open-signatures): its binders with their bounds, its receiver slot, and its complete callable type with its row, open where the declaration is |
 | `implementations` | list of [implementation records](06-runtime.md#open-signatures) sorted by the canonical bytes of `contract`, then of `receiver` | every implementation, with its positional key and its choices |
 | `obligations` | list of obligation records sorted by `declaration`, then `span` | every bare guard obligation |
 
 There is one obligation for each site where a bare guard must be
 discharged: each call of a callable with a bare `requires`, each
 construction of a type with a bare `where`, and the bare `ensures` of each
-callable, one for its predicate. An obligation record has the fields of this
-table. The [`check` payload](05-tooling.md#command-payloads) carries the same
-record as JSON, field for field, under the JSON name.
+callable, one for its predicate. Only a bare guard has one: a guard with
+`else`, a `where … else` construction included, writes no obligation
+record, even where `GUARD-1` evaluates its predicate. An obligation record
+has the fields of this table. The
+[`check` payload](05-tooling.md#command-payloads) carries the same record
+as JSON, field for field, under the JSON name.
 
 | Field | JSON name | Type | Content |
 | --- | --- | --- | --- |
@@ -807,9 +833,10 @@ A test record has `name` (`Str`, the selector); `result` (a `@test.*` atom);
 `primarySpan`: span record, `observationError` optional record
 `code: Atom`, the observation error `@tool.unsupportedValue`, and
 `typeInfo: T` optional, the static type of the operand that could not be
-shown); `trap` (optional record
-`trapCode: Atom`, `origin: U64` optional); and `auditTrace` (the test's
-[`@auditTrace.v2`](06-runtime.md#audit-trace) document).
+shown); `trap` (optional record `trapCode: Atom`, `origin` optional, the
+[source origin](06-runtime.md#audit-trace) of the trapping operation); and
+`auditTrace` (the test's [`@auditTrace.v2`](06-runtime.md#audit-trace)
+document).
 
 ```vibon
 {
@@ -840,9 +867,9 @@ shown); `trap` (optional record
   that exhausts its memory is `@test.exhausted`, and the run's observation keeps
   every other record. A case MUST NOT depend on the exact allocation at which
   memory runs out. A tool limit is expected as unknown, with the limit profile.
-- An execution that traps records the code and origin and no value. Its
-  completed events are kept. The absence of an event is never evidence that
-  nothing external happened.
+- An execution that traps records the code and the source origin, when one
+  is known, and no value. Its completed events are kept. The absence of an
+  event is never evidence that nothing external happened.
 
 **`@targetRun.v2`** holds one run of a binary target, the observation of a
 `workspaceRun` case. A case expects one with the key `expect.targetRun`, as
@@ -856,7 +883,7 @@ it expects a `@testRun.v2` document with `expect.testRun`.
 | `stdout` | [bytes record](06-runtime.md#values) | every byte the program wrote to standard output |
 | `stderr` | bytes record | every byte the program wrote to standard error |
 | `startup` | list of startup records in processing order | one per processed leaf |
-| `trap` | optional record `trapCode: Atom`, `origin: U64` optional | the defect trap that ended the run |
+| `trap` | optional record `trapCode: Atom`, `origin` optional, the [source origin](06-runtime.md#audit-trace) of the trapping operation | the defect trap that ended the run |
 | `auditTrace` | an [`@auditTrace.v2`](06-runtime.md#audit-trace) document | the run's whole trace, its startup events first |
 
 A startup record has `binding` (the leaf's atom); `status` (`@released` for
@@ -967,7 +994,8 @@ These are minimum obligations. None of these tests exists yet.
    `trim`; eager `Bool` operations against `if`. `Result` is not iterable.
 9. **Contracts.** Each discharge rule and each integer fact, with a passing
    and a nearest failing case; bare `requires`, `ensures`, and `where`;
-   unproved and refuted; the certified fragment; every return, including
+   unproved and refuted; the certified fragment, with a call of a total
+   compiler primitive evaluated on constant operands; every return, including
    through `try`; a rejected `requires … else` skips the body and `ensures`;
    an `ensures … else` consequence differs from the candidate, is evaluated
    once, and is not checked again; a constant `where … else` error, with the
@@ -983,8 +1011,9 @@ These are minimum obligations. None of these tests exists yet.
     narrowing against interface views; limits never reset.
 11. **Policies and drivers.** Whole rules stay correlated; restriction keeps
     the parent; normalization and size limits; a read-only directory chosen
-    at run time with a `.txt` rule; the real name of an entry; prefix by
-    names, not by string; reparse points, links, mounts, renames, and a
+    at run time with a `.txt` rule; the real name of an entry; a rejected
+    `RelativePath` is `ScopeError.invalidPath()`; prefix by names, not by
+    string; reparse points, links, mounts, renames, and a
     replaced root; no cached intermediate handle; hard-link and
     opened-object limits shown at approval; shared counters under siblings.
     The reserved HTTP rules: correlation, prefixes, queries, rebinding, and
@@ -1018,7 +1047,7 @@ These are minimum obligations. None of these tests exists yet.
     pending `ensures … else`, widening, or cleanup prevents a tail transfer.
     A built executable on Windows exits with the four fixed statuses for its
     own endings and passes application codes through; invocation ordinals
-    and origin ordinals agree across executors; an interface value round
+    and source origins agree across executors; an interface value round
     trips through `@value.v2` with its held type, and one holding a callable
     gives the observation error.
 14. **Tooling and approvals.** One engine and one revision across CLI and
@@ -1054,6 +1083,8 @@ rejects it. A profile that
 includes another covers that profile's operations as well. The
 [`help` inventory](05-tooling.md#command-payloads) is derived from this
 table: a command's `profiles` are the profiles of the operations it offers.
+`help` offers no case operation; its own operation `help` belongs to
+`toolingV2`, whose CLI contract covers it.
 
 `nativeV1` does not include `interpreterV2`; a differential gate needs
 both. The interpreter serves `run`, `test`, `eval`, and compile-time

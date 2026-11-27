@@ -18,18 +18,29 @@
 //! [`check_snapshot`] checks the targets it covers, and [`plan_format`]
 //! formats one confined document, checking a captured module's candidate
 //! text in place of its bytes. [`run_tests`] discovers, checks, and runs the
-//! tests of a snapshot, and [`TestRun::document`] is its `@testRun.v2`
-//! observation.
+//! tests of a snapshot, each in a fresh copy of the default host world or,
+//! with [`run_tests_in`], of a [`HostWorld`] that [`decode_world`] reads,
+//! and [`TestRun::document`] is its `@testRun.v2` observation, with the
+//! [`AuditTrace`] of each test. [`library_source`] gives the text of an
+//! embedded library module by its source identity, for a span that lies in one.
 //!
 //! # Position in the architecture
 //!
-//! This crate depends on `vibra-diagnostics`, `vibra-fmt`, `vibra-interp`,
-//! `vibra-ir`, `vibra-resolve`, `vibra-syntax`, and `vibra-types`. It is
-//! the tooling crate that reads a project's files; no language crate depends
-//! on it.
+//! This crate depends on `vibra-diagnostics`, `vibra-fmt`, `vibra-host`,
+//! `vibra-interp`, `vibra-ir`, `vibra-resolve`, `vibra-syntax`, and
+//! `vibra-types`. It is the tooling crate that reads a project's files, and
+//! the only crate that holds an interpreter and the host broker at once; no
+//! language crate depends on it.
+
+pub mod binding;
+pub mod dependencies;
+pub mod entry;
+pub mod run;
 
 mod discovery;
 mod format_plan;
+mod library;
+mod nesting;
 mod project;
 mod resolve;
 mod revision;
@@ -42,22 +53,33 @@ pub use discovery::{DiscoveredProject, discover_project, discover_project_at};
 pub use format_plan::{
     Discovery, FormatPlan, InvalidPath, WorkspaceCapture, format_mode, plan_format,
 };
+pub use library::library_source;
+pub use nesting::{COMMAND_STACK, SOURCE_NESTING, nesting_fault, source_nesting_limit};
 pub use project::{
     Availability, Dependency, DependencyKind, PROJECT_FILE_NAME, PROJECT_FORMAT,
-    Package, Project, Target, TargetKind, decode_project, project_schema,
+    Package, Project, Recipe, Target, TargetKind, decode_project, project_schema,
 };
 pub use resolve::resolve_input;
-pub use revision::{DuplicateRecord, RevisionKind, RevisionRecord, workspace_revision};
+pub use revision::{
+    RevisionError, RevisionKind, RevisionRecord, TOOLCHAIN_SOURCE_ID,
+    embedded_toolchain_record, toolchain_document, toolchain_record,
+    workspace_revision,
+};
 pub use semantic::{WorkspaceCheck, check_snapshot};
 pub use snapshot::{SourceFile, SourceSnapshot, SourceUnit, TESTS_ROOT, UnitKind};
 pub use source_graph::{GRAPH_FORMAT, GraphDependency, SourceGraph};
 pub use test_runner::{
     InvalidSelection, SuiteResult, TEST_RUN_FORMAT, TestItem, TestOutcome, TestRun,
-    TestSelector, observation_type, run_tests,
+    TestSelector, observation_type, run_tests, run_tests_in,
 };
 // The types the runner's outcomes are made of, so that a consumer of
 // `run_tests` reads them without depending on the interpreter or the IR.
 pub use vibra_interp::{FailureKind, MemoryBudget, TestAssertionFailure};
+// The host world a test runs in and the trace it records, so that a
+// consumer of `run_tests_in` builds the one and reads the other without
+// depending on the host.
+pub use vibra_host::trace::AuditTrace;
+pub use vibra_host::world::{HostWorld, decode_world};
 pub use vibra_ir::{SourceOrigin, Trap};
 // The obligation records a check found, so that a consumer of a
 // WorkspaceCheck reads them without depending on the checker.

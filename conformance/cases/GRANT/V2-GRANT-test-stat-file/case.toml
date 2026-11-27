@@ -1,0 +1,13 @@
+id = "V2-GRANT-test-stat-file"
+rule = "V2-GRANT-test-stat-file"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "04-programs-and-packages.md#test-worlds-and-grants: the stat root of TestWorld.directory permits stat of a file, decided by its file rule (FsMetadata of kind file and its size), and of a missing entry, notFound from the world; the stat of the directory itself is V2-GRANT-test-each-fs-operation"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

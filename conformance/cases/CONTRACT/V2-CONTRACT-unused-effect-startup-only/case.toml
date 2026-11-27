@@ -1,0 +1,12 @@
+id = "V2-CONTRACT-unused-effect-startup-only"
+rule = "V2-CONTRACT-unused-effect-startup-only"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "07-diagnostics-and-conformance.md#contract-effect-and-authority-diagnostics: an effects entry that only a startup step performs is no unused effect"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

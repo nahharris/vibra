@@ -22,9 +22,9 @@ Crates: `vibra-workspace`, `conformance/cases`.
 
 | Existing | Symbol | Use |
 | --- | --- | --- |
-| `crates/vibra-workspace/src/project.rs:356` | `fn grant_binding` | the recipe schema; gains the closed resource kinds |
-| `crates/vibra-workspace/src/project.rs:452` | `pub fn decode_project` | keeps field spans for the diagnostics |
-| `crates/vibra-workspace/src/semantic.rs:69` | `pub fn check_snapshot` | calls `binding::check` after `entry::check_target` |
+| `crates/vibra-workspace/src/project.rs:403` | `fn grant_binding` | the recipe schema; gains the closed resource kinds |
+| `crates/vibra-workspace/src/project.rs:544` | `pub fn decode_project` | keeps field spans for the diagnostics |
+| `crates/vibra-workspace/src/semantic.rs:79` | `pub fn check_snapshot` | calls `binding::check` after `entry::check_target` |
 
 From step 14: `recipe::{BindingPlan, Leaf, BindingFault, PROVIDERS}`,
 `policy::{decode, normalize, count}`. From step 25: `EntryFacts`.

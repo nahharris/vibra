@@ -16,13 +16,19 @@
 //!    atom singleton, and an anonymous tuple or record, with each component a
 //!    further goal.
 //!
+//! `Encodable` is decided before these: a type with no callable, plan, or
+//! grant in it, through the representation of every declared type in it,
+//! conforms structurally, with each open form in it a further goal, and
+//! an open form on its own conforms only through a bound.
+//!
 //! The search keeps its goals on a work list and stops after
 //! [`GOAL_LIMIT`] of them, so no host stack and no loop grows with what a
 //! checker built.
 
 use crate::expr::Tables;
 use crate::{
-    Binder, Implementation, IrError, Library, NamedTypes, Substitution, Type, TypeId,
+    Binder, Implementation, IrError, Library, NamedTypes, Substitution, Type, TypeBody,
+    TypeId,
 };
 
 /// The most goals one conformance question may visit.
@@ -376,6 +382,17 @@ impl Tables<'_> {
         interface: &TypeId,
         arguments: &[Type],
     ) -> Result<Option<(NamedTypes, Vec<Goal>)>, IrError> {
+        if self.library.get(Library::Encodable) == Some(interface)
+            && arguments.is_empty()
+            && !matches!(
+                receiver,
+                Type::Binder(_) | Type::SelfType | Type::Associated(_) | Type::Never
+            )
+        {
+            return Ok(self
+                .is_encodable(receiver)
+                .then(|| (NamedTypes::empty(), open_goals(receiver, interface))));
+        }
         if receiver.is_interface_value() || *receiver == Type::Never {
             return Ok(None);
         }
@@ -433,6 +450,37 @@ impl Tables<'_> {
             return Ok(Some((NamedTypes::empty(), goals)));
         }
         Ok(None)
+    }
+
+    /// Whether `ty` conforms to `Encodable` on its own account, before the
+    /// open forms in it are asked: no callable or plan type and no operation
+    /// interface value type occurs in it, through the type arguments and the
+    /// representation of every declared type in it. The walk keeps a work
+    /// list and reads each declared type once, so a recursive type ends it.
+    fn is_encodable(&self, ty: &Type) -> bool {
+        let mut seen = std::collections::BTreeSet::new();
+        let mut pending = vec![ty.clone()];
+        while let Some(ty) = pending.pop() {
+            match &ty {
+                Type::Interface(id, _, _)
+                    if self
+                        .interfaces
+                        .get(id)
+                        .is_some_and(crate::effects::is_operation_interface) =>
+                {
+                    return false;
+                }
+                Type::Fn(_) | Type::Proc(_) | Type::Intent(_) => return false,
+                Type::Declared(id, _) if seen.insert(id.clone()) => {
+                    if let Some(definition) = self.types.get(id) {
+                        pending.extend(body_types(definition.body()));
+                    }
+                }
+                _ => {}
+            }
+            pending.extend(ty.components().into_iter().cloned());
+        }
+        true
     }
 
     /// Checks that every application of a declared type in `ty` satisfies
@@ -534,4 +582,40 @@ fn bound_goal(
                 .map(|(name, ty)| (name.clone(), ty.substitute(substitution))),
         )?),
     })
+}
+
+/// The goals of a structural `Encodable`: each distinct open form in `ty`,
+/// which conforms only through a bound.
+fn open_goals(ty: &Type, interface: &TypeId) -> Vec<Goal> {
+    let mut goals: Vec<Goal> = Vec::new();
+    ty.visit(&mut |inner| {
+        if matches!(
+            inner,
+            Type::Binder(_) | Type::SelfType | Type::Associated(_)
+        ) && !goals.iter().any(|goal| goal.receiver == *inner)
+        {
+            goals.push(Goal {
+                receiver: inner.clone(),
+                interface: interface.clone(),
+                arguments: Vec::new(),
+                required: None,
+            });
+        }
+    });
+    goals
+}
+
+/// The types a declared type's body is made of. A type parameter in it is a
+/// [`Type::Binder`], which holds nothing: the arguments it stands for are
+/// walked where the type is applied.
+fn body_types(body: &TypeBody) -> Vec<Type> {
+    match body {
+        TypeBody::Record(fields) => fields.iter().map(|(_, ty)| ty.clone()).collect(),
+        TypeBody::Tuple(components) => components.clone(),
+        TypeBody::Wrapper(inner) => vec![inner.clone()],
+        TypeBody::Variant(cases) => cases
+            .iter()
+            .flat_map(|case| case.fields.iter().map(|(_, ty)| ty.clone()))
+            .collect(),
+    }
 }

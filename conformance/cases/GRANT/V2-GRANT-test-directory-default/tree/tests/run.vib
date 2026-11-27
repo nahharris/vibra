@@ -1,0 +1,16 @@
+use @std.assert enduse
+
+use @std.test.TestWorld enduse
+
+use @std.fs.DirList enduse
+
+use @std.fs.RelativePath enduse
+
+test "empty"
+  takes {world: TestWorld}
+  performs {TestWorld DirList}
+  do
+    let Result.ok(value: root) be RelativePath([]) endlet
+    let {list: lister} be await TestWorld.directory(world) endlet
+    assert.equal(Result.ok(value: []) await DirList.entries(lister root))
+endtest

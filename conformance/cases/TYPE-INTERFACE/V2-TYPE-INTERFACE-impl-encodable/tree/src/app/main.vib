@@ -1,0 +1,4 @@
+type Box of I32
+  impl Encodable
+  endimpl
+endtype

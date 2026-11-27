@@ -197,7 +197,7 @@ fn a_static_error_invalidates_the_whole_selection() {
     assert!(
         run.items()
             .iter()
-            .all(|item| item.outcome() == &TestOutcome::Invalid)
+            .all(|item| item.outcome() == &TestOutcome::Invalid(None))
     );
     assert_eq!(run.items().len(), 2);
     assert!(!run.diagnostics().is_empty());
@@ -219,5 +219,22 @@ fn a_project_without_tests_is_an_empty_passing_suite() {
     assert_eq!(
         run.document(),
         "{format: @testRun.v2 result: @command.ok tests: []}"
+    );
+}
+
+/// ATK-test-runner-no-system-driver: the runner builds each test's world
+/// from the fake world's driver only, so its source names no real driver.
+#[test]
+fn atk_test_runner_no_system_driver() {
+    let source = include_str!("../../src/test_runner.rs");
+    for forbidden in ["SystemDriver", "Launch::System", "vibra_host::system"] {
+        assert!(
+            !source.contains(forbidden),
+            "the test runner names `{forbidden}`"
+        );
+    }
+    assert!(
+        source.contains("WorldDriver::new"),
+        "the runner builds a fake world"
     );
 }

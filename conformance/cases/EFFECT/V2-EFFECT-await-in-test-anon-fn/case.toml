@@ -1,0 +1,18 @@
+id = "V2-EFFECT-await-in-test-anon-fn"
+rule = "V2-EFFECT-await-in-test-anon-fn"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "01-source-language.md#return-try-await: await in an anonymous fn written in a test body is invalid"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@effect.invalidAwait"
+level = "@error"
+source = "tests/run.vib"
+span = { start = 98, end = 121 }

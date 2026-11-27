@@ -1,0 +1,13 @@
+id = "V2-GRANT-limit-output-bytes"
+rule = "V2-GRANT-limit-output-bytes"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "06-runtime.md#host-calls: a write of three bytes through a grant limited to two output bytes is Err(limitExceeded) before it sends; the file is absent"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

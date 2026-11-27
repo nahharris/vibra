@@ -8,9 +8,10 @@
 //! every module against its digest, parses every module in standard-library
 //! mode, checks every external declaration against its registry, checks that
 //! each of the nine language roles is claimed exactly once on a declaration of
-//! the shape the type chapter requires, and binds the prelude. Any fault is a
-//! toolchain defect, reported as `@runtime.invalidCheckedProgram` with the
-//! fault in its notes, never a fallback.
+//! the shape the type chapter requires, binds the prelude, and checks the
+//! library's guards and invariants against the certified fragment. Any fault
+//! is a toolchain defect, reported as `@runtime.invalidCheckedProgram` with
+//! the fault in its notes, never a fallback.
 
 mod external;
 mod identity;
@@ -24,7 +25,8 @@ use std::sync::OnceLock;
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 use vibra_ir::external::CompilerIntrinsic;
-use vibra_ir::external::host::host_row;
+use vibra_ir::external::compiler::NarrowingType;
+use vibra_ir::external::host::{host_row, test_world_row};
 use vibra_ir::{IrError, Library, LibraryTypes, TypeId};
 use vibra_resolve::{EmbeddedUnit, PackageId, PreludeBinding, SourceModule};
 use vibra_syntax::source::{Declaration, Module, SourceOptions, TypeBody, module};
@@ -37,6 +39,7 @@ pub use names::LibraryNames;
 pub use roles::Role;
 
 use manifest::{MANIFEST_SOURCE_ID, Manifest, order_faults};
+pub(crate) use names::NARROWING_TYPES;
 use names::{BUILTIN_MODULE, intrinsic};
 use roles::{Claim, Parsed, check_core_types, check_roles};
 
@@ -46,7 +49,7 @@ pub const STDLIB_UNIT: &str = "@std";
 /// The prelude of the type chapter: the only names a program names without
 /// an import. `Any` and `Self` are predeclared and have no declaration; every
 /// other name is a declaration of the standard library.
-pub const PRELUDE: [&str; 31] = [
+pub const PRELUDE: [&str; 32] = [
     "Void",
     "Never",
     "Atom",
@@ -71,6 +74,7 @@ pub const PRELUDE: [&str; 31] = [
     "Iter",
     "Equatable",
     "Ordered",
+    "Encodable",
     "From",
     "TryFrom",
     "Any",
@@ -94,7 +98,7 @@ const EMBEDDED_MANIFEST: &[u8] = include_bytes!("../../../stdlib/manifest.vibon"
 
 /// Every module compiled into the toolchain, by module path atom, in
 /// manifest order.
-const EMBEDDED_MODULES: [(&str, &[u8]); 9] = [
+const EMBEDDED_MODULES: [(&str, &[u8]); 17] = [
     (
         "@std.assert",
         include_bytes!("../../../stdlib/src/std/assert.vib"),
@@ -116,12 +120,30 @@ const EMBEDDED_MODULES: [(&str, &[u8]); 9] = [
         include_bytes!("../../../stdlib/src/std/core.vib"),
     ),
     (
+        "@std.env",
+        include_bytes!("../../../stdlib/src/std/env.vib"),
+    ),
+    ("@std.fs", include_bytes!("../../../stdlib/src/std/fs.vib")),
+    ("@std.io", include_bytes!("../../../stdlib/src/std/io.vib")),
+    (
         "@std.iter",
         include_bytes!("../../../stdlib/src/std/iter.vib"),
     ),
     (
         "@std.option",
         include_bytes!("../../../stdlib/src/std/option.vib"),
+    ),
+    (
+        "@std.policy",
+        include_bytes!("../../../stdlib/src/std/policy.vib"),
+    ),
+    (
+        "@std.process",
+        include_bytes!("../../../stdlib/src/std/process.vib"),
+    ),
+    (
+        "@std.random",
+        include_bytes!("../../../stdlib/src/std/random.vib"),
     ),
     (
         "@std.result",
@@ -131,13 +153,22 @@ const EMBEDDED_MODULES: [(&str, &[u8]); 9] = [
         "@std.str",
         include_bytes!("../../../stdlib/src/std/str.vib"),
     ),
+    (
+        "@std.test",
+        include_bytes!("../../../stdlib/src/std/test.vib"),
+    ),
+    (
+        "@std.time",
+        include_bytes!("../../../stdlib/src/std/time.vib"),
+    ),
 ];
 
-/// The source identity of the module at the path atom `path`: its file
-/// under `stdlib/src/`, such as `stdlib/src/std/bool.vib`.
+/// The source identity of the module at the path atom `path`: the atom
+/// itself, such as `@std.bool` (`docs/spec/04-programs-and-packages.md`,
+/// "Discovery and the source snapshot"). No project file has it, since a
+/// project file's identity is a path ending in `.vib`.
 fn source_id_of(path: &str) -> String {
-    let parts = path.strip_prefix('@').unwrap_or(path).replace('.', "/");
-    format!("stdlib/src/{parts}.vib")
+    path.to_owned()
 }
 
 /// The exact bytes of one standard-library load.
@@ -214,7 +245,7 @@ impl StdlibModule {
             .unwrap_or_default()
     }
 
-    /// The source identity, such as `stdlib/src/std/bool.vib`.
+    /// The source identity, its module atom, such as `@std.bool`.
     #[must_use]
     pub fn source_id(&self) -> &str {
         &self.source_id
@@ -434,7 +465,7 @@ impl Stdlib {
     }
 
     /// The declaration of each library declaration the checked IR names:
-    /// the nine roles and the three core types.
+    /// the ten roles and the three core types.
     #[must_use]
     pub const fn library(&self) -> &BTreeMap<Library, StdlibDeclaration> {
         &self.library
@@ -626,8 +657,10 @@ pub fn load_stdlib() -> Result<Stdlib, StdlibError> {
 /// module, a digest that differs, a module the reader reports, an external
 /// declaration its registry rejects, a symbol the manifest does not list, a
 /// role claimed by no declaration, by several, or by one of the wrong shape,
-/// a core type of the wrong shape, an `Intrinsic` outside `@std.builtin`, and
-/// a prelude name with no declaration.
+/// a core type of the wrong shape, an `Intrinsic` outside `@std.builtin`, a
+/// prelude name with no declaration, and a fault the contract review of the
+/// library's own declarations reports, such as a `where` predicate outside
+/// the certified fragment.
 pub fn load_stdlib_from(inputs: &StdlibInputs<'_>) -> Result<Stdlib, StdlibError> {
     let manifest = manifest::read(inputs.manifest).map_err(StdlibError::new)?;
     let mut faults = manifest_faults(&manifest);
@@ -753,6 +786,15 @@ pub fn load_stdlib_from(inputs: &StdlibInputs<'_>) -> Result<Stdlib, StdlibError
             ))),
         }
     }
+    for narrowing in narrowing_declarations(&parsed, package) {
+        match narrowing.1.type_id() {
+            Ok(id) => library_types = library_types.with_narrowing(narrowing.0, id),
+            Err(error) => faults.push(Fault::bare(format!(
+                "`{}` has no identity in the checked IR: {error}",
+                narrowing.1.path()
+            ))),
+        }
+    }
     if !faults.is_empty() {
         return Err(StdlibError::new(faults));
     }
@@ -779,7 +821,7 @@ pub fn load_stdlib_from(inputs: &StdlibInputs<'_>) -> Result<Stdlib, StdlibError
             .map(|item| item.text.clone())
             .collect::<Vec<_>>()
     };
-    Ok(Stdlib {
+    let stdlib = Stdlib {
         package_name: manifest.package_name.clone(),
         package_version: manifest.package_version.clone(),
         modules,
@@ -791,7 +833,20 @@ pub fn load_stdlib_from(inputs: &StdlibInputs<'_>) -> Result<Stdlib, StdlibError
         host: texts(&manifest.host),
         native: texts(&manifest.native),
         names,
-    })
+    };
+    // A contract fault of the library, such as a predicate outside the
+    // certified fragment, is a defect of the library like a fault of
+    // `check_externals`: only checking the library finds it.
+    let faults = crate::check::library_faults(&stdlib)
+        .iter()
+        .map(|diagnostic| {
+            Fault::of_diagnostic(diagnostic.source_id().unwrap_or_default(), diagnostic)
+        })
+        .collect::<Vec<_>>();
+    if !faults.is_empty() {
+        return Err(StdlibError::new(faults));
+    }
+    Ok(stdlib)
 }
 
 /// The faults of the manifest on its own: its lists out of order, and
@@ -816,11 +871,14 @@ fn manifest_faults(manifest: &Manifest) -> Vec<Fault> {
         }
     }
     for symbol in &manifest.host {
-        if host_row(&symbol.text).is_none() {
+        if host_row(&symbol.text).is_none() && test_world_row(&symbol.text).is_none() {
             faults.push(Fault::at(
                 MANIFEST_SOURCE_ID,
                 symbol.span,
-                format!("`{}` is not a row of the host registry", symbol.text),
+                format!(
+                    "`{}` is not a row of the host registry or of the test-world registry",
+                    symbol.text
+                ),
             ));
         }
     }
@@ -891,6 +949,7 @@ fn binding_faults(
     let compiler = listed(&manifest.compiler);
     let host = listed(&manifest.host);
     let mut faults = Vec::new();
+    let mut bound_host: BTreeMap<String, usize> = BTreeMap::new();
     for module in parsed {
         for diagnostic in check_externals(&module.module, module.path, names) {
             faults.push(Fault::of_diagnostic(module.source_id, &diagnostic));
@@ -923,6 +982,29 @@ fn binding_faults(
                     ),
                 ));
             }
+            if what == "host" {
+                let count = bound_host.entry(symbol.clone()).or_default();
+                *count += 1;
+                if *count == 2 {
+                    faults.push(Fault::at(
+                        module.source_id,
+                        callable.construct().span(),
+                        format!("`{symbol}` is bound by more than one declaration"),
+                    ));
+                }
+            }
+        }
+    }
+    for symbol in &manifest.host {
+        if !bound_host.contains_key(&symbol.text) {
+            faults.push(Fault::at(
+                MANIFEST_SOURCE_ID,
+                symbol.span,
+                format!(
+                    "the host symbol `{}` is bound by no declaration",
+                    symbol.text
+                ),
+            ));
         }
     }
     faults
@@ -953,6 +1035,39 @@ fn callables<'a>(module: &Module<'a>) -> Vec<vibra_syntax::source::Callable<'a>>
         }
     }
     all
+}
+
+/// The declaration of each narrowing type the grant rows name that the
+/// library declares as a type of its module (`docs/spec/03-effects.md`,
+/// "Narrowing").
+fn narrowing_declarations(
+    parsed: &[Parsed<'_>],
+    package: (&str, &str),
+) -> Vec<(NarrowingType, StdlibDeclaration)> {
+    NARROWING_TYPES
+        .into_iter()
+        .filter(|narrowing| {
+            parsed
+                .iter()
+                .filter(|module| module.path == narrowing.module())
+                .flat_map(|module| module.module.declarations())
+                .any(|declaration| {
+                    matches!(&declaration, Declaration::Type(decl)
+                        if decl.name().is_some_and(|name| name.text() == narrowing.name()))
+                })
+        })
+        .map(|narrowing| {
+            (
+                narrowing,
+                StdlibDeclaration::new(
+                    package,
+                    narrowing.module(),
+                    narrowing.name(),
+                    "@type",
+                ),
+            )
+        })
+        .collect()
 }
 
 /// The faults of the manifest's `languageRoles`: each module's list names
@@ -1043,8 +1158,8 @@ mod tests {
     use super::source_id_of;
 
     #[test]
-    fn a_module_path_names_its_file() {
-        assert_eq!(source_id_of("@std.bool"), "stdlib/src/std/bool.vib");
-        assert_eq!(source_id_of("@std.a.b"), "stdlib/src/std/a/b.vib");
+    fn a_module_source_identity_is_its_atom() {
+        assert_eq!(source_id_of("@std.bool"), "@std.bool");
+        assert_eq!(source_id_of("@std.a.b"), "@std.a.b");
     }
 }

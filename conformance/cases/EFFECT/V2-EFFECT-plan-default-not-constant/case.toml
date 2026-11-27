@@ -1,0 +1,18 @@
+id = "V2-EFFECT-plan-default-not-constant"
+rule = "V2-EFFECT-plan-default-not-constant"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "01-source-language.md#fn-and-proc: a labelled default must be constant, and building a plan is a call, so a plan is no default"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.notConstant"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 82, end = 87 }

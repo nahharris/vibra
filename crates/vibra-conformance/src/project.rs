@@ -16,8 +16,9 @@ use crate::profile::{
     CaseObservation, ConformanceOperation, HandlerError, ProfileHandler,
 };
 
-/// No module is embedded in this release, so no project module collides
-/// with an embedded source identity.
+/// The source identity of an embedded library module is its module atom,
+/// such as `@std.io`, and a project module's is a path ending in `.vib`, so
+/// the two never collide and a graph case names no embedded identity.
 const EMBEDDED_SOURCE_IDS: &[&str] = &[];
 
 fn refuted(diagnostics: Vec<vibra_diagnostics::Diagnostic>) -> CaseObservation {

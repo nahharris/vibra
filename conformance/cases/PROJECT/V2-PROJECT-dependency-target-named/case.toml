@@ -1,0 +1,12 @@
+id = "V2-PROJECT-dependency-target-named"
+rule = "V2-PROJECT-dependency-target-named"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "04-programs-and-packages.md#dependencies-and-lock: of a package with two library targets, a dependency binds the one its key names"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

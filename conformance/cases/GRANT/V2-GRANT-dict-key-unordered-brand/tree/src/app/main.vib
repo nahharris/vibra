@@ -1,0 +1,6 @@
+use @std.fs.DirReadText enduse
+
+// A brand over a grant with no order of its own.
+type Key of DirReadText endtype
+
+fn size takes {entries: Dict(Key Str)} returns n: U64 do return 0u64 endfn

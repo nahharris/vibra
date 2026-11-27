@@ -1,0 +1,13 @@
+id = "V2-RUNTIME-run-target-selection"
+rule = "V2-RUNTIME-run-target-selection"
+profile = "interpreterV2"
+operation = "workspaceRun"
+description = "05-tooling.md#versioned-envelope-and-results: two binary targets and none named is invalid input; nothing is checked or started"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "unknown"
+targetRun = "target-run.vibon"

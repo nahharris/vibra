@@ -1,0 +1,19 @@
+id = "V2-GRANT-brand-forged"
+rule = "V2-GRANT-brand-forged"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#brands: only the module that declares LogDir can construct one: another module's construction is an inaccessible representation"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@name.inaccessibleRepresentation"
+level = "@error"
+source = "tests/grants.vib"
+span = { start = 2416, end = 2427 }
+related = [{ source = "src/app/logs.vib", span = { start = 163, end = 169 } }]

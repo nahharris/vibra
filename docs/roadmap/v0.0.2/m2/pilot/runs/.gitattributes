@@ -1,0 +1,2 @@
+# The records keep the clients' output byte for byte.
+* -text !eol diff

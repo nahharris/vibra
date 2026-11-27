@@ -1,0 +1,12 @@
+id = "V2-EFFECT-proc-recursive"
+rule = "V2-EFFECT-proc-recursive"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#cold-plans-and-performed-rows: a named procedure awaits a plan of itself"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

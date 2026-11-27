@@ -1,0 +1,13 @@
+id = "V2-GRANT-brand"
+rule = "V2-GRANT-brand"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "03-effects.md#brands: the module that declares LogDir wraps a grant as one; another module passes it to a proc that takes a LogDir"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

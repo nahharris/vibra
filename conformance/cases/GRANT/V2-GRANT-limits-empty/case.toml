@@ -1,0 +1,18 @@
+id = "V2-GRANT-limits-empty"
+rule = "V2-GRANT-limits-empty"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "04-programs-and-packages.md#targets: a limits with no field is the empty tuple and @data.invalidShape"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@data.invalidShape"
+level = "@error"
+source = "project.vibon"
+span = { start = 291, end = 293 }

@@ -1,0 +1,18 @@
+id = "V2-GRANT-sub-result-is-fallible"
+rule = "V2-GRANT-sub-result-is-fallible"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#narrowing: sub returns Result(Self ScopeError), so its result is no DirReadText"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.mismatch"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 158, end = 178 }

@@ -1,0 +1,14 @@
+use @std.fs.FsError enduse
+
+use @std.io.IoError enduse
+
+use @std.io.StdoutText enduse
+
+proc say
+  takes {out: StdoutText}
+  returns outcome: Result(Void IoError)
+  performs {StdoutText}
+  do
+    await StdoutText.write(out "x")
+    return Result.ok(value: void)
+endproc

@@ -64,6 +64,9 @@ pub(crate) struct Frame<'a> {
     /// The neutral values an evaluation starts with, converted on first
     /// read at the type the read names.
     pub(crate) inputs: &'a [Value],
+    /// Whether the activation runs in a procedure context, where `await`
+    /// may run.
+    pub(crate) procedure: bool,
 }
 
 impl<'a> Frame<'a> {
@@ -80,6 +83,7 @@ impl<'a> Frame<'a> {
             env,
             exit: None,
             inputs: &[],
+            procedure: false,
         })
     }
 

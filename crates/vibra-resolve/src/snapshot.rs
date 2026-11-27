@@ -204,6 +204,15 @@ impl VisibleLocals {
     }
 }
 
+/// What is visible at one statement: the statement, and the newest visible
+/// binding, a link of the chain of bindings ([`Resolution::visible_locals`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Visibility {
+    pub(crate) source_id: String,
+    pub(crate) span: ByteSpan,
+    pub(crate) top: Option<usize>,
+}
+
 /// Everything resolution established about one input.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Resolution {
@@ -213,16 +222,39 @@ pub struct Resolution {
     pub(crate) imports: Vec<ResolvedImport>,
     pub(crate) references: Vec<ResolvedReference>,
     pub(crate) diagnostics: Vec<Diagnostic>,
-    pub(crate) visible: Vec<VisibleLocals>,
+    pub(crate) visible: Vec<Visibility>,
+    /// Every local binding, each with the link of the binding visible
+    /// before it.
+    pub(crate) chain: Vec<(String, Option<usize>)>,
 }
 
 impl Resolution {
     /// The locals visible at each statement of the local modules, in the
     /// order the statements are walked: each module in input order, its
     /// declarations in written order.
+    ///
+    /// Resolution keeps one link per statement and per binding; the names
+    /// are listed here, when asked for.
     #[must_use]
-    pub fn visible_locals(&self) -> &[VisibleLocals] {
-        &self.visible
+    pub fn visible_locals(&self) -> Vec<VisibleLocals> {
+        self.visible
+            .iter()
+            .map(|visibility| {
+                let mut names = Vec::new();
+                let mut link = visibility.top;
+                while let Some((name, before)) = link.and_then(|at| self.chain.get(at))
+                {
+                    names.push(name.clone());
+                    link = *before;
+                }
+                names.reverse();
+                VisibleLocals {
+                    source_id: visibility.source_id.clone(),
+                    span: visibility.span,
+                    names,
+                }
+            })
+            .collect()
     }
 
     /// The modules, sorted by path.

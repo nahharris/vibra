@@ -162,6 +162,10 @@ pub(crate) fn to_visit<'v, 'a>(
 ) -> Result<ToNeutral<'v, 'a>, Halt> {
     use Visited::{Leaf, Node};
     Ok(match (ty, &value.0) {
+        // A plan and a sealed grant have no value encoding, and no neutral
+        // value holds one (`docs/spec/06-runtime.md`, "What has no
+        // encoding").
+        (_, Repr::Plan(_) | Repr::Grant(_)) => return Err(Halt::NoEncoding),
         (Type::I8, Repr::I8(n)) => Leaf(Value::I8(*n)),
         (Type::I16, Repr::I16(n)) => Leaf(Value::I16(*n)),
         (Type::I32, Repr::I32(n)) => Leaf(Value::I32(*n)),
@@ -627,11 +631,24 @@ pub(crate) fn from_neutral<'a>(
 /// Why a value could not be observed.
 #[derive(Debug)]
 pub(crate) enum ObserveError {
-    /// A function or closure behind an interface value: the observation
-    /// error `@tool.unsupportedValue`.
+    /// A function or closure behind an interface value, or a plan: the
+    /// observation error `@tool.unsupportedValue`.
     Unsupported,
     /// Anything else, which the checker rules out.
     Halt(Halt),
+}
+
+/// The neutral value of `value` at `ty`, a plan anywhere in it being the
+/// observation error.
+fn observed_neutral(
+    set: &CheckedModuleSet,
+    value: &Val<'_>,
+    ty: &Type,
+) -> Result<Value, ObserveError> {
+    to_neutral(set, value, ty).map_err(|halt| match halt {
+        Halt::NoEncoding => ObserveError::Unsupported,
+        other => ObserveError::Halt(other),
+    })
 }
 
 fn encoded(result: Result<String, EncodeError>) -> Result<String, ObserveError> {
@@ -648,7 +665,7 @@ pub(crate) fn observe(
     value: &Val<'_>,
     ty: &Type,
 ) -> Result<(Value, String), ObserveError> {
-    let neutral = to_neutral(set, value, ty).map_err(ObserveError::Halt)?;
+    let neutral = observed_neutral(set, value, ty)?;
     let document = encoded(value_document(&neutral, ty, set.types()))?;
     Ok((neutral, document))
 }
@@ -660,6 +677,6 @@ pub(crate) fn encoding(
     value: &Val<'_>,
     ty: &Type,
 ) -> Result<String, ObserveError> {
-    let neutral = to_neutral(set, value, ty).map_err(ObserveError::Halt)?;
+    let neutral = observed_neutral(set, value, ty)?;
     encoded(encode_value(&neutral, ty, set.types()))
 }

@@ -1,0 +1,18 @@
+id = "V2-EFFECT-std-stdin-count-missing"
+rule = "V2-EFFECT-std-stdin-count-missing"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#standard-operation-inventory: StdinText.read takes a count, so a call without it is an argument mismatch at the call"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.argumentMismatch"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 158, end = 179 }

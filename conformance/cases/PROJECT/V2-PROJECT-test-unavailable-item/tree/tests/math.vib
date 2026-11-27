@@ -1,7 +1,0 @@
-use @std.assert enduse
-
-use @app.math enduse
-
-test "effects" performs {} do assert.true(true) endtest
-
-test "plain" do assert.equal(3i32 math.add(1i32 2i32)) endtest

@@ -1,0 +1,18 @@
+id = "V2-EFFECT-row-on-proc"
+rule = "V2-EFFECT-row-on-proc"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#effect-ceilings: a proc row names operation interfaces and a proc may build a plan within it; building a plan performs nothing, so the root is the unused-effect warning (Q5)"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+
+[[expect.diagnostics]]
+code = "@contract.unusedEffect"
+level = "@warning"
+source = "src/app/main.vib"
+span = { start = 469, end = 472 }

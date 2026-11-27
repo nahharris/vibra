@@ -1,0 +1,12 @@
+id = "V2-EFFECT-proc-generic"
+rule = "V2-EFFECT-proc-generic"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "01-source-language.md#grammar: a generic proc is applied at I32 and awaited"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

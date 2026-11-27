@@ -18,8 +18,8 @@ Crates: `examples`.
 
 | Existing | Symbol | Use |
 | --- | --- | --- |
-| `crates/vibra-cli/src/test.rs:52` | `pub fn run` | the grader's test command |
-| `crates/vibra-cli/src/check.rs:145` | `pub fn run` | the grader's check command |
+| `crates/vibra-cli/src/test.rs:54` | `pub fn run` | the grader's test command |
+| `crates/vibra-cli/src/check.rs:146` | `pub fn run` | the grader's check command |
 
 Material of M1's exit step: `examples/pilot-pure/`.
 

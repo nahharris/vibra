@@ -1,0 +1,13 @@
+id = "V2-EFFECT-proc-await-direct"
+rule = "V2-EFFECT-proc-await-direct"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#cold-plans-and-performed-rows: await of a plan built by applying a proc runs it and yields its result; the types snapshot lists each proc with its Proc type"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+types = "types.vibon"

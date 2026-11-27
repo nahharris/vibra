@@ -417,7 +417,7 @@ impl<'a> BodyChecker<'_, 'a> {
                 Some(Entity::Value(index)) => {
                     return self.constant_pattern(index, ty.as_ref(), span);
                 }
-                Some(Entity::Fn(_) | Entity::Other(..)) => return Kind::Error,
+                Some(Entity::Fn(_)) => return Kind::Error,
                 _ => {}
             }
         }

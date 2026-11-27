@@ -8,11 +8,17 @@ use super::{check_source, interpret};
 mod bodies;
 mod bounds;
 mod callables;
+mod ceilings;
 mod contracts;
 mod discharge;
+mod entry;
+mod grants;
 mod interfaces;
+mod procs;
+mod rows;
 mod soundness;
 mod testing;
+mod values;
 
 const SOURCE: &str = "main.vib";
 

@@ -1,0 +1,18 @@
+id = "V2-PROJECT-entry-unknown"
+rule = "V2-PROJECT-entry-unknown"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "07-diagnostics-and-conformance.md#availability-discovery-and-resolution: an entry that resolves to nothing is @name.unknownSymbol at the field"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@name.unknownSymbol"
+level = "@error"
+source = "project.vibon"
+span = { start = 119, end = 133 }

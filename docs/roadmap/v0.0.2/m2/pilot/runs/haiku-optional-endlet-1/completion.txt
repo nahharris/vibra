@@ -1,0 +1,40 @@
+```vibra
+fn mapOptional(A B)
+  takes {item: Option(A) f: Fn({A} B)}
+  returns mapped: Option(B)
+  visibility @public
+  do
+    return match item
+      case Option.some(value: x)
+        Option.some(value: f(x))
+      case Option.none()
+        Option.none()
+    endmatch
+endfn
+
+fn clampPositive
+  takes {value: I32}
+  returns clamped: I32
+  requires Ordered.greater(value 0i32)
+    else 0i32
+  visibility @public
+  do
+    return value
+endfn
+
+fn adjust
+  takes {item: Option(I32) offset: I32}
+  returns adjusted: Option(I32)
+  visibility @public
+  do
+    return mapOptional(
+      item
+      fn
+        takes {value: I32}
+        returns scaled: I32
+        do
+          return I32.add(clampPositive(value) offset)
+      endfn
+    )
+endfn
+```

@@ -1,0 +1,12 @@
+id = "V2-TYPE-INTERFACE-relative-path-try"
+rule = "V2-TYPE-INTERFACE-relative-path-try"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#try: RelativePath(names) has type Result(RelativePath ScopeError), so try of it in a function returning Result(_ ScopeError) is accepted"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

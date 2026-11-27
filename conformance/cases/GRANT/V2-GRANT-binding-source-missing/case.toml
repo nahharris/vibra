@@ -1,0 +1,18 @@
+id = "V2-GRANT-binding-source-missing"
+rule = "V2-GRANT-binding-source-missing"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "04-programs-and-packages.md#project-file: a resource record holds every field its kind names: a missing source is @data.invalidShape at the record"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@data.invalidShape"
+level = "@error"
+source = "project.vibon"
+span = { start = 342, end = 375 }

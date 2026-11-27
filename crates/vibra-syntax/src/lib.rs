@@ -31,6 +31,7 @@ mod data;
 mod document;
 mod lexer;
 mod literal;
+mod nesting;
 mod schema;
 pub mod source;
 mod tree;
@@ -49,6 +50,7 @@ pub use literal::{
     FloatSuffix, IntegerSuffix, canonical_character, canonical_string,
     decode_character, decode_string,
 };
+pub use nesting::{Nesting, nesting};
 pub use schema::{
     Decoded, DefaultValue, FieldSchema, Presence, RecordSchema, Schema, Slot,
     SpellingRule, TypedDocument, TypedEntry, TypedField, TypedNode, TypedValue,

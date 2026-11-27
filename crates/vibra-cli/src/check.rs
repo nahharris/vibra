@@ -3,9 +3,10 @@
 //! `docs/spec/05-tooling.md`, "Command surface": without a target, `check`
 //! covers every local target and the `@tests` unit; with one, that target
 //! only. A target is an atom, never a path, and one that names no local
-//! target is invalid input. A target whose kind the profile does not support
-//! is `@tool.unavailable` at its target record, and the other targets are
-//! still checked. The work is the workspace engine's [`check_snapshot`].
+//! target is invalid input. A binary target's entry and `effects` list are
+//! checked with its unit; one whose recipes the checker does not support
+//! yet is `@tool.unavailable` at its `grants` field, and the other targets
+//! are still checked. The work is the workspace engine's [`check_snapshot`].
 //!
 //! "Versioned envelope and results" fixes the status: the result fixes it,
 //! except that a reached limit or a bare guard that is not established make
@@ -24,11 +25,11 @@ use vibra_workspace::{
 
 use crate::args::Invocation;
 use crate::refusal;
-use crate::render::{Response, status_for};
+use crate::render::{Response, reach, status_for};
 
 /// Whether `text` is an atom of one identifier part, such as `@app`: the
 /// spelling of a target name.
-fn is_target_atom(text: &str) -> bool {
+pub(crate) fn is_target_atom(text: &str) -> bool {
     let Some(name) = text.strip_prefix('@') else {
         return false;
     };
@@ -183,6 +184,7 @@ pub fn run(invocation: &Invocation) -> Response {
     }
     let Some(snapshot) = capture.snapshot() else {
         checked(&mut response, capture.diagnostics().to_vec(), Vec::new());
+        reach(&mut response, capture.limits_reached());
         return response;
     };
     for module in snapshot.modules() {
@@ -197,6 +199,8 @@ pub fn run(invocation: &Invocation) -> Response {
         .map(|result| records(result.obligations(), &response.sources))
         .unwrap_or_default();
     checked(&mut response, check.diagnostics().to_vec(), obligations);
+    reach(&mut response, capture.limits_reached());
+    reach(&mut response, check.limits_reached().to_vec());
     if response.result == CommandOutcome::Ok {
         response.notice = Some("check passed".to_owned());
     }

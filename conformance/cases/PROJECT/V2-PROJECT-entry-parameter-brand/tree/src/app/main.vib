@@ -1,0 +1,11 @@
+use @std.fs.DirReadText enduse
+
+use @std.fs.DirWriteText enduse
+
+use @std.fs.DirList enduse
+
+use @std.process.ExitCode enduse
+
+type LogDir of DirWriteText endtype
+
+proc main takes {logs: LogDir} returns code: ExitCode do return ExitCode(0u8) endproc

@@ -1,0 +1,19 @@
+id = "V2-EFFECT-row-on-test-names-type"
+rule = "V2-EFFECT-row-on-test-names-type"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "03-effects.md#effect-ceilings: a test row entry that names a plain type is an invalid reference at the entry and every item is invalid"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+testRun = "test-run.vibon"
+
+[[expect.diagnostics]]
+code = "@effect.invalidReference"
+level = "@error"
+source = "tests/run.vib"
+span = { start = 96, end = 103 }

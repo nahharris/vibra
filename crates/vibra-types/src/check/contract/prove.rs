@@ -31,8 +31,8 @@ use std::sync::Arc;
 
 use vibra_diagnostics::{ByteSpan, DiagnosticCode};
 use vibra_ir::{
-    Arguments, CallTarget, ClosureBody, Constant, Construction, Expr, Library,
-    MatchArm, Node, Pattern, Type, TypeId, Value,
+    Arguments, CallTarget, ClosureBody, Constant, Construction, Expr, Library, Node,
+    Pattern, Type, TypeId, Value,
 };
 
 use super::super::callables::substitute;
@@ -91,6 +91,10 @@ struct Guarded<'v> {
     /// Whether it is an anonymous callable, whose `identity` is the
     /// declaration it is written in.
     anonymous: bool,
+    /// Whether applying it builds a plan: it is a `proc`, named or
+    /// anonymous. Its `ensures` is a fact only of an `await` whose operand is
+    /// directly its application, and only when it is named (`GUARD-7`).
+    plan: bool,
     /// For a member of an implementation whose guards are its contract
     /// member's: the module of the interface and the contract member's name.
     contract: Option<(usize, ByteSpan)>,
@@ -269,7 +273,10 @@ enum Task<'n> {
     Leave,
     Assume(&'n Node, bool),
     Bind(Option<usize>, &'n Node),
-    Arm(&'n Node, &'n [MatchArm], usize),
+    /// What the pattern of an arm of a `match` of the subject tells.
+    Arm(&'n Node, &'n Pattern),
+    /// That the pattern of an earlier arm did not match the subject.
+    Missed(&'n Node, &'n Pattern),
     Refuted(&'n Pattern, &'n Node),
     Call(&'n Node),
     Construct(&'n Node),
@@ -461,7 +468,14 @@ pub(super) fn discharge(
             }
             let walked = prover.walk(*body, evaluator, false);
             for function in walked.started {
+                // An anonymous `proc`'s `ensures` is never a certified
+                // result: no `await` runs it by name (`GUARD-7`).
+                let anonymous_plan = prover
+                    .guarded
+                    .get(&function)
+                    .is_some_and(|data| data.anonymous && data.plan);
                 if ensured.contains(&function)
+                    && !anonymous_plan
                     && walked
                         .exits
                         .iter()
@@ -817,21 +831,11 @@ impl<'v> Prover<'v> {
                         env.bind_reading(slot, term, true, globals);
                     }
                 }
-                Task::Arm(subject, arms, at) => {
-                    self.arm(&mut env, &mut facts, subject, arms, at);
+                Task::Arm(subject, pattern) | Task::Refuted(pattern, subject) => {
+                    self.arm(&mut env, &mut facts, subject, pattern);
                 }
-                Task::Refuted(pattern, value) => {
-                    let arm = MatchArm {
-                        pattern: pattern.clone(),
-                        body: value.clone(),
-                    };
-                    self.arm(
-                        &mut env,
-                        &mut facts,
-                        value,
-                        std::slice::from_ref(&arm),
-                        0,
-                    );
+                Task::Missed(subject, pattern) => {
+                    self.missed(&mut env, &mut facts, subject, pattern);
                 }
                 Task::Call(node) => {
                     if let Some(found) =
@@ -885,58 +889,73 @@ impl<'v> Prover<'v> {
         walked
     }
 
-    /// Binds and assumes what the arm `at` of a `match` of `subject` tells:
-    /// its pattern's bindings, case facts, and literal equalities, and that
-    /// no earlier arm's case or literal matched.
-    fn arm(
+    /// The term of the subject of a `match`, the module values read to build
+    /// it, and the evidence of what its arms tell.
+    fn subject(
         &mut self,
         env: &mut Env,
-        facts: &mut FactSet,
         subject: &Node,
-        arms: &[MatchArm],
-        at: usize,
-    ) {
+    ) -> (Term, BTreeSet<usize>, Evidence) {
         let (subject, substituted, globals) =
             facts::build_reading(&mut self.terms, &self.vocabulary, env, subject);
         let mut evidence = self.values_read(Evidence::default(), &globals);
         if substituted {
             evidence = evidence.with(SUBSTITUTION);
         }
-        let evidence = evidence.with(BRANCH);
-        for earlier in arms.iter().take(at) {
-            match &earlier.pattern {
-                Pattern::Case { case, fields }
-                    if fields.iter().all(|(_, inner)| {
-                        matches!(inner, Pattern::Discard | Pattern::Bind(_))
-                    }) =>
-                {
-                    self.case_fact(facts, subject, case, false, &evidence);
-                }
-                Pattern::Literal(constant) => {
-                    let literal = self.terms.intern(Data::Constant(constant.clone()));
-                    if let Some(equal) = self.vocabulary.equality(
-                        &mut self.terms,
-                        constant.value_type(),
-                        subject,
-                        literal,
-                    ) {
-                        facts.assume(
-                            &mut self.terms,
-                            &self.vocabulary,
-                            equal,
-                            false,
-                            evidence.clone(),
-                        );
-                    }
-                }
-                _ => {}
+        (subject, globals, evidence.with(BRANCH))
+    }
+
+    /// Assumes that the pattern `earlier` of an arm of a `match` of
+    /// `subject` did not match: its case or its literal.
+    fn missed(
+        &mut self,
+        env: &mut Env,
+        facts: &mut FactSet,
+        subject: &Node,
+        earlier: &Pattern,
+    ) {
+        let (subject, _, evidence) = self.subject(env, subject);
+        match earlier {
+            Pattern::Case { case, fields }
+                if fields.iter().all(|(_, inner)| {
+                    matches!(inner, Pattern::Discard | Pattern::Bind(_))
+                }) =>
+            {
+                self.case_fact(facts, subject, case, false, &evidence);
             }
+            Pattern::Literal(constant) => {
+                let literal = self.terms.intern(Data::Constant(constant.clone()));
+                if let Some(equal) = self.vocabulary.equality(
+                    &mut self.terms,
+                    constant.value_type(),
+                    subject,
+                    literal,
+                ) {
+                    facts.assume(
+                        &mut self.terms,
+                        &self.vocabulary,
+                        equal,
+                        false,
+                        evidence,
+                    );
+                }
+            }
+            _ => {}
         }
-        let Some(arm) = arms.get(at) else {
-            return;
-        };
-        for (part, term) in facts::pattern_parts(&mut self.terms, &arm.pattern, subject)
-        {
+    }
+
+    /// Binds and assumes what the pattern of an arm of a `match` of
+    /// `subject` tells: its bindings, case facts, and literal equalities.
+    /// That no earlier arm matched is [`Self::missed`], already assumed.
+    fn arm(
+        &mut self,
+        env: &mut Env,
+        facts: &mut FactSet,
+        subject: &Node,
+        pattern: &Pattern,
+    ) {
+        let (subject, globals, evidence) = self.subject(env, subject);
+        for (part, term) in facts::pattern_parts(&mut self.terms, pattern, subject) {
             match part {
                 Pattern::Bind(slot) => {
                     env.bind_reading(*slot, term, false, globals.clone())
@@ -1585,10 +1604,17 @@ impl<'v> Prover<'v> {
     }
 
     /// Assumes the proven `ensures` of the callee of `term`, when its
-    /// `requires` was discharged or is absent.
+    /// `requires` was discharged or is absent: `term` is a call of a
+    /// function, or the `await` of a plan whose operand is directly the
+    /// application of a named `proc` (`GUARD-7`). Building a plan gives no
+    /// fact.
     fn result_facts(&mut self, facts: &mut FactSet, term: Term) {
+        let (call, awaited) = match self.terms.get(term) {
+            Some(Data::Awaited(plan, _)) => (*plan, true),
+            _ => (term, false),
+        };
         let Some(Data::Call(Callee::Function(function, _), operands)) =
-            self.terms.get(term).cloned()
+            self.terms.get(call).cloned()
         else {
             return;
         };
@@ -1598,9 +1624,12 @@ impl<'v> Prover<'v> {
         let Some(data) = self.guarded.get(&function) else {
             return;
         };
+        if data.plan != awaited || (data.plan && data.anonymous) {
+            return;
+        }
         let established = match data.entry {
             Entry::None => true,
-            Entry::Bare => self.discharged.contains(&term),
+            Entry::Bare => self.discharged.contains(&call),
             Entry::Else => false,
         };
         let Some((slot, guard)) = data.ensures.filter(|_| established) else {
@@ -2251,7 +2280,8 @@ fn with_constants(node: &Node, values: &BTreeMap<usize, Constant>) -> Node {
             Expr::Return(inner)
             | Expr::Try(inner)
             | Expr::WidenAtom(inner)
-            | Expr::WidenToInterface { value: inner, .. } => pending.push(inner),
+            | Expr::WidenToInterface { value: inner, .. }
+            | Expr::Await { plan: inner } => pending.push(inner),
             Expr::Literal(_)
             | Expr::Variable { .. }
             | Expr::Global(_)
@@ -2297,13 +2327,21 @@ fn visit<'n>(
             pending.push(Task::Enter);
             pending.push(Task::Visit(value));
         }
+        // Each arm sees that no earlier arm matched: the facts that say so
+        // are added once each, before the next arm, in a scope of the whole
+        // `match`, so a long `match` costs each arm the same.
         Expr::Match { subject, arms, .. } => {
+            pending.push(Task::Leave);
             for (at, arm) in arms.iter().enumerate().rev() {
                 pending.push(Task::Leave);
                 pending.push(Task::Visit(&arm.body));
-                pending.push(Task::Arm(subject, arms, at));
+                pending.push(Task::Arm(subject, &arm.pattern));
                 pending.push(Task::Enter);
+                if let Some(earlier) = at.checked_sub(1).and_then(|at| arms.get(at)) {
+                    pending.push(Task::Missed(subject, &earlier.pattern));
+                }
             }
+            pending.push(Task::Enter);
             pending.push(Task::Visit(subject));
         }
         Expr::If {
@@ -2565,6 +2603,7 @@ fn guarded<'v>(
                     .unwrap_or_default(),
                 result_type: signature.result.clone(),
                 anonymous: false,
+                plan: super::super::effects::procs::builds_plan(data),
                 contract: data.implements.and_then(|interface| {
                     let interface = program.interfaces.get(interface)?;
                     let member =
@@ -2652,6 +2691,7 @@ fn closures<'v>(
                     result_name: closure.result_name.clone(),
                     result_type: signature.result.clone(),
                     anonymous: true,
+                    plan: closure.plan,
                     contract: None,
                 },
             );
@@ -2727,6 +2767,7 @@ fn contracts<'v>(
                 result_name: contract.result_name.clone(),
                 result_type: signature.result.clone(),
                 anonymous: false,
+                plan: false,
                 contract: None,
             },
         );

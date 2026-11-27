@@ -1,0 +1,19 @@
+id = "V2-EFFECT-startup-row-outside-ceiling"
+rule = "V2-EFFECT-startup-row-outside-ceiling"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#target-admission: a startup read's row counts against the admission ceiling: @effect.outsideCeiling at effects, related to the recipe"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@effect.outsideCeiling"
+level = "@error"
+source = "project.vibon"
+span = { start = 143, end = 145 }
+related = [{ source = "project.vibon", span = { start = 243, end = 508 } }]

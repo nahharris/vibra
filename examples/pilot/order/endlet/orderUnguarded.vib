@@ -1,0 +1,30 @@
+type OrderError
+  case reversed
+  visibility @public
+endtype
+
+fn inOrder
+  takes {low: I32 high: I32}
+  returns ok: Bool
+  visibility @public
+  do
+    return Ordered.lessOrEqual(low high)
+endfn
+
+fn chooseUpper
+  takes {low: I32 high: I32}
+  returns upper: I32
+  requires inOrder(low high)
+  ensures inOrder(low upper)
+  visibility @public
+  do
+    return high
+endfn
+
+fn orderedChoice
+  takes {low: I32 high: I32}
+  returns choice: Result(I32 OrderError)
+  visibility @public
+  do
+    return Result.ok(value: chooseUpper(low high))
+endfn

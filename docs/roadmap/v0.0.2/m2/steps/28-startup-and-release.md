@@ -30,7 +30,7 @@ step 17: `Context::startup_event`.
 
 | Existing | Symbol | Use |
 | --- | --- | --- |
-| `crates/vibra-ir/src/external/host.rs:377` | `pub fn host_row` | the rows of the two startup reads |
+| `crates/vibra-ir/src/external/host.rs:842` | `pub fn host_row` | the rows of the two startup reads |
 
 Proposed: `vibra-host::startup::{admit, EntryShape, EntryLeaf, Admission,
 AdmissionRefusal, start, Started, StartupRecord, BindingRecord,
@@ -114,7 +114,7 @@ interfaces. `O` is the plan with leaves `@a` (`after: [@b]`), `@b`, and
 | each directory refusal | negative | the path names nothing; names a file; index beyond the arguments; variable not present | each `@refused` | 04, the `@host.fs.directory` row |
 | `V2-GRANT-startup-failed-optional` | negative | `@notes` optional; the scripted driver answers `Failed("io")` | status `failed`, `@grant.acquisitionFailed` | 04: "A failure stops the sequence for a required and an optional leaf alike" |
 | `ATK-startup-failure-not-none` | negative | the same; inspect the entry arguments | none were built; no `Absent` for `@notes` | 04: "A failure never becomes an absence" |
-| absent `source` | positive | `@args` optional and refused; `@notes` optional with `source: @args` | `@notes` `@refused` | 04: "A leaf whose `source` leaf was bound absent is refused as well" |
+| absent `source` | positive | `@args` optional; `@notes` optional with `source: @args` | cannot arise: `@host.env.args` is never refused, so `@args` is acquired and `@notes` reads it | 04: "Anything the row does not list as acquired or refused is a failure" |
 | absent `source`, required | negative | the same with `@notes` required | `@grant.requiredUnavailable` | the same |
 | unlisted read error | negative | `@variablePath`; the variable's value is not Unicode | `@failed` (Q19) | 04: "Anything the row does not list as acquired or refused is a failure" |
 | `V2-GRANT-startup-read-counts` | positive | `@args` with `limits: {invocations: 1u64}`; the entry then reads arguments | the entry's read is `limitExceeded` (Q19) | 04: "read once, at startup, through the `source` leaf's grant" |
@@ -128,7 +128,7 @@ interfaces. `O` is the plan with leaves `@a` (`after: [@b]`), `@b`, and
 | `ATK-admit-leaf-interface-mismatch` | negative | `M` with an `EntryShape` whose `@notes` leaf is a `DirWriteText` | refused at the conformance check; `Driver::acquire` is never called | 04: "A missing or extra key is `@grant.invalidBinding`" |
 | admission order | negative | `M` with both the conformance fault and the ceiling fault above | the conformance refusal | architecture, the `startup` block: the order of the checks |
 | `ATK-plan-provider-mismatch` | negative | a hand-built plan with `@host.io.stdout` for a `DirReadText` leaf | `admit` refuses | 03: "a recipe whose provider cannot issue the leaf's type" |
-| admission without a driver | negative | a driver whose `identity(@host.fs.directory)` is `None` | "unavailable"; nothing acquired | 04: "rejected at admission, as `@tool.unavailable`, before any leaf is processed" |
+| admission without a driver | negative | a driver whose `identity(@host.fs.directory)` is `None` | "unavailable"; nothing acquired | 04: "A driver the platform does not support at all is a different case" |
 | `V2-GRANT-release-order` | positive | `O` started, then `release` | acquired `@b`, `@a`, `@z`; `Driver::release` called for `@z`, `@a`, `@b`: neither the order of spelling nor its reverse | 06: "in reverse acquisition order" |
 | release after a failed startup | positive | two acquired, the third fails | the two are released, in reverse | 06: "On every ending of the process (… or a failed startup)" |
 | `V2-GRANT-release-status` | positive | a finished start and release | every acquired binding's status is `released` (Q21) | 05: "every acquired binding of a finished command is released" |

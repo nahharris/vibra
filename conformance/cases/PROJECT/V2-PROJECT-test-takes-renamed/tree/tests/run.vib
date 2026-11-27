@@ -1,0 +1,11 @@
+use @std.assert enduse
+
+use @std.test.TestWorld enduse
+
+test "renamed"
+  takes {sandbox: TestWorld}
+  performs {TestWorld}
+  do
+    let _ be await TestWorld.random(sandbox) endlet
+    assert.true(true)
+endtest

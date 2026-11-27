@@ -1,0 +1,19 @@
+id = "V2-PROJECT-entry-parameter-brand"
+rule = "V2-PROJECT-entry-parameter-brand"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "04-programs-and-packages.md#targets: a declared type over a grant is not an entry parameter type"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@project.invalidEntrySignature"
+level = "@error"
+source = "project.vibon"
+span = { start = 119, end = 133 }
+related = [{ source = "src/app/main.vib", span = { start = 169, end = 173 } }]

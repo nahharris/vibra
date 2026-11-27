@@ -1,0 +1,18 @@
+id = "V2-EFFECT-proc-result-is-plan"
+rule = "V2-EFFECT-proc-result-is-plan"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#application: applying a proc gives an Intent, not its result"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.mismatch"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 124, end = 133 }

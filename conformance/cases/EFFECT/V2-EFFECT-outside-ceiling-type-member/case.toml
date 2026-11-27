@@ -1,0 +1,19 @@
+id = "V2-EFFECT-outside-ceiling-type-member"
+rule = "V2-EFFECT-outside-ceiling-type-member"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#effect-ceilings: a proc member of a type with the empty row performs nothing"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@effect.outsideCeiling"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 369, end = 385 }
+related = [{ source = "src/app/main.vib", span = { start = 375, end = 385 } }, { source = "src/app/main.vib", span = { start = 696, end = 713 } }]

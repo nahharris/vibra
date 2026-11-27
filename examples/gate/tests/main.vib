@@ -1,0 +1,256 @@
+// The release program under a test world: every grant the entry takes comes
+// from the `TestWorld` the test receives.
+
+use @std.assert enduse
+
+use @std.test.TestWorld enduse
+
+use @std.env.EnvReadArgs enduse
+
+use @std.env.EnvReadVar enduse
+
+use @std.fs.DirList enduse
+
+use @std.fs.DirReadText enduse
+
+use @std.fs.DirWriteText enduse
+
+use @std.fs.FileAction enduse
+
+use @std.fs.FileDepth enduse
+
+use @std.fs.FsError enduse
+
+use @std.fs.FsPolicy enduse
+
+use @std.fs.NameTest enduse
+
+use @std.fs.RelativePath enduse
+
+use @std.io.StdoutText enduse
+
+use @std.policy.GrantLimits enduse
+
+use @std.process.ExitCode enduse
+
+use @gate.main enduse
+
+// What one run of the program left: its exit code, its standard output, the
+// log file, and the metric file.
+type Ran of {code: U8 shown: Bytes log: Result(Str FsError) metric: Result(Str FsError)}
+endtype
+
+// The program run in `world` on the notes `files` with the one argument
+// `notes`, its reader passed through `narrow`, and a metric directory when
+// `withMetric` holds.
+proc runIn
+  takes {
+    world: TestWorld
+    files: Dict(RelativePath Str)
+    narrow: Fn({DirReadText} DirReadText)
+    withMetric: Bool
+  }
+  returns ran: Ran
+  performs {TestWorld EnvReadArgs DirList DirReadText DirWriteText StdoutText}
+  do
+    let {list: list readText: reader} be await TestWorld.directory(world files: files)
+    endlet
+    let {readText: logReader writeText: logs} be await TestWorld.directory(world) endlet
+    let {readText: metricReader writeText: metricWriter} be
+      await TestWorld.directory(world)
+    endlet
+    let {variables: vars arguments: args} be
+      await TestWorld.environment(world arguments: ["notes"])
+    endlet
+    let {stdoutText: out} be await TestWorld.streams(world) endlet
+    let metrics be chosen(withMetric metricWriter) endlet
+    let ExitCode(code) be
+      await main.main(args vars {list: list reader: narrow(reader)} logs metrics out)
+    endlet
+    let {stdout: shown stderr: _} be await TestWorld.output(world) endlet
+    let Result.ok(value: logAt) be RelativePath(["gate.log"]) endlet
+    let Result.ok(value: metricAt) be RelativePath(["gate.metric"]) endlet
+    return Ran(
+      code: code
+      shown: shown
+      log: await DirReadText.read(logReader logAt)
+      metric: await DirReadText.read(metricReader metricAt)
+    )
+endproc
+
+// `writer` when `wanted` holds, else no metric directory.
+fn chosen
+  takes {wanted: Bool writer: DirWriteText}
+  returns metrics: Option(DirWriteText)
+  do
+    if wanted then return Option.some(value: writer) endif
+    return Option.none()
+endfn
+
+// The notes `a.txt` with two lines and `b.txt` with three.
+fn twoNotes
+  returns files: Dict(RelativePath Str)
+  do
+    let Result.ok(value: a) be RelativePath(["a.txt"]) endlet
+    let Result.ok(value: b) be RelativePath(["b.txt"]) endlet
+    return [a: "one\ntwo\n" b: "1\n2\n3"]
+endfn
+
+// The reader as the world issued it.
+fn unchanged
+  takes {reader: DirReadText}
+  returns same: DirReadText
+  do
+    return reader
+endfn
+
+test "the summary counts each note and the total"
+  takes {world: TestWorld}
+  performs {TestWorld EnvReadArgs DirList DirReadText DirWriteText StdoutText}
+  do
+    let Ran(code: code shown: shown log: _ metric: _) be
+      await runIn(world twoNotes() unchanged false)
+    endlet
+    assert.equal(0u8 code)
+    assert.equal(Str.toUtf8("a: 2 lines\nb: 3 lines\n2 notes, 5 lines\n") shown)
+endtest
+
+test "the log holds each note, the summary, and the metric's line"
+  takes {world: TestWorld}
+  performs {TestWorld EnvReadArgs DirList DirReadText DirWriteText StdoutText}
+  do
+    let Ran(code: _ shown: _ log: log metric: _) be
+      await runIn(world twoNotes() unchanged true)
+    endlet
+    assert.equal(
+      Result.ok(
+        value: "a.txt: 2 lines\nb.txt: 3 lines\n2 notes, 5 lines\nmetric: gate.metric\n"
+      )
+      log
+    )
+endtest
+
+test "a present metric directory receives the mean"
+  takes {world: TestWorld}
+  performs {TestWorld EnvReadArgs DirList DirReadText DirWriteText StdoutText}
+  do
+    let Ran(code: code shown: _ log: _ metric: metric) be
+      await runIn(world twoNotes() unchanged true)
+    endlet
+    assert.equal(0u8 code)
+    assert.equal(Result.ok(value: "mean lines per note: 2\n") metric)
+endtest
+
+test "an absent metric writes nothing and leaves the output as it is"
+  takes {world: TestWorld}
+  performs {TestWorld EnvReadArgs DirList DirReadText DirWriteText StdoutText}
+  do
+    let Ran(code: code shown: shown log: log metric: metric) be
+      await runIn(world twoNotes() unchanged false)
+    endlet
+    assert.equal(0u8 code)
+    assert.equal(Str.toUtf8("a: 2 lines\nb: 3 lines\n2 notes, 5 lines\n") shown)
+    assert.equal(
+      Result.ok(
+        value: "a.txt: 2 lines\nb.txt: 3 lines\n2 notes, 5 lines\nmetric: absent\n"
+      )
+      log
+    )
+    assert.equal(Result.err(error: FsError.notFound()) metric)
+endtest
+
+// The reader limited to the `.txt` files of its directory, as the target's
+// recipe limits it.
+fn textOnly
+  takes {reader: DirReadText}
+  returns narrowed: DirReadText
+  do
+    let Result.ok(value: here) be RelativePath([]) endlet
+    let policy be
+      FsPolicy.files(
+        prefix: here
+        depth: FileDepth.children()
+        actions: [FileAction.read()]
+        names: NameTest.suffix(value: ".txt")
+      )
+    endlet
+    let Result.ok(value: narrowed) be DirReadText.restrict(reader policy) else
+      return reader
+    endlet
+    return narrowed
+endfn
+
+test "a note outside the reader's policy is logged as denied"
+  takes {world: TestWorld}
+  performs {TestWorld EnvReadArgs DirList DirReadText DirWriteText StdoutText}
+  do
+    let Result.ok(value: a) be RelativePath(["a.txt"]) endlet
+    let Result.ok(value: c) be RelativePath(["c.md"]) endlet
+    let Ran(code: code shown: shown log: log metric: _) be
+      await runIn(world [a: "one\ntwo\n" c: "x"] textOnly false)
+    endlet
+    assert.equal(0u8 code)
+    assert.equal(Str.toUtf8("a: 2 lines\n1 notes, 2 lines\n") shown)
+    assert.equal(
+      Result.ok(
+        value: "a.txt: 2 lines\nc.md: denied\n1 notes, 2 lines\nmetric: absent\n"
+      )
+      log
+    )
+endtest
+
+// The reader bounded at two invocations.
+fn twoReads
+  takes {reader: DirReadText}
+  returns narrowed: DirReadText
+  do
+    return DirReadText.limit(
+      reader
+      GrantLimits(
+        invocations: Option.some(value: 2u64)
+        inputBytes: Option.none()
+        outputBytes: Option.none()
+      )
+    )
+endfn
+
+test "a read past the reader's limit is logged as exceeded"
+  takes {world: TestWorld}
+  performs {TestWorld EnvReadArgs DirList DirReadText DirWriteText StdoutText}
+  do
+    let Result.ok(value: a) be RelativePath(["a.txt"]) endlet
+    let Result.ok(value: b) be RelativePath(["b.txt"]) endlet
+    let Result.ok(value: c) be RelativePath(["c.txt"]) endlet
+    let Ran(code: code shown: shown log: log metric: _) be
+      await runIn(world [a: "one\ntwo\n" b: "1\n2\n3" c: "x"] twoReads false)
+    endlet
+    assert.equal(0u8 code)
+    assert.equal(Str.toUtf8("a: 2 lines\nb: 3 lines\n2 notes, 5 lines\n") shown)
+    assert.equal(
+      Result.ok(
+        value: "a.txt: 2 lines\nb.txt: 3 lines\nc.txt: limit exceeded\n2 notes, 5 lines\nmetric: absent\n"
+      )
+      log
+    )
+endtest
+
+test "more than one argument is a usage error"
+  takes {world: TestWorld}
+  performs {TestWorld EnvReadArgs DirList DirReadText DirWriteText StdoutText}
+  do
+    let {list: list readText: reader writeText: logs} be
+      await TestWorld.directory(world)
+    endlet
+    let {variables: vars arguments: args} be
+      await TestWorld.environment(world arguments: ["notes" "more"])
+    endlet
+    let {stdoutText: out} be await TestWorld.streams(world) endlet
+    let ExitCode(code) be
+      await main.main(args vars {list: list reader: reader} logs Option.none() out)
+    endlet
+    assert.equal(2u8 code)
+    assert.equal(
+      {stdout: Str.toUtf8("usage: gate <notes directory>\n") stderr: Bytes([])}
+      await TestWorld.output(world)
+    )
+endtest

@@ -1,0 +1,7 @@
+use @std.assert enduse
+
+use @app.holder enduse
+
+test "open" do assert.equal(1i32 holder.viaHolder()) endtest
+
+test "plain" do assert.true(true) endtest

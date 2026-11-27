@@ -1,0 +1,13 @@
+id = "V2-RUNTIME-model-impl-runs"
+rule = "V2-RUNTIME-model-impl-runs"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "03-effects.md#tests-and-model-profiles: a package implements an operation interface in Vibra and a test awaits its member, with no host event"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

@@ -1,0 +1,9 @@
+use @std.assert enduse
+
+use @app.main enduse
+
+type Missing of I32 endtype
+
+test "row" performs {Missing} do endtest
+
+test "plain" do assert.true(true) endtest

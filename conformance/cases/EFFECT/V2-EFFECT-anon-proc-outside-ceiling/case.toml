@@ -1,0 +1,19 @@
+id = "V2-EFFECT-anon-proc-outside-ceiling"
+rule = "V2-EFFECT-anon-proc-outside-ceiling"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#effect-ceilings: a ceiling is never inferred, so an anonymous proc with no performs that awaits Log performs outside its ceiling"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@effect.outsideCeiling"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 755, end = 779 }
+related = [{ source = "src/app/main.vib", span = { start = 761, end = 779 } }]

@@ -1,0 +1,18 @@
+id = "V2-EFFECT-std-unhandled-result"
+rule = "V2-EFFECT-std-unhandled-result"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "01-source-language.md#let: the Result of StdoutText.write left unused as a statement is an unhandled fallible value"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.unhandledFallible"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 195, end = 226 }

@@ -1,0 +1,16 @@
+interface Log
+  proc append
+    takes {log: Self entry: Str}
+    returns done: Void
+  endproc
+endinterface
+
+interface Clock
+  proc now takes {clock: Self} returns at: I64 endproc
+endinterface
+
+interface Shown
+  fn show takes {value: Self} returns text: Str endfn
+endinterface
+interface Audit proc record takes {a: Self entry: Str} returns done: Void performs {Log} endproc endinterface
+type Entry of I32 impl Audit proc record takes {a: Self entry: Str} returns done: Void do return void endproc endimpl endtype

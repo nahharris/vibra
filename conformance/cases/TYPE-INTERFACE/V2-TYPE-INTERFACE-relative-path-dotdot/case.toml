@@ -1,0 +1,18 @@
+id = "V2-TYPE-INTERFACE-relative-path-dotdot"
+rule = "V2-TYPE-INTERFACE-relative-path-dotdot"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#guards-with-else: RelativePath([\"..\"]) is a constant construction GUARD-1 evaluates to Result.err, a legal value and no @contract.refuted, so a let Result.ok over it with no else is @pattern.refutableBinding at the pattern"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@pattern.refutableBinding"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 86, end = 108 }

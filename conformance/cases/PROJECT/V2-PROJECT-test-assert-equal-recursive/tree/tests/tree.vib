@@ -1,0 +1,9 @@
+use @std.assert enduse
+
+// A recursive declared type with no callable in it.
+type Tree of {children: List(Tree) label: I32} endtype
+
+test "tree" do
+  let leaf be Tree(children: [] label: 2i32) endlet
+  assert.equal(Tree(children: [leaf] label: 1i32) Tree(children: [leaf] label: 1i32))
+endtest

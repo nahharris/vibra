@@ -18,7 +18,7 @@ Crates: `vibra-host`.
 | Existing | Symbol | Use |
 | --- | --- | --- |
 | `crates/vibra-ir/src/value.rs:18` | `pub enum Value` | the canonical data of arguments and results |
-| `crates/vibra-ir/src/origin.rs:12` | `pub struct SourceOrigin` | origins; the ordinal comes in the request |
+| `crates/vibra-ir/src/origin.rs:12` | `pub struct SourceOrigin` | origins; the request carries the `await`'s record, or none |
 
 From step 15: `broker::Context`, its pending event, and `commit`.
 
@@ -66,9 +66,10 @@ row is committed with its receipt unless the row says otherwise.
 
 | Row | Kind | Input | Expected | Specification |
 | --- | --- | --- | --- | --- |
-| one completed call | positive | `io.stdoutText "hello\n"` on a root with origin `{kind: @binding leaf: @out}`, invocation 2, parent 1, origin 1 | exactly the `@host` event of the chapter's example, field for field | 06 Audit trace, the example |
+| one completed call | positive | `io.stdoutText "hello\n"` on a root with origin `{kind: @binding leaf: @out}`, invocation 2, parent 1, the source origin `(src/hello/main.vib 42 68)` | exactly the `@host` event of the chapter's example, field for field | 06 Audit trace, the example |
 | fields in order | positive | the encoded event | `kind, invocation, parent, phase, op, driver, origin, grant, args, result` | 06, the host event table |
 | absent `parent` | positive | a startup read: phase `@startup`, no parent | the field is absent | 06: "absent for a startup read" |
+| absent `origin` | positive | a request with no source origin | the field is absent | 06 Origins: "Where no source origin is known, a document omits its optional `origin` field" |
 | denial before the adapter | negative | a policy refusal | `events` is empty | 06: "A refusal before the adapter is called … appends nothing" |
 | `limitExceeded` | negative | a grant at its bound | `events` is empty | the same |
 | size refusal at the gate | negative | `inputBytes: 4`; the driver finds 5 bytes | `Err(limitExceeded)`, no receipt; `events` is empty (Q29) | 06 Error types: "nothing was dispatched" |
@@ -83,7 +84,7 @@ row is committed with its receipt unless the row says otherwise.
 | projection after `limit` | positive | `limit(invocations: 5)` | `limits: {invocations: 5u64}` only | 06: "a record of the bounds that are set" |
 | narrowing keeps the origin | positive | `restrict` and `sub` of a `@testWorld` root | `issuedBy: {kind: @testWorld}`, the same `root` | 06: "Narrowing keeps the origin record of the grant it narrows" |
 | two roots | positive | two root grants | `root: 1u64` and `root: 2u64` (Q13) | 06: "a run-local ordinal of the root grant" |
-| drivers sorted | positive | drivers `@host.io.stdout` and `@host.fs.directory` | `drivers` lists `fs` first | 06: "sorted by `provider`" |
+| drivers sorted | positive | drivers `@host.io.stdout` and `@host.fs.directory` | `drivers` lists `fs` first | 06: "sorted by the UTF-8 bytes of the provider's spelling, then of the version" |
 | the driver of an event | positive | a scripted driver whose identity is `{provider: @host.io.stdout version: "9.9.9"}` | the event's `driver` and the one entry of `drivers` are that record | 06, the host event table: `driver` |
 | `ATK-trace-uncommitted-no-event` | negative | a completed call whose receipt is dropped without `commit` | `events` is empty; `uncommitted()` is 1 | 06 step 5: "Advance the continuation consistently with the completion, and then append the completed event" |
 | `ATK-trace-commit-once` | negative | a completed call; `commit`; then `commit` of a receipt with the same context and serial, made by the test-only constructor | `InvalidHostValue` for the second; `events` has one event | 06 Audit trace: "in completion order" |
@@ -123,7 +124,7 @@ Redaction profiles other than `@none`; the trap record's origin (29).
 
 ## Completion evidence
 
-- [ ] Each of the 29 rows is a test, named in the report.
+- [ ] Each of the 30 rows is a test, named in the report.
 - [ ] `Receipt` derives neither `Clone` nor `Copy`: the report quotes
       the type.
 - [ ] The example row compares against text copied from the chapter, not

@@ -1,0 +1,13 @@
+id = "V2-GRANT-test-stream-bytes"
+rule = "V2-GRANT-test-stream-bytes"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "07-diagnostics-and-conformance.md#required-coverage: standard input read as bytes and standard error written as bytes succeed and are traced"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

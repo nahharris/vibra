@@ -1,0 +1,12 @@
+id = "V2-TYPE-NAMES-suspicious-row-returns"
+rule = "V2-TYPE-NAMES-suspicious-row-returns"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "01-source-language.md#grammar: a returns type that is a tuple of operation interfaces is an ordinary value and no warning"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

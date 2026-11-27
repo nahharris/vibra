@@ -1,0 +1,13 @@
+id = "V2-GRANT-sub-missing-directory"
+rule = "V2-GRANT-sub-missing-directory"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "03-effects.md#narrowing: sub with a directory that does not exist is Result.ok; a read through it is Err(notFound)"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

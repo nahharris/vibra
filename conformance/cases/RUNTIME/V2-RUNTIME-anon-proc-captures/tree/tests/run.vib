@@ -1,0 +1,10 @@
+use @std.assert enduse
+
+fn adder takes {k: I32} returns f: Proc({I32} I32) do
+  return proc takes {n: I32} returns r: I32 do return I32.add(n k) endproc
+endfn
+
+test "captures" do
+  let f be adder(2i32) endlet
+  assert.equal(5i32 await f(3i32))
+endtest

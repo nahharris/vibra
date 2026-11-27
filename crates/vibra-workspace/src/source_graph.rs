@@ -4,9 +4,11 @@
 //! the graph holds exact source bytes and no parsed declaration. `units` is
 //! every unit of the snapshot sorted by `name`, `@tests` always among them;
 //! a unit's `modules` are sorted by `path`, each with its `sourceId` and its
-//! exact bytes in lower-case hexadecimal. `dependencies` is every declared
-//! dependency sorted by `alias`, with its `kind`, `source`, optional
-//! `target`, `status`, and the span record of its project entry.
+//! exact bytes in lower-case hexadecimal; a dependency's unit has the kind
+//! `@dependency`. `dependencies` is every dependency the project declares,
+//! sorted by `name`, with its `kind`, `source`, `status` (`@captured` for a
+//! path dependency, `@unavailable` for a Git one), and the span record of its
+//! project entry.
 //!
 //! `docs/spec/04-programs-and-packages.md`, "Embedded modules": a project
 //! module whose source identity collides with an embedded one is
@@ -42,10 +44,9 @@ struct GraphUnit {
 /// One dependency record of the graph.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GraphDependency {
-    alias: String,
+    name: String,
     kind: DependencyKind,
     source: String,
-    target: Option<String>,
     availability: Availability,
     source_id: String,
     span: ByteSpan,
@@ -54,11 +55,12 @@ pub struct GraphDependency {
 impl GraphDependency {
     /// The dependency name.
     #[must_use]
-    pub fn alias(&self) -> &str {
-        &self.alias
+    pub fn name(&self) -> &str {
+        &self.name
     }
 
-    /// The status atom: `@unavailable` for every dependency of this release.
+    /// The status atom: `@captured` for a path dependency, `@unavailable`
+    /// for a Git dependency.
     #[must_use]
     pub const fn status(&self) -> &'static str {
         match self.availability {
@@ -91,8 +93,8 @@ fn hex(bytes: &[u8]) -> String {
 
 impl SourceGraph {
     /// The graph of `snapshot`. A module whose source identity equals one of
-    /// `embedded` (the source identities of the embedded modules) is
-    /// `@module.sourceIdCollision`.
+    /// `embedded` (the source identities of the embedded modules, each its
+    /// module atom) is `@module.sourceIdCollision`.
     pub fn build(
         snapshot: &SourceSnapshot,
         embedded: &[&str],
@@ -141,23 +143,23 @@ impl SourceGraph {
             .dependencies()
             .iter()
             .map(|dependency| GraphDependency {
-                alias: dependency.name().to_owned(),
+                name: dependency.name().to_owned(),
                 kind: dependency.kind(),
                 source: dependency.source().to_owned(),
-                target: dependency.target().map(str::to_owned),
+
                 availability: dependency.availability(),
                 source_id: project.source_id().to_owned(),
                 span: dependency.span(),
             })
             .collect::<Vec<_>>();
-        dependencies.sort_by(|left, right| left.alias.cmp(&right.alias));
+        dependencies.sort_by(|left, right| left.name.cmp(&right.name));
         Ok(Self {
             units,
             dependencies,
         })
     }
 
-    /// The dependency records, sorted by alias.
+    /// The dependency records, sorted by name.
     #[must_use]
     pub fn dependencies(&self) -> &[GraphDependency] {
         &self.dependencies
@@ -198,14 +200,12 @@ impl SourceGraph {
             }
             let _ = write!(
                 out,
-                "{{alias: {} kind: {} source: {}",
-                canonical_string(&dependency.alias),
+                "{{name: {} kind: {} source: {}",
+                canonical_string(&dependency.name),
                 dependency.kind.as_atom(),
                 canonical_string(&dependency.source)
             );
-            if let Some(target) = &dependency.target {
-                let _ = write!(out, " target: {target}");
-            }
+
             let _ = write!(
                 out,
                 " status: {} span: {{sourceId: {} start: {}u64 end: {}u64}}}}",

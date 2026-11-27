@@ -1,0 +1,9 @@
+use @money.amount enduse
+
+fn total
+  takes {value: I32}
+  returns result: I32
+  visibility @public
+  do
+    return amount.cents(value)
+endfn

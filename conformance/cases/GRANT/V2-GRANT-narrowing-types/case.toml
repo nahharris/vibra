@@ -1,0 +1,12 @@
+id = "V2-GRANT-narrowing-types"
+rule = "V2-GRANT-narrowing-types"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#narrowing: limit and restrict are called in a fn: narrowing performs nothing"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

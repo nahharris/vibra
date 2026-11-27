@@ -20,8 +20,8 @@ Crates: none.
 
 | Existing | Symbol | Use |
 | --- | --- | --- |
-| `crates/vibra-ir/src/external/host.rs:377` | `pub fn host_row` | the rows the broker dispatches |
-| `crates/vibra-workspace/src/test_runner.rs:611` | `fn run_one` | where a world and a context are made |
+| `crates/vibra-ir/src/external/host.rs:842` | `pub fn host_row` | the rows the broker dispatches |
+| `crates/vibra-workspace/src/test_runner.rs:621` | `fn run_one` | where a world and a context are made |
 
 It reads `crates/vibra-host/src/`, `crates/vibra-interp/src/host.rs`,
 `crates/vibra-types/src/check/effects/grants.rs`, and `stdlib/src/std/`.

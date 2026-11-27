@@ -21,6 +21,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
+use vibra_ir::external::CompilerIntrinsic;
 use vibra_ir::{
     CheckedModuleSet, ClosureBody, Constant, Expr, Library, Node, Pattern, Value,
 };
@@ -29,6 +30,7 @@ use super::ctfe::{Evaluator, Outcome};
 use super::declare::{Entity, Program};
 use super::expr::{Checked, Layout};
 use super::obligation::Obligation;
+use super::{COMPILE_TIME_REDUCTIONS, PROOF_DERIVATIONS};
 use fragment::{Facts, Standing, walk};
 
 /// A checked guard of a callable.
@@ -64,6 +66,9 @@ pub(crate) struct ClosureContract {
     pub(crate) span: ByteSpan,
     /// Its type.
     pub(crate) signature: vibra_ir::FnType,
+    /// Whether applying it builds a plan: it is an anonymous `proc`, whose
+    /// `ensures` is never a certified result.
+    pub(crate) plan: bool,
     /// The name of each argument slot: the positional parameters, then the
     /// labels in canonical order.
     pub(crate) names: Vec<String>,
@@ -163,10 +168,16 @@ pub(crate) struct Fold {
 pub(crate) struct Reviewed {
     /// The diagnostics, of local declarations only.
     pub(crate) diagnostics: Vec<Diagnostic>,
+    /// The diagnostics of the embedded library's declarations: each is a
+    /// defect of the library, which the loader refuses.
+    pub(crate) library: Vec<Diagnostic>,
     /// The folded guards of each function, by program index.
     pub(crate) folds: BTreeMap<usize, Fold>,
     /// The obligation of every bare-guard site of a local declaration.
     pub(crate) obligations: Vec<Obligation>,
+    /// The name of each limit a local declaration reached, in the order
+    /// first reached.
+    pub(crate) limits: Vec<&'static str>,
 }
 
 /// A declaration whose body holds sites: a function, a module value, a
@@ -260,10 +271,16 @@ impl Context<'_, '_> {
     }
 
     /// Reports `diagnostic` once: a contract guard is reviewed for each
-    /// place it is copied to, and its faults are the contract's.
+    /// place it is copied to, and its faults are the contract's. A fault of
+    /// the embedded library is kept apart, as a defect of the library.
     fn push(&mut self, module: usize, diagnostic: Diagnostic) {
-        if self.local(module) && !self.reviewed.diagnostics.contains(&diagnostic) {
-            self.reviewed.diagnostics.push(diagnostic);
+        let found = if self.local(module) {
+            &mut self.reviewed.diagnostics
+        } else {
+            &mut self.reviewed.library
+        };
+        if !found.contains(&diagnostic) {
+            found.push(diagnostic);
         }
     }
 
@@ -349,7 +366,7 @@ impl Context<'_, '_> {
             super::ctfe::PROFILE.name,
             super::ctfe::PROFILE.proof_derivations
         );
-        self.limit_message(module, span, message);
+        self.limit_message(module, span, message, PROOF_DERIVATIONS);
     }
 
     /// Reports `@tool.limitExceeded` at the predicate at `span` of the
@@ -362,16 +379,26 @@ impl Context<'_, '_> {
             super::ctfe::PROFILE.name,
             super::ctfe::PROFILE.compile_time.reductions
         );
-        self.limit_message(module, span, message);
+        self.limit_message(module, span, message, COMPILE_TIME_REDUCTIONS);
     }
 
     /// Reports `@tool.limitExceeded` with `message` at the predicate at
-    /// `span` of the module `module`, once.
-    fn limit_message(&mut self, module: usize, span: ByteSpan, message: String) {
+    /// `span` of the module `module`, once, and names the limit reached,
+    /// `limit`, when the declaration is local.
+    fn limit_message(
+        &mut self,
+        module: usize,
+        span: ByteSpan,
+        message: String,
+        limit: &'static str,
+    ) {
         if self.limited.contains(&(module, span)) {
             return;
         }
         self.limited.push((module, span));
+        if self.local(module) && !self.reviewed.limits.contains(&limit) {
+            self.reviewed.limits.push(limit);
+        }
         let diagnostic =
             self.diagnostic(DiagnosticCode::ToolLimitExceeded, module, span, message);
         self.push(module, diagnostic);
@@ -394,7 +421,8 @@ impl Context<'_, '_> {
                 "this expression is outside the certified fragment: a predicate \
                  or a consequence is built only from parameters, constants, \
                  constructions, field reads, `if` and `match`, the primitive \
-                 comparisons and `Bool` operations, and calls of certified \
+                 comparisons and `Bool` operations, calls of the library's \
+                 functions bound to total compiler rows, and calls of certified \
                  functions",
             ));
         }
@@ -557,7 +585,20 @@ pub(crate) fn review(
     let mut external = Vec::new();
     for index in &functions {
         let data = program.functions.get(*index);
-        external.push(data.is_some_and(|data| data.external.is_some()));
+        // A function bound to a total compiler row is certified: it has no
+        // body, depends on nothing, and its application is an opaque term.
+        if data
+            .is_some_and(|data| data.external.is_some_and(CompilerIntrinsic::is_total))
+        {
+            external.push(false);
+            entries.push(Some(Vec::new()));
+            continue;
+        }
+        // Any other external function and a `proc`, whose application builds
+        // a plan, are not certified functions.
+        external.push(data.is_some_and(|data| {
+            data.external.is_some() || super::effects::procs::builds_plan(data)
+        }));
         let bodies = inputs.functions.get(index).and_then(|checked| {
             let body = checked.node.as_ref()?;
             let mut bodies = vec![body];

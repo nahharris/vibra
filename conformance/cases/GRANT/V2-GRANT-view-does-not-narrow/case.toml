@@ -1,0 +1,22 @@
+# The guide expects @type.argumentMismatch at the receiver. 02 Interface member
+# calls, Selection: a receiver that selects no implementation of the interface
+# is @type.unsatisfiedBound at the receiver operand, related to the interface.
+id = "V2-GRANT-view-does-not-narrow"
+rule = "V2-GRANT-view-does-not-narrow"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#capability-values: a readText grant cannot be viewed as a DirWriteText: DirReadText has no implementation of DirWriteText, so the receiver is an unsatisfied bound, related to the interface"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.unsatisfiedBound"
+level = "@error"
+source = "tests/grants.vib"
+span = { start = 2352, end = 2364 }
+related = [{ source = "@std.fs", span = { start = 5403, end = 5415 } }]

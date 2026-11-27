@@ -164,6 +164,9 @@ pub(crate) enum Data {
     CaseField(Term, String, String),
     /// Whether a value is of a case: a `Bool` term.
     IsCase(Term, String),
+    /// The result of one `await` of the plan term, and an opaque term that
+    /// tells it from every other `await`: each run of a plan is its own.
+    Awaited(Term, Term),
 }
 
 /// The terms of one discharge, each stored once.
@@ -327,6 +330,7 @@ fn key(data: &Data) -> String {
             };
             format!("c{callee}{operands:?}")
         }
+        Data::Awaited(plan, run) => format!("a{plan:?}.{run:?}"),
         _ => format!("{data:?}"),
     }
 }
@@ -811,6 +815,20 @@ pub(crate) fn build_reading(
                     pending.push(Build::Visit(callee));
                 }
                 Expr::Closure { .. } => pending.push(Build::Make(node)),
+                // The run of a plan whose operand is directly a call is known
+                // by that call (`GUARD-7`); any other plan's run is not.
+                Expr::Await { plan }
+                    if matches!(
+                        plan.expr,
+                        Expr::Call {
+                            target: CallTarget::Direct { .. },
+                            ..
+                        }
+                    ) =>
+                {
+                    pending.push(Build::Make(node));
+                    pending.push(Build::Visit(plan));
+                }
                 Expr::Intrinsic { arguments, .. } => {
                     pending.push(Build::Make(node));
                     pending.extend(arguments.iter().rev().map(Build::Visit));
@@ -974,6 +992,14 @@ fn make(
                 }
             }
             terms.intern(Data::Call(callee, in_slot_order(arguments, operands)))
+        }
+        Expr::Await { .. } => {
+            let plan = take(1, stack)
+                .into_iter()
+                .next()
+                .unwrap_or_else(|| terms.opaque());
+            let run = terms.opaque();
+            terms.intern(Data::Awaited(plan, run))
         }
         Expr::Closure { closure, .. } => {
             let origin = &closure.body.origin;

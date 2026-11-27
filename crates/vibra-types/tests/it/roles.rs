@@ -23,11 +23,22 @@ fn every_role_is_claimed_exactly_once() {
             ("@std.bool", vec![Role::Bool]),
             ("@std.builtin", vec![Role::Dict]),
             ("@std.bytes", vec![Role::Bytes]),
-            ("@std.core", vec![Role::Equatable, Role::Ordered]),
+            (
+                "@std.core",
+                vec![Role::Equatable, Role::Ordered, Role::Encodable]
+            ),
+            ("@std.env", vec![]),
+            ("@std.fs", vec![]),
+            ("@std.io", vec![]),
             ("@std.iter", vec![Role::Iter]),
             ("@std.option", vec![Role::Option]),
+            ("@std.policy", vec![]),
+            ("@std.process", vec![]),
+            ("@std.random", vec![]),
             ("@std.result", vec![Role::Result]),
             ("@std.str", vec![Role::Str]),
+            ("@std.test", vec![]),
+            ("@std.time", vec![]),
         ]
     );
 }

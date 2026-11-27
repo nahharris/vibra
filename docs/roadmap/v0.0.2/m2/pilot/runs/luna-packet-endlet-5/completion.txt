@@ -1,0 +1,24 @@
+type Packet
+  case empty
+  case item {points: List(I32) code: I32}
+  visibility @public
+endtype
+
+let stopCode: I32 be 99i32 endlet
+
+fn packetScore
+  takes {packet: Packet}
+  returns score: Option(I32)
+  visibility @public
+  do
+    return match packet
+      case Packet.empty()
+        Option.none()
+      case Packet.item(points: _ code: stopCode)
+        Option.none()
+      case Packet.item(points: [first second] code: code)
+        Option.some(value: I32.add(I32.add(first second) code))
+      case Packet.item(points: _ code: _)
+        Option.none()
+    endmatch
+endfn

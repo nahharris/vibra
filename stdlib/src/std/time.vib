@@ -1,0 +1,48 @@
+// The clocks: the two operation interfaces of the `time` rows of the host
+// registry and their error type. Each interface binds its one operation with
+// `external @host` and its narrowing member `limit` with `external @compiler`;
+// both are the implementation of a sealed grant only, so an `impl` supplies
+// them.
+
+use @std.policy.GrantLimits enduse
+
+type TimeError
+  case unavailable
+  case denied
+  case limitExceeded
+  case unsupported
+  case outcomeUnknown
+  visibility @public
+endtype
+
+interface WallClock
+  visibility @public
+  proc read
+    takes {grant: Self}
+    returns outcome: Result(I64 TimeError)
+    external @host
+    symbol "time.nowWall"
+  endproc
+  fn limit
+    takes {grant: Self limits: GrantLimits}
+    returns narrowed: Self
+    external @compiler
+    symbol "grant.limit"
+  endfn
+endinterface
+
+interface MonotonicClock
+  visibility @public
+  proc read
+    takes {grant: Self}
+    returns outcome: Result(U64 TimeError)
+    external @host
+    symbol "time.nowMonotonic"
+  endproc
+  fn limit
+    takes {grant: Self limits: GrantLimits}
+    returns narrowed: Self
+    external @compiler
+    symbol "grant.limit"
+  endfn
+endinterface

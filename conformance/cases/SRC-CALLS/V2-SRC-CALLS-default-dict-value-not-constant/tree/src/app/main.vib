@@ -1,0 +1,2 @@
+fn one returns r: U8 do return 1u8 endfn
+fn table labelled {d: Dict(U8 U8) be [1u8: one()]} returns r: Dict(U8 U8) do return d endfn

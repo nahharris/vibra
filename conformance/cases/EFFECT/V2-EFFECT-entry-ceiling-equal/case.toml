@@ -1,0 +1,12 @@
+id = "V2-EFFECT-entry-ceiling-equal"
+rule = "V2-EFFECT-entry-ceiling-equal"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "04-programs-and-packages.md#targets: an entry row equal to the target's effects is contained in it"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

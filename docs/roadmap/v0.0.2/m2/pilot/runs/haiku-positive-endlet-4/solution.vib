@@ -1,0 +1,40 @@
+// module @pilot.positive
+
+type PositiveError
+  case nonPositive
+  visibility @public
+endtype
+
+type Positive of I32
+  where isPositive
+  visibility @public
+endtype
+
+fn isPositive
+  takes {value: I32}
+  returns ok: Bool
+  visibility @public
+  do
+    return Ordered.greater(value 0i32)
+endfn
+
+fn makePositive
+  takes {raw: I32}
+  returns made: Result(Positive PositiveError)
+  visibility @public
+  do
+    if isPositive(raw) then
+      return Result.ok(value: Positive(raw))
+    endif
+    return Result.err(error: PositiveError.nonPositive())
+endfn
+
+fn readPositive
+  takes {positive: Positive}
+  returns value: I32
+  ensures isPositive(value)
+  visibility @public
+  do
+    let Positive(raw) be positive endlet
+    return raw
+endfn

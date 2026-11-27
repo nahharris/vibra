@@ -1,0 +1,26 @@
+use @std.assert enduse
+
+use @std.fs.RelativePath enduse
+
+use @std.policy.ScopeError enduse
+
+fn outcome
+  takes {names: List(Str)}
+  returns found: Str
+  do
+    match RelativePath(names)
+      case Result.err(error: ScopeError.invalidPath())
+        return "invalidPath"
+      case Result.err(error: _)
+        return "another error"
+      case Result.ok(value: _)
+        return "ok"
+    endmatch
+endfn
+
+test "invalidPath"
+  do
+    assert.equal("invalidPath" outcome([".."]))
+    assert.equal("invalidPath" outcome(["a" "NUL.txt"]))
+    assert.equal("ok" outcome(["a.txt"]))
+endtest

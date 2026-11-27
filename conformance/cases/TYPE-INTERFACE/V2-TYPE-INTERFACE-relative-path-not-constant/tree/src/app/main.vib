@@ -1,0 +1,9 @@
+use @std.fs.RelativePath enduse
+
+fn named
+  takes {names: List(Str)}
+  returns found: RelativePath
+  do
+    let Result.ok(value: path) be RelativePath(names) endlet
+    return path
+endfn

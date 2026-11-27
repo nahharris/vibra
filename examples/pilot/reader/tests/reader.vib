@@ -1,0 +1,100 @@
+use @std.assert enduse
+
+use @std.test.TestWorld enduse
+
+use @std.fs.DirReadText enduse
+
+use @std.fs.FileAction enduse
+
+use @std.fs.FileDepth enduse
+
+use @std.fs.FsError enduse
+
+use @std.fs.FsPolicy enduse
+
+use @std.fs.NameTest enduse
+
+use @std.fs.RelativePath enduse
+
+use @pilot.reader enduse
+
+test "no reader gives the fallback"
+  performs {DirReadText}
+  do
+    let Result.ok(value: at) be RelativePath(["a.txt"]) endlet
+    assert.equal(
+      Result.ok(value: "fallback")
+      await reader.readOptional(Option.none() at "fallback")
+    )
+endtest
+
+test "a reader reads the file"
+  takes {world: TestWorld}
+  performs {TestWorld DirReadText}
+  do
+    let Result.ok(value: at) be RelativePath(["a.txt"]) endlet
+    let {readText: grant} be await TestWorld.directory(world files: [at: "hello"])
+    endlet
+    assert.equal(
+      Result.ok(value: "hello")
+      await reader.readOptional(Option.some(value: grant) at "fallback")
+    )
+endtest
+
+test "a missing file is the error, not the fallback"
+  takes {world: TestWorld}
+  performs {TestWorld DirReadText}
+  do
+    let Result.ok(value: at) be RelativePath(["a.txt"]) endlet
+    let {readText: grant} be await TestWorld.directory(world) endlet
+    assert.equal(
+      Result.err(error: FsError.notFound())
+      await reader.readOptional(Option.some(value: grant) at "fallback")
+    )
+endtest
+
+test "a path outside the reader's policy is denied"
+  takes {world: TestWorld}
+  performs {TestWorld DirReadText}
+  do
+    let Result.ok(value: at) be RelativePath(["a.txt"]) endlet
+    let {readText: grant} be await TestWorld.directory(world files: [at: "hello"])
+    endlet
+    assert.equal(
+      Result.err(error: FsError.denied())
+      await reader.readOptional(Option.some(value: onlyB(grant)) at "fallback")
+    )
+endtest
+
+// The reader limited to the file `b.txt`, or the reader itself if the
+// restriction is refused.
+fn onlyB
+  takes {grant: DirReadText}
+  returns narrowed: DirReadText
+  do
+    let Result.ok(value: here) be RelativePath([]) endlet
+    let policy be
+      FsPolicy.files(
+        prefix: here
+        depth: FileDepth.children()
+        actions: [FileAction.read()]
+        names: NameTest.exact(names: ["b.txt"])
+      )
+    endlet
+    let Result.ok(value: narrowed) be DirReadText.restrict(grant policy) else
+      return grant
+    endlet
+    return narrowed
+endfn
+
+test "an empty file reads as empty text"
+  takes {world: TestWorld}
+  performs {TestWorld DirReadText}
+  do
+    let Result.ok(value: at) be RelativePath(["a.txt"]) endlet
+    let {readText: grant} be await TestWorld.directory(world files: [at: ""]) endlet
+    assert.equal(
+      Result.ok(value: "")
+      await reader.readOptional(Option.some(value: grant) at "fallback")
+    )
+endtest

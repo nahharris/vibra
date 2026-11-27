@@ -574,15 +574,23 @@ fn test_declarations() {
     let view = tests(&document)[0];
     assert_eq!(view.takes().unwrap().0.node().kind(), SyntaxKind::Path);
     assert_eq!(view.performs().unwrap().paths()[0].dotted(), "TestWorld");
-    // `takes` admits exactly one parameter.
-    for params in ["{a: A b: B}", "{}"] {
+    // `takes` admits exactly one bare-name parameter; anything else is
+    // `@syntax.invalidForm` at the section, from `takes` to its brace's end.
+    for params in ["{a: A b: B}", "{}", "{{a b}: A}"] {
         let text = format!("test \"x\" takes {params} do assert.true(true) endtest");
         assert_eq!(
             diagnostics(&text),
-            [(SyntaxInvalidForm, 0, text.len())],
+            [(SyntaxInvalidForm, 9, 15 + params.len())],
             "{text}"
         );
     }
+    // The name is free.
+    let text = "test \"x\" takes {sandbox: TestWorld} do assert.true(true) endtest";
+    assert!(diagnostics(text).is_empty());
+    // A test admits no `labelled` section.
+    let text =
+        "test \"x\" labelled {world: TestWorld be w} do assert.true(true) endtest";
+    assert_eq!(diagnostics(text), [(SyntaxInvalidSection, 9, 41)]);
     // A test has a name and a body, and no signature but `takes`.
     let text = "test do endtest";
     assert_eq!(diagnostics(text), [(SyntaxInvalidForm, 0, 15)]);

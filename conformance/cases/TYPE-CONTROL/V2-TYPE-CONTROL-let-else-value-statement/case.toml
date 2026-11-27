@@ -1,0 +1,18 @@
+id = "V2-TYPE-CONTROL-let-else-value-statement"
+rule = "V2-TYPE-CONTROL-let-else-value-statement"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "01-source-language.md#bodies-and-statements: a fallback whose one statement has a value is one mismatch at the statement"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.mismatch"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 84, end = 88 }

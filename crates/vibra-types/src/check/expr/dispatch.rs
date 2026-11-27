@@ -30,6 +30,7 @@ use super::{
 };
 use crate::check::callables::mark_tail;
 use crate::check::declare::{BoundData, BoundGoal, GoalHead, key_diagnostic};
+use crate::check::effects;
 use crate::check::interfaces::same_head;
 
 /// The most goals one search for evidence visits.
@@ -45,7 +46,7 @@ pub(super) enum View {
     /// By the implementation `index`, at the types its binders take.
     Selected(usize, Vec<Option<Type>>),
     /// By the structural `Equatable` or `Ordered` of an atom, a tuple, or a
-    /// record.
+    /// record, or the structural `Encodable` of a type with an encoding.
     Structural,
 }
 
@@ -297,7 +298,7 @@ fn self_positions(
             _ => None,
         };
         let walks = match pattern {
-            Type::Tuple(_) | Type::Record(_) | Type::List(_) => true,
+            Type::Tuple(_) | Type::Record(_) | Type::List(_) | Type::Intent(_) => true,
             Type::Declared(..) => {
                 matches!(library(pattern), Some(Library::Option | Library::Result))
             }
@@ -315,11 +316,7 @@ impl<'a> BodyChecker<'_, 'a> {
     /// The written type span of the expected type at the expression
     /// `span`, when it is written.
     pub(super) fn written_span(&self, span: ByteSpan) -> Option<ByteSpan> {
-        self.destinations
-            .iter()
-            .rev()
-            .find(|(at, _)| *at == span)
-            .map(|(_, written)| *written)
+        self.destinations.get(&span).copied()
     }
 
     /// Reports `code` at `span`, related to `related` of `module`.
@@ -433,6 +430,42 @@ impl<'a> BodyChecker<'_, 'a> {
     ) -> (Found, Vec<Goal>) {
         let program = self.program;
         let none = (Found::None, Vec::new());
+        if program.prelude_interface("Encodable") == Some(interface)
+            && arguments.is_empty()
+            && !matches!(
+                receiver,
+                Type::Binder(_) | Type::SelfType | Type::Associated(_) | Type::Never
+            )
+        {
+            // 02 "Interfaces": conformance to `Encodable` is structural. A
+            // type with no callable, plan, or grant in it, through every
+            // declared type's representation, conforms, and each open form in
+            // it must conform through a bound.
+            if !effects::grants::is_encodable(program, receiver) {
+                return none;
+            }
+            let mut goals = Vec::new();
+            receiver.visit(&mut |inner| {
+                if matches!(
+                    inner,
+                    Type::Binder(_) | Type::SelfType | Type::Associated(_)
+                ) && !goals.iter().any(|goal: &Goal| goal.receiver == *inner)
+                {
+                    goals.push(Goal {
+                        receiver: inner.clone(),
+                        interface,
+                        arguments: Vec::new(),
+                        required: Vec::new(),
+                    });
+                }
+            });
+            let evidence = Evidence {
+                arguments: Vec::new(),
+                choices: Vec::new(),
+                view: View::Structural,
+            };
+            return (Found::One(evidence), goals);
+        }
         if receiver.is_interface_value() || *receiver == Type::Never {
             return none;
         }
@@ -615,7 +648,7 @@ impl<'a> BodyChecker<'_, 'a> {
         let Type::Fn(signature) = &substituted else {
             return None;
         };
-        let signature = signature.as_ref().clone();
+        let signature = effects::members::applied(declared, signature.as_ref().clone());
         let mut names = declared.binders.clone();
         names.push("Self".to_owned());
         names.extend(data.associated.iter().map(|(name, _)| name.clone()));
@@ -1543,7 +1576,8 @@ impl<'a> BodyChecker<'_, 'a> {
         else {
             return Out::error();
         };
-        let pattern = Type::function(signature);
+        let pattern =
+            effects::members::named_as_value(self, interface, member, signature);
         let var = dispatch.self_var();
         let mut assignment = vec![None; names.len()];
         let fits = expected.is_some_and(|expected| {
@@ -1692,9 +1726,8 @@ impl<'a> BodyChecker<'_, 'a> {
         ty: &Type,
         span: ByteSpan,
     ) -> Option<Node> {
-        let Type::Fn(callable) = ty else {
-            return None;
-        };
+        let callable = effects::members::value_signature(ty)?;
+        let callable = &callable;
         let call =
             self.contract_target(dispatch, &|ty| closed(ty, assignment), span, span)?;
         let defaults = self.member_defaults(dispatch, callable)?;
@@ -1715,7 +1748,7 @@ impl<'a> BodyChecker<'_, 'a> {
                 Some((name.clone(), read(self, callable.parameters.len() + at)?))
             })
             .collect::<Option<Vec<_>>>()?;
-        let mut body = self.node(
+        let call = self.node(
             IrExpr::Call {
                 target: CallTarget::Contract(Box::new(call)),
                 arguments: Arguments {
@@ -1725,7 +1758,7 @@ impl<'a> BodyChecker<'_, 'a> {
             },
             span,
         );
-        mark_tail(&mut body);
+        let body = effects::members::closure_body(ty, call, mark_tail);
         let closure = ClosureBody {
             value_type: ty.clone(),
             slot_count: slot_types.len(),

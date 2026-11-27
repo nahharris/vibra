@@ -1,0 +1,12 @@
+id = "V2-CONTRACT-proc-requires-at-build"
+rule = "V2-CONTRACT-proc-requires-at-build"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#cold-plans-and-performed-rows: a bare requires of a proc is discharged where the plan is built"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

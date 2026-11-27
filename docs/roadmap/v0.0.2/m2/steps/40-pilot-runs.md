@@ -16,7 +16,7 @@ Crates: none.
 
 | Existing | Symbol | Use |
 | --- | --- | --- |
-| `crates/vibra-cli/src/lib.rs:82` | `fn execute` | the grader, through `examples/pilot/grade.ps1` |
+| `crates/vibra-cli/src/lib.rs:84` | `fn execute` | the grader, through `examples/pilot/grade.ps1` |
 
 Proposed: `docs/roadmap/v0.0.2/m2/pilot/runs/` (one record per attempt);
 `docs/roadmap/v0.0.2/m2/pilot/runs.tsv`.

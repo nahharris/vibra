@@ -1,0 +1,19 @@
+id = "V2-EFFECT-test-row-missing-operation"
+rule = "V2-EFFECT-test-row-missing-operation"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#effect-ceilings: a test row naming TestWorld must also name what the test then performs"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@effect.outsideCeiling"
+level = "@error"
+source = "tests/run.vib"
+span = { start = 255, end = 281 }
+related = [{ source = "tests/run.vib", span = { start = 261, end = 281 } }]

@@ -1,4 +1,5 @@
-//! Source origins carried by checked nodes.
+//! Source origins carried by checked nodes (`docs/spec/06-runtime.md`,
+//! "Audit trace", "Origins").
 
 use std::sync::Arc;
 
@@ -6,8 +7,8 @@ use vibra_diagnostics::ByteSpan;
 
 /// A source identity and a span: where a checked node came from.
 ///
-/// A trap keeps the origin of the node that raised it, as the runtime
-/// chapter's "Traps" requires.
+/// A trap and a host event name a source location by this record itself,
+/// as the runtime chapter's "Origins" requires; nothing numbers origins.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SourceOrigin {
     /// Shared, so that cloning an origin, which every node carries, never

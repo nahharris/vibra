@@ -9,7 +9,7 @@ and one checked slice runs as native code.
 | --- | --- | --- |
 | M0 | [Specification and transition](m0/README.md) | No contradictory active rule; every supported form has a test, diagnostic, and schema owner; Windows file-scope feasibility recorded. |
 | M1 | [Pure language](m1/README.md) | The pure language passes its corpus on the interpreter, including static contract discharge and rejection. Exited: [exit record](m1/exit.md). |
-| M2 | [Operations and authority](m2/README.md) | A command-line program runs with bound grants; forbidden and unbound operations are rejected or denied as specified. The model-writing pilot is run. |
+| M2 | [Operations and authority](m2/README.md) | A command-line program runs with bound grants; forbidden and unbound operations are rejected or denied as specified. The model-writing pilot is run. Exited: [exit record](m2/exit.md). |
 | M3 | [Identity and repair loop](m3/README.md) | An agent starts from a seeded defect, inspects, repairs, and retests it; stale and replaced approvals are rejected. |
 | M4 | [First native slice](m4/README.md) | One new checked slice agrees across interpreter, stepper, and a linked Windows executable. |
 

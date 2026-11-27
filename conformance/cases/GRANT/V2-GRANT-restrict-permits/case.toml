@@ -1,0 +1,13 @@
+id = "V2-GRANT-restrict-permits"
+rule = "V2-GRANT-restrict-permits"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "03-effects.md#scope-policies: the restricted grant reads a.txt; the event projects the effective policy, a key of policies"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

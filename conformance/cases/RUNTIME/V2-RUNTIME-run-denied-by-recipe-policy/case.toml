@@ -1,0 +1,26 @@
+id = "V2-RUNTIME-run-denied-by-recipe-policy"
+rule = "V2-RUNTIME-run-denied-by-recipe-policy"
+profile = "interpreterV2"
+operation = "workspaceRun"
+description = "07-diagnostics-and-conformance.md#required-coverage: a read outside the recipe policy returns denied with no event, and the entry returns 4"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+hostWorld = "world.vibon"
+
+[expect]
+verdict = "unknown"
+targetRun = "target-run.vibon"
+
+[[expect.diagnostics]]
+code = "@contract.unusedEffect"
+level = "@warning"
+source = "src/app/main.vib"
+span = { start = 309, end = 320 }
+
+[[expect.diagnostics]]
+code = "@contract.unusedEffect"
+level = "@warning"
+source = "src/app/main.vib"
+span = { start = 333, end = 343 }

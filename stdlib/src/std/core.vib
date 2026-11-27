@@ -1,6 +1,7 @@
 // The core types and contracts of the standard library: the order of two
 // values, the errors of the checked numeric and conversion operations, the
-// comparison interfaces, and the conversion interfaces.
+// comparison interfaces, the bound of a canonical encoding, and the conversion
+// interfaces.
 
 type Ordering
   case less
@@ -121,6 +122,14 @@ interface Ordered
           endmatch
       endmatch
   endfn
+endinterface
+
+// A type conforms structurally, with no implementation, when its static type
+// shows a canonical value encoding (`docs/spec/06-runtime.md`, "What has no
+// encoding").
+interface Encodable
+  role @encodable
+  visibility @public
 endinterface
 
 interface From(Source)

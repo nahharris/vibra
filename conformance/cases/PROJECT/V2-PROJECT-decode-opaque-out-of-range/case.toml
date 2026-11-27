@@ -14,4 +14,4 @@ verdict = "refuted"
 code = "@data.invalidValue"
 level = "@error"
 source = "project.vibon"
-span = { start = 256, end = 264 }
+span = { start = 266, end = 274 }

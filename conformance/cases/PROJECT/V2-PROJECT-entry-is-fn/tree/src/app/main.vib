@@ -1,0 +1,3 @@
+use @std.process.ExitCode enduse
+
+fn main returns code: ExitCode do return ExitCode(0u8) endfn

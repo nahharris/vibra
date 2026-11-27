@@ -1,0 +1,24 @@
+use @std.assert enduse
+
+use @std.test.TestWorld enduse
+
+use @std.fs.DirStat enduse
+
+use @std.fs.FsError enduse
+
+use @std.fs.FsKind enduse
+
+use @std.fs.FsMetadata enduse
+
+use @std.fs.RelativePath enduse
+
+test "stat"
+  takes {world: TestWorld}
+  performs {TestWorld DirStat}
+  do
+    let Result.ok(value: note) be RelativePath(["n.txt"]) endlet
+    let Result.ok(value: missing) be RelativePath(["m.txt"]) endlet
+    let {stat: statter} be await TestWorld.directory(world files: [note: "hello"]) endlet
+    assert.equal(Result.ok(value: FsMetadata(kind: FsKind.file() size: 5u64)) await DirStat.stat(statter note))
+    assert.equal(Result.err(error: FsError.notFound()) await DirStat.stat(statter missing))
+endtest

@@ -1,0 +1,16 @@
+use @std.assert enduse
+
+use @std.test.TestWorld enduse
+
+use @std.io.StdoutText enduse
+
+use @app.main enduse
+
+test "exhausts"
+  takes {world: TestWorld}
+  performs {TestWorld StdoutText}
+  do
+    let {stdoutText: out} be await TestWorld.streams(world) endlet
+    assert.equal(Result.ok(value: void) await StdoutText.write(out "a"))
+    let _ be await main.spin() endlet
+endtest

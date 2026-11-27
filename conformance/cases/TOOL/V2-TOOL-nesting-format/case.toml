@@ -1,0 +1,14 @@
+id = "V2-TOOL-nesting-format"
+rule = "V2-TOOL-nesting-format"
+profile = "toolingV2"
+operation = "format"
+description = "05-tooling.md#formatting: when a module of the snapshot is past the source nesting limit, a captured module is formatted by syntax alone: its text is laid out and its unknown name is not reported"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+source = "tree/src/app/other.vib"
+
+[expect]
+verdict = "accepted"
+formatted = "formatted.vib"

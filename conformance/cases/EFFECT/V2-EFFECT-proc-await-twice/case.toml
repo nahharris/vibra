@@ -1,0 +1,12 @@
+id = "V2-EFFECT-proc-await-twice"
+rule = "V2-EFFECT-proc-await-twice"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#cold-plans-and-performed-rows: a plan is awaited any number of times"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

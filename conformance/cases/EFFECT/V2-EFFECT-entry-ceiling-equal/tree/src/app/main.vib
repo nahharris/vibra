@@ -1,0 +1,17 @@
+use @std.process.ExitCode enduse
+
+interface Log
+  proc append takes {log: Self entry: Str} returns done: Void endproc
+endinterface
+
+type Memory of {lines: List(Str)}
+  impl Log
+    proc append takes {log: Self entry: Str} returns done: Void do return void endproc
+  endimpl
+endtype
+
+let memory: Memory be Memory(lines: []) endlet
+proc main returns code: ExitCode performs {Log} do
+  await Log.append(memory "start")
+  return ExitCode(0u8)
+endproc

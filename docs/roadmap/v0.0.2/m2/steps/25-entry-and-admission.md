@@ -17,7 +17,7 @@ Crates: `vibra-types`, `vibra-workspace`, `conformance/cases`.
   chapter](../../../../spec/06-runtime.md#entry-outcome) "Entry outcome",
   Startup, the last item; [diagnostics
   chapter](../../../../spec/07-diagnostics-and-conformance.md#availability-discovery-and-resolution)
-  the rows of `@project.entryOutsideTarget`, `@project.entryOnLibrary`,
+  the rows of `@project.entryOutsideTarget` and
   `@project.invalidEntrySignature`; [questions](../spec-questions.md) Q20,
   Q27.
 
@@ -28,7 +28,7 @@ Crates: `vibra-types`, `vibra-workspace`, `conformance/cases`.
 | `crates/vibra-workspace/src/project.rs:490` | `TargetKind::Bin => Availability::Unavailable` | a binary target becomes available |
 | `crates/vibra-workspace/src/project.rs:374` | `fn target` | the target schema with `entry`, `effects`, `grants` |
 | `crates/vibra-workspace/src/semantic.rs:69` | `pub fn check_snapshot` | calls `entry::check_target` per binary target |
-| `crates/vibra-types/src/check/lower.rs:868` | `pub(crate) fn check_program` | exposes the entry's declaration to `effects::entry` |
+| `crates/vibra-types/src/check/lower.rs:873` | `pub(crate) fn check_program` | exposes the entry's declaration to `effects::entry` |
 
 Proposed: `vibra-types::check::effects::entry::{entry_signature,
 EntrySignature, GrantShape, LeafType}`; `vibra-workspace::entry::
@@ -49,9 +49,11 @@ EntrySignature, GrantShape, LeafType}`; `vibra-workspace::entry::
 ## Ordered tasks
 
 1. `entry`'s first part MUST be the target's name
-   (`@project.entryOutsideTarget` at the field); on a library it is
-   `@project.entryOnLibrary`. Invariant: naming an entry makes no import
-   edge and changes no visibility.
+   (`@project.entryOutsideTarget` at the field); on a library the field is
+   unknown to the closed record shape, `@data.invalidShape` at the field
+   name, which M1 case `V2-PROJECT-decode-lib-with-entry` covers.
+   Invariant: naming an entry makes no import edge and changes no
+   visibility.
 2. Resolve the path: another kind of entity is `@name.wrongEntityKind`; a
    path that resolves to nothing is `@name.unknownSymbol`, both at the
    field.
@@ -93,7 +95,6 @@ EntrySignature, GrantShape, LeafType}`; `vibra-workspace::entry::
 | `V2-PROJECT-entry-minimal` | positive | `proc main returns code: ExitCode do return ExitCode(0u8) endproc`; `T(@app.main.main [])` | accepted | 04 Targets: "It MUST resolve to a module-level `proc` with an entry signature" |
 | `V2-PROJECT-entry-private-other-name` | positive | the same `proc` named `start`, not public | accepted | 04: "The entry need not be public or named `main`" |
 | `V2-PROJECT-entry-outside-target` | negative | `entry: @other.main.main` | `@project.entryOutsideTarget` at the `entry` field | 04: "whose first part MUST be the target's own name" |
-| `V2-PROJECT-entry-on-library` | negative | a `@lib` target with `entry` | `@project.entryOnLibrary` at the field | 04: "An `entry` on a library is `@project.entryOnLibrary`" |
 | `V2-PROJECT-entry-unknown` | negative | `entry: @app.main.nope` | `@name.unknownSymbol` at the field | 07: "a name that resolves to nothing … an entity reference slot" |
 | `V2-PROJECT-entry-is-fn` | negative | `main` declared as a `fn` | `@project.invalidEntrySignature` at the field, related to the declaration | 07: "an `entry` that is not a module-level `proc` with an entry signature" |
 | `V2-PROJECT-entry-is-type` | negative | `entry` names a type | `@name.wrongEntityKind` at the field | 04: "a path that resolves to another kind of entity is `@name.wrongEntityKind`" |
@@ -121,10 +122,10 @@ EntrySignature, GrantShape, LeafType}`; `vibra-workspace::entry::
 
 ## Diagnostics and schema changes
 
-Codes: `@project.entryOutsideTarget`, `@project.entryOnLibrary`,
-`@project.invalidEntrySignature`, `@name.wrongEntityKind`,
-`@name.unknownSymbol`, `@effect.outsideCeiling`, `@effect.invalidReference`,
-`@effect.duplicateRoot`, `@contract.unusedEffect`, `@tool.unavailable`. No
+Codes: `@project.entryOutsideTarget`, `@project.invalidEntrySignature`,
+`@name.wrongEntityKind`, `@name.unknownSymbol`, `@effect.outsideCeiling`,
+`@effect.invalidReference`, `@effect.duplicateRoot`,
+`@contract.unusedEffect`, `@tool.unavailable`. No
 schema change: `@project.v2` already holds the three fields.
 
 ## Validation

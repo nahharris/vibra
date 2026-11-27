@@ -1,0 +1,12 @@
+id = "V2-EFFECT-await-in-if"
+rule = "V2-EFFECT-await-in-if"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#cold-plans-and-performed-rows: await is valid inside an if of a proc body"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

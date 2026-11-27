@@ -1,0 +1,7 @@
+{
+  format: @testRun.v2
+  result: @command.ok
+  tests: [
+    {name: "@tests.grants::\"sub\"" result: @test.passed auditTrace: {format: @auditTrace.v2 revision: "sha256:fbebf92eee55aef77f0d0f67ef8887801057ef2a7ce7efdf9044a482a89a31dd" drivers: [{provider: @hostWorld.v2 version: "0.0.2"}] policies: [:] redaction: @none events: []}}
+  ]
+}

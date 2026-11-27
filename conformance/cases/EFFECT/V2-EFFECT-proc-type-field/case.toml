@@ -1,0 +1,12 @@
+id = "V2-EFFECT-proc-type-field"
+rule = "V2-EFFECT-proc-type-field"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#cold-plans-and-performed-rows: a stored callable of a Proc type in a record field is applied and awaited"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

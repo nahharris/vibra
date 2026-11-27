@@ -1,0 +1,25 @@
+id = "V2-GRANT-test-directory-conflict-computed"
+rule = "V2-GRANT-test-directory-conflict-computed"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "04-programs-and-packages.md#test-worlds-and-grants: a conflict among keys a function computes, and a fixture holding the empty path, each end the test @test.invalid with @test.conflictingFixture at the await"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+testRun = "test-run.vibon"
+
+[[expect.diagnostics]]
+code = "@test.conflictingFixture"
+level = "@error"
+source = "tests/run.vib"
+span = { start = 527, end = 572 }
+
+[[expect.diagnostics]]
+code = "@test.conflictingFixture"
+level = "@error"
+source = "tests/run.vib"
+span = { start = 831, end = 882 }

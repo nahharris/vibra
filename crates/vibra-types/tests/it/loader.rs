@@ -15,8 +15,8 @@ fn the_embedded_library_loads() {
         stdlib.modules().len(),
         stdlib.roles().len()
     );
-    assert_eq!(stdlib.modules().len(), 9);
-    assert_eq!(stdlib.roles().len(), 9);
+    assert_eq!(stdlib.modules().len(), 17);
+    assert_eq!(stdlib.roles().len(), 10);
     assert_eq!(stdlib.package_name(), "std");
     assert_eq!(stdlib.package_version(), "0.0.2");
 }
@@ -34,6 +34,7 @@ fn every_role_has_its_declaration() {
         (Role::Iter, "@std.iter", "Iter", "@interface"),
         (Role::Equatable, "@std.core", "Equatable", "@interface"),
         (Role::Ordered, "@std.core", "Ordered", "@interface"),
+        (Role::Encodable, "@std.core", "Encodable", "@interface"),
     ];
     for (role, module, name, kind) in expected {
         let declaration = stdlib.role(role).expect("every role has a declaration");
@@ -84,7 +85,9 @@ fn the_prelude_table_binds_every_declared_name() {
         "Iter" => Some("@std.iter"),
         "Str" => Some("@std.str"),
         "Bytes" => Some("@std.bytes"),
-        "Equatable" | "Ordered" | "From" | "TryFrom" | "Ordering" => Some("@std.core"),
+        "Equatable" | "Ordered" | "Encodable" | "From" | "TryFrom" | "Ordering" => {
+            Some("@std.core")
+        }
         "Any" | "Self" => None,
         name if builtin.contains(&name) => Some("@std.builtin"),
         _ => Some("unexpected"),
@@ -127,31 +130,23 @@ fn the_overlay_is_the_unit_std() {
     assert_eq!(
         modules,
         vec![
-            (
-                "@std.assert",
-                "assert".to_owned(),
-                "stdlib/src/std/assert.vib"
-            ),
-            ("@std.bool", "bool".to_owned(), "stdlib/src/std/bool.vib"),
-            (
-                "@std.builtin",
-                "builtin".to_owned(),
-                "stdlib/src/std/builtin.vib"
-            ),
-            ("@std.bytes", "bytes".to_owned(), "stdlib/src/std/bytes.vib"),
-            ("@std.core", "core".to_owned(), "stdlib/src/std/core.vib"),
-            ("@std.iter", "iter".to_owned(), "stdlib/src/std/iter.vib"),
-            (
-                "@std.option",
-                "option".to_owned(),
-                "stdlib/src/std/option.vib"
-            ),
-            (
-                "@std.result",
-                "result".to_owned(),
-                "stdlib/src/std/result.vib"
-            ),
-            ("@std.str", "str".to_owned(), "stdlib/src/std/str.vib"),
+            ("@std.assert", "assert".to_owned(), "@std.assert"),
+            ("@std.bool", "bool".to_owned(), "@std.bool"),
+            ("@std.builtin", "builtin".to_owned(), "@std.builtin"),
+            ("@std.bytes", "bytes".to_owned(), "@std.bytes"),
+            ("@std.core", "core".to_owned(), "@std.core"),
+            ("@std.env", "env".to_owned(), "@std.env"),
+            ("@std.fs", "fs".to_owned(), "@std.fs"),
+            ("@std.io", "io".to_owned(), "@std.io"),
+            ("@std.iter", "iter".to_owned(), "@std.iter"),
+            ("@std.option", "option".to_owned(), "@std.option"),
+            ("@std.policy", "policy".to_owned(), "@std.policy"),
+            ("@std.process", "process".to_owned(), "@std.process"),
+            ("@std.random", "random".to_owned(), "@std.random"),
+            ("@std.result", "result".to_owned(), "@std.result"),
+            ("@std.str", "str".to_owned(), "@std.str"),
+            ("@std.test", "test".to_owned(), "@std.test"),
+            ("@std.time", "time".to_owned(), "@std.time"),
         ]
     );
     assert_eq!(&overlay.prelude, stdlib.prelude());
@@ -177,15 +172,23 @@ fn the_overlay_is_resolution_s_embedded_unit() {
     assert_eq!(
         modules,
         [
-            ("@std.assert", "stdlib/src/std/assert.vib"),
-            ("@std.bool", "stdlib/src/std/bool.vib"),
-            ("@std.builtin", "stdlib/src/std/builtin.vib"),
-            ("@std.bytes", "stdlib/src/std/bytes.vib"),
-            ("@std.core", "stdlib/src/std/core.vib"),
-            ("@std.iter", "stdlib/src/std/iter.vib"),
-            ("@std.option", "stdlib/src/std/option.vib"),
-            ("@std.result", "stdlib/src/std/result.vib"),
-            ("@std.str", "stdlib/src/std/str.vib"),
+            ("@std.assert", "@std.assert"),
+            ("@std.bool", "@std.bool"),
+            ("@std.builtin", "@std.builtin"),
+            ("@std.bytes", "@std.bytes"),
+            ("@std.core", "@std.core"),
+            ("@std.env", "@std.env"),
+            ("@std.fs", "@std.fs"),
+            ("@std.io", "@std.io"),
+            ("@std.iter", "@std.iter"),
+            ("@std.option", "@std.option"),
+            ("@std.policy", "@std.policy"),
+            ("@std.process", "@std.process"),
+            ("@std.random", "@std.random"),
+            ("@std.result", "@std.result"),
+            ("@std.str", "@std.str"),
+            ("@std.test", "@std.test"),
+            ("@std.time", "@std.time"),
         ]
     );
     for module in unit.modules() {

@@ -1,0 +1,17 @@
+use @std.assert enduse
+
+use @std.test.TestWorld enduse
+
+use @std.io.StdoutText enduse
+
+use @std.io.StderrText enduse
+
+test "order"
+  takes {world: TestWorld}
+  performs {TestWorld StdoutText StderrText}
+  do
+    let {stdoutText: out stderrText: err} be await TestWorld.streams(world) endlet
+    assert.equal(Result.ok(value: void) await StdoutText.write(out "1"))
+    assert.equal(Result.ok(value: void) await StderrText.write(err "2"))
+    assert.equal(Result.ok(value: void) await StdoutText.write(out "3"))
+endtest

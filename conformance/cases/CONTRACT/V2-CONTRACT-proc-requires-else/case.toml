@@ -1,0 +1,12 @@
+id = "V2-CONTRACT-proc-requires-else"
+rule = "V2-CONTRACT-proc-requires-else"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#cold-plans-and-performed-rows: a requires with else runs on each await and states no obligation where the plan is built"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

@@ -1,0 +1,45 @@
+use @std.assert enduse
+
+use @pilot.gate enduse
+
+test "a disabled gate refuses"
+  do
+    assert.equal(
+      Result.err(error: gate.GateError.disabled())
+      gate.viaGate(gate.gateAmount false 4i32)
+    )
+endtest
+
+test "an enabled gate passes a positive amount"
+  do
+    assert.equal(Result.ok(value: 4i32) gate.viaGate(gate.gateAmount true 4i32))
+endtest
+
+test "an enabled gate refuses an amount that is not positive"
+  do
+    assert.equal(
+      Result.err(error: gate.GateError.nonPositive())
+      gate.viaGate(gate.gateAmount true -4i32)
+    )
+endtest
+
+test "a disabled gate refuses a negative amount"
+  do
+    assert.equal(
+      Result.err(error: gate.GateError.disabled())
+      gate.viaGate(gate.gateAmount false -4i32)
+    )
+endtest
+
+test "an enabled gate refuses zero"
+  do
+    assert.equal(
+      Result.err(error: gate.GateError.nonPositive())
+      gate.viaGate(gate.gateAmount true 0i32)
+    )
+endtest
+
+test "the gate called directly"
+  do
+    assert.equal(Result.ok(value: 7i32) gate.gateAmount(true 7i32))
+endtest

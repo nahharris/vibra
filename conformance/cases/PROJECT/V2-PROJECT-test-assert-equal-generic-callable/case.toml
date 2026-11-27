@@ -1,0 +1,19 @@
+id = "V2-PROJECT-test-assert-equal-generic-callable"
+rule = "V2-PROJECT-test-assert-equal-generic-callable"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#interfaces: a callable type is not Encodable, so the helper bound by T: Encodable used at a function value is @type.unsatisfiedBound at the operand that fixes T, related to the helper's bound"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.unsatisfiedBound"
+level = "@error"
+source = "tests/same.vib"
+span = { start = 321, end = 324 }
+related = [{ source = "tests/same.vib", span = { start = 170, end = 179 } }]

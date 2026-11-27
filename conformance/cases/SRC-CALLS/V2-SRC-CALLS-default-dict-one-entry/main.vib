@@ -1,0 +1,2 @@
+fn main returns r: List({Str I32}) do return Iter.collect(table()) endfn
+fn table labelled {d: Dict(Str I32) be ["a": 1i32]} returns r: Dict(Str I32) do return d endfn

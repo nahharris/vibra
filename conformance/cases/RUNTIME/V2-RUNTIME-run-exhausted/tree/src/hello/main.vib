@@ -1,0 +1,20 @@
+use @std.io.StdoutText enduse
+
+use @std.process.ExitCode enduse
+
+fn loop
+  takes {n: I32}
+  returns r: I32
+  do
+    return I32.add(1i32 loop(n))
+endfn
+
+proc main
+  takes {out: StdoutText}
+  returns code: ExitCode
+  performs {StdoutText}
+  do
+    let _ be await StdoutText.write(out "hello\n") endlet
+    let _ be loop(0i32) endlet
+    return ExitCode(0u8)
+endproc

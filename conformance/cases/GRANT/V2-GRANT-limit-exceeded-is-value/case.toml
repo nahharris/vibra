@@ -1,0 +1,13 @@
+id = "V2-GRANT-limit-exceeded-is-value"
+rule = "V2-GRANT-limit-exceeded-is-value"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "03-effects.md#limits: a grant limited to one invocation reads once, then returns Err(limitExceeded); one event"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

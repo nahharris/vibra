@@ -5,7 +5,9 @@
 //! returns a `Result`; every partial row returns an `Option` or a `Result`.
 //! No row traps on user data: an operand of the wrong representation is an
 //! invalid checked program, which the checker rules out. `list.fold` and
-//! the assertion rows need the machine and live there.
+//! the assertion rows need the machine and live there. The three grant rows
+//! narrow a sealed grant, which this interpreter does not hold yet: each is
+//! [`Halt::Unavailable`].
 
 use std::cmp::Ordering;
 use std::rc::Rc;
@@ -573,6 +575,17 @@ fn sequence_row<'a>(intrinsic: CompilerIntrinsic, args: &[Val<'a>]) -> Option<Va
                 Val::some(Val::tuple(vec![first.clone(), Val::list(rest.to_vec())]))
             }
         },
+        (C::FsValidNames, [list]) => {
+            let names = list
+                .as_list()?
+                .iter()
+                .map(|value| match &value.0 {
+                    Repr::Str(name) => Some(name.as_ref()),
+                    _ => None,
+                })
+                .collect::<Option<Vec<&str>>>()?;
+            Val::boolean(vibra_ir::names::valid_names(&names))
+        }
         _ => return None,
     })
 }
@@ -583,6 +596,16 @@ pub(crate) fn apply<'a>(
     args: &[Val<'a>],
 ) -> Result<Val<'a>, Halt> {
     let result = match intrinsic {
+        // A narrowing asks the host context, which the machine holds and a
+        // pure row does not: `Machine::narrow` runs it.
+        CompilerIntrinsic::GrantRestrict
+        | CompilerIntrinsic::GrantSub
+        | CompilerIntrinsic::GrantLimit => {
+            return Err(Halt::Invalid(format!(
+                "`{}` narrows a sealed grant, which no pure row does",
+                intrinsic.symbol()
+            )));
+        }
         CompilerIntrinsic::Integer(integer, op) => integer_row(integer, op, args),
         CompilerIntrinsic::Float(float, op) => float_row(float, op, args),
         CompilerIntrinsic::Convert(source, target) => convert(source, target, args),
@@ -607,4 +630,29 @@ pub(crate) fn lookup<'a>(collection: &Val<'a>, key: &Val<'_>) -> Option<Val<'a>>
             .map_or_else(Val::none, |byte| Val::some(Val(Repr::U8(*byte)))),
         _ => return None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use vibra_ir::external::CompilerIntrinsic;
+
+    use super::apply;
+    use crate::machine::Halt;
+
+    /// The grant rows are no pure rows: the machine routes them to the host
+    /// context before `apply`, so `apply` reaching one is a defect.
+    #[test]
+    fn the_grant_rows_are_not_pure_rows() {
+        for intrinsic in [
+            CompilerIntrinsic::GrantRestrict,
+            CompilerIntrinsic::GrantSub,
+            CompilerIntrinsic::GrantLimit,
+        ] {
+            assert!(
+                matches!(apply(intrinsic, &[]), Err(Halt::Invalid(_))),
+                "{}",
+                intrinsic.symbol()
+            );
+        }
+    }
 }

@@ -17,8 +17,8 @@ Crates: `vibra-host`, `vibra-interp`, `vibra-types`, `stdlib`,
 
 | Existing | Symbol | Use |
 | --- | --- | --- |
-| `crates/vibra-workspace/src/test_runner.rs:611` | `fn run_one` | runner-side fixes |
-| `crates/vibra-interp/src/machine.rs:1264` | `fn dispatch` | interpreter-side fixes |
+| `crates/vibra-workspace/src/test_runner.rs:621` | `fn run_one` | runner-side fixes |
+| `crates/vibra-interp/src/machine.rs:1322` | `fn dispatch` | interpreter-side fixes |
 
 Broker-side fixes enter through `Context::host` and `Context::narrow` of
 step 15.

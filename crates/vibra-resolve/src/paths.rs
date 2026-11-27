@@ -50,7 +50,7 @@ use crate::imports::top_level;
 use crate::namespaces::at;
 use crate::prelude::{ANY, SELF};
 use crate::scope::Frames;
-use crate::snapshot::VisibleLocals;
+use crate::snapshot::Visibility;
 
 /// What a name or a path denotes.
 #[derive(Clone, Copy, Debug)]
@@ -113,12 +113,13 @@ impl Scope {
 pub(crate) type Reference = (String, ByteSpan, DeclarationId);
 
 /// Resolves every path of the graph, in type positions and in bodies, and
-/// returns the locals visible at each statement of the local modules.
+/// returns what is visible at each statement of the local modules and the
+/// chain of bindings it links into.
 pub(crate) fn resolve_paths(
     graph: &Graph<'_>,
     out: &mut Vec<Diagnostic>,
     references: &mut Vec<Reference>,
-) -> Vec<VisibleLocals> {
+) -> (Vec<Visibility>, Vec<(String, Option<usize>)>) {
     let mut walker = Walker::new(graph, out, references);
     walker.constants = constants::table(graph);
     for module in 0..graph.modules.len() {
@@ -133,7 +134,8 @@ pub(crate) fn resolve_paths(
             walker.impl_block(*block);
         }
     }
-    walker.visible
+    let chain = walker.frames.take_chain();
+    (walker.visible, chain)
 }
 
 /// The walk over one graph: the module being walked, the lexical scopes open
@@ -148,7 +150,7 @@ pub(crate) struct Walker<'g, 'a, 'o> {
     /// Whether each declaration is a constant module value.
     constants: Vec<bool>,
     /// The locals visible at each statement walked so far.
-    visible: Vec<VisibleLocals>,
+    visible: Vec<Visibility>,
 }
 
 impl<'g, 'a, 'o> Walker<'g, 'a, 'o> {
@@ -197,20 +199,16 @@ impl<'a> Walker<'_, 'a, '_> {
         }
     }
 
-    /// Records the locals visible at the statement at `span`.
+    /// Records the locals visible at the statement at `span`: the newest
+    /// visible binding, which links to the others.
     pub(crate) fn record_visible(&mut self, span: ByteSpan) {
         if self.graph.is_embedded(self.module) {
             return;
         }
-        let names = self
-            .frames
-            .visible()
-            .map(|local| local.name.clone())
-            .collect();
-        self.visible.push(VisibleLocals {
+        self.visible.push(Visibility {
             source_id: self.source_id().to_owned(),
             span,
-            names,
+            top: self.frames.top(),
         });
     }
 
@@ -415,9 +413,21 @@ impl<'a> Walker<'_, 'a, '_> {
         }
     }
 
+    /// Resolves the entries of an effect row. An entry that names nothing is
+    /// not reported here: a row entry that is no operation interface, one
+    /// that resolves to nothing included, is the effect checker's
+    /// `@effect.invalidReference` (`docs/spec/03-effects.md`, "Effect
+    /// ceilings").
     fn row(&mut self, scope: &Scope, row: Row<'a>) {
         for path in row.paths() {
+            let reported = self.out.len();
             self.path(scope, path, Position::Row);
+            let found = self.out.split_off(reported);
+            self.out.extend(
+                found
+                    .into_iter()
+                    .filter(|found| found.code() != DiagnosticCode::NameUnknownSymbol),
+            );
         }
     }
 

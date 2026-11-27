@@ -1,0 +1,12 @@
+id = "V2-CONTRACT-unused-effect-impl-member"
+rule = "V2-CONTRACT-unused-effect-impl-member"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#effect-ceilings: an impl member whose body performs nothing is no warning, since its contract fixes its row (Q5)"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

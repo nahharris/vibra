@@ -3,20 +3,28 @@
 //! `docs/spec/04-programs-and-packages.md`, "Project file", gives the record
 //! table: `project`, `package`, `target`, `grant binding`, `limits`,
 //! `path dependency`, and `Git dependency`. The decoder reads one document's
-//! bytes and no path. A `@bin` target is decoded and marked unavailable for
-//! checking (its entry, ceiling, and grants are validated in M2); every
-//! dependency is decoded and marked unavailable (path dependencies until M2,
-//! Git dependencies throughout this release).
+//! bytes and no path. Every target is available for checking: a `@bin`
+//! target keeps its `entry`, its `effects` list, and its `grants` dict with
+//! where each is written, for the checks of [`crate::entry`]. Every
+//! dependency is decoded with where its `path` is written; its key is the
+//! name of the library target it binds. A path dependency is available
+//! ([`crate::dependencies`] loads it), and a Git dependency is unavailable
+//! throughout this release.
 //!
-//! The grant binding's `resource` and `policy` are opaque here: their schemas
-//! depend on the provider and are the effects chapter's, checked with the
-//! binary target in M2.
+//! The grant binding's `resource` is a closed union selected by its `kind`:
+//! `kind`, then the fields the provider table names for that kind, all
+//! required. Whether a provider accepts the kind is checked with the binary
+//! target's recipes ([`crate::binding`]). The `policy` is opaque here: it is
+//! a `@scopePolicy.v1` document of the effects chapter, decoded with the
+//! recipes.
 
 use vibra_diagnostics::{ByteSpan, Diagnostic};
 use vibra_syntax::{
     FieldSchema, IntegerSuffix, RecordSchema, Schema, Slot, TypedDocument, TypedNode,
-    VariantSchema, decode, is_reserved_word,
+    VariantSchema, decode, is_reserved_word, parse_data,
 };
+
+use crate::nesting::nesting_fault;
 
 /// The name of the project marker.
 pub const PROJECT_FILE_NAME: &str = "project.vibon";
@@ -64,12 +72,12 @@ impl DependencyKind {
     }
 }
 
-/// Whether this release can check a decoded target or deliver a dependency.
+/// Whether this release can deliver a dependency.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Availability {
-    /// Checked or delivered.
+    /// Delivered.
     Available,
-    /// Decoded, and unavailable for checking or delivery.
+    /// Decoded, and unavailable for delivery.
     Unavailable,
 }
 
@@ -95,7 +103,7 @@ impl Package {
 }
 
 /// One local target.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Target {
     span: ByteSpan,
     name: String,
@@ -103,7 +111,57 @@ pub struct Target {
     kind: TargetKind,
     root: String,
     root_span: ByteSpan,
-    availability: Availability,
+    binary: Option<Binary>,
+}
+
+/// What a `@bin` target writes beside its name, kind, and root.
+#[derive(Clone, Debug, PartialEq)]
+struct Binary {
+    /// The `entry` atom and its value's span.
+    entry: (String, ByteSpan),
+    /// The `effects` list's value span, and each entry with its span.
+    effects: (ByteSpan, Vec<(String, ByteSpan)>),
+    /// The `grants` dict's value span, and each key with its span.
+    grants: (ByteSpan, Vec<(String, ByteSpan)>),
+    /// The recipes of `grants`, in dict order.
+    recipes: Vec<Recipe>,
+}
+
+/// One entry of a binary target's `grants` dict: the leaf atom it is keyed
+/// by and its decoded grant binding record.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Recipe {
+    key: String,
+    key_span: ByteSpan,
+    binding: TypedNode,
+}
+
+impl Recipe {
+    /// The leaf atom the recipe is keyed by, `@` included.
+    #[must_use]
+    pub fn key(&self) -> &str {
+        &self.key
+    }
+
+    /// Where the key is written.
+    #[must_use]
+    pub const fn key_span(&self) -> ByteSpan {
+        self.key_span
+    }
+
+    /// The decoded grant binding record: `provider`, the closed `resource`
+    /// record, the opaque `policy`, `limits`, and `after`, each with where it
+    /// is written.
+    #[must_use]
+    pub const fn binding(&self) -> &TypedNode {
+        &self.binding
+    }
+
+    /// Where the grant binding record is written: the recipe.
+    #[must_use]
+    pub const fn span(&self) -> ByteSpan {
+        self.binding.span()
+    }
 }
 
 impl Target {
@@ -143,10 +201,54 @@ impl Target {
         self.root_span
     }
 
-    /// A library is available for checking; a binary is not until M2.
+    /// The `entry` atom of a binary, `@` included, and where its value is
+    /// written; `None` for a library.
     #[must_use]
-    pub const fn availability(&self) -> Availability {
-        self.availability
+    pub fn entry(&self) -> Option<(&str, ByteSpan)> {
+        self.binary
+            .as_ref()
+            .map(|binary| (binary.entry.0.as_str(), binary.entry.1))
+    }
+
+    /// Where the `effects` list of a binary is written; `None` for a
+    /// library.
+    #[must_use]
+    pub fn effects_span(&self) -> Option<ByteSpan> {
+        self.binary.as_ref().map(|binary| binary.effects.0)
+    }
+
+    /// The entries of a binary's `effects` list, in written order, each
+    /// with where it is written; empty for a library.
+    #[must_use]
+    pub fn effects(&self) -> &[(String, ByteSpan)] {
+        self.binary
+            .as_ref()
+            .map_or(&[], |binary| binary.effects.1.as_slice())
+    }
+
+    /// Where the `grants` dict of a binary is written; `None` for a
+    /// library.
+    #[must_use]
+    pub fn grants_span(&self) -> Option<ByteSpan> {
+        self.binary.as_ref().map(|binary| binary.grants.0)
+    }
+
+    /// The leaf keys of a binary's `grants` dict, in dict order, each with
+    /// where it is written; empty for a library.
+    #[must_use]
+    pub fn grant_keys(&self) -> &[(String, ByteSpan)] {
+        self.binary
+            .as_ref()
+            .map_or(&[], |binary| binary.grants.1.as_slice())
+    }
+
+    /// The recipes of a binary's `grants` dict, in dict order; empty for a
+    /// library.
+    #[must_use]
+    pub fn recipes(&self) -> &[Recipe] {
+        self.binary
+            .as_ref()
+            .map_or(&[], |binary| binary.recipes.as_slice())
     }
 }
 
@@ -158,12 +260,13 @@ pub struct Dependency {
     span: ByteSpan,
     kind: DependencyKind,
     source: String,
+    source_span: ByteSpan,
     rev: Option<String>,
-    target: Option<String>,
 }
 
 impl Dependency {
-    /// The dependency name, the dict key.
+    /// The dependency name, the dict key: the name of the library target it
+    /// binds.
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
@@ -193,22 +296,27 @@ impl Dependency {
         &self.source
     }
 
+    /// Where the `path` of a path dependency, or the `git` of a Git
+    /// dependency, is written.
+    #[must_use]
+    pub const fn source_span(&self) -> ByteSpan {
+        self.source_span
+    }
+
     /// The revision of a Git dependency.
     #[must_use]
     pub fn rev(&self) -> Option<&str> {
         self.rev.as_deref()
     }
 
-    /// The selected library target, an atom with its `@`.
-    #[must_use]
-    pub fn target(&self) -> Option<&str> {
-        self.target.as_deref()
-    }
-
-    /// Dependencies are unavailable in this release.
+    /// A path dependency is available; a Git dependency is not, in this
+    /// release.
     #[must_use]
     pub const fn availability(&self) -> Availability {
-        Availability::Unavailable
+        match self.kind {
+            DependencyKind::Path => Availability::Available,
+            DependencyKind::Git => Availability::Unavailable,
+        }
     }
 }
 
@@ -353,11 +461,50 @@ fn git_revision(rev: &str) -> Option<&'static str> {
     (!valid).then_some("a revision is 40 lower-case hexadecimal digits")
 }
 
+/// The resource record of a grant binding: `kind`, then the fields the
+/// provider table names for that kind, in its order, all required.
+fn resource() -> Slot {
+    let case = |kind: &'static str, fields: Vec<FieldSchema>| {
+        let mut all = vec![FieldSchema::required("kind", Slot::AtomOf(vec![kind]))];
+        all.extend(fields);
+        (kind, RecordSchema::new(all))
+    };
+    let source = || FieldSchema::required("source", Slot::Atom(None));
+    Slot::Variant(VariantSchema::new(
+        "kind",
+        vec![
+            case(
+                "@fixedPath",
+                vec![FieldSchema::required("path", Slot::Str(None))],
+            ),
+            case(
+                "@argumentPath",
+                vec![
+                    FieldSchema::required("index", Slot::Integer(IntegerSuffix::U64)),
+                    source(),
+                ],
+            ),
+            case(
+                "@variablePath",
+                vec![FieldSchema::required("name", Slot::Str(None)), source()],
+            ),
+            case("@processStream", Vec::new()),
+            case(
+                "@variableSet",
+                vec![FieldSchema::required("names", Slot::list(Slot::Str(None)))],
+            ),
+            case("@processArguments", Vec::new()),
+            case("@systemClock", Vec::new()),
+            case("@systemRandom", Vec::new()),
+        ],
+    ))
+}
+
 fn grant_binding() -> Slot {
     let bound = || Slot::Integer(IntegerSuffix::U64);
     Slot::Record(RecordSchema::new(vec![
         FieldSchema::required("provider", Slot::Atom(None)),
-        FieldSchema::required("resource", Slot::Opaque),
+        FieldSchema::required("resource", resource()),
         FieldSchema::optional("policy", Slot::Opaque),
         FieldSchema::optional(
             "limits",
@@ -403,7 +550,6 @@ fn dependency() -> Slot {
                 RecordSchema::new(vec![
                     FieldSchema::required("kind", Slot::AtomOf(vec!["@path"])),
                     FieldSchema::required("path", Slot::Str(None)),
-                    FieldSchema::optional("target", Slot::Atom(None)),
                 ]),
             ),
             (
@@ -412,7 +558,6 @@ fn dependency() -> Slot {
                     FieldSchema::required("kind", Slot::AtomOf(vec!["@git"])),
                     FieldSchema::required("git", Slot::Str(Some(git_url))),
                     FieldSchema::required("rev", Slot::Str(Some(git_revision))),
-                    FieldSchema::optional("target", Slot::Atom(None)),
                 ]),
             ),
         ],
@@ -447,12 +592,73 @@ fn text_of(node: Option<&TypedNode>) -> String {
         .to_owned()
 }
 
+/// The atom of `node`, when it is one, with where it is written.
+fn atom_of(node: &TypedNode) -> (String, ByteSpan) {
+    (text_of(Some(node)), node.span())
+}
+
+/// The fields a validated `@bin` target record writes beside its name,
+/// kind, and root. A field the schema requires is present in a validated
+/// document; the target's own span stands in where one is not.
+fn binary(target: &TypedNode) -> Binary {
+    let entry = target
+        .get("entry")
+        .map_or_else(|| (String::new(), target.span()), atom_of);
+    let effects = target.get("effects").map_or_else(
+        || (target.span(), Vec::new()),
+        |list| {
+            (
+                list.span(),
+                list.as_list()
+                    .unwrap_or_default()
+                    .iter()
+                    .map(atom_of)
+                    .collect(),
+            )
+        },
+    );
+    let grants = target.get("grants").map_or_else(
+        || (target.span(), Vec::new()),
+        |dict| {
+            (
+                dict.span(),
+                dict.as_entries()
+                    .unwrap_or_default()
+                    .iter()
+                    .map(|entry| atom_of(entry.key()))
+                    .collect(),
+            )
+        },
+    );
+    let recipes = target
+        .get("grants")
+        .and_then(TypedNode::as_entries)
+        .unwrap_or_default()
+        .iter()
+        .map(|entry| Recipe {
+            key: text_of(Some(entry.key())),
+            key_span: entry.key().span(),
+            binding: entry.value().clone(),
+        })
+        .collect();
+    Binary {
+        entry,
+        effects,
+        grants,
+        recipes,
+    }
+}
+
 /// Decodes one `project.vibon`, read as `source_id`, with no discovery and
-/// no path read.
+/// no path read. A document nested past the source nesting limit is that
+/// limit alone ([`crate::nesting_fault`]): it is not decoded.
 pub fn decode_project(
     source_id: &str,
     bytes: &[u8],
 ) -> Result<Project, Vec<Diagnostic>> {
+    if let Some(fault) = nesting_fault(&parse_data(Some(source_id), bytes)) {
+        return Err(vec![fault]);
+    }
     let (document, diagnostics) =
         decode(&project_schema(), Some(source_id), bytes).into_parts();
     let Some(document) = document else {
@@ -485,10 +691,7 @@ pub fn decode_project(
                 kind,
                 root: text_of(root),
                 root_span: root.map_or(target.span(), TypedNode::span),
-                availability: match kind {
-                    TargetKind::Lib => Availability::Available,
-                    TargetKind::Bin => Availability::Unavailable,
-                },
+                binary: (kind == TargetKind::Bin).then(|| binary(target)),
             }
         })
         .collect();
@@ -515,8 +718,8 @@ pub fn decode_project(
                 span: entry.span(),
                 kind,
                 source: text_of(source),
+                source_span: source.map_or(entry.span(), TypedNode::span),
                 rev: value.get("rev").map(|rev| text_of(Some(rev))),
-                target: value.get("target").map(|target| text_of(Some(target))),
             }
         })
         .collect();

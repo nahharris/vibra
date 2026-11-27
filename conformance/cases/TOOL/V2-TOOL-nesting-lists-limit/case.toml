@@ -1,0 +1,18 @@
+id = "V2-TOOL-nesting-lists-limit"
+rule = "V2-TOOL-nesting-lists-limit"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "05-tooling.md#program-arguments-execution-and-evaluation: 1,025 nested lists are the source nesting limit alone, at the element, with no @type.depthExceeded, and the outcome unknown"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "unknown"
+
+[[expect.diagnostics]]
+code = "@tool.limitExceeded"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 1039, end = 1043 }

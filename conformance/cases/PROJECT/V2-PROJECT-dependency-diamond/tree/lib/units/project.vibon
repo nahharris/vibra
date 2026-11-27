@@ -1,0 +1,1 @@
+{format: @project.v2 package: {name: "units" version: "1.0.0"} targets: [{name: @units kind: @lib root: "src/units"}] dependencies: [:]}

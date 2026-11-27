@@ -1,0 +1,47 @@
+use @std.assert enduse
+
+use @pilot.pair enduse
+
+test "a reversed pair is ordered with its delta"
+  do
+    assert.equal(
+      {first: 3i32 second: 8i32 delta: Option.some(value: 5i32)}
+      pair.normalizePair({low: 8i32 high: 3i32})
+    )
+endtest
+
+test "the delta can be left out"
+  do
+    assert.equal(
+      {first: 3i32 second: 8i32 delta: Option.none()}
+      pair.normalizePair({low: 8i32 high: 3i32} includeDelta: false)
+    )
+endtest
+
+test "equal bounds have a delta of zero"
+  do
+    assert.equal(
+      {first: 4i32 second: 4i32 delta: Option.some(value: 0i32)}
+      pair.normalizePair({low: 4i32 high: 4i32})
+    )
+endtest
+
+test "an ordered pair stays in order"
+  do
+    assert.equal(
+      {first: 3i32 second: 8i32 delta: Option.some(value: 5i32)}
+      pair.normalizePair({low: 3i32 high: 8i32})
+    )
+endtest
+
+test "the delta saturates"
+  do
+    assert.equal(
+      {
+        first: -2147483648i32
+        second: 2147483647i32
+        delta: Option.some(value: 2147483647i32)
+      }
+      pair.normalizePair({low: 2147483647i32 high: -2147483648i32})
+    )
+endtest

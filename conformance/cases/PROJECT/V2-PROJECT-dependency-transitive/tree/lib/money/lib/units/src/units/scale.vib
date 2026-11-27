@@ -1,0 +1,7 @@
+fn one
+  takes {value: I32}
+  returns result: I32
+  visibility @public
+  do
+    return value
+endfn

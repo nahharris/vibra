@@ -13,13 +13,16 @@
 //! ([`pattern`]), runs the initializer-cycle analysis ([`cycle`]), reviews
 //! the guards and invariants against the certified fragment, evaluating
 //! constants through the interpreter ([`contract`], [`ctfe`]), and builds the
-//! [`CheckedModuleSet`] ([`lower`]).
+//! [`CheckedModuleSet`] ([`lower`]). Every decision about a procedure, a
+//! row, an `await`, a grant type, or an entry is taken in [`effects`], which
+//! the other files call.
 
 mod callables;
 mod contract;
 mod ctfe;
 mod cycle;
 mod declare;
+mod effects;
 mod expr;
 mod generics;
 mod interfaces;
@@ -41,6 +44,10 @@ use vibra_resolve::{
 
 use crate::stdlib::{PRELUDE, Stdlib, load_stdlib};
 use declare::{BuildInputs, PackageName, Program, Source, parse_all};
+pub use effects::entry::{
+    DataReference, EntryLeaf, EntrySignature, GrantShape, LeafType, RowEntry,
+    TargetCheck, TargetEntry,
+};
 pub use obligation::{Obligation, ObligationKind, ObligationStatus};
 
 /// The package of a source checked alone.
@@ -51,6 +58,14 @@ const SOURCE_VERSION: &str = "0.0.0";
 const SOURCE_UNIT: &str = "@app";
 /// The one module of a source checked alone.
 const SOURCE_MODULE: &str = "@app.main";
+
+/// The name `limits.reached` gives the reduction limit of one compile-time
+/// evaluation (`docs/spec/05-tooling.md`, "Limits").
+pub const COMPILE_TIME_REDUCTIONS: &str = "compileTimeReductions";
+
+/// The name `limits.reached` gives the derivation limit of the discharge of
+/// one obligation.
+pub const PROOF_DERIVATIONS: &str = "proofDerivations";
 
 /// What one check found: its diagnostics, the notes recording the
 /// standard-library declarations it skipped, and, when nothing was rejected,
@@ -66,6 +81,14 @@ pub struct CheckResult {
     tests: Vec<CheckedTest>,
     test_set: Option<Arc<CheckedModuleSet>>,
     obligations: Vec<Obligation>,
+    /// The faults the contract review found in the embedded library's own
+    /// declarations, which [library_faults] hands the loader.
+    library_faults: Vec<Diagnostic>,
+    /// What [`check_targets`] found of each target it was given.
+    targets: Vec<TargetCheck>,
+    /// The limits a local declaration reached, by name, in the order first
+    /// reached.
+    limits_reached: Vec<&'static str>,
 }
 
 /// One test of a covered module of `@tests`: the function its body was
@@ -118,7 +141,26 @@ impl CheckResult {
             tests: Vec::new(),
             test_set: None,
             obligations: Vec::new(),
+            library_faults: Vec::new(),
+            targets: Vec::new(),
+            limits_reached: Vec::new(),
         }
+    }
+
+    /// The limits the check of a local declaration reached, by the name
+    /// `limits.reached` gives them ([`COMPILE_TIME_REDUCTIONS`],
+    /// [`PROOF_DERIVATIONS`]), in the order first reached. Each is reported
+    /// by a `@tool.limitExceeded`.
+    #[must_use]
+    pub fn limits_reached(&self) -> &[&'static str] {
+        &self.limits_reached
+    }
+
+    /// What [`check_targets`] found of each binary target it was given, in
+    /// order; empty when resolution failed or no target was given.
+    #[must_use]
+    pub fn targets(&self) -> &[TargetCheck] {
+        &self.targets
     }
 
     /// The tests of the covered modules of `@tests`, in the order of their
@@ -229,10 +271,46 @@ impl CheckResult {
 /// (`@tests.math`), which covers that module and its imports.
 #[must_use]
 pub fn check_workspace(input: &ResolveInput, units: &[String]) -> CheckResult {
-    let stdlib = match load_stdlib() {
-        Ok(stdlib) => stdlib,
-        Err(error) => return CheckResult::rejected(vec![error.diagnostic().clone()]),
-    };
+    check_targets(input, units, &[])
+}
+
+/// [`check_workspace`], which also resolves the `entry` and the `effects`
+/// list of each binary target of `targets` against the checked program
+/// ([`CheckResult::targets`]): `docs/spec/04-programs-and-packages.md`,
+/// "Targets".
+#[must_use]
+pub fn check_targets(
+    input: &ResolveInput,
+    units: &[String],
+    targets: &[TargetEntry],
+) -> CheckResult {
+    match load_stdlib() {
+        Ok(stdlib) => check_with(input, units, &stdlib, targets),
+        Err(error) => CheckResult::rejected(vec![error.diagnostic().clone()]),
+    }
+}
+
+/// The faults of the embedded library `stdlib` that only checking it finds:
+/// every diagnostic the contract review reports for one of its declarations,
+/// such as `@contract.unsupportedPredicate` for a predicate outside the
+/// certified fragment. The loader refuses a library with one, as it refuses
+/// a fault of `check_externals`.
+pub(crate) fn library_faults(stdlib: &Stdlib) -> Vec<Diagnostic> {
+    let input = ResolveInput::new(
+        PackageId::new(SOURCE_PACKAGE, SOURCE_VERSION),
+        Vec::new(),
+        stdlib.overlay().embedded_unit(),
+    );
+    check_with(&input, &[], stdlib, &[]).library_faults
+}
+
+/// [`check_targets`] with the loaded library `stdlib`.
+fn check_with(
+    input: &ResolveInput,
+    units: &[String],
+    stdlib: &Stdlib,
+    targets: &[TargetEntry],
+) -> CheckResult {
     let resolution = resolve(input);
     let mut diagnostics = resolution.diagnostics().to_vec();
     if resolution.has_errors() {
@@ -247,6 +325,10 @@ pub fn check_workspace(input: &ResolveInput, units: &[String]) -> CheckResult {
                 bytes: module.bytes().to_vec(),
                 embedded: false,
                 tests: unit.kind() == UnitKind::Tests,
+                package: unit.package().map(|package| PackageName {
+                    name: package.name().to_owned(),
+                    version: package.version().to_owned(),
+                }),
             });
         }
     }
@@ -257,12 +339,15 @@ pub fn check_workspace(input: &ResolveInput, units: &[String]) -> CheckResult {
             bytes: module.bytes().to_vec(),
             embedded: true,
             tests: false,
+            package: None,
         });
     }
     let documents = parse_all(&sources);
-    let inputs = build_inputs(input, &stdlib, units);
+    let inputs = build_inputs(input, stdlib, units);
     let program = Program::build(&sources, &documents, &inputs);
+    let targets = effects::entry::check_targets(&program, targets);
     let mut result = lower::check_program(program, &documents);
+    result.targets = targets;
     diagnostics.append(&mut result.diagnostics);
     result.diagnostics = diagnostics;
     if result.has_errors() {

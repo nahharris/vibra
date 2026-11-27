@@ -35,10 +35,12 @@ pub enum Role {
     Equatable,
     /// `@ordered`: dict keys.
     Ordered,
+    /// `@encodable`: the bound of `assert.equal`, met structurally.
+    Encodable,
 }
 
 /// The role atoms, in the order of the type chapter's table.
-pub(crate) const ROLE_ATOMS: [&str; 9] = [
+pub(crate) const ROLE_ATOMS: [&str; 10] = [
     "@bool",
     "@str",
     "@bytes",
@@ -48,11 +50,12 @@ pub(crate) const ROLE_ATOMS: [&str; 9] = [
     "@iter",
     "@equatable",
     "@ordered",
+    "@encodable",
 ];
 
 impl Role {
     /// Every role, in the order of the type chapter's table.
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 10] = [
         Self::Bool,
         Self::Str,
         Self::Bytes,
@@ -62,6 +65,7 @@ impl Role {
         Self::Iter,
         Self::Equatable,
         Self::Ordered,
+        Self::Encodable,
     ];
 
     /// The role atom, such as `@bool`.
@@ -77,6 +81,7 @@ impl Role {
             Self::Iter => "@iter",
             Self::Equatable => "@equatable",
             Self::Ordered => "@ordered",
+            Self::Encodable => "@encodable",
         }
     }
 
@@ -99,6 +104,7 @@ impl Role {
             Self::Iter => Library::Iter,
             Self::Equatable => Library::Equatable,
             Self::Ordered => Library::Ordered,
+            Self::Encodable => Library::Encodable,
         }
     }
 }
@@ -234,7 +240,7 @@ fn type_shape(role: Role, decl: &TypeDecl<'_>, top: Scope<'_>) -> Option<String>
                 binder(1),
             ])))),
         ),
-        Role::Iter | Role::Equatable | Role::Ordered => {
+        Role::Iter | Role::Equatable | Role::Ordered | Role::Encodable => {
             return Some("the role is played by an interface, not a type".to_owned());
         }
     };
@@ -346,6 +352,7 @@ fn interface_shape(
     let (associated, members, defaults_open): (&[&str], Vec<Member>, bool) = match role
     {
         Role::Equatable => (&[], vec![member("equal", true, 2, bool_type())], false),
+        Role::Encodable => (&[], Vec::new(), false),
         Role::Ordered => (
             &[],
             vec![

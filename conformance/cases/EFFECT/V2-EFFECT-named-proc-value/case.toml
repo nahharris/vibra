@@ -1,0 +1,12 @@
+id = "V2-EFFECT-named-proc-value"
+rule = "V2-EFFECT-named-proc-value"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#functions-as-values: a module-level proc named without application is a value of its Proc type"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

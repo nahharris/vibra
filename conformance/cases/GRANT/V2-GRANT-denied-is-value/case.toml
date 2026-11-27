@@ -1,0 +1,13 @@
+id = "V2-GRANT-denied-is-value"
+rule = "V2-GRANT-denied-is-value"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "07-diagnostics-and-conformance.md#required-coverage: the denial is matched as a value and the test carries on to a permitted read: no trap, no diagnostic"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

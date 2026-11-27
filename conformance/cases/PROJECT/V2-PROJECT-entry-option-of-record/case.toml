@@ -1,0 +1,19 @@
+id = "V2-PROJECT-entry-option-of-record"
+rule = "V2-PROJECT-entry-option-of-record"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "04-programs-and-packages.md#targets: Option of a record of grants is no grant shape"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@project.invalidEntrySignature"
+level = "@error"
+source = "project.vibon"
+span = { start = 119, end = 133 }
+related = [{ source = "src/app/main.vib", span = { start = 132, end = 136 } }]

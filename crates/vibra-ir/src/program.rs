@@ -6,7 +6,7 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use crate::module_set::may_match;
-use crate::{Callable, CheckedModuleSet, Facts, IrError, Type};
+use crate::{Callable, CheckedModuleSet, Facts, IrError, Library, LibraryTypes, Type};
 
 /// A module set and the function a run starts in.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -80,14 +80,36 @@ fn reaches_itself(module_set: &CheckedModuleSet, root: usize) -> bool {
     }
 }
 
+/// Whether `ty` is a type an entry's caller can hand in: an operation
+/// interface value, an `Option` of one, or a record whose fields are such
+/// types (`docs/spec/03-effects.md`, "Capability values").
+fn is_grant_shape(library: &LibraryTypes, ty: &Type) -> bool {
+    let mut pending = vec![ty];
+    while let Some(ty) = pending.pop() {
+        match ty {
+            Type::Interface(..) => {}
+            Type::Record(fields) => {
+                pending.extend(fields.entries().iter().map(|(_, ty)| ty))
+            }
+            _ => match library.arguments_of(Library::Option, ty) {
+                Some([Type::Interface(..)]) => {}
+                _ => return false,
+            },
+        }
+    }
+    true
+}
+
 impl CheckedProgram {
     /// The program of `module_set` that starts in the function `entry`.
     ///
     /// # Errors
     ///
     /// The entry is not a function of the set, is generic or a contract
-    /// member, or takes inputs; or the set has an initializer cycle, which
-    /// names the first module value on one.
+    /// member, or takes a labelled input or one that is not a grant its
+    /// caller issues: an operation interface value, an `Option` of one, or a
+    /// record of such; or the set has an initializer cycle, which names the
+    /// first module value on one.
     pub fn for_entry(
         module_set: Arc<CheckedModuleSet>,
         entry: usize,
@@ -103,17 +125,26 @@ impl CheckedProgram {
                 function.name
             )));
         }
-        let inputs = match signature.type_info() {
-            Type::Fn(callable) => callable.slot_count(),
-            Type::Proc(callable) => callable
-                .parameters
-                .len()
-                .saturating_add(callable.labels.len()),
-            _ => usize::MAX,
+        let takes_only_grants = match signature.type_info() {
+            Type::Fn(callable) => {
+                callable.labels.is_empty()
+                    && callable
+                        .parameters
+                        .iter()
+                        .all(|ty| is_grant_shape(module_set.library(), ty))
+            }
+            Type::Proc(callable) => {
+                callable.labels.is_empty()
+                    && callable
+                        .parameters
+                        .iter()
+                        .all(|ty| is_grant_shape(module_set.library(), ty))
+            }
+            _ => false,
         };
-        if inputs != 0 {
+        if !takes_only_grants {
             return Err(IrError::InvalidEntry(format!(
-                "`{}` takes inputs",
+                "`{}` takes inputs that are not grants",
                 function.name
             )));
         }

@@ -1,0 +1,26 @@
+// `T`'s bound leaves `Item` open: `pick`'s contract call on `T` is a form
+// this toolchain does not support.
+interface Holder(T)
+  given {T: Iter}
+  fn pick
+    takes {holder: Self source: T}
+    returns found: I32
+    do
+      let _ be Iter.next(source) endlet
+      return 1i32
+  endfn
+endinterface
+
+type Box of I32
+  visibility @public
+  impl Holder(List(I32))
+  endimpl
+endtype
+
+fn viaHolder
+  takes {}
+  returns found: I32
+  visibility @public
+  do
+    return Holder.pick(Box(1i32) [1i32])
+endfn

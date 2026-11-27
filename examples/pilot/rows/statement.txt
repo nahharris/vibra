@@ -1,0 +1,26 @@
+# Task: rows
+
+Write the module `@pilot.rows`. Each declaration named below has exactly
+the name, parameters, and result written here, and has
+`visibility @public` unless this task says it is private. You may add
+declarations of your own. Write no `test`.
+
+- The type `Row`, a record type `{key: Str amount: I32}`.
+- The function `indexRows`, which takes `{rows: List(Row)}` and returns
+  `index: Dict(Str I32)`.
+- The function `latest`, which takes `{rows: List(Row) key: Str}` and
+  returns `amount: Option(I32)`.
+
+`indexRows` maps each row to the pair `{key amount}` with `Iter.map`,
+collects the pairs, and converts them to the dict with `From.convert`.
+When two rows have an equal key, the later row's amount is kept.
+`latest` looks `key` up in the dict `indexRows(rows)` makes.
+
+Examples:
+
+- For the rows `Row(key: "b" amount: 1i32)`, `Row(key: "a" amount: 2i32)`,
+  and `Row(key: "b" amount: 3i32)`, in that order, `Dict.entries` of their
+  `indexRows` is `[{"a" 2i32} {"b" 3i32}]`.
+- `latest([Row(key: "b" amount: 1i32) Row(key: "b" amount: 3i32)] "b")`
+  is `Option.some(value: 3i32)`.
+- `latest([] "a")` is `Option.none()`.

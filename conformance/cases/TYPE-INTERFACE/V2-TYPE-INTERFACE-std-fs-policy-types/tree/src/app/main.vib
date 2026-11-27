@@ -1,0 +1,27 @@
+use @std.fs.DirReadText enduse
+
+use @std.fs.FileAction enduse
+
+use @std.fs.FileDepth enduse
+
+use @std.fs.FsPolicy enduse
+
+use @std.fs.NameTest enduse
+
+use @std.fs.RelativePath enduse
+
+use @std.policy.ScopeError enduse
+
+fn readTextFiles
+  takes {notes: DirReadText}
+  returns reader: Result(DirReadText ScopeError)
+  do
+    let textOnly be FsPolicy.files(
+      prefix: try RelativePath([])
+      depth: FileDepth.tree()
+      actions: [FileAction.read()]
+      names: NameTest.suffix(value: ".txt")
+    ) endlet
+    let reader be try DirReadText.restrict(notes textOnly) endlet
+    return Result.ok(value: reader)
+endfn

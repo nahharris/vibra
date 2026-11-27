@@ -673,7 +673,7 @@ fn an_unknown_member_of_a_prelude_type_is_unknown() {
             "src/app/main.vib".to_owned(),
             span_of(text, "nothere", 0).0,
             span_of(text, "nothere", 0).1,
-            vec![("stdlib/src/std/option.vib".to_owned(), start, end)],
+            vec![("@std.option".to_owned(), start, end)],
         )]
     );
 }
@@ -824,4 +824,27 @@ fn a_module_value_initializer_sees_the_module_scope_only() {
         inside(text, "be seed()", "seed"),
         &main_id("", K::Fn, "seed"),
     ));
+}
+
+/// A chain of 20,000 module values, each naming the next, is decided on a
+/// 256 KiB stack: the values of a chain are decided on an explicit stack,
+/// not by host recursion in proportion to its length.
+#[test]
+fn a_long_chain_of_module_values_is_decided_without_host_recursion() {
+    const LENGTH: usize = 20_000;
+    let mut text = String::new();
+    for k in 1..LENGTH {
+        text.push_str(&format!("let v{k}: I32 be v{} endlet\n", k + 1));
+    }
+    text.push_str(&format!("let v{LENGTH}: I32 be 1i32 endlet\n"));
+    text.push_str(
+        "fn f takes {x: I32} returns r: I32 do match x case v1 return 1i32 case _ return 0i32 endmatch endfn\n",
+    );
+    let resolution = std::thread::Builder::new()
+        .stack_size(256 * 1024)
+        .spawn(move || resolve_main(&text))
+        .expect("a thread")
+        .join()
+        .expect("resolution finishes");
+    assert_clean(&resolution);
 }

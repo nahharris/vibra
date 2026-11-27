@@ -20,8 +20,8 @@ Crates: `vibra-types`, `conformance/cases`.
 
 | Existing | Symbol | Use |
 | --- | --- | --- |
-| `crates/vibra-types/src/check/lower.rs:868` | `pub(crate) fn check_program` | calls `effects::analysis::check_bodies` (step 04) |
-| `crates/vibra-types/src/check/expr.rs:1368` | `ExprForm::Await` | records each `await` with its operand's `Intent` type |
+| `crates/vibra-types/src/check/lower.rs:873` | `pub(crate) fn check_program` | calls `effects::analysis::check_bodies` (step 04) |
+| `crates/vibra-types/src/check/expr.rs:1428` | `ExprForm::Await` | records each `await` with its operand's `Intent` type |
 | `crates/vibra-ir/src/types.rs:152` | `pub struct Row` | set operations on rows |
 
 Proposed: `effects::analysis::{Performed, Witness, check_bodies}` as the
@@ -47,8 +47,10 @@ architecture gives them.
    `await` that contributes it. Invariant: once per body and interface.
 3. Related spans: the shortest chain of calls from that `await` to an
    operation member of the root, ties in source order, each with the note
-   `performs <root> via <callee>`; a hop through a callback parameter or
-   an interface member is marked indirect. The search uses an explicit
+   `performs <root> via <callee>`; a hop through a callback parameter, a
+   plan value, or an interface member at an open or `Self` receiver or
+   through an interface value is marked indirect, and a member at a closed
+   receiver is not. The search uses an explicit
    work list over the call graph and never the host stack.
 4. `@contract.unusedEffect`, a warning at the row entry, for a root of a
    written row that the body does not perform: on a `proc`, a test, and
@@ -93,12 +95,12 @@ endproc
 | `V2-EFFECT-ceiling-exact` | positive | `L` alone | accepted, no warning | 03 Effect ceilings: "requires it to be a subset of the ceiling" |
 | `V2-EFFECT-ceiling-transitive` | positive | `proc outer takes {m: Memory} returns d: Void performs {Log} do return await note(m) endproc` | accepted | 03 Cold plans: "`await plan` contributes the plan's complete row" |
 | `V2-EFFECT-outside-ceiling-direct` | negative | `proc bad takes {m: Memory} returns d: Void do return await Log.append(m "x") endproc` | `@effect.outsideCeiling` at the `await`, one related span `performs Log via Log.append` | 03 Effect ceilings: "it reports one `@effect.outsideCeiling` at the earliest `await` that contributes it" |
-| `V2-EFFECT-outside-ceiling-transitive` | negative | `proc bad takes {m: Memory} returns d: Void do return await note(m) endproc` | `@effect.outsideCeiling` at the `await`; related: `note`, then `Log.append` | 07: "the shortest remaining chain of calls" |
+| `V2-EFFECT-outside-ceiling-transitive` | negative | `proc bad takes {m: Memory} returns d: Void do return await note(m) endproc` | `@effect.outsideCeiling` at the `await`; related: `note`, then `Log.append` | 07: "the shortest chain of calls from the reporting `await` to an operation member of the interface" |
 | `V2-EFFECT-outside-ceiling-earliest` | negative | a `proc` with the empty row and two awaits of `Log.append` | one diagnostic, at the first | 07: "reported once per body and interface" |
 | `V2-EFFECT-outside-ceiling-two-roots` | negative, two faults by rule | a `proc` with the empty row awaiting `Log.append` then `Clock.now` | two diagnostics, one per interface, in source order | the same |
 | `V2-EFFECT-outside-ceiling-wrong-root` | negative | `performs {Clock}` on a body that awaits only `Log.append`, with `let _ be await Clock.now(m) endlet` first | `@effect.outsideCeiling` for `Log` only | 03 Effect ceilings: "no relation between roots" |
 | `V2-EFFECT-outside-ceiling-stored-plan` | negative | `let plan be Log.append(m "x") endlet` then `await plan` in a `proc` with the empty row | `@effect.outsideCeiling` at the `await`, not at the `let` | 03 Cold plans: "Building a plan contributes only what evaluating its arguments performs" |
-| `V2-EFFECT-outside-ceiling-interface-value` | negative | `proc bad takes {l: Log} returns d: Void do return await Log.append(l "x") endproc` | `@effect.outsideCeiling`; the related hop is marked indirect | 07: "a hop through a callback or interface member is marked indirect" |
+| `V2-EFFECT-outside-ceiling-interface-value` | negative | `proc bad takes {l: Log} returns d: Void do return await Log.append(l "x") endproc` | `@effect.outsideCeiling`; the related hop is marked indirect | 07: "an interface member applied at an open or `Self` receiver or through an interface value" |
 | `V2-EFFECT-outside-ceiling-in-if` | negative | the await inside an `if` branch of a `proc` with the empty row | `@effect.outsideCeiling` at that `await` | 03 Effect ceilings |
 | `V2-EFFECT-outside-ceiling-type-member` | negative | a `proc` member of `Memory` with the empty row that awaits `note(self)` | `@effect.outsideCeiling` | the same |
 | `V2-EFFECT-outside-ceiling-default-member` | negative | a default member of `Log` that awaits `Clock.now` of a `Clock` parameter, with no `performs` | `@effect.outsideCeiling` for `Clock` | 03 Operation interfaces: the complete row |

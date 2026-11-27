@@ -1,0 +1,16 @@
+# Q1: the model's own sub runs and returns Result.ok. Were narrowing reserved to
+# sealed grants, sub on a model would have no result to return; Memory ignores
+# the path, so the read is Ok("M") under any rebasing.
+id = "V2-GRANT-narrow-model-sub"
+rule = "V2-GRANT-narrow-model-sub"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "03-effects.md#narrowing: DirReadText.sub on a Memory runs the model's sub: Result.ok, no event (Q1)"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

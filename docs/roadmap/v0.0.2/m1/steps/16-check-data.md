@@ -54,9 +54,9 @@ Proposed: `vibra-types::{nominal, generics}`.
 5. Collections: list literal elements of one type; `[]` and `[:]` need an
    expected type (`@type.ambiguousInference`); dict keys `Ordered`
    (`@type.invalidDictKey` for `F64`, `Void`, `List`, `Option`, a declared
-   type without `Ordered`; `@type.functionNotEquatable` for a callable
-   key); lookups `items(0u64)`, `table(key)`, `text(0u64)`, `bytes(0u64)`
-   with exactly one positional argument returning `Option`.
+   type without `Ordered`, and a callable key); lookups `items(0u64)`,
+   `table(key)`, `text(0u64)`, `bytes(0u64)` with exactly one positional
+   argument returning `Option`.
 6. Representation visibility: `representation @private|@public`, default
    the declaration's visibility; a hidden constructor, pattern, or field
    from another module is `@name.inaccessibleRepresentation`.
@@ -110,7 +110,7 @@ Proposed: `vibra-types::{nominal, generics}`.
 | `V2-TYPE-INFER-empty-dict-expected` | positive, interpret | `let d: Dict(Str I32) be [:] endlet return d` | an empty dict |
 | `V2-TYPE-NOMINAL-dict-order-and-duplicate` | positive, interpret | `["b": 1i32 "a": 2i32 "a": 3i32]` | two entries, `"a": 3i32` first |
 | `V2-TYPE-NOMINAL-dict-key-float` | negative | `[1.0f64: "x"]` | `@type.invalidDictKey` at the key type |
-| `V2-TYPE-NOMINAL-dict-key-function` | negative | `[inc: "x"]` | `@type.functionNotEquatable` |
+| `V2-TYPE-NOMINAL-dict-key-function` | negative | `[inc: "x"]` | `@type.invalidDictKey` at the key |
 | `V2-TYPE-NOMINAL-dict-key-tuple` | positive, interpret | `[{1i32 "a"}: true]` | one entry: an anonymous tuple of `Ordered` components is `Ordered` structurally |
 | `V2-TYPE-NOMINAL-dict-key-atom` | positive, interpret | `[@b: 1i32 @a: 2i32]` | two entries, `@a` first: atoms are `Ordered` structurally |
 | `V2-SRC-CALLS-lookup-list` | positive, interpret | `return [7i32](0u64)` and `return [7i32](1u64)` | `Option.some(value: 7i32)` and `Option.none()` |
@@ -140,7 +140,7 @@ Proposed: `vibra-types::{nominal, generics}`.
 
 Codes: `@type.argumentMismatch`, `@type.mismatch`, `@type.notApplicable`,
 `@type.unknownRecordField`, `@type.ambiguousInference`,
-`@type.invalidDictKey`, `@type.functionNotEquatable`,
+`@type.invalidDictKey`,
 `@name.inaccessibleRepresentation`, `@name.privateAccess`,
 `@type.typeArgumentMismatch`, `@type.infiniteSize`,
 `@type.depthExceeded`, `@type.expandingInstantiation`. No schema change

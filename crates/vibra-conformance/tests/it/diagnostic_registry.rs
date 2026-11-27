@@ -123,13 +123,13 @@ fn the_registry_is_in_specification_table_order() {
 }
 
 #[test]
-fn the_registry_has_119_codes() {
-    assert_eq!(DiagnosticCode::ALL.len(), 119);
+fn the_registry_has_117_codes() {
+    assert_eq!(DiagnosticCode::ALL.len(), 117);
     let unique = DiagnosticCode::ALL
         .iter()
         .map(|code| code.as_atom())
         .collect::<BTreeSet<_>>();
-    assert_eq!(unique.len(), 119);
+    assert_eq!(unique.len(), 117);
 }
 
 #[test]
@@ -163,17 +163,18 @@ fn every_domain_is_the_first_component_of_its_code_with_the_specified_counts() {
         ("syntax", 11),
         ("name", 10),
         ("module", 11),
-        ("type", 31),
+        ("type", 30),
         ("pattern", 6),
         ("effect", 4),
         ("external", 3),
         ("data", 5),
-        ("project", 12),
+        ("project", 10),
         ("runtime", 3),
         ("style", 1),
         ("contract", 7),
         ("grant", 6),
         ("tool", 9),
+        ("test", 1),
     ];
     assert_eq!(
         Domain::ALL
@@ -184,7 +185,7 @@ fn every_domain_is_the_first_component_of_its_code_with_the_specified_counts() {
             .iter()
             .map(|(domain, _)| *domain)
             .collect::<Vec<_>>(),
-        "the fourteen domains"
+        "the fifteen domains"
     );
     assert_eq!(counts, BTreeMap::from(expected));
 }

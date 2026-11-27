@@ -1,0 +1,19 @@
+id = "V2-RUNTIME-await-unbounded"
+rule = "V2-RUNTIME-await-unbounded"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "05-tooling.md#tests-and-selection: a test whose awaits recurse without end exhausts its memory and the other test passes"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "unknown"
+hostEvent = "@runtime.memoryExhausted"
+testRun = "test-run.vibon"
+
+[[expect.diagnostics]]
+code = "@runtime.memoryExhausted"
+level = "@error"
+span = { start = 0, end = 0 }

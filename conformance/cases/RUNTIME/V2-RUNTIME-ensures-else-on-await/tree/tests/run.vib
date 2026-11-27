@@ -1,0 +1,5 @@
+use @std.assert enduse
+
+use @app.main enduse
+
+test "clamped" do assert.equal(0i32 await main.clamp(I32.sub(0i32 3i32))) assert.equal(5i32 await main.clamp(5i32)) endtest

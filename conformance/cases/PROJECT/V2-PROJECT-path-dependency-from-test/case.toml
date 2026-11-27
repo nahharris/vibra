@@ -1,0 +1,13 @@
+id = "V2-PROJECT-path-dependency-from-test"
+rule = "V2-PROJECT-path-dependency-from-test"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "04-programs-and-packages.md#packages-units-and-targets: a module of @tests names a dependency the project declares, and its test passes"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

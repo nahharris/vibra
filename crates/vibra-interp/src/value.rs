@@ -13,9 +13,12 @@
 
 use std::rc::Rc;
 
+use vibra_ir::authority::GrantToken;
 use vibra_ir::{ClosureBody, Type};
 
 use crate::frame::TypeEnv;
+use crate::machine::Target;
+use crate::plan::PlanVal;
 
 /// A runtime value.
 #[derive(Clone, Debug, Default)]
@@ -63,6 +66,11 @@ pub(crate) enum Repr<'a> {
     Interface(Rc<Held<'a>>),
     Function(Rc<FunctionVal>),
     Closure(Rc<ClosureVal<'a>>),
+    /// A plan: the resolved callee and its evaluated operands.
+    Plan(Rc<PlanVal<'a>>),
+    /// A sealed grant: a token of the host context, copied freely, never
+    /// encoded, and never compared. Only `crate::host` makes one.
+    Grant(GrantToken),
 }
 
 /// A case with fields.
@@ -117,6 +125,7 @@ impl Repr<'_> {
                 | Self::Dict(_)
                 | Self::Interface(_)
                 | Self::Closure(_)
+                | Self::Plan(_)
         )
     }
 }
@@ -176,6 +185,16 @@ impl Drop for Val<'_> {
                     if let Ok(closure) = Rc::try_unwrap(closure) {
                         for mut capture in closure.captures {
                             pending.push(take_repr(&mut capture));
+                        }
+                    }
+                }
+                Repr::Plan(plan) => {
+                    if let Ok(plan) = Rc::try_unwrap(plan) {
+                        if let Target::Closure(closure) = plan.callee.target {
+                            pending.push(Repr::Closure(closure));
+                        }
+                        for mut argument in plan.arguments {
+                            pending.push(take_repr(&mut argument));
                         }
                     }
                 }
@@ -311,6 +330,12 @@ impl<'a> Val<'a> {
             }),
             Repr::Interface(held) => visit(&held.value),
             Repr::Closure(closure) => closure.captures.iter().for_each(visit),
+            Repr::Plan(plan) => {
+                if let Some(closure) = plan.closure() {
+                    visit(&Val(Repr::Closure(Rc::clone(closure))));
+                }
+                plan.arguments.iter().for_each(visit);
+            }
             _ => {}
         }
     }
@@ -356,6 +381,13 @@ impl<'a> Val<'a> {
                 Rc::as_ptr(closure).addr(),
                 size_of::<ClosureVal<'_>>()
                     .saturating_add(closure.captures.len().saturating_mul(value)),
+            ),
+            // Accounted like a closure: its own record and one slot per
+            // operand; the operands and a closure callee are its children.
+            Repr::Plan(plan) => (
+                Rc::as_ptr(plan).addr(),
+                size_of::<PlanVal<'_>>()
+                    .saturating_add(plan.arguments.len().saturating_mul(value)),
             ),
             _ => return None,
         })
@@ -495,6 +527,7 @@ pub(crate) fn same(left: &Val<'_>, right: &Val<'_>) -> bool {
                 a.function == b.function && a.type_arguments == b.type_arguments
             }
             (Repr::Closure(a), Repr::Closure(b)) => Rc::ptr_eq(a, b),
+            (Repr::Plan(a), Repr::Plan(b)) => Rc::ptr_eq(a, b),
             _ => false,
         };
         if !equal {

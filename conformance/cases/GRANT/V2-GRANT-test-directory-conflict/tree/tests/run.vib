@@ -1,0 +1,28 @@
+use @std.assert enduse
+
+use @std.test.TestWorld enduse
+
+use @std.fs.DirList enduse
+
+use @std.fs.RelativePath enduse
+
+test "conflict"
+  takes {world: TestWorld}
+  performs {TestWorld DirList}
+  do
+    let Result.ok(value: a) be RelativePath(["a"]) endlet
+    let Result.ok(value: b) be RelativePath(["a" "b"]) endlet
+    let Result.ok(value: root) be RelativePath([]) endlet
+    let {list: lister} be await TestWorld.directory(world files: [a: "1" b: "2"]) endlet
+    assert.equal(Result.ok(value: ["a"]) await DirList.entries(lister root))
+endtest
+
+test "after"
+  takes {world: TestWorld}
+  performs {TestWorld DirList}
+  do
+    let Result.ok(value: a) be RelativePath(["a"]) endlet
+    let Result.ok(value: root) be RelativePath([]) endlet
+    let {list: lister} be await TestWorld.directory(world files: [a: "1"]) endlet
+    assert.equal(Result.ok(value: ["a"]) await DirList.entries(lister root))
+endtest

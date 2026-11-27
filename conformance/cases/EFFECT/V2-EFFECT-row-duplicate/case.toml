@@ -1,0 +1,19 @@
+id = "V2-EFFECT-row-duplicate"
+rule = "V2-EFFECT-row-duplicate"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#effect-ceilings: an interface named twice in a row is a duplicate root at the second, related to the first"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@effect.duplicateRoot"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 313, end = 316 }
+related = [{ source = "src/app/main.vib", span = { start = 309, end = 312 } }]

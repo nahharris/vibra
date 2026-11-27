@@ -1,0 +1,19 @@
+id = "V2-EFFECT-outside-ceiling-direct"
+rule = "V2-EFFECT-outside-ceiling-direct"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#effect-ceilings: an awaited member outside the ceiling is reported at the await, related to the call"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@effect.outsideCeiling"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 692, end = 715 }
+related = [{ source = "src/app/main.vib", span = { start = 698, end = 715 } }]

@@ -1,0 +1,12 @@
+id = "V2-EFFECT-intent-type-result"
+rule = "V2-EFFECT-intent-type-result"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#cold-plans-and-performed-rows: a function returns the plan an application builds, of the type Intent(R {Row})"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

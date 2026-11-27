@@ -1,0 +1,13 @@
+id = "V2-RUNTIME-trace-order"
+rule = "V2-RUNTIME-trace-order"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "07-diagnostics-and-conformance.md#required-coverage: each completed call is recorded once, in completion order"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

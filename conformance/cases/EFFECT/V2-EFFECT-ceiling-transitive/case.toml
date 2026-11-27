@@ -1,0 +1,12 @@
+id = "V2-EFFECT-ceiling-transitive"
+rule = "V2-EFFECT-ceiling-transitive"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#cold-plans-and-performed-rows: awaiting a plan of a proc contributes the proc's complete row"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

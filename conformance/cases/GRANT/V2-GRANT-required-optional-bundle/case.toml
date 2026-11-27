@@ -1,0 +1,13 @@
+id = "V2-GRANT-required-optional-bundle"
+rule = "V2-GRANT-required-optional-bundle"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "03-effects.md#capability-values: the chapter's report takes a required grant, an optional one, and a bundle; called with Option.none() it carries on"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

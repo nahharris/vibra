@@ -1,0 +1,1 @@
+{format: @project.v2 package: {name: "hello" version: "0.1.0"} targets: [{name: @app kind: @bin root: "src/app" entry: @app.main.App.start effects: [] grants: [:]}] dependencies: [:]}

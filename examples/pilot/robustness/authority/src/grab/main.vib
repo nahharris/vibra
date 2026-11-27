@@ -1,0 +1,16 @@
+use @std.fs.DirReadText enduse
+
+use @std.fs.RelativePath enduse
+
+use @std.process.ExitCode enduse
+
+proc main
+  takes {home: DirReadText}
+  returns code: ExitCode
+  performs {DirReadText}
+  visibility @public
+  do
+    let Result.ok(value: at) be RelativePath(["secret.txt"]) endlet
+    let _ be await DirReadText.read(home at) endlet
+    return ExitCode(0u8)
+endproc

@@ -24,11 +24,11 @@ Crates: `vibra-host`.
 
 | Existing | Symbol | Use |
 | --- | --- | --- |
-| `crates/vibra-fs-scope/src/windows.rs:127` | `pub fn open_root` | acquisition |
-| `crates/vibra-fs-scope/src/windows.rs:151` | `pub fn open_read` | reads |
-| `crates/vibra-fs-scope/src/windows.rs:157` | `pub fn create_new` | exclusive creation |
-| `crates/vibra-fs-scope/src/windows.rs:163` | `pub fn open_for_replace` | replacement without truncation |
-| `crates/vibra-fs-scope/src/lib.rs:37` | `pub enum ScopeError` | mapped to `FsError` cases |
+| `crates/vibra-fs-scope/src/windows.rs:170` | `pub fn open_root` | acquisition |
+| `crates/vibra-fs-scope/src/windows.rs:197` | `pub fn open_read` | reads |
+| `crates/vibra-fs-scope/src/windows.rs:319` | `pub fn create_new` | exclusive creation |
+| `crates/vibra-fs-scope/src/windows.rs:204` | `pub fn open_for_replace` | replacement without truncation |
+| `crates/vibra-fs-scope/src/lib.rs:56` | `pub enum ScopeError` | mapped to `FsError` cases |
 
 From step 13: `list`, `stat`, `links`, `real_names`, `replace_contents`,
 `open_parent`, `ScopedParent::create_new`, `check_name`. From step 14:

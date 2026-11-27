@@ -12,7 +12,8 @@ project, over ordinary source files.
 - **Protected evidence.** Test bodies, fixtures, and the runner and policy
   versions are pinned for each run and distinguished from the code under
   repair. An approval names what it approved; it is void when the test, the
-  policy, or the claim changes.
+  policy, or the claim changes. A command presents a target's authority in
+  plain terms before a run, so an approval names the authority it grants.
 - **Queries.** Read-only, bounded, versioned: declaration, references, type,
   contracts, effect row, grant requirements, and diagnostics at a position
   or entity. Results name the snapshot they describe.

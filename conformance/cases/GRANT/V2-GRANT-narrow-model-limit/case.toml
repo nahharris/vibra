@@ -1,0 +1,15 @@
+# Q1: narrowing a value that is not a sealed grant runs that type's member. Were
+# the broker to bound any value, the second read would be Err(limitExceeded).
+id = "V2-GRANT-narrow-model-limit"
+rule = "V2-GRANT-narrow-model-limit"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "03-effects.md#narrowing: DirReadText.limit on a Memory viewed as a DirReadText runs the model's own limit, which returns it: two reads give Ok(\"M\"), no event (Q1)"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

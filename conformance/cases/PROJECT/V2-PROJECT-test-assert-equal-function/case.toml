@@ -1,0 +1,18 @@
+id = "V2-PROJECT-test-assert-equal-function"
+rule = "V2-PROJECT-test-assert-equal-function"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "04-programs-and-packages.md#assertions: a callable type is not Encodable, so assert.equal on two function values is @type.unsatisfiedBound at the operand that fixes T, related to the bound"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+[[expect.diagnostics]]
+code = "@type.unsatisfiedBound"
+level = "@error"
+source = "tests/math.vib"
+span = { start = 79, end = 87 }
+related = [{ source = "@std.assert", span = { start = 555, end = 564 } }]

@@ -1,0 +1,15 @@
+use @std.assert enduse
+
+// Asserts through `assert.equal`, generic over any `Encodable` type.
+fn same(T)
+  takes {expected: T actual: T}
+  returns done: Void
+  given {T: Encodable}
+  do
+    assert.equal(expected actual)
+    return void
+endfn
+
+test "ints" do same(1i32 1i32) endtest
+
+test "texts" do same("a" "a") endtest

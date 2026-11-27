@@ -1,0 +1,5 @@
+use @std.assert enduse
+
+use @money.amount enduse
+
+test "keeps cents" do assert.equal(5i32 amount.cents(5i32)) endtest

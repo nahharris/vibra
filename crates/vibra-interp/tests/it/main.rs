@@ -17,8 +17,10 @@
 mod deep;
 mod depth;
 mod evaluation;
+mod host;
 mod intrinsics;
 mod observation;
+mod plans;
 mod soundness;
 mod tests_and_dispatch;
 
@@ -69,6 +71,7 @@ pub fn path(library: Library) -> &'static str {
         Library::Iter => "std.iter.Iter",
         Library::Equatable => "std.equatable.Equatable",
         Library::Ordered => "std.ordered.Ordered",
+        Library::Encodable => "std.encodable.Encodable",
         Library::Ordering => "std.ordering.Ordering",
         Library::ArithmeticError => "std.number.ArithmeticError",
         Library::ConversionError => "std.number.ConversionError",
@@ -107,11 +110,16 @@ pub fn dict(key: Type, value: Type) -> Type {
     library_type(Library::Dict, vec![key, value])
 }
 
-/// Every library binding but `@equatable` and `@iter`.
+/// Every library binding but `@equatable`, `@iter`, and `@encodable`.
 pub fn library() -> LibraryTypes {
     Library::ALL
         .into_iter()
-        .filter(|library| !matches!(library, Library::Equatable | Library::Iter))
+        .filter(|library| {
+            !matches!(
+                library,
+                Library::Equatable | Library::Iter | Library::Encodable
+            )
+        })
         .fold(LibraryTypes::new(), |bindings, library| {
             bindings.with(library, id(path(library)))
         })
@@ -236,6 +244,7 @@ pub fn function(
     slot_count: usize,
 ) -> CheckedFunction {
     CheckedFunction {
+        context: vibra_ir::BodyContext::Pure,
         name: name.to_owned(),
         signature,
         defaults: Vec::new(),

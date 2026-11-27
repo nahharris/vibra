@@ -1,0 +1,7 @@
+use @std.env.EnvReadVar enduse
+
+use @std.fs.DirReadText enduse
+
+use @std.process.ExitCode enduse
+
+proc main takes {vars: EnvReadVar notes: DirReadText} returns code: ExitCode do return ExitCode(0u8) endproc

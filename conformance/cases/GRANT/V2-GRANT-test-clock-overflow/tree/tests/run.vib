@@ -1,0 +1,17 @@
+use @std.assert enduse
+
+use @std.test.TestWorld enduse
+
+use @std.time.MonotonicClock enduse
+
+use @std.time.TimeError enduse
+
+test "overflow"
+  takes {world: TestWorld}
+  performs {TestWorld MonotonicClock}
+  do
+    let {monotonic: clock} be await TestWorld.clocks(world) endlet
+    assert.equal(Result.ok(value: 18446744073709551615u64) await MonotonicClock.read(clock))
+    assert.equal(Result.err(error: TimeError.unavailable()) await MonotonicClock.read(clock))
+    assert.equal(Result.err(error: TimeError.unavailable()) await MonotonicClock.read(clock))
+endtest

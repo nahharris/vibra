@@ -1,0 +1,54 @@
+use @std.assert enduse
+
+use @pilot.optional enduse
+
+test "nothing stays nothing"
+  do
+    assert.equal(Option.none() optional.adjust(Option.none() 2i32))
+endtest
+
+test "a positive value is offset"
+  do
+    assert.equal(
+      Option.some(value: 5i32)
+      optional.adjust(Option.some(value: 3i32) 2i32)
+    )
+endtest
+
+test "a value that is not positive is clamped before the offset"
+  do
+    assert.equal(
+      Option.some(value: 2i32)
+      optional.adjust(Option.some(value: -3i32) 2i32)
+    )
+endtest
+
+test "zero is clamped before the offset"
+  do
+    assert.equal(
+      Option.some(value: 2i32)
+      optional.adjust(Option.some(value: 0i32) 2i32)
+    )
+endtest
+
+test "the offset saturates"
+  do
+    assert.equal(
+      Option.some(value: 2147483647i32)
+      optional.adjust(Option.some(value: 2147483647i32) 1i32)
+    )
+endtest
+
+test "a mapped value"
+  do
+    assert.equal(
+      Option.some(value: 2u64)
+      optional.mapOptional(Option.some(value: "ab") Str.length)
+    )
+endtest
+
+test "nothing maps to nothing"
+  do
+    let e: Option(Str) be Option.none() endlet
+    assert.equal(Option.none() optional.mapOptional(e Str.length))
+endtest

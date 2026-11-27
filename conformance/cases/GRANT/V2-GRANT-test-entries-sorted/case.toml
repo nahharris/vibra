@@ -1,0 +1,13 @@
+id = "V2-GRANT-test-entries-sorted"
+rule = "V2-GRANT-test-entries-sorted"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "06-runtime.md#closed-operation-semantics: DirList.entries returns the names sorted by Unicode scalar, not in creation order: z.txt written before a.txt lists as a.txt, z.txt"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

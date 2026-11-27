@@ -1,0 +1,97 @@
+{
+  format: @project.v2
+  package: {name: "gate" version: "0.1.0"}
+  targets: [
+    {
+      name: @gate
+      kind: @bin
+      root: "src/gate"
+      entry: @gate.main.main
+      effects: [
+        @std.env.EnvReadArgs
+        @std.env.EnvReadVar
+        @std.fs.DirList
+        @std.fs.DirReadText
+        @std.fs.DirWriteText
+        @std.io.StdoutText
+      ]
+      grants: [
+        @args: {provider: @host.env.args resource: {kind: @processArguments} after: []}
+        @vars: {
+          provider: @host.env.vars
+          resource: {kind: @variableSet names: ["GATE_METRICS"]}
+          after: []
+        }
+        @notes.list: {
+          provider: @host.fs.directory
+          resource: {kind: @argumentPath index: 0u64 source: @args}
+          policy: {
+            format: @scopePolicy.v1
+            family: @filesystem
+            expression: {
+              kind: @directoryRule
+              root: @notes.list
+              prefix: []
+              depth: @self
+              actions: [@list]
+            }
+          }
+          after: [@args]
+        }
+        @notes.reader: {
+          provider: @host.fs.directory
+          resource: {kind: @argumentPath index: 0u64 source: @args}
+          policy: {
+            format: @scopePolicy.v1
+            family: @filesystem
+            expression: {
+              kind: @fileRule
+              root: @notes.reader
+              prefix: []
+              depth: @children
+              actions: [@read]
+              names: {kind: @suffix value: ".txt"}
+            }
+          }
+          after: [@args]
+        }
+        @logs: {
+          provider: @host.fs.directory
+          resource: {kind: @fixedPath path: "logs"}
+          policy: {
+            format: @scopePolicy.v1
+            family: @filesystem
+            expression: {
+              kind: @fileRule
+              root: @logs
+              prefix: []
+              depth: @children
+              actions: [@create @replace]
+              names: {kind: @exact names: ["gate.log"]}
+            }
+          }
+          after: []
+        }
+        @metrics: {
+          provider: @host.fs.directory
+          resource: {kind: @variablePath name: "GATE_METRICS" source: @vars}
+          policy: {
+            format: @scopePolicy.v1
+            family: @filesystem
+            expression: {
+              kind: @fileRule
+              root: @metrics
+              prefix: []
+              depth: @children
+              actions: [@create @replace]
+              names: {kind: @exact names: ["gate.metric"]}
+            }
+          }
+          after: [@vars]
+        }
+        @out: {provider: @host.io.stdout resource: {kind: @processStream} after: []}
+      ]
+    }
+  ]
+  dependencies: ["gatePure": {kind: @path path: "gate-pure"}]
+}

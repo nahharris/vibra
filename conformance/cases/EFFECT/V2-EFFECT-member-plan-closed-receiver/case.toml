@@ -1,0 +1,12 @@
+id = "V2-EFFECT-member-plan-closed-receiver"
+rule = "V2-EFFECT-member-plan-closed-receiver"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#effect-ceilings: a fn may build a plan of a contract proc member at a closed receiver"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

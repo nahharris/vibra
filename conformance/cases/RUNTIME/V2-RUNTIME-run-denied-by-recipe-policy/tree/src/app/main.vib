@@ -1,0 +1,24 @@
+use @std.env.EnvReadArgs enduse
+
+use @std.fs.DirReadText enduse
+
+use @std.fs.FsError enduse
+
+use @std.fs.RelativePath enduse
+
+use @std.io.StdoutText enduse
+
+use @std.process.ExitCode enduse
+
+proc main
+  takes {args: EnvReadArgs notes: DirReadText out: Option(StdoutText)}
+  returns code: ExitCode
+  performs {EnvReadArgs DirReadText StdoutText}
+  do    let Result.ok(value: path) be RelativePath(["raw.bin"]) endlet
+    match await DirReadText.read(notes path)
+      case Result.err(error: FsError.denied())
+        return ExitCode(4u8)
+      case _
+        return ExitCode(0u8)
+    endmatch
+endproc

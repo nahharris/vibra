@@ -24,6 +24,7 @@ fn generic(name: &str, bound: Option<Bound>, body: Node) -> CheckedFunction {
     )
     .unwrap();
     CheckedFunction {
+        context: vibra_ir::BodyContext::Pure,
         name: name.to_owned(),
         signature,
         defaults: Vec::new(),

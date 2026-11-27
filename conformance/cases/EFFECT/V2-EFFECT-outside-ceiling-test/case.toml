@@ -1,0 +1,19 @@
+id = "V2-EFFECT-outside-ceiling-test"
+rule = "V2-EFFECT-outside-ceiling-test"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#tests-and-model-profiles: a test row names whatever the test performs, and the empty row performs nothing"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@effect.outsideCeiling"
+level = "@error"
+source = "tests/main.vib"
+span = { start = 67, end = 106 }
+related = [{ source = "tests/main.vib", span = { start = 73, end = 106 } }, { source = "src/app/main.vib", span = { start = 695, end = 712 } }]

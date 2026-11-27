@@ -66,7 +66,7 @@ fn the_input_carries_the_package_every_unit_with_its_bytes_and_the_library() {
         ]
     );
     assert_eq!(input.embedded().name(), "@std");
-    assert_eq!(input.embedded().modules().len(), 9);
+    assert_eq!(input.embedded().modules().len(), 17);
     let resolution = resolve(&input);
     assert!(
         resolution.diagnostics().is_empty(),

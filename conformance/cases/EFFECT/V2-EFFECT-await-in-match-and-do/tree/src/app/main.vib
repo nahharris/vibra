@@ -1,0 +1,4 @@
+proc double takes {n: I32} returns twice: I32 do
+  return I32.add(n n)
+endproc
+proc run takes {n: I32 go: Bool} returns r: I32 do let m be do let x be await double(n) endlet I32.add(x 1i32) enddo endlet match go case true return await double(m) case false return m endmatch endproc

@@ -1,0 +1,25 @@
+id = "V2-RUNTIME-run-optional-absent"
+rule = "V2-RUNTIME-run-optional-absent"
+profile = "interpreterV2"
+operation = "workspaceRun"
+description = "03-effects.md#capability-values: an optional leaf refused by its provider is Option.none() and the entry returns zero"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+targetRun = "target-run.vibon"
+
+[[expect.diagnostics]]
+code = "@contract.unusedEffect"
+level = "@warning"
+source = "src/app/main.vib"
+span = { start = 203, end = 215 }
+
+[[expect.diagnostics]]
+code = "@contract.unusedEffect"
+level = "@warning"
+source = "src/app/main.vib"
+span = { start = 216, end = 226 }

@@ -1,0 +1,37 @@
+```vibra
+type GateError
+  case disabled
+  case nonPositive
+  visibility @public
+endtype
+
+fn positiveOk
+  takes {outcome: Result(I32 GateError)}
+  returns ok: Bool
+  do
+    return match outcome
+      case Result.ok(value: amount)
+        Ordered.greater(amount 0i32)
+      case Result.err(error: _)
+        true
+    endmatch
+endfn
+
+fn gateAmount
+  takes {enabled: Bool amount: I32}
+  returns outcome: Result(I32 GateError)
+  requires enabled else Result.err(error: GateError.disabled())
+  ensures positiveOk(outcome) else Result.err(error: GateError.nonPositive())
+  visibility @public
+  do
+    return Result.ok(value: amount)
+endfn
+
+fn viaGate
+  takes {gate: Fn({Bool I32} Result(I32 GateError)) enabled: Bool amount: I32}
+  returns outcome: Result(I32 GateError)
+  visibility @public
+  do
+    return gate(enabled amount)
+endfn
+```

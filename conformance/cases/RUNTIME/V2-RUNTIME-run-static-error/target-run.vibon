@@ -1,0 +1,8 @@
+{
+  format: @targetRun.v2
+  result: @command.diagnostics
+  stdout: {kind: @bytes values: []}
+  stderr: {kind: @bytes values: []}
+  startup: []
+  auditTrace: {format: @auditTrace.v2 revision: "sha256:a23665d9fcfb57669c7da30c3d406db45f1c53d2b9e70df1e230b42139130924" target: @hello drivers: [] policies: [:] redaction: @none events: []}
+}

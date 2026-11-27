@@ -2,9 +2,11 @@
 //!
 //! `docs/spec/02-type-system.md`, "Guards with `else`": a `let` pattern
 //! `Result.ok(value: x)` over a construction of a type whose `where` has an
-//! `else` is irrefutable only when the evaluation of that constant
-//! construction succeeds. When a tool limit stops that evaluation, the
-//! report is `@tool.limitExceeded` alone, at the predicate.
+//! `else` is irrefutable only when rule 1 (`GUARD-1`) proves that the
+//! constant construction succeeds. When a tool limit stops that evaluation,
+//! the report is `@tool.limitExceeded` alone, at the predicate. Every other
+//! case fails closed: a predicate that is not certified, an evaluation that
+//! does not run, and one that gives `false` all leave the pattern refutable.
 use vibra_diagnostics::DiagnosticCode;
 use vibra_ir::{
     Arguments, CallTarget, Constant, Construction, Expr, MatchArm, NamedTypes, Node,
@@ -29,23 +31,36 @@ pub(super) fn patterns(context: &mut Context<'_, '_>, evaluator: &mut Evaluator<
         else {
             continue;
         };
-        if !context.certified_predicate(*ty) {
-            continue;
-        }
-        match evaluator.evaluate(&matches(pattern, value)) {
-            Outcome::Value(Value::U8(1)) => {}
-            Outcome::LimitReached => limit_at_predicate(context, *ty),
-            Outcome::Value(_) | Outcome::Unevaluated => {
-                let diagnostic = context.diagnostic(
-                    DiagnosticCode::PatternRefutableBinding,
-                    *module,
-                    *span,
-                    "this pattern does not cover the value of this constant \
-                     construction, which the checker evaluated; add an `else`",
-                );
-                context.push(*module, diagnostic);
+        // Only rule 1 makes the pattern irrefutable: without a certified
+        // predicate there is no proof, whatever the reason.
+        let outcome = if context.certified_predicate(*ty) {
+            evaluator.evaluate(&matches(pattern, value))
+        } else {
+            Outcome::Unevaluated
+        };
+        let message = match outcome {
+            Outcome::Value(Value::U8(1)) => continue,
+            Outcome::LimitReached => {
+                limit_at_predicate(context, *ty);
+                continue;
             }
-        }
+            Outcome::Value(_) => {
+                "this pattern does not cover the value of this constant \
+                 construction, which the checker evaluated; add an `else`"
+            }
+            Outcome::Unevaluated => {
+                "the checker cannot evaluate the predicate of this constant \
+                 construction, so nothing proves that it succeeds and this \
+                 pattern may not cover its value; add an `else`"
+            }
+        };
+        let diagnostic = context.diagnostic(
+            DiagnosticCode::PatternRefutableBinding,
+            *module,
+            *span,
+            message,
+        );
+        context.push(*module, diagnostic);
     }
 }
 /// Reports the limit at the predicate of the type at program index `ty`.

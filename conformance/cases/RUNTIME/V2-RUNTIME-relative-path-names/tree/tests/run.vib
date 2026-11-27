@@ -1,0 +1,64 @@
+use @std.assert enduse
+
+use @std.fs.RelativePath enduse
+
+fn rejected
+  takes {names: List(Str)}
+  returns r: Bool
+  do
+    match RelativePath(names)
+      case Result.err(error: _)
+        return true
+      case Result.ok(value: _)
+        return false
+    endmatch
+endfn
+
+fn accepted
+  takes {names: List(Str)}
+  returns r: Bool
+  do
+    return Bool.not(rejected(names))
+endfn
+
+test "names"
+  do
+    assert.true(rejected([""]))
+    assert.true(rejected(["."]))
+    assert.true(rejected([".."]))
+    assert.true(rejected(["a/b"]))
+    assert.true(rejected(["a\\b"]))
+    assert.true(rejected(["a:b"]))
+    assert.true(rejected(["a\u{0}b"]))
+    assert.true(rejected(["a\u{1F}b"]))
+    assert.true(rejected(["a\u{7F}b"]))
+    assert.true(rejected(["a\u{9F}b"]))
+    assert.true(rejected(["a."]))
+    assert.true(rejected(["..."]))
+    assert.true(rejected(["a "]))
+    assert.true(rejected(["NUL.txt"]))
+    assert.true(rejected(["con .log"]))
+    assert.true(rejected(["nul.tar.gz"]))
+    assert.true(rejected(["CONIN$"]))
+    assert.true(rejected(["conout$.txt"]))
+    assert.true(rejected(["COM\u{B9}"]))
+    assert.true(rejected(["lpt\u{B3}.x"]))
+    assert.true(rejected(["com0"]))
+    assert.true(rejected(["con\u{131}n$"]))
+    assert.true(rejected(["a" ".."]))
+    assert.true(accepted([]))
+    assert.true(accepted(["nul2"]))
+    assert.true(accepted(["a.txt"]))
+    assert.true(accepted([".txt"]))
+    assert.true(accepted(["com10"]))
+    assert.true(accepted(["a.b"]))
+    assert.true(accepted(["a b"]))
+    assert.true(accepted(["...a"]))
+    assert.true(accepted(["a\u{A0}b"]))
+    assert.true(accepted(["nul_"]))
+    assert.true(accepted(["COM\u{B9}0"]))
+    assert.true(accepted(["\u{131}"]))
+    assert.true(accepted(["\u{17F}"]))
+    assert.true(accepted(["con\u{130}n$"]))
+    assert.true(accepted(["a" "b"]))
+endtest

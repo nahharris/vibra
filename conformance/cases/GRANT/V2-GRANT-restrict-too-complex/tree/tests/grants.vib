@@ -1,0 +1,130 @@
+use @std.assert enduse
+
+use @std.test.TestWorld enduse
+
+use @std.fs.DirReadText enduse
+
+use @std.fs.DirList enduse
+
+use @std.fs.DirWriteText enduse
+
+use @std.fs.FsError enduse
+
+use @std.fs.FsPolicy enduse
+
+use @std.fs.FileDepth enduse
+
+use @std.fs.FileAction enduse
+
+use @std.fs.NameTest enduse
+
+use @std.fs.RelativePath enduse
+
+use @std.io.StdinBytes enduse
+
+use @std.io.IoError enduse
+
+use @std.io.StdoutText enduse
+
+use @std.policy.GrantLimits enduse
+
+use @std.policy.ScopeError enduse
+
+use @app.notes enduse
+
+use @app.logs enduse
+
+// Reads only `.txt` files below `at`: the chapter's `textOnly`.
+fn textOnly
+  takes {at: RelativePath}
+  returns policy: FsPolicy
+  do
+    return FsPolicy.files(
+      prefix: at
+      depth: FileDepth.tree()
+      actions: [FileAction.read()]
+      names: NameTest.suffix(value: ".txt")
+    )
+endfn
+
+// Reads every file below `at`.
+fn anyFile
+  takes {at: RelativePath}
+  returns policy: FsPolicy
+  do
+    return FsPolicy.files(
+      prefix: at
+      depth: FileDepth.tree()
+      actions: [FileAction.read()]
+      names: NameTest.anyName()
+    )
+endfn
+
+fn callsAtMost
+  takes {count: U64}
+  returns limits: GrantLimits
+  do
+    return GrantLimits(
+      invocations: Option.some(value: count)
+      inputBytes: Option.none()
+      outputBytes: Option.none()
+    )
+endfn
+
+fn inputAtMost
+  takes {count: U64}
+  returns limits: GrantLimits
+  do
+    return GrantLimits(
+      invocations: Option.none()
+      inputBytes: Option.some(value: count)
+      outputBytes: Option.none()
+    )
+endfn
+
+fn outputAtMost
+  takes {count: U64}
+  returns limits: GrantLimits
+  do
+    return GrantLimits(
+      invocations: Option.none()
+      inputBytes: Option.none()
+      outputBytes: Option.some(value: count)
+    )
+endfn
+// `grant` restricted by `policy`, `count` times in a row.
+fn chain
+  takes {grant: DirReadText policy: FsPolicy count: U64}
+  returns narrowed: Result(DirReadText ScopeError)
+  do
+    if Equatable.equal(count 0u64) then
+      return Result.ok(value: grant)
+    else
+      let next be try DirReadText.restrict(grant policy) endlet
+      return chain(next policy U64.sub(count 1u64))
+    endif
+endfn
+test "depth"
+  takes {world: TestWorld}
+  performs {TestWorld}
+  do
+    let Result.ok(value: here) be RelativePath([]) endlet
+    let Result.ok(value: aTxt) be RelativePath(["a.txt"]) endlet
+    let Result.ok(value: bBin) be RelativePath(["b.bin"]) endlet
+    let Result.ok(value: subTxt) be RelativePath(["sub" "s.txt"]) endlet
+    let Result.ok(value: subDir) be RelativePath(["sub"]) endlet
+    let Result.ok(value: sTxt) be RelativePath(["s.txt"]) endlet
+    let dir be await TestWorld.directory(world files: [aTxt: "A" bBin: "B" subTxt: "S"]) endlet
+    match chain(dir.readText textOnly(here) 61u64)
+      case Result.ok(value: _)
+        assert.true(true)
+      case Result.err(error: _)
+        assert.true(false)
+    endmatch
+    match chain(dir.readText textOnly(here) 62u64)
+      case Result.ok(value: _)
+        assert.true(false)
+      case Result.err(error: refusal)
+        assert.equal(ScopeError.policyTooComplex() refusal)
+    endmatch
+endtest

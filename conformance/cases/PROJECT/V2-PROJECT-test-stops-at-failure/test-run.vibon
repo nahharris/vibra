@@ -2,6 +2,6 @@
   format: @testRun.v2
   result: @command.testFailed
   tests: [
-    {name: "@tests.math::\"stops\"" result: @test.assertionFailed failure: {kind: @assertion assertion: "assert.equal" expected: "4i32" actual: "3i32" primarySpan: {sourceId: "tests/math.vib" start: 64u64 end: 102u64}} auditTrace: {format: @auditTrace.v2 revision: "sha256:d78e87ffbf04236fe4b8f79aeccd5b3e74c593a1d7d7ba5d9b1a32a738e0054c" drivers: [{provider: @hostWorld.v2 version: "0.0.2"}] policies: [:] redaction: @none events: []}}
+    {name: "@tests.math::\"stops\"" result: @test.assertionFailed failure: {kind: @assertion assertion: "assert.equal" expected: "4i32" actual: "3i32" primarySpan: {sourceId: "tests/math.vib" start: 64u64 end: 102u64}} auditTrace: {format: @auditTrace.v2 revision: "sha256:31183d1f48b4e3c8f857d74ca6598bbd6bb24326206da17a0bc9194106a5fe96" drivers: [{provider: @hostWorld.v2 version: "0.0.2"}] policies: [:] redaction: @none events: []}}
   ]
 }

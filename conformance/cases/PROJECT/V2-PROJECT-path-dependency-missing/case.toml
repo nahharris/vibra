@@ -1,0 +1,18 @@
+id = "V2-PROJECT-path-dependency-missing"
+rule = "V2-PROJECT-path-dependency-missing"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "04-programs-and-packages.md#dependencies-and-lock: a path dependency whose directory holds no project.vibon is @project.notFound at its path"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@project.notFound"
+level = "@error"
+source = "project.vibon"
+span = { start = 155, end = 165 }

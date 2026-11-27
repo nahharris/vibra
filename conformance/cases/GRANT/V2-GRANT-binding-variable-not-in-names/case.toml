@@ -1,0 +1,18 @@
+id = "V2-GRANT-binding-variable-not-in-names"
+rule = "V2-GRANT-binding-variable-not-in-names"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "04-programs-and-packages.md#targets: a variable read names a source leaf whose names include the variable: @grant.invalidBinding at name"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@grant.invalidBinding"
+level = "@error"
+source = "project.vibon"
+span = { start = 339, end = 345 }

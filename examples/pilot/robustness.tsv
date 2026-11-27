@@ -1,0 +1,12 @@
+subject	task	arm	file	grade	shows	limit
+empty	packet	endlet	robustness/empty.vib	refuted	any	
+empty	packet	noEndlet	robustness/empty.vib	refuted	any	
+prose	packet	endlet	robustness/prose.vib	refuted	any	
+prose	packet	noEndlet	robustness/prose.vib	refuted	any	
+fence	packet	endlet	robustness/fence.vib	refuted	any	
+fence	packet	noEndlet	robustness/fence.noEndlet.vib	refuted	any	
+authority	reader	endlet	robustness/authority/src/pilot/reader.vib	refuted	test a missing file is the error, not the fallback	
+endless	packet	endlet	robustness/endless.vib	unknown	code @runtime.memoryExhausted	
+endless	packet	noEndlet	robustness/endless.noEndlet.vib	unknown	code @runtime.memoryExhausted	
+endlessTail	packet	endlet	robustness/endlessTail.vib	unknown	reason time	10
+endlessTail	packet	noEndlet	robustness/endlessTail.noEndlet.vib	unknown	reason time	10

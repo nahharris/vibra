@@ -1,0 +1,12 @@
+id = "V2-PROJECT-entry-private-other-name"
+rule = "V2-PROJECT-entry-private-other-name"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "04-programs-and-packages.md#targets: the entry need not be public or named main"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

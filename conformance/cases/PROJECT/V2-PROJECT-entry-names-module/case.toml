@@ -1,0 +1,18 @@
+id = "V2-PROJECT-entry-names-module"
+rule = "V2-PROJECT-entry-names-module"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "04-programs-and-packages.md#targets: an entry that names a module resolves to another kind of entity"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@name.wrongEntityKind"
+level = "@error"
+source = "project.vibon"
+span = { start = 119, end = 128 }

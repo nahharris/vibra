@@ -1,0 +1,37 @@
+id = "V2-GRANT-binding-plain-missing"
+rule = "V2-GRANT-binding-plain-missing"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "04-programs-and-packages.md#targets: a missing key of a plain parameter's leaf is @grant.invalidBinding at the grants field, related to the parameter"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@grant.invalidBinding"
+level = "@error"
+source = "project.vibon"
+span = { start = 213, end = 371 }
+related = [{ source = "src/app/main.vib", span = { start = 167, end = 172 } }]
+
+[[expect.diagnostics]]
+code = "@contract.unusedEffect"
+level = "@warning"
+source = "src/app/main.vib"
+span = { start = 248, end = 259 }
+
+[[expect.diagnostics]]
+code = "@contract.unusedEffect"
+level = "@warning"
+source = "src/app/main.vib"
+span = { start = 260, end = 271 }
+
+[[expect.diagnostics]]
+code = "@contract.unusedEffect"
+level = "@warning"
+source = "src/app/main.vib"
+span = { start = 272, end = 282 }

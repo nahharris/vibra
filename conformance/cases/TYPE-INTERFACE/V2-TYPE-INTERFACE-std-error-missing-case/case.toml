@@ -1,0 +1,18 @@
+id = "V2-TYPE-INTERFACE-std-error-missing-case"
+rule = "V2-TYPE-INTERFACE-std-error-missing-case"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "06-runtime.md#error-types: each error type also has the case outcomeUnknown, so a match without it is not exhaustive"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@pattern.nonExhaustive"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 87, end = 589 }

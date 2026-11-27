@@ -1,0 +1,19 @@
+id = "V2-EFFECT-std-read-all-row"
+rule = "V2-EFFECT-std-read-all-row"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#effect-ceilings: io.readAllText has the row {StdinText}, so awaiting it with no ceiling is outside the ceiling, with the chain of calls into the library"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@effect.outsideCeiling"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 155, end = 182 }
+related = [{ source = "src/app/main.vib", span = { start = 161, end = 182 } }, { source = "@std.io", span = { start = 2990, end = 3013 } }, { source = "@std.io", span = { start = 3571, end = 3601 } }]

@@ -10,14 +10,17 @@
 //!
 //! There is no union widening, no member pattern, no tuple projection, no
 //! variadic tail, no `ArrayOf` or `DictOf`, no integer `Div` or `Rem`, no row
-//! tail, and no plan or `await` node. A bare guard is discharged by the checker
-//! and leaves no node; a guard with a consequence lives on
+//! tail, and no plan node: a plan is built by a call whose callee has a
+//! `Proc` type, and run by [`Expr::Await`]. A bare guard is discharged by the
+//! checker and leaves no node; a guard with a consequence lives on
 //! [`crate::CheckedFunction`] or on [`crate::Invariant`].
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use crate::conformance::Evidence;
+use crate::constant::check_encodable;
+use crate::effects;
 use crate::encode::{TypeTable, encode_value};
 use crate::external::CompilerIntrinsic;
 use crate::{
@@ -27,7 +30,12 @@ use crate::{
 };
 
 /// An expression and where its source is.
-#[derive(Clone, Debug, PartialEq, Eq)]
+///
+/// A sequence of statements nests each binding statement around the rest of
+/// the sequence ([`Expr::rest`]): a long body is a long right spine. Every
+/// walk over a node, its clone, its comparison, its debug form, and its drop
+/// included, follows that spine in a loop, so the host stack it needs is
+/// bounded by how deeply the source nests, never by how long a sequence is.
 pub struct Node {
     /// The expression.
     pub expr: Expr,
@@ -40,6 +48,127 @@ impl Node {
     #[must_use]
     pub const fn new(expr: Expr, origin: SourceOrigin) -> Self {
         Self { expr, origin }
+    }
+
+    /// The links of the spine that starts at this node, first first, and
+    /// the node that ends it, which continues no sequence.
+    fn spine(&self) -> (Vec<&Self>, &Self) {
+        let mut links = Vec::new();
+        let mut node = self;
+        while let Some(rest) = node.expr.rest() {
+            links.push(node);
+            node = rest;
+        }
+        (links, node)
+    }
+}
+
+/// A clone builds the spine from its end, each link around the clone of the
+/// rest.
+impl Clone for Node {
+    fn clone(&self) -> Self {
+        let (mut links, end) = self.spine();
+        let mut built = Self::new(end.expr.clone(), end.origin.clone());
+        while let Some(link) = links.pop() {
+            built = Self::new(link.expr.relinked(built), link.origin.clone());
+        }
+        built
+    }
+}
+
+/// Two nodes are equal when their spines have the same links, compared one
+/// pair at a time, and the same ends.
+impl PartialEq for Node {
+    fn eq(&self, other: &Self) -> bool {
+        let (mut left, mut right) = (self, other);
+        loop {
+            if left.origin != right.origin {
+                return false;
+            }
+            match (left.expr.rest(), right.expr.rest()) {
+                (Some(left_rest), Some(right_rest)) => {
+                    if !left.expr.same_link(&right.expr) {
+                        return false;
+                    }
+                    left = left_rest;
+                    right = right_rest;
+                }
+                (None, None) => return left.expr == right.expr,
+                _ => return false,
+            }
+        }
+    }
+}
+
+impl Eq for Node {}
+
+/// A node that continues a sequence is written as the list of its spine:
+/// each link without its rest, then the node that ends it.
+impl std::fmt::Debug for Node {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let (links, end) = self.spine();
+        if links.is_empty() {
+            return End(end).fmt(f);
+        }
+        let mut list = f.debug_list();
+        for link in links {
+            list.entry(&Link(link));
+        }
+        list.entry(&End(end)).finish()
+    }
+}
+
+/// One link of a spine, written without its rest.
+struct Link<'n>(&'n Node);
+
+impl std::fmt::Debug for Link<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut link = f.debug_struct("Link");
+        match &self.0.expr {
+            Expr::Let { slot, value, .. } => {
+                link.field("let", slot).field("value", value);
+            }
+            Expr::LetElse {
+                pattern,
+                value,
+                fallback,
+                ..
+            } => {
+                link.field("letElse", pattern)
+                    .field("value", value)
+                    .field("fallback", fallback);
+            }
+            Expr::Match {
+                subject,
+                arms,
+                value_type,
+            } => {
+                let (others, last) = match arms.split_last() {
+                    Some((last, others)) => (others, Some(&last.pattern)),
+                    None => (arms.as_slice(), None),
+                };
+                link.field("match", subject)
+                    .field("arms", &others)
+                    .field("lastPattern", &last)
+                    .field("valueType", value_type);
+            }
+            other => {
+                link.field("expr", other);
+            }
+        }
+        link.field("origin", &self.0.origin).finish()
+    }
+}
+
+/// The node that ends a spine, or a node on none.
+struct End<'n>(&'n Node);
+
+impl std::fmt::Debug for End<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Node")
+            .field("expr", &self.0.expr)
+            .field("origin", &self.0.origin)
+            .finish()
     }
 }
 
@@ -56,6 +185,115 @@ impl Drop for Node {
 }
 
 impl Expr {
+    /// The operand that continues this expression's sequence, which a walk
+    /// follows in a loop: the body of a `let` or a `let … else`, which is the
+    /// rest of the enclosing sequence, and the body of the last arm of a
+    /// `match`, which is that rest when the `match` is a destructuring `let`.
+    #[must_use]
+    pub fn rest(&self) -> Option<&Node> {
+        match self {
+            Self::Let { body, .. } | Self::LetElse { body, .. } => Some(body),
+            Self::Match { arms, .. } => arms.last().map(|arm| &arm.body),
+            _ => None,
+        }
+    }
+
+    /// A clone of this expression, whose [`Self::rest`] is `rest`.
+    fn relinked(&self, rest: Node) -> Self {
+        match self {
+            Self::Let { slot, value, .. } => Self::Let {
+                slot: *slot,
+                value: value.clone(),
+                body: Box::new(rest),
+            },
+            Self::LetElse {
+                pattern,
+                value,
+                fallback,
+                ..
+            } => Self::LetElse {
+                pattern: pattern.clone(),
+                value: value.clone(),
+                fallback: fallback.clone(),
+                body: Box::new(rest),
+            },
+            Self::Match {
+                subject,
+                arms,
+                value_type,
+            } => {
+                let mut relinked = Vec::with_capacity(arms.len());
+                if let Some((last, others)) = arms.split_last() {
+                    relinked.extend(others.iter().cloned());
+                    relinked.push(MatchArm {
+                        pattern: last.pattern.clone(),
+                        body: rest,
+                    });
+                }
+                Self::Match {
+                    subject: subject.clone(),
+                    arms: relinked,
+                    value_type: value_type.clone(),
+                }
+            }
+            other => other.clone(),
+        }
+    }
+
+    /// Whether this expression and `other` are equal in everything but
+    /// their [`Self::rest`].
+    fn same_link(&self, other: &Self) -> bool {
+        match (self, other) {
+            (
+                Self::Let { slot, value, .. },
+                Self::Let {
+                    slot: other_slot,
+                    value: other_value,
+                    ..
+                },
+            ) => slot == other_slot && value == other_value,
+            (
+                Self::LetElse {
+                    pattern,
+                    value,
+                    fallback,
+                    ..
+                },
+                Self::LetElse {
+                    pattern: other_pattern,
+                    value: other_value,
+                    fallback: other_fallback,
+                    ..
+                },
+            ) => {
+                pattern == other_pattern
+                    && value == other_value
+                    && fallback == other_fallback
+            }
+            (
+                Self::Match {
+                    subject,
+                    arms,
+                    value_type,
+                },
+                Self::Match {
+                    subject: other_subject,
+                    arms: other_arms,
+                    value_type: other_type,
+                },
+            ) => match (arms.split_last(), other_arms.split_last()) {
+                (Some((last, others)), Some((other_last, other_others))) => {
+                    subject == other_subject
+                        && value_type == other_type
+                        && others == other_others
+                        && last.pattern == other_last.pattern
+                }
+                _ => false,
+            },
+            _ => false,
+        }
+    }
+
     /// Checks that every type written in this expression, its operands,
     /// patterns, constants, and closure bodies included, nests at most
     /// [`Type::MAX_DEPTH`] levels. The expression is walked with a work
@@ -172,6 +410,7 @@ impl Expr {
                     nodes.push(value);
                 }
                 Self::Field { record: value, .. }
+                | Self::Await { plan: value }
                 | Self::Return(value)
                 | Self::Try(value)
                 | Self::WidenAtom(value) => nodes.push(value),
@@ -250,6 +489,7 @@ impl Expr {
                 nodes.extend(arguments.labelled.iter().map(|(_, node)| node));
             }
             Self::Field { record: value, .. }
+            | Self::Await { plan: value }
             | Self::Return(value)
             | Self::Try(value)
             | Self::WidenToInterface { value, .. }
@@ -345,6 +585,7 @@ impl Expr {
                 }
             }
             Self::Field { record: node, .. }
+            | Self::Await { plan: node }
             | Self::Return(node)
             | Self::Try(node)
             | Self::WidenToInterface { value: node, .. }
@@ -481,6 +722,13 @@ pub enum Expr {
         target: CallTarget,
         /// The arguments.
         arguments: Arguments,
+    },
+    /// `await plan`: runs the plan, an `Intent`, and yields its result. It
+    /// is valid only in a body that runs in a procedure context
+    /// (`docs/spec/03-effects.md`, "Cold plans and performed rows").
+    Await {
+        /// The plan.
+        plan: Box<Node>,
     },
     /// `return`, which leaves the nearest callable activation.
     Return(Box<Node>),
@@ -681,8 +929,10 @@ fn names_equal<'a>(
 }
 
 impl<'a> Tables<'a> {
-    /// Checks the shape of `ty` in `scope`, and that every declared type and
-    /// interface it names exists at its arity, with every choice.
+    /// Checks the shape of `ty` in `scope`, that every declared type and
+    /// interface it names exists at its arity, with every choice, and that
+    /// every row entry is an operation interface. A dict key is decided by its
+    /// `Ordered` conformance alone, where the dict is built.
     pub(crate) fn check_type(
         &self,
         ty: &Type,
@@ -706,6 +956,12 @@ impl<'a> Tables<'a> {
                         actual: arguments.len(),
                     });
                 }
+            }
+            Type::Proc(signature) => {
+                effects::check_row(self.interfaces, &signature.effects)?
+            }
+            Type::Intent(intent) => {
+                effects::check_row(self.interfaces, &intent.effects)?
             }
             Type::Interface(id, arguments, choices) => {
                 let interface = self
@@ -924,9 +1180,11 @@ impl<'a> Checker<'a> {
         self.tables.check_applications(self.evidence, ty)
     }
 
-    /// Checks that a constant's value fits its type, as its encoding does.
+    /// Checks that a constant's type has an encoding and its value fits the
+    /// type, as its encoding does.
     pub(crate) fn check_constant(&self, constant: &Constant) -> Result<(), IrError> {
         self.check_type(constant.value_type())?;
+        check_encodable("a constant", constant.value_type(), self.tables.interfaces)?;
         encode_value(constant.value(), constant.value_type(), self.tables.table)
             .map(drop)
             .map_err(|error| IrError::InvalidExpression(format!("a constant: {error}")))

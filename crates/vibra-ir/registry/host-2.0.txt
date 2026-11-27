@@ -1,0 +1,31 @@
+registry host 2.0
+row	io.stdinText	@std.io.StdinText	Proc({StdinText U64} Result(Str IoError) {StdinText})	0	@once
+row	io.stdinBytes	@std.io.StdinBytes	Proc({StdinBytes U64} Result(Bytes IoError) {StdinBytes})	0	@once
+row	io.stdoutText	@std.io.StdoutText	Proc({StdoutText Str} Result(Void IoError) {StdoutText})	0	@once
+row	io.stdoutBytes	@std.io.StdoutBytes	Proc({StdoutBytes Bytes} Result(Void IoError) {StdoutBytes})	0	@once
+row	io.stderrText	@std.io.StderrText	Proc({StderrText Str} Result(Void IoError) {StderrText})	0	@once
+row	io.stderrBytes	@std.io.StderrBytes	Proc({StderrBytes Bytes} Result(Void IoError) {StderrBytes})	0	@once
+row	fs.readFile	@std.fs.DirReadBytes	Proc({DirReadBytes RelativePath} Result(Bytes FsError) {DirReadBytes})	0	@once
+row	fs.readText	@std.fs.DirReadText	Proc({DirReadText RelativePath} Result(Str FsError) {DirReadText})	0	@once
+row	fs.readEntries	@std.fs.DirList	Proc({DirList RelativePath} Result(List(Str) FsError) {DirList})	0	@once
+row	fs.writeFile	@std.fs.DirWriteBytes	Proc({DirWriteBytes RelativePath Bytes} Result(Void FsError) {DirWriteBytes})	0	@once
+row	fs.writeText	@std.fs.DirWriteText	Proc({DirWriteText RelativePath Str} Result(Void FsError) {DirWriteText})	0	@once
+row	fs.metadataStat	@std.fs.DirStat	Proc({DirStat RelativePath} Result(FsMetadata FsError) {DirStat})	0	@once
+row	env.readVar	@std.env.EnvReadVar	Proc({EnvReadVar Str} Result(Str EnvError) {EnvReadVar})	0	@once
+row	env.readArgs	@std.env.EnvReadArgs	Proc({EnvReadArgs} Result(List(Str) EnvError) {EnvReadArgs})	0	@once
+row	time.nowWall	@std.time.WallClock	Proc({WallClock} Result(I64 TimeError) {WallClock})	0	@once
+row	time.nowMonotonic	@std.time.MonotonicClock	Proc({MonotonicClock} Result(U64 TimeError) {MonotonicClock})	0	@once
+row	random.generateBytes	@std.random.RandomBytes	Proc({RandomBytes U64} Result(Bytes RandomError) {RandomBytes})	0	@once
+testWorld	testWorld.directory	@std.test.TestWorld	Proc({TestWorld files: Dict(RelativePath Str)} {readBytes: DirReadBytes readText: DirReadText list: DirList writeBytes: DirWriteBytes writeText: DirWriteText stat: DirStat} {TestWorld})	0	@once
+testWorld	testWorld.streams	@std.test.TestWorld	Proc({TestWorld stdin: Str} {stdinText: StdinText stdinBytes: StdinBytes stdoutText: StdoutText stdoutBytes: StdoutBytes stderrText: StderrText stderrBytes: StderrBytes} {TestWorld})	0	@once
+testWorld	testWorld.environment	@std.test.TestWorld	Proc({TestWorld variables: Dict(Str Str) arguments: List(Str)} {variables: EnvReadVar arguments: EnvReadArgs} {TestWorld})	0	@once
+testWorld	testWorld.clocks	@std.test.TestWorld	Proc({TestWorld} {wall: WallClock monotonic: MonotonicClock} {TestWorld})	0	@once
+testWorld	testWorld.random	@std.test.TestWorld	Proc({TestWorld} RandomBytes {TestWorld})	0	@once
+testWorld	testWorld.output	@std.test.TestWorld	Proc({TestWorld} {stdout: Bytes stderr: Bytes} {TestWorld})	0	@once
+type	IoError	@std.io	invalidText closed other denied limitExceeded unsupported outcomeUnknown
+type	FsError	@std.fs	notFound permissionDenied notAFile notADirectory invalidPath invalidText other denied limitExceeded unsupported outcomeUnknown
+type	EnvError	@std.env	notPresent notUnicode denied limitExceeded unsupported outcomeUnknown
+type	TimeError	@std.time	unavailable denied limitExceeded unsupported outcomeUnknown
+type	RandomError	@std.random	unavailable denied limitExceeded unsupported outcomeUnknown
+type	FsKind	@std.fs	file directory other
+type	FsMetadata	@std.fs	{kind: FsKind size: U64}

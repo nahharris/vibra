@@ -1,0 +1,19 @@
+id = "V2-GRANT-binding-cycle"
+rule = "V2-GRANT-binding-cycle"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "04-programs-and-packages.md#targets: for @a after @b and @b after @a the fault is at the entry @a of @b's list, related along the cycle"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@grant.bindingCycle"
+level = "@error"
+source = "project.vibon"
+span = { start = 644, end = 646 }
+related = [{ source = "project.vibon", span = { start = 397, end = 399 } }]

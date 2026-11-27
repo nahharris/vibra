@@ -1,0 +1,14 @@
+id = "V2-RUNTIME-run-fresh-world"
+rule = "V2-RUNTIME-run-fresh-world"
+profile = "interpreterV2"
+operation = "workspaceRun"
+description = "06-runtime.md#host-world: every run gets a fresh copy of the world; the file the entry writes is absent when it starts"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+hostWorld = "world.vibon"
+
+[expect]
+verdict = "accepted"
+targetRun = "target-run.vibon"

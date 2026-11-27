@@ -1,0 +1,201 @@
+index	cohort	position	run	model	setting	task	arm	attempt	promptSha256
+1	haiku	1	haiku-packet-endlet-1	claude-haiku-5-5	effort low	packet	endlet	1	3f475c629dddccf8530458ad0f9228ac5e3fb73bf2400bc63539c873d28d68d9
+2	haiku	2	haiku-packet-noEndlet-1	claude-haiku-5-5	effort low	packet	noEndlet	1	d7b00ff704bc3e9fdc0d53279e3fc72f21c8cf7302310ad6dd73f65b41a1f185
+3	haiku	3	haiku-pair-endlet-1	claude-haiku-5-5	effort low	pair	endlet	1	2dba4a585cc0514d9fcf7a34c74f02ba1ad3784636a0374f9c46a599581e2d01
+4	haiku	4	haiku-pair-noEndlet-1	claude-haiku-5-5	effort low	pair	noEndlet	1	03e3d565af140443633283eb477a55de1648c968246c76d16ba8b8f5f767ef50
+5	haiku	5	haiku-positive-endlet-1	claude-haiku-5-5	effort low	positive	endlet	1	c67ca5a84c2487cd9ed6ae4c4dece60e97a33e09737539e22ed8b591831f1762
+6	haiku	6	haiku-positive-noEndlet-1	claude-haiku-5-5	effort low	positive	noEndlet	1	3ccb6672ff7f7b4b22062cbb93841f2b80465f98aebf9048d902c26d6c60dcad
+7	haiku	7	haiku-range-endlet-1	claude-haiku-5-5	effort low	range	endlet	1	322c8110a40145b5473753745cff42ab076d6d1983c5d674b22cf9f31fa78b6d
+8	haiku	8	haiku-range-noEndlet-1	claude-haiku-5-5	effort low	range	noEndlet	1	b215ce6e36652c4b77e4aeb232fa9f2bdb5d3a53b81577790e9ba7e3303c26bc
+9	haiku	9	haiku-order-endlet-1	claude-haiku-5-5	effort low	order	endlet	1	567e23783ca87f5ee97ef6ef9adc0e6f4f90c6fcc9d8046c901e5710b439f81e
+10	haiku	10	haiku-order-noEndlet-1	claude-haiku-5-5	effort low	order	noEndlet	1	4a8a465ea1926d23b25d312905d830b85c9d60c2411c906f9f4538800e8a0e0e
+11	haiku	11	haiku-gate-endlet-1	claude-haiku-5-5	effort low	gate	endlet	1	8e20e4e757bd447852943d33216efebe2e7e575d1aa89ba154366268495d2833
+12	haiku	12	haiku-gate-noEndlet-1	claude-haiku-5-5	effort low	gate	noEndlet	1	eaeb0dc0c30101dda4d4f674e4a39df0c460399798a7a40c633eaf682d3ef4d1
+13	haiku	13	haiku-reader-endlet-1	claude-haiku-5-5	effort low	reader	endlet	1	2a0f97b5e657d16ed72a28488478daae4d9db5a08338a58a8d04d9ec26066b2f
+14	haiku	14	haiku-reader-noEndlet-1	claude-haiku-5-5	effort low	reader	noEndlet	1	56ff4144b7b1eb8537b3a8da064d549ca3b2d238eaf29f6b3b3ef895843f9a73
+15	haiku	15	haiku-plan-endlet-1	claude-haiku-5-5	effort low	plan	endlet	1	fac777d00c40a23fbf9e750ea6de979f31fe59f774c48a8e065ee67745b05c75
+16	haiku	16	haiku-plan-noEndlet-1	claude-haiku-5-5	effort low	plan	noEndlet	1	ef83e9f3e55d617004678bb051e328ff2bca97a383e5f9df0c67a1c0cf97a98d
+17	haiku	17	haiku-optional-endlet-1	claude-haiku-5-5	effort low	optional	endlet	1	371f603cd88e4317da9ae592b0f6fc5322025c81c05dccb2786fc2f833198ea1
+18	haiku	18	haiku-optional-noEndlet-1	claude-haiku-5-5	effort low	optional	noEndlet	1	9143a138aeec3b7461602881822ce745a51d344b6acbcf3aa5be2572cfdcd48c
+19	haiku	19	haiku-rows-endlet-1	claude-haiku-5-5	effort low	rows	endlet	1	4c5d0a7d326f7fe41a33b44adc86ee44016e1399f1d106bc474725a6553b850a
+20	haiku	20	haiku-rows-noEndlet-1	claude-haiku-5-5	effort low	rows	noEndlet	1	ce93530a9ac58b33260edcd356317fd5b1af99bef91cb1b67abe8c054348d1a1
+21	haiku	21	haiku-packet-noEndlet-2	claude-haiku-5-5	effort low	packet	noEndlet	2	d7b00ff704bc3e9fdc0d53279e3fc72f21c8cf7302310ad6dd73f65b41a1f185
+22	haiku	22	haiku-packet-endlet-2	claude-haiku-5-5	effort low	packet	endlet	2	3f475c629dddccf8530458ad0f9228ac5e3fb73bf2400bc63539c873d28d68d9
+23	haiku	23	haiku-pair-noEndlet-2	claude-haiku-5-5	effort low	pair	noEndlet	2	03e3d565af140443633283eb477a55de1648c968246c76d16ba8b8f5f767ef50
+24	haiku	24	haiku-pair-endlet-2	claude-haiku-5-5	effort low	pair	endlet	2	2dba4a585cc0514d9fcf7a34c74f02ba1ad3784636a0374f9c46a599581e2d01
+25	haiku	25	haiku-positive-noEndlet-2	claude-haiku-5-5	effort low	positive	noEndlet	2	3ccb6672ff7f7b4b22062cbb93841f2b80465f98aebf9048d902c26d6c60dcad
+26	haiku	26	haiku-positive-endlet-2	claude-haiku-5-5	effort low	positive	endlet	2	c67ca5a84c2487cd9ed6ae4c4dece60e97a33e09737539e22ed8b591831f1762
+27	haiku	27	haiku-range-noEndlet-2	claude-haiku-5-5	effort low	range	noEndlet	2	b215ce6e36652c4b77e4aeb232fa9f2bdb5d3a53b81577790e9ba7e3303c26bc
+28	haiku	28	haiku-range-endlet-2	claude-haiku-5-5	effort low	range	endlet	2	322c8110a40145b5473753745cff42ab076d6d1983c5d674b22cf9f31fa78b6d
+29	haiku	29	haiku-order-noEndlet-2	claude-haiku-5-5	effort low	order	noEndlet	2	4a8a465ea1926d23b25d312905d830b85c9d60c2411c906f9f4538800e8a0e0e
+30	haiku	30	haiku-order-endlet-2	claude-haiku-5-5	effort low	order	endlet	2	567e23783ca87f5ee97ef6ef9adc0e6f4f90c6fcc9d8046c901e5710b439f81e
+31	haiku	31	haiku-gate-noEndlet-2	claude-haiku-5-5	effort low	gate	noEndlet	2	eaeb0dc0c30101dda4d4f674e4a39df0c460399798a7a40c633eaf682d3ef4d1
+32	haiku	32	haiku-gate-endlet-2	claude-haiku-5-5	effort low	gate	endlet	2	8e20e4e757bd447852943d33216efebe2e7e575d1aa89ba154366268495d2833
+33	haiku	33	haiku-reader-noEndlet-2	claude-haiku-5-5	effort low	reader	noEndlet	2	56ff4144b7b1eb8537b3a8da064d549ca3b2d238eaf29f6b3b3ef895843f9a73
+34	haiku	34	haiku-reader-endlet-2	claude-haiku-5-5	effort low	reader	endlet	2	2a0f97b5e657d16ed72a28488478daae4d9db5a08338a58a8d04d9ec26066b2f
+35	haiku	35	haiku-plan-noEndlet-2	claude-haiku-5-5	effort low	plan	noEndlet	2	ef83e9f3e55d617004678bb051e328ff2bca97a383e5f9df0c67a1c0cf97a98d
+36	haiku	36	haiku-plan-endlet-2	claude-haiku-5-5	effort low	plan	endlet	2	fac777d00c40a23fbf9e750ea6de979f31fe59f774c48a8e065ee67745b05c75
+37	haiku	37	haiku-optional-noEndlet-2	claude-haiku-5-5	effort low	optional	noEndlet	2	9143a138aeec3b7461602881822ce745a51d344b6acbcf3aa5be2572cfdcd48c
+38	haiku	38	haiku-optional-endlet-2	claude-haiku-5-5	effort low	optional	endlet	2	371f603cd88e4317da9ae592b0f6fc5322025c81c05dccb2786fc2f833198ea1
+39	haiku	39	haiku-rows-noEndlet-2	claude-haiku-5-5	effort low	rows	noEndlet	2	ce93530a9ac58b33260edcd356317fd5b1af99bef91cb1b67abe8c054348d1a1
+40	haiku	40	haiku-rows-endlet-2	claude-haiku-5-5	effort low	rows	endlet	2	4c5d0a7d326f7fe41a33b44adc86ee44016e1399f1d106bc474725a6553b850a
+41	haiku	41	haiku-packet-endlet-3	claude-haiku-5-5	effort low	packet	endlet	3	3f475c629dddccf8530458ad0f9228ac5e3fb73bf2400bc63539c873d28d68d9
+42	haiku	42	haiku-packet-noEndlet-3	claude-haiku-5-5	effort low	packet	noEndlet	3	d7b00ff704bc3e9fdc0d53279e3fc72f21c8cf7302310ad6dd73f65b41a1f185
+43	haiku	43	haiku-pair-endlet-3	claude-haiku-5-5	effort low	pair	endlet	3	2dba4a585cc0514d9fcf7a34c74f02ba1ad3784636a0374f9c46a599581e2d01
+44	haiku	44	haiku-pair-noEndlet-3	claude-haiku-5-5	effort low	pair	noEndlet	3	03e3d565af140443633283eb477a55de1648c968246c76d16ba8b8f5f767ef50
+45	haiku	45	haiku-positive-endlet-3	claude-haiku-5-5	effort low	positive	endlet	3	c67ca5a84c2487cd9ed6ae4c4dece60e97a33e09737539e22ed8b591831f1762
+46	haiku	46	haiku-positive-noEndlet-3	claude-haiku-5-5	effort low	positive	noEndlet	3	3ccb6672ff7f7b4b22062cbb93841f2b80465f98aebf9048d902c26d6c60dcad
+47	haiku	47	haiku-range-endlet-3	claude-haiku-5-5	effort low	range	endlet	3	322c8110a40145b5473753745cff42ab076d6d1983c5d674b22cf9f31fa78b6d
+48	haiku	48	haiku-range-noEndlet-3	claude-haiku-5-5	effort low	range	noEndlet	3	b215ce6e36652c4b77e4aeb232fa9f2bdb5d3a53b81577790e9ba7e3303c26bc
+49	haiku	49	haiku-order-endlet-3	claude-haiku-5-5	effort low	order	endlet	3	567e23783ca87f5ee97ef6ef9adc0e6f4f90c6fcc9d8046c901e5710b439f81e
+50	haiku	50	haiku-order-noEndlet-3	claude-haiku-5-5	effort low	order	noEndlet	3	4a8a465ea1926d23b25d312905d830b85c9d60c2411c906f9f4538800e8a0e0e
+51	haiku	51	haiku-gate-endlet-3	claude-haiku-5-5	effort low	gate	endlet	3	8e20e4e757bd447852943d33216efebe2e7e575d1aa89ba154366268495d2833
+52	haiku	52	haiku-gate-noEndlet-3	claude-haiku-5-5	effort low	gate	noEndlet	3	eaeb0dc0c30101dda4d4f674e4a39df0c460399798a7a40c633eaf682d3ef4d1
+53	haiku	53	haiku-reader-endlet-3	claude-haiku-5-5	effort low	reader	endlet	3	2a0f97b5e657d16ed72a28488478daae4d9db5a08338a58a8d04d9ec26066b2f
+54	haiku	54	haiku-reader-noEndlet-3	claude-haiku-5-5	effort low	reader	noEndlet	3	56ff4144b7b1eb8537b3a8da064d549ca3b2d238eaf29f6b3b3ef895843f9a73
+55	haiku	55	haiku-plan-endlet-3	claude-haiku-5-5	effort low	plan	endlet	3	fac777d00c40a23fbf9e750ea6de979f31fe59f774c48a8e065ee67745b05c75
+56	haiku	56	haiku-plan-noEndlet-3	claude-haiku-5-5	effort low	plan	noEndlet	3	ef83e9f3e55d617004678bb051e328ff2bca97a383e5f9df0c67a1c0cf97a98d
+57	haiku	57	haiku-optional-endlet-3	claude-haiku-5-5	effort low	optional	endlet	3	371f603cd88e4317da9ae592b0f6fc5322025c81c05dccb2786fc2f833198ea1
+58	haiku	58	haiku-optional-noEndlet-3	claude-haiku-5-5	effort low	optional	noEndlet	3	9143a138aeec3b7461602881822ce745a51d344b6acbcf3aa5be2572cfdcd48c
+59	haiku	59	haiku-rows-endlet-3	claude-haiku-5-5	effort low	rows	endlet	3	4c5d0a7d326f7fe41a33b44adc86ee44016e1399f1d106bc474725a6553b850a
+60	haiku	60	haiku-rows-noEndlet-3	claude-haiku-5-5	effort low	rows	noEndlet	3	ce93530a9ac58b33260edcd356317fd5b1af99bef91cb1b67abe8c054348d1a1
+61	haiku	61	haiku-packet-noEndlet-4	claude-haiku-5-5	effort low	packet	noEndlet	4	d7b00ff704bc3e9fdc0d53279e3fc72f21c8cf7302310ad6dd73f65b41a1f185
+62	haiku	62	haiku-packet-endlet-4	claude-haiku-5-5	effort low	packet	endlet	4	3f475c629dddccf8530458ad0f9228ac5e3fb73bf2400bc63539c873d28d68d9
+63	haiku	63	haiku-pair-noEndlet-4	claude-haiku-5-5	effort low	pair	noEndlet	4	03e3d565af140443633283eb477a55de1648c968246c76d16ba8b8f5f767ef50
+64	haiku	64	haiku-pair-endlet-4	claude-haiku-5-5	effort low	pair	endlet	4	2dba4a585cc0514d9fcf7a34c74f02ba1ad3784636a0374f9c46a599581e2d01
+65	haiku	65	haiku-positive-noEndlet-4	claude-haiku-5-5	effort low	positive	noEndlet	4	3ccb6672ff7f7b4b22062cbb93841f2b80465f98aebf9048d902c26d6c60dcad
+66	haiku	66	haiku-positive-endlet-4	claude-haiku-5-5	effort low	positive	endlet	4	c67ca5a84c2487cd9ed6ae4c4dece60e97a33e09737539e22ed8b591831f1762
+67	haiku	67	haiku-range-noEndlet-4	claude-haiku-5-5	effort low	range	noEndlet	4	b215ce6e36652c4b77e4aeb232fa9f2bdb5d3a53b81577790e9ba7e3303c26bc
+68	haiku	68	haiku-range-endlet-4	claude-haiku-5-5	effort low	range	endlet	4	322c8110a40145b5473753745cff42ab076d6d1983c5d674b22cf9f31fa78b6d
+69	haiku	69	haiku-order-noEndlet-4	claude-haiku-5-5	effort low	order	noEndlet	4	4a8a465ea1926d23b25d312905d830b85c9d60c2411c906f9f4538800e8a0e0e
+70	haiku	70	haiku-order-endlet-4	claude-haiku-5-5	effort low	order	endlet	4	567e23783ca87f5ee97ef6ef9adc0e6f4f90c6fcc9d8046c901e5710b439f81e
+71	haiku	71	haiku-gate-noEndlet-4	claude-haiku-5-5	effort low	gate	noEndlet	4	eaeb0dc0c30101dda4d4f674e4a39df0c460399798a7a40c633eaf682d3ef4d1
+72	haiku	72	haiku-gate-endlet-4	claude-haiku-5-5	effort low	gate	endlet	4	8e20e4e757bd447852943d33216efebe2e7e575d1aa89ba154366268495d2833
+73	haiku	73	haiku-reader-noEndlet-4	claude-haiku-5-5	effort low	reader	noEndlet	4	56ff4144b7b1eb8537b3a8da064d549ca3b2d238eaf29f6b3b3ef895843f9a73
+74	haiku	74	haiku-reader-endlet-4	claude-haiku-5-5	effort low	reader	endlet	4	2a0f97b5e657d16ed72a28488478daae4d9db5a08338a58a8d04d9ec26066b2f
+75	haiku	75	haiku-plan-noEndlet-4	claude-haiku-5-5	effort low	plan	noEndlet	4	ef83e9f3e55d617004678bb051e328ff2bca97a383e5f9df0c67a1c0cf97a98d
+76	haiku	76	haiku-plan-endlet-4	claude-haiku-5-5	effort low	plan	endlet	4	fac777d00c40a23fbf9e750ea6de979f31fe59f774c48a8e065ee67745b05c75
+77	haiku	77	haiku-optional-noEndlet-4	claude-haiku-5-5	effort low	optional	noEndlet	4	9143a138aeec3b7461602881822ce745a51d344b6acbcf3aa5be2572cfdcd48c
+78	haiku	78	haiku-optional-endlet-4	claude-haiku-5-5	effort low	optional	endlet	4	371f603cd88e4317da9ae592b0f6fc5322025c81c05dccb2786fc2f833198ea1
+79	haiku	79	haiku-rows-noEndlet-4	claude-haiku-5-5	effort low	rows	noEndlet	4	ce93530a9ac58b33260edcd356317fd5b1af99bef91cb1b67abe8c054348d1a1
+80	haiku	80	haiku-rows-endlet-4	claude-haiku-5-5	effort low	rows	endlet	4	4c5d0a7d326f7fe41a33b44adc86ee44016e1399f1d106bc474725a6553b850a
+81	haiku	81	haiku-packet-endlet-5	claude-haiku-5-5	effort low	packet	endlet	5	3f475c629dddccf8530458ad0f9228ac5e3fb73bf2400bc63539c873d28d68d9
+82	haiku	82	haiku-packet-noEndlet-5	claude-haiku-5-5	effort low	packet	noEndlet	5	d7b00ff704bc3e9fdc0d53279e3fc72f21c8cf7302310ad6dd73f65b41a1f185
+83	haiku	83	haiku-pair-endlet-5	claude-haiku-5-5	effort low	pair	endlet	5	2dba4a585cc0514d9fcf7a34c74f02ba1ad3784636a0374f9c46a599581e2d01
+84	haiku	84	haiku-pair-noEndlet-5	claude-haiku-5-5	effort low	pair	noEndlet	5	03e3d565af140443633283eb477a55de1648c968246c76d16ba8b8f5f767ef50
+85	haiku	85	haiku-positive-endlet-5	claude-haiku-5-5	effort low	positive	endlet	5	c67ca5a84c2487cd9ed6ae4c4dece60e97a33e09737539e22ed8b591831f1762
+86	haiku	86	haiku-positive-noEndlet-5	claude-haiku-5-5	effort low	positive	noEndlet	5	3ccb6672ff7f7b4b22062cbb93841f2b80465f98aebf9048d902c26d6c60dcad
+87	haiku	87	haiku-range-endlet-5	claude-haiku-5-5	effort low	range	endlet	5	322c8110a40145b5473753745cff42ab076d6d1983c5d674b22cf9f31fa78b6d
+88	haiku	88	haiku-range-noEndlet-5	claude-haiku-5-5	effort low	range	noEndlet	5	b215ce6e36652c4b77e4aeb232fa9f2bdb5d3a53b81577790e9ba7e3303c26bc
+89	haiku	89	haiku-order-endlet-5	claude-haiku-5-5	effort low	order	endlet	5	567e23783ca87f5ee97ef6ef9adc0e6f4f90c6fcc9d8046c901e5710b439f81e
+90	haiku	90	haiku-order-noEndlet-5	claude-haiku-5-5	effort low	order	noEndlet	5	4a8a465ea1926d23b25d312905d830b85c9d60c2411c906f9f4538800e8a0e0e
+91	haiku	91	haiku-gate-endlet-5	claude-haiku-5-5	effort low	gate	endlet	5	8e20e4e757bd447852943d33216efebe2e7e575d1aa89ba154366268495d2833
+92	haiku	92	haiku-gate-noEndlet-5	claude-haiku-5-5	effort low	gate	noEndlet	5	eaeb0dc0c30101dda4d4f674e4a39df0c460399798a7a40c633eaf682d3ef4d1
+93	haiku	93	haiku-reader-endlet-5	claude-haiku-5-5	effort low	reader	endlet	5	2a0f97b5e657d16ed72a28488478daae4d9db5a08338a58a8d04d9ec26066b2f
+94	haiku	94	haiku-reader-noEndlet-5	claude-haiku-5-5	effort low	reader	noEndlet	5	56ff4144b7b1eb8537b3a8da064d549ca3b2d238eaf29f6b3b3ef895843f9a73
+95	haiku	95	haiku-plan-endlet-5	claude-haiku-5-5	effort low	plan	endlet	5	fac777d00c40a23fbf9e750ea6de979f31fe59f774c48a8e065ee67745b05c75
+96	haiku	96	haiku-plan-noEndlet-5	claude-haiku-5-5	effort low	plan	noEndlet	5	ef83e9f3e55d617004678bb051e328ff2bca97a383e5f9df0c67a1c0cf97a98d
+97	haiku	97	haiku-optional-endlet-5	claude-haiku-5-5	effort low	optional	endlet	5	371f603cd88e4317da9ae592b0f6fc5322025c81c05dccb2786fc2f833198ea1
+98	haiku	98	haiku-optional-noEndlet-5	claude-haiku-5-5	effort low	optional	noEndlet	5	9143a138aeec3b7461602881822ce745a51d344b6acbcf3aa5be2572cfdcd48c
+99	haiku	99	haiku-rows-endlet-5	claude-haiku-5-5	effort low	rows	endlet	5	4c5d0a7d326f7fe41a33b44adc86ee44016e1399f1d106bc474725a6553b850a
+100	haiku	100	haiku-rows-noEndlet-5	claude-haiku-5-5	effort low	rows	noEndlet	5	ce93530a9ac58b33260edcd356317fd5b1af99bef91cb1b67abe8c054348d1a1
+101	luna	1	luna-packet-endlet-1	gpt-6-luna	reasoning effort low	packet	endlet	1	3f475c629dddccf8530458ad0f9228ac5e3fb73bf2400bc63539c873d28d68d9
+102	luna	2	luna-packet-noEndlet-1	gpt-6-luna	reasoning effort low	packet	noEndlet	1	d7b00ff704bc3e9fdc0d53279e3fc72f21c8cf7302310ad6dd73f65b41a1f185
+103	luna	3	luna-pair-endlet-1	gpt-6-luna	reasoning effort low	pair	endlet	1	2dba4a585cc0514d9fcf7a34c74f02ba1ad3784636a0374f9c46a599581e2d01
+104	luna	4	luna-pair-noEndlet-1	gpt-6-luna	reasoning effort low	pair	noEndlet	1	03e3d565af140443633283eb477a55de1648c968246c76d16ba8b8f5f767ef50
+105	luna	5	luna-positive-endlet-1	gpt-6-luna	reasoning effort low	positive	endlet	1	c67ca5a84c2487cd9ed6ae4c4dece60e97a33e09737539e22ed8b591831f1762
+106	luna	6	luna-positive-noEndlet-1	gpt-6-luna	reasoning effort low	positive	noEndlet	1	3ccb6672ff7f7b4b22062cbb93841f2b80465f98aebf9048d902c26d6c60dcad
+107	luna	7	luna-range-endlet-1	gpt-6-luna	reasoning effort low	range	endlet	1	322c8110a40145b5473753745cff42ab076d6d1983c5d674b22cf9f31fa78b6d
+108	luna	8	luna-range-noEndlet-1	gpt-6-luna	reasoning effort low	range	noEndlet	1	b215ce6e36652c4b77e4aeb232fa9f2bdb5d3a53b81577790e9ba7e3303c26bc
+109	luna	9	luna-order-endlet-1	gpt-6-luna	reasoning effort low	order	endlet	1	567e23783ca87f5ee97ef6ef9adc0e6f4f90c6fcc9d8046c901e5710b439f81e
+110	luna	10	luna-order-noEndlet-1	gpt-6-luna	reasoning effort low	order	noEndlet	1	4a8a465ea1926d23b25d312905d830b85c9d60c2411c906f9f4538800e8a0e0e
+111	luna	11	luna-gate-endlet-1	gpt-6-luna	reasoning effort low	gate	endlet	1	8e20e4e757bd447852943d33216efebe2e7e575d1aa89ba154366268495d2833
+112	luna	12	luna-gate-noEndlet-1	gpt-6-luna	reasoning effort low	gate	noEndlet	1	eaeb0dc0c30101dda4d4f674e4a39df0c460399798a7a40c633eaf682d3ef4d1
+113	luna	13	luna-reader-endlet-1	gpt-6-luna	reasoning effort low	reader	endlet	1	2a0f97b5e657d16ed72a28488478daae4d9db5a08338a58a8d04d9ec26066b2f
+114	luna	14	luna-reader-noEndlet-1	gpt-6-luna	reasoning effort low	reader	noEndlet	1	56ff4144b7b1eb8537b3a8da064d549ca3b2d238eaf29f6b3b3ef895843f9a73
+115	luna	15	luna-plan-endlet-1	gpt-6-luna	reasoning effort low	plan	endlet	1	fac777d00c40a23fbf9e750ea6de979f31fe59f774c48a8e065ee67745b05c75
+116	luna	16	luna-plan-noEndlet-1	gpt-6-luna	reasoning effort low	plan	noEndlet	1	ef83e9f3e55d617004678bb051e328ff2bca97a383e5f9df0c67a1c0cf97a98d
+117	luna	17	luna-optional-endlet-1	gpt-6-luna	reasoning effort low	optional	endlet	1	371f603cd88e4317da9ae592b0f6fc5322025c81c05dccb2786fc2f833198ea1
+118	luna	18	luna-optional-noEndlet-1	gpt-6-luna	reasoning effort low	optional	noEndlet	1	9143a138aeec3b7461602881822ce745a51d344b6acbcf3aa5be2572cfdcd48c
+119	luna	19	luna-rows-endlet-1	gpt-6-luna	reasoning effort low	rows	endlet	1	4c5d0a7d326f7fe41a33b44adc86ee44016e1399f1d106bc474725a6553b850a
+120	luna	20	luna-rows-noEndlet-1	gpt-6-luna	reasoning effort low	rows	noEndlet	1	ce93530a9ac58b33260edcd356317fd5b1af99bef91cb1b67abe8c054348d1a1
+121	luna	21	luna-packet-noEndlet-2	gpt-6-luna	reasoning effort low	packet	noEndlet	2	d7b00ff704bc3e9fdc0d53279e3fc72f21c8cf7302310ad6dd73f65b41a1f185
+122	luna	22	luna-packet-endlet-2	gpt-6-luna	reasoning effort low	packet	endlet	2	3f475c629dddccf8530458ad0f9228ac5e3fb73bf2400bc63539c873d28d68d9
+123	luna	23	luna-pair-noEndlet-2	gpt-6-luna	reasoning effort low	pair	noEndlet	2	03e3d565af140443633283eb477a55de1648c968246c76d16ba8b8f5f767ef50
+124	luna	24	luna-pair-endlet-2	gpt-6-luna	reasoning effort low	pair	endlet	2	2dba4a585cc0514d9fcf7a34c74f02ba1ad3784636a0374f9c46a599581e2d01
+125	luna	25	luna-positive-noEndlet-2	gpt-6-luna	reasoning effort low	positive	noEndlet	2	3ccb6672ff7f7b4b22062cbb93841f2b80465f98aebf9048d902c26d6c60dcad
+126	luna	26	luna-positive-endlet-2	gpt-6-luna	reasoning effort low	positive	endlet	2	c67ca5a84c2487cd9ed6ae4c4dece60e97a33e09737539e22ed8b591831f1762
+127	luna	27	luna-range-noEndlet-2	gpt-6-luna	reasoning effort low	range	noEndlet	2	b215ce6e36652c4b77e4aeb232fa9f2bdb5d3a53b81577790e9ba7e3303c26bc
+128	luna	28	luna-range-endlet-2	gpt-6-luna	reasoning effort low	range	endlet	2	322c8110a40145b5473753745cff42ab076d6d1983c5d674b22cf9f31fa78b6d
+129	luna	29	luna-order-noEndlet-2	gpt-6-luna	reasoning effort low	order	noEndlet	2	4a8a465ea1926d23b25d312905d830b85c9d60c2411c906f9f4538800e8a0e0e
+130	luna	30	luna-order-endlet-2	gpt-6-luna	reasoning effort low	order	endlet	2	567e23783ca87f5ee97ef6ef9adc0e6f4f90c6fcc9d8046c901e5710b439f81e
+131	luna	31	luna-gate-noEndlet-2	gpt-6-luna	reasoning effort low	gate	noEndlet	2	eaeb0dc0c30101dda4d4f674e4a39df0c460399798a7a40c633eaf682d3ef4d1
+132	luna	32	luna-gate-endlet-2	gpt-6-luna	reasoning effort low	gate	endlet	2	8e20e4e757bd447852943d33216efebe2e7e575d1aa89ba154366268495d2833
+133	luna	33	luna-reader-noEndlet-2	gpt-6-luna	reasoning effort low	reader	noEndlet	2	56ff4144b7b1eb8537b3a8da064d549ca3b2d238eaf29f6b3b3ef895843f9a73
+134	luna	34	luna-reader-endlet-2	gpt-6-luna	reasoning effort low	reader	endlet	2	2a0f97b5e657d16ed72a28488478daae4d9db5a08338a58a8d04d9ec26066b2f
+135	luna	35	luna-plan-noEndlet-2	gpt-6-luna	reasoning effort low	plan	noEndlet	2	ef83e9f3e55d617004678bb051e328ff2bca97a383e5f9df0c67a1c0cf97a98d
+136	luna	36	luna-plan-endlet-2	gpt-6-luna	reasoning effort low	plan	endlet	2	fac777d00c40a23fbf9e750ea6de979f31fe59f774c48a8e065ee67745b05c75
+137	luna	37	luna-optional-noEndlet-2	gpt-6-luna	reasoning effort low	optional	noEndlet	2	9143a138aeec3b7461602881822ce745a51d344b6acbcf3aa5be2572cfdcd48c
+138	luna	38	luna-optional-endlet-2	gpt-6-luna	reasoning effort low	optional	endlet	2	371f603cd88e4317da9ae592b0f6fc5322025c81c05dccb2786fc2f833198ea1
+139	luna	39	luna-rows-noEndlet-2	gpt-6-luna	reasoning effort low	rows	noEndlet	2	ce93530a9ac58b33260edcd356317fd5b1af99bef91cb1b67abe8c054348d1a1
+140	luna	40	luna-rows-endlet-2	gpt-6-luna	reasoning effort low	rows	endlet	2	4c5d0a7d326f7fe41a33b44adc86ee44016e1399f1d106bc474725a6553b850a
+141	luna	41	luna-packet-endlet-3	gpt-6-luna	reasoning effort low	packet	endlet	3	3f475c629dddccf8530458ad0f9228ac5e3fb73bf2400bc63539c873d28d68d9
+142	luna	42	luna-packet-noEndlet-3	gpt-6-luna	reasoning effort low	packet	noEndlet	3	d7b00ff704bc3e9fdc0d53279e3fc72f21c8cf7302310ad6dd73f65b41a1f185
+143	luna	43	luna-pair-endlet-3	gpt-6-luna	reasoning effort low	pair	endlet	3	2dba4a585cc0514d9fcf7a34c74f02ba1ad3784636a0374f9c46a599581e2d01
+144	luna	44	luna-pair-noEndlet-3	gpt-6-luna	reasoning effort low	pair	noEndlet	3	03e3d565af140443633283eb477a55de1648c968246c76d16ba8b8f5f767ef50
+145	luna	45	luna-positive-endlet-3	gpt-6-luna	reasoning effort low	positive	endlet	3	c67ca5a84c2487cd9ed6ae4c4dece60e97a33e09737539e22ed8b591831f1762
+146	luna	46	luna-positive-noEndlet-3	gpt-6-luna	reasoning effort low	positive	noEndlet	3	3ccb6672ff7f7b4b22062cbb93841f2b80465f98aebf9048d902c26d6c60dcad
+147	luna	47	luna-range-endlet-3	gpt-6-luna	reasoning effort low	range	endlet	3	322c8110a40145b5473753745cff42ab076d6d1983c5d674b22cf9f31fa78b6d
+148	luna	48	luna-range-noEndlet-3	gpt-6-luna	reasoning effort low	range	noEndlet	3	b215ce6e36652c4b77e4aeb232fa9f2bdb5d3a53b81577790e9ba7e3303c26bc
+149	luna	49	luna-order-endlet-3	gpt-6-luna	reasoning effort low	order	endlet	3	567e23783ca87f5ee97ef6ef9adc0e6f4f90c6fcc9d8046c901e5710b439f81e
+150	luna	50	luna-order-noEndlet-3	gpt-6-luna	reasoning effort low	order	noEndlet	3	4a8a465ea1926d23b25d312905d830b85c9d60c2411c906f9f4538800e8a0e0e
+151	luna	51	luna-gate-endlet-3	gpt-6-luna	reasoning effort low	gate	endlet	3	8e20e4e757bd447852943d33216efebe2e7e575d1aa89ba154366268495d2833
+152	luna	52	luna-gate-noEndlet-3	gpt-6-luna	reasoning effort low	gate	noEndlet	3	eaeb0dc0c30101dda4d4f674e4a39df0c460399798a7a40c633eaf682d3ef4d1
+153	luna	53	luna-reader-endlet-3	gpt-6-luna	reasoning effort low	reader	endlet	3	2a0f97b5e657d16ed72a28488478daae4d9db5a08338a58a8d04d9ec26066b2f
+154	luna	54	luna-reader-noEndlet-3	gpt-6-luna	reasoning effort low	reader	noEndlet	3	56ff4144b7b1eb8537b3a8da064d549ca3b2d238eaf29f6b3b3ef895843f9a73
+155	luna	55	luna-plan-endlet-3	gpt-6-luna	reasoning effort low	plan	endlet	3	fac777d00c40a23fbf9e750ea6de979f31fe59f774c48a8e065ee67745b05c75
+156	luna	56	luna-plan-noEndlet-3	gpt-6-luna	reasoning effort low	plan	noEndlet	3	ef83e9f3e55d617004678bb051e328ff2bca97a383e5f9df0c67a1c0cf97a98d
+157	luna	57	luna-optional-endlet-3	gpt-6-luna	reasoning effort low	optional	endlet	3	371f603cd88e4317da9ae592b0f6fc5322025c81c05dccb2786fc2f833198ea1
+158	luna	58	luna-optional-noEndlet-3	gpt-6-luna	reasoning effort low	optional	noEndlet	3	9143a138aeec3b7461602881822ce745a51d344b6acbcf3aa5be2572cfdcd48c
+159	luna	59	luna-rows-endlet-3	gpt-6-luna	reasoning effort low	rows	endlet	3	4c5d0a7d326f7fe41a33b44adc86ee44016e1399f1d106bc474725a6553b850a
+160	luna	60	luna-rows-noEndlet-3	gpt-6-luna	reasoning effort low	rows	noEndlet	3	ce93530a9ac58b33260edcd356317fd5b1af99bef91cb1b67abe8c054348d1a1
+161	luna	61	luna-packet-noEndlet-4	gpt-6-luna	reasoning effort low	packet	noEndlet	4	d7b00ff704bc3e9fdc0d53279e3fc72f21c8cf7302310ad6dd73f65b41a1f185
+162	luna	62	luna-packet-endlet-4	gpt-6-luna	reasoning effort low	packet	endlet	4	3f475c629dddccf8530458ad0f9228ac5e3fb73bf2400bc63539c873d28d68d9
+163	luna	63	luna-pair-noEndlet-4	gpt-6-luna	reasoning effort low	pair	noEndlet	4	03e3d565af140443633283eb477a55de1648c968246c76d16ba8b8f5f767ef50
+164	luna	64	luna-pair-endlet-4	gpt-6-luna	reasoning effort low	pair	endlet	4	2dba4a585cc0514d9fcf7a34c74f02ba1ad3784636a0374f9c46a599581e2d01
+165	luna	65	luna-positive-noEndlet-4	gpt-6-luna	reasoning effort low	positive	noEndlet	4	3ccb6672ff7f7b4b22062cbb93841f2b80465f98aebf9048d902c26d6c60dcad
+166	luna	66	luna-positive-endlet-4	gpt-6-luna	reasoning effort low	positive	endlet	4	c67ca5a84c2487cd9ed6ae4c4dece60e97a33e09737539e22ed8b591831f1762
+167	luna	67	luna-range-noEndlet-4	gpt-6-luna	reasoning effort low	range	noEndlet	4	b215ce6e36652c4b77e4aeb232fa9f2bdb5d3a53b81577790e9ba7e3303c26bc
+168	luna	68	luna-range-endlet-4	gpt-6-luna	reasoning effort low	range	endlet	4	322c8110a40145b5473753745cff42ab076d6d1983c5d674b22cf9f31fa78b6d
+169	luna	69	luna-order-noEndlet-4	gpt-6-luna	reasoning effort low	order	noEndlet	4	4a8a465ea1926d23b25d312905d830b85c9d60c2411c906f9f4538800e8a0e0e
+170	luna	70	luna-order-endlet-4	gpt-6-luna	reasoning effort low	order	endlet	4	567e23783ca87f5ee97ef6ef9adc0e6f4f90c6fcc9d8046c901e5710b439f81e
+171	luna	71	luna-gate-noEndlet-4	gpt-6-luna	reasoning effort low	gate	noEndlet	4	eaeb0dc0c30101dda4d4f674e4a39df0c460399798a7a40c633eaf682d3ef4d1
+172	luna	72	luna-gate-endlet-4	gpt-6-luna	reasoning effort low	gate	endlet	4	8e20e4e757bd447852943d33216efebe2e7e575d1aa89ba154366268495d2833
+173	luna	73	luna-reader-noEndlet-4	gpt-6-luna	reasoning effort low	reader	noEndlet	4	56ff4144b7b1eb8537b3a8da064d549ca3b2d238eaf29f6b3b3ef895843f9a73
+174	luna	74	luna-reader-endlet-4	gpt-6-luna	reasoning effort low	reader	endlet	4	2a0f97b5e657d16ed72a28488478daae4d9db5a08338a58a8d04d9ec26066b2f
+175	luna	75	luna-plan-noEndlet-4	gpt-6-luna	reasoning effort low	plan	noEndlet	4	ef83e9f3e55d617004678bb051e328ff2bca97a383e5f9df0c67a1c0cf97a98d
+176	luna	76	luna-plan-endlet-4	gpt-6-luna	reasoning effort low	plan	endlet	4	fac777d00c40a23fbf9e750ea6de979f31fe59f774c48a8e065ee67745b05c75
+177	luna	77	luna-optional-noEndlet-4	gpt-6-luna	reasoning effort low	optional	noEndlet	4	9143a138aeec3b7461602881822ce745a51d344b6acbcf3aa5be2572cfdcd48c
+178	luna	78	luna-optional-endlet-4	gpt-6-luna	reasoning effort low	optional	endlet	4	371f603cd88e4317da9ae592b0f6fc5322025c81c05dccb2786fc2f833198ea1
+179	luna	79	luna-rows-noEndlet-4	gpt-6-luna	reasoning effort low	rows	noEndlet	4	ce93530a9ac58b33260edcd356317fd5b1af99bef91cb1b67abe8c054348d1a1
+180	luna	80	luna-rows-endlet-4	gpt-6-luna	reasoning effort low	rows	endlet	4	4c5d0a7d326f7fe41a33b44adc86ee44016e1399f1d106bc474725a6553b850a
+181	luna	81	luna-packet-endlet-5	gpt-6-luna	reasoning effort low	packet	endlet	5	3f475c629dddccf8530458ad0f9228ac5e3fb73bf2400bc63539c873d28d68d9
+182	luna	82	luna-packet-noEndlet-5	gpt-6-luna	reasoning effort low	packet	noEndlet	5	d7b00ff704bc3e9fdc0d53279e3fc72f21c8cf7302310ad6dd73f65b41a1f185
+183	luna	83	luna-pair-endlet-5	gpt-6-luna	reasoning effort low	pair	endlet	5	2dba4a585cc0514d9fcf7a34c74f02ba1ad3784636a0374f9c46a599581e2d01
+184	luna	84	luna-pair-noEndlet-5	gpt-6-luna	reasoning effort low	pair	noEndlet	5	03e3d565af140443633283eb477a55de1648c968246c76d16ba8b8f5f767ef50
+185	luna	85	luna-positive-endlet-5	gpt-6-luna	reasoning effort low	positive	endlet	5	c67ca5a84c2487cd9ed6ae4c4dece60e97a33e09737539e22ed8b591831f1762
+186	luna	86	luna-positive-noEndlet-5	gpt-6-luna	reasoning effort low	positive	noEndlet	5	3ccb6672ff7f7b4b22062cbb93841f2b80465f98aebf9048d902c26d6c60dcad
+187	luna	87	luna-range-endlet-5	gpt-6-luna	reasoning effort low	range	endlet	5	322c8110a40145b5473753745cff42ab076d6d1983c5d674b22cf9f31fa78b6d
+188	luna	88	luna-range-noEndlet-5	gpt-6-luna	reasoning effort low	range	noEndlet	5	b215ce6e36652c4b77e4aeb232fa9f2bdb5d3a53b81577790e9ba7e3303c26bc
+189	luna	89	luna-order-endlet-5	gpt-6-luna	reasoning effort low	order	endlet	5	567e23783ca87f5ee97ef6ef9adc0e6f4f90c6fcc9d8046c901e5710b439f81e
+190	luna	90	luna-order-noEndlet-5	gpt-6-luna	reasoning effort low	order	noEndlet	5	4a8a465ea1926d23b25d312905d830b85c9d60c2411c906f9f4538800e8a0e0e
+191	luna	91	luna-gate-endlet-5	gpt-6-luna	reasoning effort low	gate	endlet	5	8e20e4e757bd447852943d33216efebe2e7e575d1aa89ba154366268495d2833
+192	luna	92	luna-gate-noEndlet-5	gpt-6-luna	reasoning effort low	gate	noEndlet	5	eaeb0dc0c30101dda4d4f674e4a39df0c460399798a7a40c633eaf682d3ef4d1
+193	luna	93	luna-reader-endlet-5	gpt-6-luna	reasoning effort low	reader	endlet	5	2a0f97b5e657d16ed72a28488478daae4d9db5a08338a58a8d04d9ec26066b2f
+194	luna	94	luna-reader-noEndlet-5	gpt-6-luna	reasoning effort low	reader	noEndlet	5	56ff4144b7b1eb8537b3a8da064d549ca3b2d238eaf29f6b3b3ef895843f9a73
+195	luna	95	luna-plan-endlet-5	gpt-6-luna	reasoning effort low	plan	endlet	5	fac777d00c40a23fbf9e750ea6de979f31fe59f774c48a8e065ee67745b05c75
+196	luna	96	luna-plan-noEndlet-5	gpt-6-luna	reasoning effort low	plan	noEndlet	5	ef83e9f3e55d617004678bb051e328ff2bca97a383e5f9df0c67a1c0cf97a98d
+197	luna	97	luna-optional-endlet-5	gpt-6-luna	reasoning effort low	optional	endlet	5	371f603cd88e4317da9ae592b0f6fc5322025c81c05dccb2786fc2f833198ea1
+198	luna	98	luna-optional-noEndlet-5	gpt-6-luna	reasoning effort low	optional	noEndlet	5	9143a138aeec3b7461602881822ce745a51d344b6acbcf3aa5be2572cfdcd48c
+199	luna	99	luna-rows-endlet-5	gpt-6-luna	reasoning effort low	rows	endlet	5	4c5d0a7d326f7fe41a33b44adc86ee44016e1399f1d106bc474725a6553b850a
+200	luna	100	luna-rows-noEndlet-5	gpt-6-luna	reasoning effort low	rows	noEndlet	5	ce93530a9ac58b33260edcd356317fd5b1af99bef91cb1b67abe8c054348d1a1

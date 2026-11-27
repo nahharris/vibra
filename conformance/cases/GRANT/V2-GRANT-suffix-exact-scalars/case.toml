@@ -1,0 +1,13 @@
+id = "V2-GRANT-suffix-exact-scalars"
+rule = "V2-GRANT-suffix-exact-scalars"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "03-effects.md#filesystem-policies: suffix(\".txt\") compares exact scalars: a.txt and .txt are read, a.TXT and a.txt.exe are denied"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

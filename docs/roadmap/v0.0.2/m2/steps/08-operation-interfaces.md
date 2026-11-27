@@ -113,7 +113,7 @@ endinterface
 | `V2-EFFECT-row-on-test` | positive, `workspaceTest` | `test "row" performs {Log} do assert.true(true) endtest` | `@test.passed` | 03 Effect ceilings: "and a `test`" |
 | `V2-EFFECT-row-on-test-invalid` | negative | `test "row" performs {Shown} do endtest` | `@effect.invalidReference` | the same |
 | `V2-EFFECT-impl-keeps-row` | positive | `type Memory of {lines: List(Str)} impl Log proc append takes {log: Self entry: Str} returns done: Void do return void endproc endimpl endtype` | accepted | 03: "It MUST keep each member's row, types, and guards" |
-| `V2-EFFECT-impl-row-wider` | negative | the `impl` member with `performs {Clock}` | `@type.mismatch` at the `performs` section | the same; 07: "an implementation member whose signature differs from the contract" |
+| `V2-EFFECT-impl-row-wider` | negative | the `impl` member with `performs {Clock}` | `@type.mismatch` at the `performs` section | the same; 07: "an implementation member whose signature, kind, or row differs from its contract member" |
 | `V2-EFFECT-impl-row-narrower` | negative | an `impl Audit` whose `record` omits `performs {Log}` | `@type.mismatch` at the member's name | the same |
 | `V2-EFFECT-impl-owner-in-row` | negative | the `impl Log` member with `performs {Log}` | `@effect.duplicateRoot` at `Log` | 03: "Writing the owner in a member's own `performs`" |
 | `V2-EFFECT-impl-fn-for-proc` | negative | the `impl Log` member written as a `fn` | `@type.mismatch` at the member | 03: "It MUST keep each member's row, types, and guards" |

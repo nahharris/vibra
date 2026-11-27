@@ -20,7 +20,20 @@ const ADDS: &str = "test \"adds\" do assert.equal(3i32 math.add(1i32 2i32)) endt
 const ADDS_WRONG: &str =
     "test \"adds\" do assert.equal(4i32 math.add(1i32 2i32)) endtest\n";
 
-const EFFECTS: &str = "test \"effects\" performs {} do assert.true(true) endtest\n";
+/// A test whose declaration closure reaches a form this checker does not
+/// support: `pick`'s contract call on `T`, whose bound leaves `Item` open.
+/// The call `Iter.next(source)` is 128 bytes into the text.
+const UNAVAILABLE: &str = "interface Holder(T)\n  given {T: Iter}\n  fn pick\n    \
+                           takes {holder: Self source: T}\n    returns found: I32\n    \
+                           do\n      let _ be Iter.next(source) endlet\n      \
+                           return 1i32\n  endfn\nendinterface\n\n\
+                           type Box of I32\n  impl Holder(List(I32))\n  endimpl\nendtype\n\n\
+                           test \"open\" do assert.equal(1i32 Holder.pick(Box(1i32) [1i32])) \
+                           endtest\n";
+
+/// A test that names the module `math` as a value: `math` is 26 bytes into
+/// the test.
+const MODULE_VALUE: &str = "test \"static\" do let _ be math endlet endtest\n";
 
 /// A library project with `src/app/math.vib` and `files`.
 fn project(label: &str, files: &[(&str, &str)]) -> TempDir {
@@ -181,7 +194,7 @@ fn test_observation_error() {
                 "endPosition": {"line": 3, "column": 181}
             },
             "observationError": {
-                "code": "unsupportedValue",
+                "code": "@tool.unsupportedValue",
                 "type": "@any",
                 "origin": null
             }
@@ -352,20 +365,20 @@ fn test_invalid_selection() {
 fn test_unavailable_item() {
     let root = project(
         "test-unavailable",
-        &[("tests/math.vib", &math_tests(&[EFFECTS, ADDS]))],
+        &[("tests/math.vib", &math_tests(&[UNAVAILABLE, ADDS]))],
     );
     let (code, document) = test(&root, &[]);
     assert_eq!(code, 4, "{document}");
     assert_eq!(document["result"], "@command.unavailable");
     assert_eq!(document["status"], "unsupported");
-    // The whole declaration of the first test, bytes 46..101.
+    // `Iter.next(source)` in `pick`, bytes 174..191.
     assert_eq!(codes(&document), ["@tool.unavailable"]);
     let span = &document["diagnostics"][0]["primarySpan"];
     assert_eq!(span["sourceId"], "tests/math.vib");
-    assert_eq!((&span["start"], &span["end"]), (&json!(46), &json!(101)));
+    assert_eq!((&span["start"], &span["end"]), (&json!(174), &json!(191)));
     assert_eq!(counts(&document), (2, 1, 1));
     let items = &document["payload"]["tests"];
-    assert_eq!(items[0]["name"], "@tests.math::\"effects\"");
+    assert_eq!(items[0]["name"], "@tests.math::\"open\"");
     assert_eq!(items[0]["result"], "@test.unavailable");
     assert_eq!(items[0]["status"], "unsupported");
     assert_eq!(items[0]["diagnostics"], json!(["@tool.unavailable"]));
@@ -374,10 +387,32 @@ fn test_unavailable_item() {
 }
 
 #[test]
+fn test_module_as_value_invalid() {
+    // 02 "Namespaces and resolution": a module in value position is the wrong
+    // kind of entity, an ordinary error, so the whole selection is invalid.
+    let root = project(
+        "test-module-value",
+        &[("tests/math.vib", &math_tests(&[MODULE_VALUE, ADDS]))],
+    );
+    let (code, document) = test(&root, &[]);
+    assert_eq!(code, 1, "{document}");
+    assert_eq!(document["result"], "@command.diagnostics");
+    // `math` in the first test, bytes 72..76.
+    assert_eq!(codes(&document), ["@name.wrongEntityKind"]);
+    let span = &document["diagnostics"][0]["primarySpan"];
+    assert_eq!(span["sourceId"], "tests/math.vib");
+    assert_eq!((&span["start"], &span["end"]), (&json!(72), &json!(76)));
+    assert_eq!(
+        results(&document),
+        [json!("@test.invalid"), json!("@test.invalid")]
+    );
+}
+
+#[test]
 fn test_precedence_unavailable_over_failed() {
     let root = project(
         "test-precedence",
-        &[("tests/math.vib", &math_tests(&[EFFECTS, ADDS_WRONG]))],
+        &[("tests/math.vib", &math_tests(&[UNAVAILABLE, ADDS_WRONG]))],
     );
     let (code, document) = test(&root, &[]);
     assert_eq!(code, 4, "{document}");
@@ -501,7 +536,7 @@ fn test_json_validates() {
     );
     let unavailable = project(
         "test-json-unavailable",
-        &[("tests/math.vib", &math_tests(&[EFFECTS, ADDS]))],
+        &[("tests/math.vib", &math_tests(&[UNAVAILABLE, ADDS]))],
     );
     let parse = project(
         "test-json-parse",
@@ -531,4 +566,93 @@ fn test_json_validates() {
     assert_eq!(code, 1);
     assert_eq!(codes(&document), ["@project.notFound"]);
     assert_eq!(counts(&document), (0, 0, 0));
+}
+
+/// `tests/world.vib`: a test whose `TestWorld.directory` fixture holds `["a"]`
+/// as a file and as the parent of `["a" "b"]`. The `await` of the call is
+/// bytes 293 to 348, on line 13.
+const CONFLICTING: &str = "use @std.assert enduse\n\nuse @std.test.TestWorld enduse\n\n\
+    use @std.fs.RelativePath enduse\n\n\
+    test \"conflict\"\n  takes {world: TestWorld}\n  performs {TestWorld}\n  do\n    \
+    let Result.ok(value: a) be RelativePath([\"a\"]) endlet\n    \
+    let Result.ok(value: b) be RelativePath([\"a\" \"b\"]) endlet\n    \
+    let _ be await TestWorld.directory(world files: [a: \"1\" b: \"2\"]) endlet\nendtest\n";
+
+/// 04 "Test worlds and grants" and 05 "Tests and selection": a conflicting
+/// fixture ends its test `@test.invalid` with `@test.conflictingFixture` at
+/// the `await`, attributed to that item; it counts as failed, so the suite is
+/// `@command.testFailed` (exit 1), and the other test still passes.
+#[test]
+fn test_conflicting_fixture() {
+    let root = project(
+        "conflicting-fixture",
+        &[
+            ("tests/math.vib", &math_tests(&[ADDS])),
+            ("tests/world.vib", CONFLICTING),
+        ],
+    );
+    let (code, document) = test(&root, &[]);
+    assert_eq!(code, 1, "{document}");
+    assert_eq!(document["result"], "@command.testFailed");
+    assert_eq!(document["status"], "refuted");
+    assert_eq!(counts(&document), (2, 1, 1));
+    assert_eq!(
+        results(&document),
+        [json!("@test.passed"), json!("@test.invalid")]
+    );
+    let item = &document["payload"]["tests"][1];
+    assert_eq!(item["name"], "@tests.world::\"conflict\"");
+    assert_eq!(item["status"], "refuted");
+    assert_eq!(item["diagnostics"], json!(["@test.conflictingFixture"]));
+    assert_eq!(item["auditTrace"], json!([]));
+    assert_eq!(codes(&document), ["@test.conflictingFixture"]);
+    let span = &document["diagnostics"][0]["primarySpan"];
+    assert_eq!(span["sourceId"], "tests/world.vib");
+    assert_eq!(
+        (span["start"].as_u64(), span["end"].as_u64()),
+        (Some(293), Some(348))
+    );
+    assert_eq!(span["startPosition"]["line"], 13);
+}
+/// `tests/stdin.vib`: one test reading its stdin to the end through
+/// `io.readAllText`, whose host calls are awaited inside `@std.io`.
+const READ_ALL: &str = "use @std.assert enduse\n\nuse @std.test.TestWorld enduse\n\n\
+                        use @std.io enduse\n\nuse @std.io.StdinText enduse\n\n\
+                        test \"reads all\"\n  takes {world: TestWorld}\n  \
+                        performs {TestWorld StdinText}\n  do\n    \
+                        let {stdinText: input} be await TestWorld.streams(world stdin: \"hi\") endlet\n    \
+                        assert.equal(Result.ok(value: \"hi\") await io.readAllText(input))\nendtest\n";
+
+/// 06 "Audit trace": an event's origin is the `await` that ran the host
+/// call, here `await StdinText.read(input 65536u64)` at bytes 3565 to 3601
+/// of `stdlib/src/std/io.vib` (146:22 to 146:58), named by the module atom
+/// `@std.io` (04 "Discovery and the source snapshot"); its positions come
+/// from the library module's text. Two reads: "hi", then the empty end.
+#[test]
+fn test_trace_origin_in_a_library_module() {
+    let root = TempDir::project(
+        "test-library-origin",
+        LIBRARY,
+        &[("src/app/math.vib", MATH), ("tests/stdin.vib", READ_ALL)],
+    );
+    let (code, document) = envelope_in(root.path(), &["--format", "json", "test"]);
+    assert_eq!(code, 0, "{document}");
+    assert_eq!(document["result"], "@command.ok");
+    let trace = document["payload"]["tests"][0]["auditTrace"]
+        .as_array()
+        .expect("an audit trace");
+    assert_eq!(trace.len(), 2);
+    for event in trace {
+        assert_eq!(event["op"], "io.stdinText");
+        assert_eq!(
+            event["origin"],
+            json!({
+                "sourceId": "@std.io",
+                "start": 3565,
+                "end": 3601,
+                "startPosition": {"line": 146, "column": 22},
+                "endPosition": {"line": 146, "column": 58},
+            })
+        );
+    }
 }

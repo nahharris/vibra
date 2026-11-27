@@ -1,0 +1,18 @@
+id = "V2-TYPE-INTERFACE-relative-path-not-constant"
+rule = "V2-TYPE-INTERFACE-relative-path-not-constant"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#guards-with-else: a let Result.ok over a construction rule 1 does not prove, here RelativePath(names) of a parameter, is @pattern.refutableBinding at the pattern"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@pattern.refutableBinding"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 112, end = 134 }

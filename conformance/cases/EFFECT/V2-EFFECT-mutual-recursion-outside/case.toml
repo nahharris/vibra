@@ -1,0 +1,19 @@
+id = "V2-EFFECT-mutual-recursion-outside"
+rule = "V2-EFFECT-mutual-recursion-outside"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#cold-plans-and-performed-rows: the row analysis closes a cycle and reports the body whose ceiling the cycle leaves"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@effect.outsideCeiling"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 815, end = 825 }
+related = [{ source = "src/app/main.vib", span = { start = 821, end = 825 } }, { source = "src/app/main.vib", span = { start = 738, end = 755 } }]

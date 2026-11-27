@@ -1,0 +1,19 @@
+id = "V2-EFFECT-outside-ceiling-callback"
+rule = "V2-EFFECT-outside-ceiling-callback"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "07-diagnostics-and-conformance.md#contract-effect-and-authority-diagnostics: awaiting a callback performs its row, and the hop through the callback is indirect"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@effect.outsideCeiling"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 722, end = 738 }
+related = [{ source = "src/app/main.vib", span = { start = 728, end = 738 } }]

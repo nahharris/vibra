@@ -25,11 +25,11 @@ Crates: `stdlib`, `vibra-host`, `vibra-types`, `vibra-workspace`,
 
 | Existing | Symbol | Use |
 | --- | --- | --- |
-| `crates/vibra-workspace/src/test_runner.rs:611` | `fn run_one` | builds one world, one `Context`, one trace per test |
-| `crates/vibra-workspace/src/test_runner.rs:664` | `fn execute` | passes the world token and the context to `run_test` |
-| `crates/vibra-types/src/check/testing.rs:101` | `test.view.takes().is_none()` | reaches `effects::procs::test_header` |
-| `crates/vibra-conformance/src/manifest.rs:452` | `fn validate_host_world` | validates the case's `@hostWorld.v2` |
-| `crates/vibra-schema/src/test_payload.rs:127` | `pub struct TestItem` | `auditTrace` carries the events |
+| `crates/vibra-workspace/src/test_runner.rs:621` | `fn run_one` | builds one world, one `Context`, one trace per test |
+| `crates/vibra-workspace/src/test_runner.rs:689` | `fn execute` | passes the world token and the context to `run_test` |
+| `crates/vibra-types/src/check/testing.rs:101` | `effects::procs::test_header(program, test)` | reaches `effects::procs::test_header` |
+| `crates/vibra-conformance/src/manifest.rs:460` | `fn validate_host_world` | validates the case's `@hostWorld.v2` |
+| `crates/vibra-schema/src/test_payload.rs:128` | `pub struct TestItem` | `auditTrace` carries the events |
 
 Proposed: `stdlib/src/std/test.vib`; `vibra-host::test_world`
 (`TestWorldRoot`, the six rows over `WorldDriver`).
@@ -136,7 +136,7 @@ the world.
 | `V2-RUNTIME-test-body-parent` | positive | the test body awaits a `proc` that awaits `WallClock.read` | the event's `parent` is the `proc`'s invocation; the body is invocation 1 (Q13) | 06 Invocations |
 | `V2-RUNTIME-invocation-gaps` | positive | `TestWorld.clocks`, a denied read, then a successful read | one event; its `invocation` counts the earlier awaits (Q13) | 06: "Every `await` is an invocation" |
 | `V2-RUNTIME-root-ordinals` | positive | `directory` then `clocks`; one event from each | `root` values in issue order (Q13) | 06: "a run-local ordinal of the root grant" |
-| `V2-RUNTIME-trace-trap-no-event` | positive | a host write, then a trap | the item is `@test.trap`; the trace has exactly the one event | 07 Required coverage 12: "a trap or exhaustion invents no event" |
+| `V2-RUNTIME-trace-trap-no-event` | positive | a host write, then memory exhaustion: no checked test reaches a defect trap | the item is `@test.exhausted`; the trace has exactly the one event | 07 Required coverage 12: "a trap or exhaustion invents no event" |
 | `V2-RUNTIME-trace-test-world-no-event` | positive | only `TestWorld` members are awaited | an empty `events` | 04: "appends no `@host` event to the test's trace" |
 | `V2-GRANT-test-worlds-isolated` | positive | two tests; the first writes a file through `directory`, the second lists a new one | both pass; the second sees `[]` | 04: "Every test runs in a fresh, deterministic, in-memory host world" |
 | `ATK-test-world-op-on-leaf` | negative, host test | `Context::test_world` with a token of a directory root | `InvalidHostValue` | 04: "No binding recipe can name `TestWorld`" |

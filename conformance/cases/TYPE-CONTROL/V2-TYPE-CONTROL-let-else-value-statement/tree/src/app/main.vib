@@ -1,0 +1,1 @@
+fn run takes {p: Option(I32)} returns r: I32 do let Option.some(value: n) be p else 1i32 endlet return n endfn

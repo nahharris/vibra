@@ -1,0 +1,13 @@
+id = "V2-EFFECT-await-in-test"
+rule = "V2-EFFECT-await-in-test"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "03-effects.md#cold-plans-and-performed-rows: await is valid in a test body, which runs in a procedure context the runner owns"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

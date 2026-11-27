@@ -1,0 +1,13 @@
+id = "V2-GRANT-test-output-captured"
+rule = "V2-GRANT-test-output-captured"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "04-programs-and-packages.md#test-worlds-and-grants: output returns what the streams received, per stream, in write order"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

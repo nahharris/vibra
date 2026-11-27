@@ -1,0 +1,5 @@
+use @app.log enduse
+
+use @app.log.Log as Journal enduse
+
+proc p returns d: Void performs {log.Log Journal} do return void endproc

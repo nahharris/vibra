@@ -1,0 +1,13 @@
+id = "V2-RUNTIME-test-body-parent"
+rule = "V2-RUNTIME-test-body-parent"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "06-runtime.md#audit-trace: the run of the test body is invocation 1 and an event's parent is the proc whose body awaited it"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

@@ -1,0 +1,15 @@
+use @std.env.EnvReadArgs enduse
+
+use @std.fs.DirReadText enduse
+
+use @std.io.StdoutText enduse
+
+use @std.process.ExitCode enduse
+
+proc main
+  takes {args: EnvReadArgs notes: DirReadText out: Option(StdoutText)}
+  returns code: ExitCode
+  performs {EnvReadArgs DirReadText StdoutText}
+  do
+    return ExitCode(0u8)
+endproc

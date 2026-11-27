@@ -1,0 +1,13 @@
+id = "V2-GRANT-copy-shares"
+rule = "V2-GRANT-copy-shares"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "06-runtime.md#host-calls: a copy of a limited grant shares its accounting: the read through the copy is Err(limitExceeded)"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

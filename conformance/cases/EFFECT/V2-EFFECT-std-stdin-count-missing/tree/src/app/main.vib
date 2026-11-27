@@ -1,0 +1,5 @@
+use @std.io.IoError enduse
+
+use @std.io.StdinText enduse
+
+proc r takes {input: StdinText} returns o: Result(Str IoError) performs {StdinText} do return await StdinText.read(input) endproc

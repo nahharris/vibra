@@ -5,26 +5,36 @@
 //! strict written-order evaluation, frames that live on the heap, proper
 //! tail calls for every callee, lazy module values, callable contracts,
 //! dispatch by the receiver's runtime type, the pure rows of the compiler
-//! intrinsic registry, and a memory budget whose exhaustion is a host event.
+//! intrinsic registry, cold plans and `await` with their invocation
+//! ordinals, and a memory budget whose exhaustion is a host event.
 //!
 //! The interpreter consumes no host stack in proportion to the depth of
-//! Vibra calls, and it reads nothing from its surroundings: no file, no
-//! environment variable, no clock, and no standard stream.
+//! Vibra calls or awaits, and it reads nothing from its surroundings: no
+//! file, no environment variable, no clock, and no standard stream.
 //!
-//! Host operations, grants, plans, `await`, and native bindings are not
-//! here: applying a `proc` is reported as [`RuntimeError::Unavailable`].
+//! Host-bound members, the narrowing of grants, and the test-world rows run
+//! through a [`vibra_ir::authority::HostContext`] the caller hands in, which
+//! issues and checks every grant: a sealed grant is a token of that context,
+//! never encoded and never compared. With no context, a host-bound member
+//! that is reached is reported as [`RuntimeError::Unavailable`].
 
 mod compare;
 mod encode;
 mod evaluate;
 mod frame;
+mod host;
 mod ingress;
 mod intrinsics;
 mod machine;
+mod plan;
 mod types;
 mod value;
 
-pub use evaluate::{evaluate, evaluate_reading, run, run_test};
+pub use evaluate::{
+    evaluate, evaluate_reading, run, run_entry, run_test, run_test_probing,
+};
+pub use host::EntryArgument;
+pub use plan::Invocation;
 
 use std::collections::BTreeSet;
 
@@ -82,12 +92,16 @@ pub struct LimitProfile {
     /// integer fact to one premise or one pair of premises, or one
     /// comparison of two constants, whether or not its conclusion is new.
     pub proof_derivations: u64,
+    /// The most levels a token of a source or data document may be nested,
+    /// as `docs/spec/05-tooling.md`, "Limits", counts them. A command
+    /// measures every document it reads against it before any later stage.
+    pub source_nesting: usize,
 }
 
 impl LimitProfile {
     /// `m1Default`: 10,000,000 reductions for one compile-time evaluation,
-    /// with the default memory budget, and 100,000 attempted derivations
-    /// for the proof of one obligation.
+    /// with the default memory budget, 100,000 attempted derivations for
+    /// the proof of one obligation, and a source nesting of 1,024 levels.
     pub const M1_DEFAULT: Self = Self {
         name: "m1Default",
         compile_time: Limits {
@@ -95,6 +109,7 @@ impl LimitProfile {
             memory: MemoryBudget::DEFAULT,
         },
         proof_derivations: 100_000,
+        source_nesting: 1_024,
     };
 }
 
@@ -147,6 +162,17 @@ pub struct Instrumentation {
     /// The bytes still reachable when the execution ended: module values
     /// and the result.
     pub live_memory_bytes: u64,
+    /// How many invocations started: the run of the entry or of the test
+    /// body, and each `await`. An evaluation starts none.
+    pub invocation_count: u64,
+    /// The greatest length the continuation stack reached.
+    pub max_continuation_depth: usize,
+    /// The greatest live footprint measured: frames, continuations, the
+    /// values reachable from them and from the module values, and the
+    /// storage being reserved. The live bytes are measured whenever the
+    /// accounted footprint passes twice the last measurement, or the
+    /// budget.
+    pub peak_live_bytes: u64,
 }
 
 /// A finished [`run`].
@@ -219,8 +245,9 @@ pub enum RuntimeError {
         /// The budget that was exceeded.
         budget: MemoryBudget,
     },
-    /// The result holds a function behind an interface value, which has no
-    /// observation: the observation error `@tool.unsupportedValue`.
+    /// The result holds a function behind an interface value, or a plan,
+    /// which has no observation: the observation error
+    /// `@tool.unsupportedValue`.
     UnsupportedValue {
         /// The static type of the value that was observed.
         value_type: Type,
@@ -230,6 +257,15 @@ pub enum RuntimeError {
     Unavailable {
         /// The form, for a person.
         message: String,
+    },
+    /// A `TestWorld.directory` fixture holds a path as a file and a
+    /// directory, or holds the empty path: `@test.conflictingFixture`, which
+    /// ends the test `@test.invalid`. It is not a trap.
+    ConflictingFixture {
+        /// The path, by its names; empty for the empty path.
+        names: Vec<String>,
+        /// The source origin of the `await` of the call, when known.
+        origin: Option<SourceOrigin>,
     },
 }
 
@@ -248,6 +284,7 @@ impl RuntimeError {
             Self::MemoryExhausted { .. } => DiagnosticCode::RuntimeMemoryExhausted,
             Self::UnsupportedValue { .. } => DiagnosticCode::ToolUnsupportedValue,
             Self::Unavailable { .. } => DiagnosticCode::ToolUnavailable,
+            Self::ConflictingFixture { .. } => DiagnosticCode::TestConflictingFixture,
         }
     }
 
@@ -286,11 +323,33 @@ impl RuntimeError {
                 self.code(),
                 at_start,
                 format!(
-                    "a value of {value_type} holds a function and has no observation"
+                    "a value of {value_type} holds a function or a plan and has no observation"
                 ),
             ),
             Self::Unavailable { message } => {
                 Diagnostic::new(self.code(), at_start, message.clone())
+            }
+            Self::ConflictingFixture { names, origin } => {
+                let message = if names.is_empty() {
+                    "the fixture of `TestWorld.directory` holds the empty path"
+                        .to_owned()
+                } else {
+                    format!(
+                        "the fixture of `TestWorld.directory` holds the path [{}] as a file and a directory",
+                        names
+                            .iter()
+                            .map(|name| format!("{name:?}"))
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                    )
+                };
+                match origin {
+                    Some(origin) => {
+                        Diagnostic::new(self.code(), origin.span(), message)
+                            .with_source_id(origin.source_id())
+                    }
+                    None => Diagnostic::new(self.code(), at_start, message),
+                }
             }
         }
     }

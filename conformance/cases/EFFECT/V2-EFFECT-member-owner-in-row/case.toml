@@ -1,0 +1,19 @@
+id = "V2-EFFECT-member-owner-in-row"
+rule = "V2-EFFECT-member-owner-in-row"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#operation-interfaces: the owner written in a member's own row is a duplicate root, related to the owner"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@effect.duplicateRoot"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 360, end = 365 }
+related = [{ source = "src/app/main.vib", span = { start = 286, end = 291 } }]

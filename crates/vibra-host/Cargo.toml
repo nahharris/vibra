@@ -1,6 +1,6 @@
 [package]
 name = "vibra-host"
-description = "The host provider of the Vibra runtime over the major-1 host rows: the provider trait, the system provider, the in-memory host world, and the audit event."
+description = "The host of the Vibra runtime: the broker, the drivers, the host world, the audit trace, and startup, over the host registry of major 2."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,12 +8,23 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[features]
+# Test hooks of the broker: the crate's own tests issue root grants, release
+# resources, and read the counters through them. No shipped build enables it.
+testing = []
+
 [dependencies]
 getrandom.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 vibra-diagnostics.workspace = true
+vibra-fs-scope.workspace = true
 vibra-ir.workspace = true
 vibra-syntax.workspace = true
+
+[dev-dependencies]
+# The crate's own integration tests reach the broker's test hooks.
+vibra-host = { path = ".", features = ["testing"] }
 
 [lints]
 workspace = true

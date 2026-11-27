@@ -1,0 +1,13 @@
+id = "V2-RUNTIME-run-entry-requires-else"
+rule = "V2-RUNTIME-run-entry-requires-else"
+profile = "interpreterV2"
+operation = "workspaceRun"
+description = "06-runtime.md#entry-outcome: the requires else of an entry behaves as on any proc; the body does not run"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "unknown"
+targetRun = "target-run.vibon"

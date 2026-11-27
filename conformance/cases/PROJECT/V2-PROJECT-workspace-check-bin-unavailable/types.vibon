@@ -1,1 +1,0 @@
-{format: @types.v2 moduleValues: [] callables: [{declaration: "sha256:d719efe405517578a87a02baee3ce337683e0393decf353321f8cd038545e1e0" signature: {binders: [] typeInfo: {kind: @fn parameters: [] labels: [:] result: @i32}}}] implementations: [] obligations: []}

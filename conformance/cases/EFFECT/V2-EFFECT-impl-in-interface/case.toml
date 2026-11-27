@@ -1,0 +1,12 @@
+id = "V2-EFFECT-impl-in-interface"
+rule = "V2-EFFECT-impl-in-interface"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#implementations: an implementation nested in its interface, for a type of another module, keeps the member's row"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

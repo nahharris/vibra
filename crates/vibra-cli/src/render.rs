@@ -14,6 +14,8 @@ use vibra_schema::{
     Status, TestPayload, TestResult,
 };
 
+use vibra_workspace::library_source;
+
 use crate::args::OutputFormat;
 use crate::exit_code;
 
@@ -35,13 +37,17 @@ pub struct Response {
     pub workspace_revision: Option<String>,
     /// The diagnostics, once each.
     pub diagnostics: Vec<Diagnostic>,
-    /// The text of each source a diagnostic names, by source identity, from
-    /// which display positions are derived.
+    /// The text of each captured source a diagnostic names, by source
+    /// identity, from which display positions are derived. An embedded
+    /// library module is not listed: its text is the toolchain's.
     pub sources: BTreeMap<String, String>,
     /// The payload.
     pub payload: Payload,
     /// A line for a person when the response carries no diagnostic to show.
     pub notice: Option<String>,
+    /// The lines of the tool's log, written to standard error in either
+    /// format (05 "Streams").
+    pub log: Vec<String>,
     /// The limit profile, the limits reached, and whether the observation is
     /// complete.
     pub limits: Limits,
@@ -67,6 +73,7 @@ impl Response {
             sources: BTreeMap::new(),
             payload,
             notice: None,
+            log: Vec::new(),
             limits: limits(),
         }
     }
@@ -87,6 +94,23 @@ pub const fn status_for(result: CommandOutcome) -> Status {
         | CommandOutcome::OperationalFailure
         | CommandOutcome::Trap
         | CommandOutcome::ProgramFailed => Status::Unknown,
+    }
+}
+
+/// Records the limits `reached`, by name, in `response`: a reached limit is
+/// an unknown outcome and an incomplete observation (05 "Limits").
+pub(crate) fn reach(response: &mut Response, reached: Vec<String>) {
+    if reached.is_empty() {
+        return;
+    }
+    for limit in reached {
+        if !response.limits.reached.contains(&limit) {
+            response.limits.reached.push(limit);
+        }
+    }
+    response.limits.complete = false;
+    if response.status != Status::Unsupported {
+        response.status = Status::Unknown;
     }
 }
 
@@ -114,11 +138,27 @@ fn envelope(response: &Response) -> Result<Envelope, String> {
     envelope
         .workspace_revision
         .clone_from(&response.workspace_revision);
-    let indexes = response
+    let mut indexes = response
         .sources
         .iter()
-        .map(|(source_id, text)| (source_id.clone(), LineIndex::new(text)))
+        .map(|(source_id, text)| (source_id.clone(), LineIndex::new(text.as_str())))
         .collect::<BTreeMap<_, _>>();
+    // A span in an embedded library module is rendered against that module's
+    // text, named by its module atom.
+    for source_id in response.diagnostics.iter().flat_map(|diagnostic| {
+        diagnostic.source_id().into_iter().chain(
+            diagnostic
+                .related()
+                .iter()
+                .filter_map(|related| related.source_id.as_deref()),
+        )
+    }) {
+        if !indexes.contains_key(source_id)
+            && let Some(text) = library_source(source_id)
+        {
+            indexes.insert(source_id.to_owned(), LineIndex::new(text));
+        }
+    }
     // A diagnostic with no location, or naming a source that was never read,
     // is at offset 0 of the empty document.
     let empty = LineIndex::new("");
@@ -136,12 +176,24 @@ fn envelope(response: &Response) -> Result<Envelope, String> {
     Ok(envelope)
 }
 
+/// The text of the source source_id: a captured project document, or an
+/// embedded library module named by its module atom; empty for a source
+/// that was never read.
+pub(crate) fn source_text<'r>(response: &'r Response, source_id: &str) -> &'r str {
+    response
+        .sources
+        .get(source_id)
+        .map(String::as_str)
+        .or_else(|| library_source(source_id))
+        .unwrap_or("")
+}
+
 /// One line per diagnostic on standard error, with its location when it has
 /// one.
 fn write_diagnostics<E: Write>(response: &Response, stderr: &mut E) {
     for diagnostic in &response.diagnostics {
         let location = diagnostic.source_id().map(|source_id| {
-            let text = response.sources.get(source_id).map_or("", String::as_str);
+            let text = source_text(response, source_id);
             let position =
                 LineIndex::new(text).position(diagnostic.primary_span().start());
             format!("{source_id}:{}:{}: ", position.line, position.column)
@@ -219,6 +271,9 @@ pub fn emit<W: Write, E: Write>(
     stderr: &mut E,
     serialize: &dyn Fn(&Envelope) -> Result<String, SchemaViolation>,
 ) -> i32 {
+    for line in &response.log {
+        let _ = writeln!(stderr, "{line}");
+    }
     match response.format {
         OutputFormat::Json => {
             let built = envelope(response).and_then(|built| {

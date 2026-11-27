@@ -1,0 +1,11 @@
+use @std.policy enduse
+
+fn f
+  returns limits: policy.GrantLimits
+  do
+    return policy.GrantLimits(
+      invocations: Option.some(value: 3u64)
+      inputBytes: Option.none()
+      outputBytes: Option.none()
+    )
+endfn

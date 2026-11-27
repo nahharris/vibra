@@ -1,0 +1,18 @@
+id = "V2-EFFECT-std-grant-parameter-mismatch"
+rule = "V2-EFFECT-std-grant-parameter-mismatch"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#standard-operation-inventory: io.readAllText takes a StdinText grant, so passing a StdoutText grant is an argument mismatch at the argument"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.argumentMismatch"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 230, end = 236 }

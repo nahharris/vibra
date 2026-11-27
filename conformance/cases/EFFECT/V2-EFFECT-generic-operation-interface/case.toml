@@ -1,0 +1,18 @@
+id = "V2-EFFECT-generic-operation-interface"
+rule = "V2-EFFECT-generic-operation-interface"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#operation-interfaces: every application of a generic operation interface is one root; the body performs nothing, so the root is the unused-effect warning"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+
+[[expect.diagnostics]]
+code = "@contract.unusedEffect"
+level = "@warning"
+source = "src/app/main.vib"
+span = { start = 435, end = 440 }

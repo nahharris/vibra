@@ -1,0 +1,8 @@
+{
+  format: @targetRun.v2
+  result: @command.operationalFailure
+  stdout: {kind: @bytes values: [104u8 101u8 108u8 108u8 111u8 10u8]}
+  stderr: {kind: @bytes values: []}
+  startup: [{binding: @out status: @released}]
+  auditTrace: {format: @auditTrace.v2 revision: "sha256:ca99b61af41d86f24a015524e11abf8889f84094cde05786958895b07f6135a3" target: @hello drivers: [{provider: @hostWorld.v2 version: "0.0.2"}] policies: [:] redaction: @none events: [{kind: @startup binding: @out provider: @host.io.stdout status: @acquired grant: {issuedBy: {kind: @binding leaf: @out} policy: "" rights: [{path: @std.io.StdoutText seed: "sha256:fe4d0fcafb6fef90ff00bf30700b9d76346269c0f4a5d1c919bda5399decda11"}] root: 1u64}} {kind: @host invocation: 2u64 parent: 1u64 phase: @entry op: "io.stdoutText" driver: {provider: @hostWorld.v2 version: "0.0.2"} origin: {sourceId: "src/hello/main.vib" start: 255u64 end: 292u64} grant: {issuedBy: {kind: @binding leaf: @out} policy: "" rights: [{path: @std.io.StdoutText seed: "sha256:fe4d0fcafb6fef90ff00bf30700b9d76346269c0f4a5d1c919bda5399decda11"}] root: 1u64} args: ["hello\n"] result: {kind: @enum typeInfo: {kind: @declared path: @std.result.Result seed: "sha256:b138394632da413ed9cb78cdc2c9b874f324077f447ccd5f5c9e455a066af761" arguments: [@void {kind: @declared path: @std.io.IoError seed: "sha256:689c34661aa1cd1407260035a1176aa73fe1b050e15c0a0c58bcc84a14cdd79c" arguments: []}]} variant: @ok payload: {value: void}}}]}
+}

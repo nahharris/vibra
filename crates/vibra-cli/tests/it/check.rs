@@ -107,38 +107,70 @@ fn check_no_project() {
 }
 
 #[test]
-fn check_unsupported() {
-    let source = "fn answer returns r: I32 do return 42i32 endfn\n\nproc run returns r: Void do return void endproc";
-    let root = TempDir::project("check-proc", LIBRARY, &[("src/app/main.vib", source)]);
+fn check_test_takes_another_type() {
+    let source = "fn answer returns r: I32 do return 42i32 endfn\n";
+    // A test that takes another type than `TestWorld`: 51 bytes of imports
+    // and a type before it, and `takes {world: World}` 13 bytes into it.
+    let tests = "use @std.assert enduse\n\ntype World of I32 endtype\n\n\
+                 test \"world\" takes {world: World} do endtest\n";
+    let root = TempDir::project(
+        "check-world",
+        LIBRARY,
+        &[("src/app/main.vib", source), ("tests/main.vib", tests)],
+    );
     let (code, document) = check(&root, &[]);
-    assert_eq!(code, 4, "{document}");
-    assert_eq!(document["result"], "@command.unavailable");
-    assert_eq!(document["status"], "unsupported");
-    assert_eq!(codes(&document), ["@tool.unavailable"]);
+    assert_eq!(code, 1, "{document}");
+    assert_eq!(document["result"], "@command.diagnostics");
+    assert_eq!(codes(&document), ["@syntax.invalidForm"]);
     let span = &document["diagnostics"][0]["primarySpan"];
-    assert_eq!(span["sourceId"], "src/app/main.vib");
-    assert_eq!(span["start"], 48);
-    assert_eq!(span["end"], 95);
+    assert_eq!(span["sourceId"], "tests/main.vib");
+    assert_eq!(span["start"], 64);
+    assert_eq!(span["end"], 84);
     assert_eq!(document["payload"]["accepted"], false);
 }
 
 #[test]
-fn check_bin_target_unsupported() {
+fn check_bin_target_passed() {
+    // An entry that takes no grant needs no recipe, so its target checks.
+    let entry = "use @std.process.ExitCode enduse\n\n\
+                 proc main returns code: ExitCode do return ExitCode(0u8) endproc\n";
+    let root = TempDir::project(
+        "check-bin-passed",
+        BINARY_AND_LIBRARY,
+        &[("src/app/main.vib", VALID), ("src/hello/main.vib", entry)],
+    );
+    let (code, document) = check(&root, &[]);
+    assert_eq!(code, 0, "{document}");
+    assert_eq!(document["status"], "passed");
+    assert!(codes(&document).is_empty());
+}
+
+#[test]
+fn check_bin_target_missing_recipe() {
+    // The entry takes a grant leaf and `grants` has no recipe for it: the
+    // target is refuted at its `grants` field, related to the parameter.
+    let entry = "use @std.io.StdoutText enduse\n\nuse @std.process.ExitCode enduse\n\n\
+                 proc main takes {out: StdoutText} returns code: ExitCode do return ExitCode(0u8) endproc\n";
     let root = TempDir::project(
         "check-bin",
         BINARY_AND_LIBRARY,
-        &[("src/app/main.vib", VALID), ("src/hello/main.vib", VALID)],
+        &[("src/app/main.vib", VALID), ("src/hello/main.vib", entry)],
     );
     let (code, document) = check(&root, &[]);
-    assert_eq!(code, 4, "{document}");
-    assert_eq!(document["status"], "unsupported");
-    assert_eq!(codes(&document), ["@tool.unavailable"]);
-    let span = &document["diagnostics"][0]["primarySpan"];
+    assert_eq!(code, 1, "{document}");
+    assert_eq!(document["status"], "refuted");
+    assert_eq!(codes(&document), ["@grant.invalidBinding"]);
+    let diagnostic = &document["diagnostics"][0];
+    let span = &diagnostic["primarySpan"];
     assert_eq!(span["sourceId"], "project.vibon");
-    let record = "{name: @hello kind: @bin root: \"src/hello\" entry: @hello.main.main effects: [] grants: [:]}";
-    let start = BINARY_AND_LIBRARY.find(record).expect("the record");
+    let start = BINARY_AND_LIBRARY.find("grants: [:]").expect("the grants") + 8;
     assert_eq!(span["start"], start);
-    assert_eq!(span["end"], start + record.len());
+    assert_eq!(span["end"], start + "[:]".len());
+    let related = &diagnostic["related"][0]["span"];
+    assert_eq!(related["sourceId"], "src/hello/main.vib");
+    let parameter = entry.find("out: StdoutText").expect("the parameter");
+    assert_eq!(related["start"], parameter);
+    assert_eq!(related["end"], parameter + "out".len());
 }
 
 #[test]
@@ -308,4 +340,97 @@ fn the_readme_shows_the_checked_example() {
             "README.md shows `examples/hello/{file}` as it is"
         );
     }
+}
+
+/// The tree of the conformance case `group/id`, checked in place: `check`
+/// reads it and writes nothing.
+fn corpus_tree(group: &str, id: &str) -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../conformance/cases")
+        .join(group)
+        .join(id)
+        .join("tree")
+}
+
+/// A span document's source, offsets, and display positions.
+fn span_of(span: &Value) -> (String, u64, u64, (u64, u64), (u64, u64)) {
+    let number = |value: &Value| value.as_u64().expect("a number");
+    let position = |value: &Value| (number(&value["line"]), number(&value["column"]));
+    (
+        span["sourceId"].as_str().expect("a source").to_owned(),
+        number(&span["start"]),
+        number(&span["end"]),
+        position(&span["startPosition"]),
+        position(&span["endPosition"]),
+    )
+}
+
+/// 07 "Diagnostic documents and spans": a related span may be in another
+/// document, here the embedded `@std.fs`, whose source identity is its module
+/// atom (04 "Discovery and the source snapshot"); its positions come from the
+/// library module's text. Case `V2-GRANT-view-does-not-narrow`: the receiver
+/// `dir.readText` at bytes 2352 to 2364 (106:39 to 106:51), related to the
+/// name `DirWriteText` of its interface at bytes 5403 to 5415 of
+/// `stdlib/src/std/fs.vib` (234:11 to 234:23).
+#[test]
+fn check_json_related_span_in_a_library_module() {
+    let tree = corpus_tree("GRANT", "V2-GRANT-view-does-not-narrow");
+    let (code, document) = envelope_in(&tree, &["--format", "json", "check"]);
+    assert_eq!(code, 1, "{document}");
+    assert_eq!(document["result"], "@command.diagnostics");
+    assert_eq!(codes(&document), ["@type.unsatisfiedBound"]);
+    let diagnostic = &document["diagnostics"][0];
+    assert_eq!(
+        span_of(&diagnostic["primarySpan"]),
+        (
+            "tests/grants.vib".to_owned(),
+            2352,
+            2364,
+            (106, 39),
+            (106, 51)
+        )
+    );
+    let related = diagnostic["related"].as_array().expect("related spans");
+    assert_eq!(related.len(), 1);
+    assert_eq!(
+        span_of(&related[0]["span"]),
+        ("@std.fs".to_owned(), 5403, 5415, (234, 11), (234, 23))
+    );
+}
+
+/// The same with a primary span in a project file and related spans in the
+/// project file and twice in `@std.io`, the shape of case
+/// `V2-EFFECT-std-read-all-row`: the witness chain `io.readAllText(input)`
+/// (161 to 182), `readTextAfter(input "")` at bytes 2990 to 3013 of
+/// `stdlib/src/std/io.vib` (126:18 to 126:41), and
+/// `StdinText.read(input 65536u64)` at 3571 to 3601 (146:28 to 146:58).
+#[test]
+fn check_json_related_spans_in_a_project_file_and_a_library_module() {
+    let tree = corpus_tree("EFFECT", "V2-EFFECT-std-read-all-row");
+    let (code, document) = envelope_in(&tree, &["--format", "json", "check"]);
+    assert_eq!(code, 1, "{document}");
+    assert_eq!(codes(&document), ["@effect.outsideCeiling"]);
+    let diagnostic = &document["diagnostics"][0];
+    assert_eq!(
+        span_of(&diagnostic["primarySpan"]).0,
+        "src/app/main.vib".to_owned()
+    );
+    let related = diagnostic["related"]
+        .as_array()
+        .expect("related spans")
+        .iter()
+        .map(|related| span_of(&related["span"]))
+        .collect::<Vec<_>>();
+    assert_eq!(related.len(), 3);
+    assert_eq!(
+        (related[0].0.as_str(), related[0].1, related[0].2),
+        ("src/app/main.vib", 161, 182)
+    );
+    assert_eq!(
+        related[1..],
+        [
+            ("@std.io".to_owned(), 2990, 3013, (126, 18), (126, 41)),
+            ("@std.io".to_owned(), 3571, 3601, (146, 28), (146, 58)),
+        ]
+    );
 }

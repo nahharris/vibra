@@ -252,9 +252,10 @@ output.
 | package | `name`, `version` | strings; `name` satisfies the source identifier grammar, is not a reserved word, and is camelCase, which here means that its first letter is lower case; `version` is one semantic version, never a range |
 | target | `name`, `kind`, `root`, `entry`, `effects`, `grants` | `name` is a one-part atom whose part is not a reserved word; `kind` is `@bin` or `@lib`; `root` a `Str`; a binary requires `entry` (an entity reference), `effects` (a list of entity references), and `grants` (a dict from leaf atom to grant binding); a library omits all three |
 | grant binding | `provider`, `resource`, `policy`, `limits`, `after` | `provider`, `resource`, `after` required; `policy` and `limits` optional; a present `limits` holds at least one bound; see [Targets](#targets) |
+| resource | `kind`, then the fields the [provider table](#targets) names for that kind, in its order | all required; `kind` is one of the table's resource kinds |
 | limits | `invocations`, `inputBytes`, `outputBytes` | each an optional `U64`; at least one present |
-| path dependency | `kind`, `path`, `target` | `kind` is `@path`; `path` a `Str` confined beneath the project root; `target` an optional atom |
-| Git dependency | `kind`, `git`, `rev`, `target` | `kind` is `@git`; `git` is an HTTPS URL without userinfo; `rev` is 40 lower-case hexadecimal digits; `target` an optional atom |
+| path dependency | `kind`, `path` | `kind` is `@path`; `path` a `Str`, relative to the directory of the project file that declares it and confined beneath the root project's directory |
+| Git dependency | `kind`, `git`, `rev` | `kind` is `@git`; `git` is an HTTPS URL without userinfo; `rev` is 40 lower-case hexadecimal digits |
 
 A `format` other than `@project.v2` is rejected under the
 [schema rules](#schemas); there is no fallback and no automatic migration.
@@ -303,7 +304,11 @@ a reference whose case differs from the file's actual name is
 `@module.fileDirectoryCollision`. Entries are sorted by project-relative
 path. Source identities are project-relative paths with `/` separators, and
 bytes are copied exactly into an immutable snapshot: repeated snapshots of an
-unchanged tree are identical. Later phases receive the snapshot and no
+unchanged tree are identical. The source identity of an embedded
+[standard library](#the-standard-library) module is its module path written as
+the module atom, such as `@std.io`; spans, related spans, and source origins
+in the library carry it. It cannot collide with a project file's identity,
+which is a path ending in `.vib`. Later phases receive the snapshot and no
 filesystem access.
 
 The optional top-level `tests/` directory is the source root of the reserved
@@ -321,20 +326,24 @@ part of every declaration's identity and never appear in a reference.
 Dependency selection is exact; there is no version solving.
 
 A **unit** is one local target, the reserved unit `@tests`, the embedded
-standard library `@std`, or one dependency name. The first part of every
-code-reference atom names a unit. Target and dependency names share one
-namespace with the two reserved units. Two targets with one name, or a
-target and a dependency with one name, are `@project.duplicateName` at the
-later name in the project file, a target's `name` value or a dependency's
-key, related to the earlier one. Because roots are disjoint, every
-module belongs to exactly one unit and has exactly one canonical path.
+standard library `@std`, or one library target of a dependency package. The
+first part of every code-reference atom names a unit, and a unit's name is
+global: one name means one unit in the whole snapshot, whichever project
+file declares it. Target names, dependency keys, and the two reserved units
+share that namespace. Two different units with one name, among them a
+transitive dependency named like a root target, are `@project.duplicateName`
+at the later name in discovery order, a target's `name` value or a
+dependency's key, related to the earlier one. Two entries that reach one
+library target of one package name one unit, which is no fault. Because
+roots are disjoint, every module belongs to exactly one unit and has exactly
+one canonical path.
 
 The units a module can name are closed: its own unit, `@std`, and the
-dependencies its project declares; a module of `@tests` can also name every
-local target. A path whose first part is any other unit, including `@tests`
-from a target and an undeclared dependency, is `@module.unknownPath` at the
-reference. Together with the acyclic dependency graph this keeps the unit
-graph acyclic.
+dependencies its own project file declares; a module of `@tests` can also
+name every local target. A path whose first part is any other unit,
+including `@tests` from a target, a dependency of a dependency, and an
+undeclared unit, is `@module.unknownPath` at the reference. Together with
+the acyclic dependency graph this keeps the unit graph acyclic.
 
 A library target has no entry. Its surface is every public declaration of
 every module under its root.
@@ -355,10 +364,16 @@ module-level `proc` with an **entry signature**:
 
 Anything else, and a bare `requires` on the entry, which no call site could
 discharge, is `@project.invalidEntrySignature`; a path that resolves to
-another kind of entity is `@name.wrongEntityKind`. The entry need not be
+another kind of entity is `@name.wrongEntityKind`, and one that resolves to
+nothing, a path into a module that does not exist included, is
+`@name.unknownSymbol`. A diagnostic at a field of the target record, such
+as the `entry`, `effects`, or `grants` field, has the field's value as its
+primary span. The entry need not be
 public or named `main`. Naming it in `entry` creates no import edge and does
-not change its visibility. An `entry` on a library is
-`@project.entryOnLibrary`.
+not change its visibility. A library's target record has no `entry`
+field, so an `entry` on a library is an unknown field of that closed
+record shape, `@data.invalidShape` at the field name, as
+[Project file](#project-file) states.
 
 ```vibra
 use @std.env.EnvReadArgs enduse
@@ -392,11 +407,15 @@ is `@effect.invalidReference` at that entry, and a later repeat of an
 interface is `@effect.duplicateRoot` at the repeat, related to the first.
 The entry's written
 `performs` row, and the row of every startup step, MUST be contained in it,
-or the project is `@effect.outsideCeiling` at the `effects` field, related
-to the entry's `performs` entry or to the recipe. An interface in the list
-that neither the entry nor a startup step performs is the warning
-`@contract.unusedEffect` at that entry of the list. The list grants
-nothing.
+or the project is `@effect.outsideCeiling` at the `effects` field: once for
+each interface of the entry's row outside it, related to that `performs`
+entry, and once for each startup step outside it, related to that step's
+recipe. An interface in the list that neither the entry nor a startup step
+performs is the warning `@contract.unusedEffect` at that entry of the list.
+The warning is decided whenever the entry and the list check, from the
+entry's written row and the startup step of every recipe whose `source`
+names a leaf of the entry, even when another recipe has a fault. The list
+grants nothing.
 
 `grants` is a dict of **binding recipes**, one for each grant the entry
 takes, keyed by the name of what it binds.
@@ -406,7 +425,9 @@ type, or of `Option` of one, is a leaf, named by the parameter: `@notes`. A
 parameter of a record type has one leaf for each field, named by the
 parameter and the field, and so on through nested records: `@logs.reader`.
 The dict's keys MUST be exactly the entry's leaves. A missing or extra key
-is `@grant.invalidBinding` at the `grants` field, related to the parameter.
+is `@grant.invalidBinding` at the `grants` field, related to the parameter
+that the key's first part names; an extra key whose first part names no
+parameter has no related span.
 
 A recipe has:
 
@@ -418,13 +439,19 @@ A recipe has:
   `@argumentPath` or a `@variablePath`) names in `source` the leaf whose
   grant performs that read: a leaf of type `EnvReadArgs` for an argument, a
   leaf of type `EnvReadVar` whose `names` include the variable for a
-  variable. No recipe reads the environment by itself.
+  variable. No recipe reads the environment by itself. A resource record
+  that lacks a field its kind requires is a shape fault of the project
+  file, `@data.invalidShape` at the resource record, found when the file is
+  decoded.
 - `policy`: for `@host.fs.directory` only, and required there: a
   `@scopePolicy.v1` document of family `@filesystem`, defined in the
   [effects chapter](03-effects.md#scope-policies). Its rules name this
   leaf as their root. The grant permits exactly the operation the leaf's
   interface names, within the policy. A policy describes; it
-  authorizes nothing by itself.
+  authorizes nothing by itself. A policy is decoded before the provider
+  is asked whether it takes one, so a malformed policy on another provider
+  is `@grant.invalidPolicy` only, and a well-formed one there is
+  `@grant.invalidBinding` at the policy.
 - `limits`: optional record of `invocations`, `inputBytes`, and
   `outputBytes`, each an optional `U64` upper bound for the life of the
   process. A present record holds at least one bound; a grant with no limit
@@ -434,7 +461,17 @@ A recipe has:
 - `after`: a list, without repeats, of leaves this recipe must be acquired
   after. It MUST contain the recipe's `source` leaf when it has one. Every
   name in it MUST be a key of `grants`. The `after` relation MUST be
-  acyclic, or the project is `@grant.bindingCycle`.
+  acyclic, or the project is `@grant.bindingCycle` at each entry of `after`
+  that closes a cycle. The entries that close cycles are found by a
+  depth-first walk that starts from each leaf it has not yet reached, in
+  the UTF-8 byte order of their spellings, and follows each `after` list in
+  its written order; an entry closes a cycle when it leads back to a leaf
+  the walk is still inside. Its related spans are the entries of `after`
+  on the shortest chain from the leaf the closing entry names back to the
+  leaf whose list holds it, each list followed in its written order, in
+  chain order; an entry that names its own leaf has no related span. So
+  for `@a` after `@b` and `@b` after `@a` the fault is at the entry `@a` of
+  `@b`'s list, related to the entry `@b` of `@a`'s list.
 
 | Provider | Grant types | Resource kinds |
 | --- | --- | --- |
@@ -457,9 +494,12 @@ row is that grant's interface, and it is recorded in the
 the `source` leaf's `limits` and leaves less to the entry. A typed error of
 the read that the issuer's row below does not list as a refusal, such as
 `limitExceeded` or `outcomeUnknown`, is a failure of the leaf that needed
-it. In each case the issuer opens the
-directory once and the grant holds that directory object; a path string is
-never authority. The table is closed; a project cannot add a provider.
+it. Of a variable read, `notPresent` is the refusal "a variable that is not
+present" and `notUnicode` the refusal "the path is not Unicode", since the
+value is the path. Of an argument read, `notUnicode` is a failure. In each
+case the issuer opens the directory once and the grant holds that directory
+object; a path string is never authority. The table is closed; a project
+cannot add a provider.
 
 Project checking validates every recipe: the issuer exists and issues the
 leaf's type, the resource kind is one the issuer accepts, the `source` leaf
@@ -467,7 +507,13 @@ exists with the grant type the read needs, the policy is well-formed for the
 issuer and names this leaf as its root, and `after` is well-formed. Any
 other case is `@grant.invalidBinding` at the offending field; an invalid
 policy is `@grant.invalidPolicy`. A missing or invalid recipe fails the
-build, for a required and an optional leaf alike.
+build, for a required and an optional leaf alike. A recipe that cannot
+become a leaf, because its key is no leaf of the entry, its provider is
+unknown, or no provider issues its leaf's type, is reported once and takes
+no further part: a `source` or an `after` entry that names its key is not
+reported again, and no cycle through it is sought. A policy that does not
+decode is reported once, and its recipe is not also reported as lacking
+one.
 
 ### Startup order
 
@@ -488,26 +534,29 @@ row. Anything the row does not list as acquired or refused is a failure:
 
 | Provider | Refused | Failed |
 | --- | --- | --- |
-| `@host.fs.directory` | the path names nothing; the path names something that is not a directory; the operating system denies the process permission to open the directory; the path is not Unicode; an `@argumentPath` index at or beyond the end of the argument list, which `index` counts from zero without the executable's path; a `@variablePath` variable that is not present | any other error opening the directory; a directory on which the driver cannot enforce the leaf's policy |
+| `@host.fs.directory` | the path names nothing; the path names something that is not a directory; the operating system denies the process permission to open the directory; the path is not Unicode; an `@argumentPath` index at or beyond the end of the argument list, which `index` counts from zero without the executable's path; a `@variablePath` variable that is not present | any other error opening the directory; a directory on which the driver cannot enforce the leaf's policy: one that is itself a symbolic link, a junction, or another reparse point, one on a remote volume, or one on a volume that cannot report the real names and link counts of its entries |
 | `@host.io.stdin`, `@host.io.stdout`, `@host.io.stderr` | the process has no such stream | any other error obtaining the stream |
 | `@host.env.vars`, `@host.env.args`, `@host.time.wall`, `@host.time.monotonic`, `@host.random` | never | the operating system cannot provide the resource |
 
 - **Acquired.** The leaf is bound to its grant.
-- **Refused.** A leaf whose `source` leaf was bound absent is refused as
-  well, because its read cannot happen. A refused optional leaf is bound to
-  `Option.none()` and the sequence continues. A refused required leaf stops
-  the sequence: startup fails with `@grant.requiredUnavailable`.
+- **Refused.** A refused optional leaf is bound to `Option.none()` and the
+  sequence continues. A refused required leaf stops the sequence: startup
+  fails with `@grant.requiredUnavailable`.
 - **Failed.** A failure stops the sequence for a required and an optional
   leaf alike: startup fails with `@grant.acquisitionFailed`. A failure never
   becomes an absence.
 
 Both diagnostics are startup results with the leaf's binding recipe in the
-project file as their primary span, and the entry does not run. The
-`@startup` events of the [audit trace](06-runtime.md#audit-trace) and the
-startup record of the [tooling chapter](05-tooling.md#command-payloads)
-report each leaf with these same three outcomes. A driver the platform does
+project file as their primary span, the record that is the value of the
+leaf's entry in `grants`, and the entry does not run. The `@startup` events
+of the [audit trace](06-runtime.md#audit-trace) and the startup record of
+the [tooling chapter](05-tooling.md#command-payloads) report each leaf with
+these same three outcomes. A driver the platform does
 not support at all is a different case: it is rejected at admission, as
-`@tool.unavailable`, before any leaf is processed.
+`@tool.unavailable` at the target's `name` value, before any leaf is
+processed. In this release `@host.fs.directory` has a driver on Windows
+only, so on every other platform admission refuses a target with a
+directory leaf.
 
 The [runtime chapter](06-runtime.md#entry-outcome) defines the outcomes,
 the release of the acquired grants on every ending of the process, a
@@ -577,11 +626,26 @@ as for any other missing module.
 ## Dependencies and lock
 
 A dependency is local (`kind: @path`) or an exact Git revision
-(`kind: @git`). A dependency name binds one `@lib` target of the dependency's
-package, named by `target`; when omitted, the package's only library target
-is selected, and a package with several is
-`@project.ambiguousDependencyTarget`. A dependency never binds a binary
-target.
+(`kind: @git`). A dependency's key is the name of the library target it
+binds in the dependency's package; there is no renaming. A key that names no
+target of the package is `@name.unknownSymbol` at the key, and a key that
+names a binary target is `@name.wrongEntityKind` at the key: a dependency
+never binds a binary target.
+
+A `path` is relative to the directory of the project file that declares it,
+and that directory holds the dependency's `project.vibon`; when it holds
+none, the dependency is `@project.notFound` at its `path` value. The
+directory MUST be the root project's directory, which is then a cycle, or
+lie beneath it: the path is checked first as written, then by its canonical
+directory, so a link that resolves inside the root is accepted and one that
+resolves outside it is `@module.pathEscape` at the `path` value. Discovery
+takes the project files breadth-first from the root project, each file's
+entries in dict order. As with imports, an entry is added to the dependency
+graph unless its package already reaches the declaring package through the
+entries added before it; such an entry, one naming the root project
+included, is `@project.dependencyCycle` at that entry, related to the
+entries of the shortest such chain in chain order, and an entry that names
+its own package has no related span.
 
 `vibra project sync` exports each Git revision into `dep/<name>/` without
 repository metadata and writes `project-lock.vibon`, one `@projectLock.v2`
@@ -601,8 +665,8 @@ A lock entry has `kind` (`@path` or `@git`); for `@path`, `path` (`Str`);
 for `@git`, `git` (`Str`), `rev` (`Str`, 40 lower-case hexadecimal digits),
 `vendorPath` (`Str`, the project-relative vendor directory), and
 `contentHash` (`Str`, the [content hash](#content-hash) of the vendored
-tree); then `target` (optional atom) and `dependencies` (list of `Str`, the
-names the dependency's own project declares, sorted by UTF-8 bytes).
+tree); then `dependencies` (list of `Str`, the names the dependency's own
+project declares, sorted by UTF-8 bytes).
 
 The example shows the shape. Its `project` digest is a placeholder, not the
 digest of any project file in this chapter; its `contentHash` is the test
@@ -630,9 +694,9 @@ required, a lock whose `project` digest differs from the project file, or a
 dependency set that differs from the project's, `@project.staleLock` at the
 lock's `format` field, and a missing vendor directory or vendored content
 whose content hash differs from the lock, `@project.staleLock` at that lock
-entry; a path
-dependency outside the project root, `@module.pathEscape` at its `path`;
-and an import of an undeclared unit, `@module.unknownPath` at the import as
+entry; a path dependency outside the root project's directory,
+`@module.pathEscape` at its `path`, as above; and an import of an undeclared
+unit, `@module.unknownPath` at the import as
 [Packages, units, and targets](#packages-units-and-targets) states.
 
 #### Content hash
@@ -719,9 +783,9 @@ The package enters resolution as unit `@std`. Its modules are:
 | `@std.assert` | assertions, usable only from `@tests` |
 | `@std.test` | `TestWorld` |
 | `@std.process` | `ExitCode` |
-| `@std.policy` | `ScopeError` and `GrantLimits`; it imports nothing, so every operation module can import it |
+| `@std.policy` | `ScopeError`, the error of a narrowing and, as `invalidPath`, of a rejected `RelativePath` construction, and `GrantLimits`; it imports nothing, so every operation module can import it |
 | `@std.io` | the operation interfaces and error type of its host registry rows, and the procedures `readAllText` and `readAllBytes` |
-| `@std.fs` | the operation interfaces and error types of its host registry rows, `RelativePath`, and the policy and selector types of the [scope policies](03-effects.md#scope-policies): `FsPolicy`, `NameTest`, `FileDepth`, `DirDepth`, `FileAction`, `DirAction` |
+| `@std.fs` | the operation interfaces and error types of its host registry rows, `RelativePath` with its predicate `validNames`, bound to the total compiler row `fs.validNames`, and the policy and selector types of the [scope policies](03-effects.md#scope-policies): `FsPolicy`, `NameTest`, `FileDepth`, `DirDepth`, `FileAction`, `DirAction` |
 | `@std.env`, `@std.time`, `@std.random` | the operation interfaces and error types of the host registry |
 
 `readAllText` and `readAllBytes` read standard input to its end in source.
@@ -737,9 +801,9 @@ The embedded library gets no exemption from the rule that imports do not
 form a cycle.
 
 Adding a module or symbol is a change to this specification and to the
-runtime registry. A project module whose source identity collides with an
-embedded one is `@module.sourceIdCollision` at offset 0 of the project
-module.
+runtime registry. An embedded module's source identity is its module atom, as
+[the source snapshot](#discovery-and-the-source-snapshot) defines, so no
+project module shares it.
 
 ## Tests
 
@@ -806,7 +870,7 @@ can name `TestWorld`, so no target can obtain one.
 `TestWorld` has these members. Each is a `proc` that takes the world as its
 one required parameter `{world: Self}`, takes its fixture data as labelled
 parameters with the constant defaults shown, performs only `TestWorld`, and
-cannot fail.
+cannot fail for a well-formed fixture.
 
 | Member | Labelled parameters | Returns |
 | --- | --- | --- |
@@ -831,9 +895,19 @@ test's world are unusable in another. The members behave as follows:
 - Each grant `directory` returns permits its own action everywhere in the
   new directory, with no limits: a `files` rule with `prefix: []`,
   `depth: @tree`, and `anyName` for the read and write grants, a
-  `directories` rule of `depth: @tree` for `list` and `stat`. A test
-  narrows them with `restrict`, `sub`, and `limit`. A multi-name path in
+  `directories` rule of `depth: @tree` for `list`, and for `stat`, whose
+  request on a directory the directory rules decide and on any other entry
+  the file rules decide, the `anyOf` of a `directories` rule and a `files`
+  rule with `@stat`, both with `prefix: []` and `depth: @tree`, the file
+  rule with `anyName`. A test narrows them with `restrict`, `sub`, and `limit`. A multi-name path in
   `files` implies its parent directories.
+- A `files` argument that holds the empty path, or in which one key is a
+  proper prefix of another so that one entry would be both a file and a
+  directory, is a **conflicting fixture**, whether its keys are literals or
+  computed. The call issues nothing and appends no event, and the test ends
+  `@test.invalid` with `@test.conflictingFixture` at the `await` of the
+  call. It is a fault of the test's setup, not a value the program sees and
+  not a trap; the other tests run in their own worlds as usual.
 - `directory` and `streams` make a new resource on every call. `streams`
   makes new standard streams whose input is its `stdin` argument.
 - `environment`, `clocks`, and `random` return grants over the world's one
@@ -859,18 +933,26 @@ assertion row, as a callee or as a value, is
 | --- | --- | --- |
 | `assert.true` | `Fn({Bool} Void)` | the operand is `true` |
 | `assert.false` | `Fn({Bool} Void)` | the operand is `false` |
-| `assert.equal(T)` | `Fn({T T} Void)`, expected then actual | both operands have the same canonical value encoding |
+| `assert.equal(T)` | `Fn({T T} Void)` with `given {T: Encodable}`, expected then actual | both operands have the same canonical value encoding |
 
-An operand of `assert.equal` whose type contains a callable, plan, or grant type
-is `@type.functionNotEquatable`, once at each such operand. The comparison uses
-the canonical value encoding and gives ordinary code no equality.
+`assert.equal` is bound by `T: Encodable`, the interface of
+[Interfaces](02-type-system.md#interfaces) whose conforming types have a
+canonical encoding. An operand type that is not `Encodable`, such as one
+that contains a callable type or
+[holds a grant](03-effects.md#capability-values), leaves the bound
+unsatisfied: `@type.unsatisfiedBound` at the operand that fixes `T`, related
+to the bound, as for any bound. A generic helper passes its own parameter to
+`assert.equal` when its `given` bounds that parameter by `Encodable`. The
+comparison uses the canonical value encoding and gives ordinary code no
+equality.
 
 A false assertion records one structured failure, with the assertion's name,
 the canonical encodings of the expected and actual values, and the call's
 span, and stops that test's body. It is not a trap, a `Result`, or a host
 event. Each test ends as exactly one of `@test.passed`,
 `@test.assertionFailed`, `@test.invalid`, `@test.unavailable`,
-`@test.trap`, or `@test.exhausted`.
+`@test.trap`, or `@test.exhausted`. A test is `@test.invalid` when its
+selection has static errors or when its fixture conflicts.
 
 Before any selected test runs, the runner checks every selected test module
 and its import closure. An error there makes every selected test

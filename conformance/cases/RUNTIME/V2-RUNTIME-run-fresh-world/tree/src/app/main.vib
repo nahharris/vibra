@@ -1,0 +1,25 @@
+use @std.fs.DirReadText enduse
+
+use @std.fs.DirWriteText enduse
+
+use @std.fs.FsError enduse
+
+use @std.fs.RelativePath enduse
+
+use @std.process.ExitCode enduse
+
+proc main
+  takes {reader: DirReadText writer: DirWriteText}
+  returns code: ExitCode
+  performs {DirReadText DirWriteText}
+  do
+    let Result.ok(value: path) be RelativePath(["f.txt"]) endlet
+    let before be await DirReadText.read(reader path) endlet
+    let _ be await DirWriteText.write(writer path "x") endlet
+    match before
+      case Result.err(error: FsError.notFound())
+        return ExitCode(0u8)
+      case _
+        return ExitCode(1u8)
+    endmatch
+endproc

@@ -19,26 +19,28 @@
 //!    end, and registry order, and its code is attributed to every item it
 //!    affects: every error to every item of an invalid selection, and to an
 //!    item the diagnostic of its own ending (its `@tool.unavailable`, its
-//!    trap, its exhaustion, or its observation error).
+//!    `@test.conflictingFixture`, its trap, its exhaustion, or its
+//!    observation error).
 //! 6. Memory exhaustion is the host event `@runtime.memoryExhausted` on its
 //!    item: the item is `@test.exhausted`, the limit `memory` is reached,
 //!    and the observation is incomplete. It is not a trap.
 
+use serde_json::Value as Json;
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode, LineIndex};
 use vibra_schema::{
-    CommandOutcome, ObservationError, ObservationErrorCode, Payload, SpanDocument,
-    Status, TestFailure, TestFailureKind, TestItem as ItemRecord, TestPayload,
-    TestResult, TrapRecord,
+    AuditEvent, CommandOutcome, ObservationError, ObservationErrorCode, Payload,
+    SpanDocument, Status, TestFailure, TestFailureKind, TestItem as ItemRecord,
+    TestPayload, TestResult, TrapRecord,
 };
 use vibra_workspace::{
-    Discovery, FailureKind, MemoryBudget, PROJECT_FILE_NAME, SuiteResult,
-    TestAssertionFailure, TestOutcome, TestSelector, WorkspaceCapture,
+    AuditTrace, Discovery, FailureKind, MemoryBudget, PROJECT_FILE_NAME, SourceOrigin,
+    SuiteResult, TestAssertionFailure, TestOutcome, TestSelector, WorkspaceCapture,
     observation_type, run_tests,
 };
 
 use crate::args::Invocation;
 use crate::refusal;
-use crate::render::{Response, status_for};
+use crate::render::{Response, reach, source_text, status_for};
 
 /// The memory budget each test runs under: the memory limit of the published
 /// limit profile.
@@ -82,8 +84,10 @@ pub fn run(invocation: &Invocation) -> Response {
             &mut response,
             SuiteResult::Diagnostics,
             Vec::new(),
+            Vec::new(),
             capture.diagnostics(),
         );
+        reach(&mut response, capture.limits_reached());
         return response;
     };
     for module in snapshot.modules() {
@@ -101,9 +105,16 @@ pub fn run(invocation: &Invocation) -> Response {
         .iter()
         .map(|item| (item.selector().to_string(), item.outcome().clone()))
         .collect::<Vec<_>>();
+    let traces = run
+        .items()
+        .iter()
+        .map(|item| audit_events(item.trace(), &response))
+        .collect::<Vec<_>>();
     let mut result = run.result();
     inject(&mut items, &mut result);
-    finish(&mut response, result, items, run.diagnostics());
+    finish(&mut response, result, items, traces, run.diagnostics());
+    reach(&mut response, capture.limits_reached());
+    reach(&mut response, run.limits_reached().to_vec());
     response
 }
 
@@ -125,7 +136,7 @@ const fn test_result(outcome: &TestOutcome) -> TestResult {
         TestOutcome::Passed => TestResult::Passed,
         TestOutcome::AssertionFailed(_) => TestResult::AssertionFailed,
         TestOutcome::Trap { .. } => TestResult::Trap,
-        TestOutcome::Invalid => TestResult::Invalid,
+        TestOutcome::Invalid(_) => TestResult::Invalid,
         TestOutcome::Unavailable(_) => TestResult::Unavailable,
         TestOutcome::Exhausted => TestResult::Exhausted,
     }
@@ -138,7 +149,7 @@ const fn item_status(outcome: &TestOutcome) -> Status {
         TestOutcome::Passed => CommandOutcome::Ok,
         TestOutcome::AssertionFailed(_) => CommandOutcome::TestFailed,
         TestOutcome::Trap { .. } => CommandOutcome::Trap,
-        TestOutcome::Invalid => CommandOutcome::Diagnostics,
+        TestOutcome::Invalid(_) => CommandOutcome::Diagnostics,
         TestOutcome::Unavailable(_) => CommandOutcome::Unavailable,
         TestOutcome::Exhausted => CommandOutcome::OperationalFailure,
     })
@@ -163,7 +174,8 @@ fn ending_diagnostic(outcome: &TestOutcome) -> Option<Diagnostic> {
                 MEMORY_BUDGET.bytes
             ),
         )),
-        TestOutcome::Unavailable(diagnostic) => Some(diagnostic.clone()),
+        TestOutcome::Unavailable(diagnostic)
+        | TestOutcome::Invalid(Some(diagnostic)) => Some(diagnostic.clone()),
         TestOutcome::AssertionFailed(failure) => match &failure.kind {
             FailureKind::Observation { code, .. } => Some(
                 Diagnostic::new(
@@ -175,7 +187,7 @@ fn ending_diagnostic(outcome: &TestOutcome) -> Option<Diagnostic> {
             ),
             FailureKind::Assertion => None,
         },
-        TestOutcome::Passed | TestOutcome::Invalid => None,
+        TestOutcome::Passed | TestOutcome::Invalid(None) => None,
     }
 }
 
@@ -200,6 +212,7 @@ fn finish(
     response: &mut Response,
     result: SuiteResult,
     items: Vec<(String, TestOutcome)>,
+    traces: Vec<Vec<AuditEvent>>,
     diagnostics: &[Diagnostic],
 ) {
     let mut envelope = diagnostics.to_vec();
@@ -212,7 +225,7 @@ fn finish(
             envelope.push(diagnostic.clone());
         }
         attributed.push(match outcome {
-            TestOutcome::Invalid => diagnostics
+            TestOutcome::Invalid(None) => diagnostics
                 .iter()
                 .filter(|diagnostic| diagnostic.is_error())
                 .cloned()
@@ -227,7 +240,8 @@ fn finish(
     let tests = items
         .into_iter()
         .zip(attributed)
-        .map(|((name, outcome), attributed)| ItemRecord {
+        .zip(traces)
+        .map(|(((name, outcome), attributed), audit_trace)| ItemRecord {
             name,
             result: test_result(&outcome),
             failure: match &outcome {
@@ -237,13 +251,15 @@ fn finish(
                 _ => None,
             },
             trap: match &outcome {
-                TestOutcome::Trap { trap, .. } => Some(TrapRecord {
+                TestOutcome::Trap { trap, origin } => Some(TrapRecord {
                     trap_code: trap.code().as_atom().to_owned(),
-                    origin: None,
+                    origin: origin
+                        .as_ref()
+                        .map(|origin| span_document(origin, response)),
                 }),
                 _ => None,
             },
-            audit_trace: Vec::new(),
+            audit_trace,
             diagnostics: envelope
                 .iter()
                 .filter(|diagnostic| attributed.contains(diagnostic))
@@ -272,10 +288,30 @@ fn finish(
     });
 }
 
+/// The `SpanDocument` of a source origin, against the captured text of its
+/// source.
+fn span_document(origin: &SourceOrigin, response: &Response) -> SpanDocument {
+    let source_id = origin.source_id();
+    let text = source_text(response, source_id);
+    SpanDocument::render(origin.span(), &LineIndex::new(text), Some(source_id))
+}
+
+/// The JSON projection of the events of `trace`, a known origin as its
+/// `SpanDocument`. A test's trace holds only `@host` events, which every
+/// projection covers.
+fn audit_events(trace: &AuditTrace, response: &Response) -> Vec<AuditEvent> {
+    let span = |origin: &SourceOrigin| {
+        serde_json::to_value(span_document(origin, response)).unwrap_or(Json::Null)
+    };
+    trace
+        .events
+        .iter()
+        .filter_map(|event| event.json(&span))
+        .map(AuditEvent)
+        .collect()
+}
 /// The `TestItem.failure` of a failed assertion.
 fn failure_record(failure: &TestAssertionFailure, response: &Response) -> TestFailure {
-    let source_id = failure.origin.source_id();
-    let text = response.sources.get(source_id).map_or("", String::as_str);
     let observation = matches!(failure.kind, FailureKind::Observation { .. });
     TestFailure {
         kind: if observation {
@@ -286,11 +322,7 @@ fn failure_record(failure: &TestAssertionFailure, response: &Response) -> TestFa
         assertion: Some(failure.assertion.clone()),
         expected: failure.expected.clone(),
         actual: failure.actual.clone(),
-        primary_span: SpanDocument::render(
-            failure.origin.span(),
-            &LineIndex::new(text),
-            Some(source_id),
-        ),
+        primary_span: span_document(&failure.origin, response),
         observation_error: observation.then(|| ObservationError {
             code: ObservationErrorCode::UnsupportedValue,
             value_type: observation_type(failure),
@@ -304,6 +336,14 @@ thread_local! {
     /// The fault-injection hook of the trap test: the first selected test of
     /// a checked selection ends in `@runtime.invalidCheckedProgram`.
     static TRAP_FIRST: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// The calling thread's test hook, to set on the thread a command runs on
+/// ([`crate::run`] runs every command on its own thread).
+#[cfg(test)]
+pub(crate) fn carry_hook() -> impl FnOnce() + Send {
+    let trap_first = TRAP_FIRST.get();
+    move || TRAP_FIRST.set(trap_first)
 }
 
 /// Applies the test hook to a run's items and suite result.

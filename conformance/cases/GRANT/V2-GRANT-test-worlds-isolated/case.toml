@@ -1,0 +1,13 @@
+id = "V2-GRANT-test-worlds-isolated"
+rule = "V2-GRANT-test-worlds-isolated"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "04-programs-and-packages.md#test-worlds-and-grants: every test runs in a fresh world, so a file one test writes is absent from the next"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

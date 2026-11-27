@@ -1,0 +1,8 @@
+use @std.assert enduse
+
+fn one takes {} returns r: I32 do return 1i32 endfn
+
+// A generic wrapper, applied to a callable argument.
+type Box(T) of T endtype
+
+test "box" do assert.equal(Box(one) Box(one)) endtest

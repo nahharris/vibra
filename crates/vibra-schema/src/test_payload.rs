@@ -65,25 +65,26 @@ pub enum TestFailureKind {
     Observation,
 }
 
-/// The code of an observation error.
+/// The code of an observation error, spelled in JSON as its full atom text,
+/// `@` included, as every code is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
 pub enum ObservationErrorCode {
-    /// The value holds a function, a plan, or a grant, which has no
-    /// observation.
+    /// `@tool.unsupportedValue`: the value holds a function, a plan, or a
+    /// grant, which has no observation.
+    #[serde(rename = "@tool.unsupportedValue")]
     UnsupportedValue,
 }
 
 /// `ObservationError`: why an operand could not be observed.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct ObservationError {
-    /// `unsupportedValue`.
+    /// `@tool.unsupportedValue`.
     pub code: ObservationErrorCode,
     /// The canonical `@type.v2` text of the operand's type, or `null`.
     #[serde(rename = "type")]
     pub value_type: Option<String>,
-    /// The source-origin ordinal of the observed expression, or `null`.
-    pub origin: Option<u64>,
+    /// The source origin of the observed expression, or `null`.
+    pub origin: Option<SpanDocument>,
 }
 
 /// `TestItem.failure`: the failed assertion that ended a test.
@@ -104,22 +105,24 @@ pub struct TestFailure {
     pub observation_error: Option<ObservationError>,
 }
 
-/// `TrapRecord`: the defect trap that ended a test.
+/// `TrapRecord`: the defect trap that ended a test or a run.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TrapRecord {
     /// The trap's atom, such as `@runtime.invalidCheckedProgram`.
     pub trap_code: String,
-    /// The source-origin ordinal of the trapping operation, or `null`.
-    pub origin: Option<u64>,
+    /// The source origin of the trapping operation, or `null` when none is
+    /// known.
+    pub origin: Option<SpanDocument>,
 }
 
-/// One event of a test's audit trace.
-///
-/// This version publishes no event kind: a test in the pure language
-/// completes no host call, so every trace is empty.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-pub enum AuditEvent {}
+/// One event of an audit trace, as the JSON projection of the runtime
+/// chapter (`docs/spec/06-runtime.md`, "Audit trace") gives it: each field of
+/// the event its own member, an atom a string keeping its `@`, and a VIBON
+/// value such as an argument or a result its canonical text inside a string.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(transparent)]
+pub struct AuditEvent(pub serde_json::Value);
 
 /// `TestItem`: one selected test and how it ended.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -133,7 +136,8 @@ pub struct TestItem {
     pub failure: Option<TestFailure>,
     /// The defect trap, for `@test.trap`.
     pub trap: Option<TrapRecord>,
-    /// The audit events the test completed.
+    /// The events of the test's `@auditTrace.v2` document, in completion
+    /// order.
     pub audit_trace: Vec<AuditEvent>,
     /// The code of every envelope diagnostic attributed to the item, in the
     /// envelope's order.

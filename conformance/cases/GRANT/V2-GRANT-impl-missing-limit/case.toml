@@ -1,0 +1,19 @@
+id = "V2-GRANT-impl-missing-limit"
+rule = "V2-GRANT-impl-missing-limit"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#implementations: the narrowing member limit is abstract for an implementation, so one without it is missing an abstract member"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.missingAbstractMember"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 229, end = 245 }
+related = [{ source = "@std.fs", span = { start = 3903, end = 3908 } }]

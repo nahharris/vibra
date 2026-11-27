@@ -1,0 +1,13 @@
+id = "V2-GRANT-restrict-keeps-parent"
+rule = "V2-GRANT-restrict-keeps-parent"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "03-effects.md#narrowing: restricting textOnly again with a policy that permits every file keeps the parent's policy: b.bin is still denied"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

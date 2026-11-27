@@ -10,7 +10,9 @@
 //!   number of `@test.passed` items, and `failed` their difference
 //!   ("Tests and selection");
 //! - every code attributed to a test item is the code of a diagnostic of the
-//!   envelope, where it appears once.
+//!   envelope, where it appears once;
+//! - every non-empty policy hash of a grant projection in a `run` payload is
+//!   a key of its `policies` ("Command payloads").
 
 use std::fmt;
 use std::sync::OnceLock;
@@ -171,6 +173,62 @@ fn test_relations(envelope: &Value, found: &mut Vec<String>) {
     }
 }
 
+/// Every grant projection of a `run` payload names a policy of `policies`:
+/// the projections of the entry's events, of the startup events, and of the
+/// bindings. The empty hash is a provider without a policy.
+fn run_relations(envelope: &Value, found: &mut Vec<String>) {
+    if envelope.get("command").and_then(Value::as_str) != Some("run") {
+        return;
+    }
+    let Some(payload) = envelope.get("payload") else {
+        return;
+    };
+    let Some(policies) = payload.get("policies").and_then(Value::as_object) else {
+        return;
+    };
+    let list = |value: Option<&Value>| {
+        value
+            .and_then(Value::as_array)
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+            .to_vec()
+    };
+    let startup = payload.get("startup");
+    let mut projections = Vec::new();
+    for (path, events) in [
+        ("/payload/auditTrace", list(payload.get("auditTrace"))),
+        (
+            "/payload/startup/auditTrace",
+            list(startup.and_then(|startup| startup.get("auditTrace"))),
+        ),
+    ] {
+        for (index, event) in events.iter().enumerate() {
+            if let Some(grant) = event.get("grant") {
+                projections.push((format!("{path}/{index}/grant"), grant.clone()));
+            }
+        }
+    }
+    let bindings = list(startup.and_then(|startup| startup.get("bindings")));
+    for (index, binding) in bindings.iter().enumerate() {
+        if let Some(grant) = binding.get("grantProjection") {
+            projections.push((
+                format!("/payload/startup/bindings/{index}/grantProjection"),
+                grant.clone(),
+            ));
+        }
+    }
+    for (path, grant) in projections {
+        if let Some(hash) = grant.get("policy").and_then(Value::as_str)
+            && !hash.is_empty()
+            && !policies.contains_key(hash)
+        {
+            found.push(format!(
+                "{path}/policy: `{hash}` is not a key of /payload/policies"
+            ));
+        }
+    }
+}
+
 fn check(
     document: &'static str,
     validator: &Result<Validator, String>,
@@ -185,6 +243,7 @@ fn check(
         .collect::<Vec<_>>();
     misordered_spans(value, "", &mut messages);
     test_relations(value, &mut messages);
+    run_relations(value, &mut messages);
     if messages.is_empty() {
         Ok(())
     } else {

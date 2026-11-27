@@ -132,7 +132,11 @@ pub(crate) fn fold(
                     Construction::Dict(_) => {
                         let key = dict_key(value_type, library)
                             .ok_or(NotConstant::Expression)?;
-                        if ordered_by_implementation(key, library) {
+                        // An empty dict has no entries to order, so its key
+                        // type's own `Ordered` implementation never runs.
+                        if !operands.is_empty()
+                            && ordered_by_implementation(key, library)
+                        {
                             return Err(NotConstant::Dict);
                         }
                         Value::Dict(dict_entries(operands, key, library)?)
@@ -405,6 +409,7 @@ pub(crate) fn substitute(node: &mut Node, binders: &[Type]) {
                 }
             }
             IrExpr::Field { record: inner, .. }
+            | IrExpr::Await { plan: inner }
             | IrExpr::Return(inner)
             | IrExpr::Try(inner)
             | IrExpr::WidenAtom(inner) => pending.push(inner),

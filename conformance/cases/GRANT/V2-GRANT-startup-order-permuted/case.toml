@@ -1,0 +1,13 @@
+id = "V2-GRANT-startup-order-permuted"
+rule = "V2-GRANT-startup-order-permuted"
+profile = "interpreterV2"
+operation = "workspaceRun"
+description = "04-programs-and-packages.md#startup-order: grants written z, a, b, with a after b; b is the smallest ready leaf, acquiring it makes a ready, and a precedes z, which was ready from the start: acquired b, a, z"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+targetRun = "target-run.vibon"

@@ -1,0 +1,19 @@
+id = "V2-PROJECT-entry-is-fn"
+rule = "V2-PROJECT-entry-is-fn"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "07-diagnostics-and-conformance.md#availability-discovery-and-resolution: an entry that is not a proc is @project.invalidEntrySignature, related to the declaration"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@project.invalidEntrySignature"
+level = "@error"
+source = "project.vibon"
+span = { start = 119, end = 133 }
+related = [{ source = "src/app/main.vib", span = { start = 37, end = 41 } }]

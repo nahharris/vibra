@@ -129,6 +129,12 @@ endproc
   default `proc` member, or for a `Proc` or `Intent` type. Building a plan
   performs nothing, so a `proc` that only builds plans of an interface and
   returns them does not perform it.
+- The warning is not reported for a body whose declaration has an error,
+  since its `await` nodes may not all be known; an error of an anonymous
+  `proc` the declaration holds is an error of the declaration. A body's
+  own `@effect.outsideCeiling` is the exception: it leaves that body's
+  `await` nodes known, so that body keeps its own warnings. A module of the
+  embedded standard library gets no such warning.
 - Callable types compare rows exactly. A `Proc({Str} Void {DirWriteText})`
   parameter accepts only a procedure with exactly that row. There are no row
   variables, no row subtyping, and no relation between roots.
@@ -214,7 +220,20 @@ with its relatives.
 
 No source expression makes a grant. A path, a policy value, a wrapper type,
 an `impl`, and decoded data are not grants and cannot become one. A grant has
-no encoding: it cannot be written to a file, compared, or used as a dict key.
+no encoding, so it cannot be written to a file. It is not compared and is no
+dict key: an operation interface value type receives no `impl`, so it
+implements neither `Equatable` nor `Ordered`.
+A type **holds a grant** when it is an operation interface value type, or
+holds one through a record, a tuple, a list, an `Option`, a wrapper, the
+representation of a declared type, or the type arguments of a declared
+type; a callable type holds none on its own account. A type that holds a
+grant is not `Encodable`, as the
+[type chapter](02-type-system.md#interfaces) states, and is no labelled
+default, since a default is a constant. A declared type that holds a grant
+may implement `Equatable` and `Ordered`, and is then compared by its own
+implementations and is a dict key, as
+[Dict keys, equality, and order](02-type-system.md#dict-keys-equality-and-order)
+states; a dict whose key type holds a grant holds a grant.
 A grant from another world, or one released at shutdown, is unusable.
 Checked source cannot reach either, so the runtime treats a use of one as a
 defect, as [host calls](06-runtime.md#host-calls) state.
@@ -300,7 +319,9 @@ A `limit` contributes no policy. A grant's projection in the
 policy.
 
 `ScopeError` (`@std.policy`) has the cases `invalidPolicy`,
-`unsupportedVersion`, `policyTooComplex`, and `foreignRoot`. For `restrict`,
+`unsupportedVersion`, `policyTooComplex`, `foreignRoot`, and `invalidPath`.
+`invalidPath` is the error of a rejected `RelativePath` construction, under
+**Paths** below, and no narrowing returns it. For `restrict`,
 `invalidPolicy` is exactly a policy with an empty `suffix`, and
 `policyTooComplex` a policy over the limits of
 [The wire form](#the-wire-form). An empty `actions` list and an empty
@@ -320,7 +341,13 @@ That binding is the broker's narrowing, the implementation of a sealed
 grant; an `impl` supplies the three members as it supplies any abstract
 member, as [Operation interfaces](#operation-interfaces) states. A model
 that wraps a grant forwards the narrowing to it; a model that holds only
-memory returns itself or keeps bounds of its own.
+memory returns itself or keeps bounds of its own. Forwarding is the
+author's contract, not a checked rule, as [Two mechanisms](#two-mechanisms)
+says. It cannot amplify authority: a model can hand back only grants it
+already holds, the ancestry of a sealed grant is the broker's alone, and
+the [audit trace](06-runtime.md#audit-trace) projects the grant actually
+used, with its real root, policy, and limits, so no event shows a
+narrowing that did not happen.
 
 ### Brands
 
@@ -451,16 +478,21 @@ Unknown fields, kinds, and versions are rejected.
 [effective policy](#narrowing) every rule has a `root`: a rule a `restrict`
 or a `sub` contributes names the leaf its grant descends from, and every
 rule of a grant that descends from a `TestWorld` directory grant names
-`@testWorld`. `names` is a
-record whose `kind` is `@anyName`; `@exact` with `names`; `@suffix` with
-`value`; or `@allOf` or `@anyOf` with `items`.
+`@testWorld`. Each element of a `prefix` is a name under the profile of
+[Paths](#filesystem-policies), so a document whose `prefix` holds `..` is
+rejected. `names` is a record whose `kind` is `@anyName`; `@exact` with
+`names`; `@suffix` with `value`; or `@allOf` or `@anyOf` with `items`.
 
 A policy is normalized before it is hashed or shown: nested `allOf` or
 `anyOf` of the same kind are flattened, duplicate items removed, items
 sorted by their canonical bytes, single-item wrappers removed, and sets
-sorted. Sequences such as path components keep their order. The hash
-identifies this normal form; two policies with the same meaning may hash
-differently.
+sorted, each element kept once. The `actions` sort by their atoms and the
+`names` of `@exact` in `Str` order, by Unicode scalar. Sequences such as
+path components keep their order. A policy's hash is `sha256:` followed by
+the lower-case hexadecimal SHA-256 of the canonical bytes of the normalized
+`@scopePolicy.v1` document, with no prefix bytes: the document's `format`
+field is its domain tag. The hash identifies this normal form; two policies
+with the same meaning may hash differently.
 
 A policy has at most 4,096 nodes and entries in total and a depth of at most
 64, counting ancestors acquired by restriction. A larger one is
@@ -468,9 +500,11 @@ A policy has at most 4,096 nodes and entries in total and a depth of at most
 a grant's [effective policy](#narrowing). A node is one expression record or
 one name-test record; an entry is one element of a `prefix`, `actions`, or
 `names` list. The depth is the nesting of expression and name-test records,
-plus one for each `restrict` and each `sub` in the grant's ancestry; a
-`limit` adds nothing. These numbers are an engineering default of the first
-tool profile, not a measured capacity.
+a lone record counting one, so a file rule whose `names` is
+`{kind: @anyName}` has depth 2; to it is added one for each `restrict` and
+each `sub` in the grant's ancestry, and a `limit` adds nothing. These
+numbers are an engineering default of the first tool profile, not a
+measured capacity.
 
 ### Filesystem policies
 
@@ -482,12 +516,27 @@ selects directories: `self` is `prefix` itself, `children` one name further,
 - **Actions.** `read` covers `DirReadBytes` and `DirReadText`; `replace` and
   `create` cover the two write interfaces for an existing and a new file;
   `list` covers `DirList`; `stat` covers `DirStat` for the kind of rule it
-  appears in. A grant's interface and its policy both have to allow a
-  request. Append, remove, and rename do not exist yet.
+  appears in: a `stat` of a directory is decided by the directory rules,
+  and a `stat` of any other entry by the file rules. A grant's interface
+  and its policy both have to allow a request. Append, remove, and rename
+  do not exist yet.
 - **A file rule grants no listing.** Permission to read `.txt` files does
   not permit enumerating a directory.
 - **Paths.** A `RelativePath` (`@std.fs`) is a list of names, built by the
-  fallible constructor `RelativePath(names)`. A name is non-empty and is
+  fallible constructor `RelativePath(names)`, whose type is
+  `Result(RelativePath ScopeError)`: its `where` predicate is the total
+  compiler primitive `validNames`, the
+  [`fs.validNames` row](06-runtime.md#compiler-intrinsic-registry), and a
+  list with a rejected name yields
+  `Result.err(error: ScopeError.invalidPath())`. The empty path is valid and
+  names the directory the grant holds. No file rule selects that directory,
+  so a policy permits a file operation on the empty path only if it
+  permits every request, as an empty `allOf` does; otherwise the request is
+  `denied` before any driver is asked. The file rule of a `TestWorld`
+  directory grant selects a positive number of names, so a file request on
+  the empty path through one is `denied` before the driver, restricted or
+  not. A file request the policy permits that reaches a directory is
+  `notAFile`. A name is non-empty and is
   rejected if it is `.` or `..`, contains `/`, `\`, `:`, NUL, or a control
   character, ends in a dot or a space, or is a reserved device name.
   Absolute, drive-relative, UNC, and device paths cannot be represented.
@@ -499,11 +548,12 @@ selects directories: `self` is `prefix` itself, `children` one name further,
 - **Reserved device names.** Names are portable: the same closed set is
   rejected on every platform. A name's **stem** is the part before its
   first dot, with trailing spaces removed. A name is rejected when its
-  stem, compared without case, is one of `CON`, `PRN`, `AUX`, `NUL`,
-  `CONIN$`, `CONOUT$`, `COM0` through `COM9`, `LPT0` through `LPT9`, or
-  the superscript-digit forms `COM¹`, `COM²`, `COM³`, `LPT¹`, `LPT²`,
-  `LPT³`. So `nul`, `NUL.txt`, and `con .log` are rejected and `nul2` is
-  not.
+  stem, after each character is mapped to its Unicode simple uppercase, is
+  one of `CON`, `PRN`, `AUX`, `NUL`, `CONIN$`, `CONOUT$`, `COM0` through
+  `COM9`, `LPT0` through `LPT9`, or the superscript-digit forms `COM¹`,
+  `COM²`, `COM³`, `LPT¹`, `LPT²`, `LPT³`. So `nul`, `NUL.txt`, `con .log`,
+  and `conın$` (with U+0131, whose simple uppercase is `I`) are rejected
+  and `nul2` is not.
 - **Names.** A name test compares exact Unicode scalars, with no case
   folding and no normalization. `suffix(".txt")` accepts `notes.txt` and
   `.txt` and rejects `notes.TXT` and `notes.txt.exe`. An empty suffix is
@@ -516,7 +566,12 @@ The driver MUST enforce a file rule as follows.
    points and without crossing a mount point.
 2. Check the name the filesystem actually reports for the opened entry and
    its kind. A different-case or short-name alias MUST NOT satisfy a name
-   test the real name fails.
+   test the real name fails. An answer MUST NOT depend on what the policy
+   does not permit: a request decided below a directory whose real names
+   the policy does not permit is `denied`, whether or not the entry it
+   names exists, so `notFound` or any other error decided below a directory
+   is returned only after the real names of the directories already opened
+   are checked.
 3. Perform the access on the object that was opened and checked. Checking a
    path and then reopening it by name is not conforming.
 4. Never truncate or create before authorization. Creating a new file is
@@ -525,6 +580,12 @@ The driver MUST enforce a file rule as follows.
    operation walks from the grant's directory again.
 6. Where the platform cannot provide these guarantees, return
    `FsError.unsupported` before acting. There is no unchecked fallback.
+
+A component that another process renames or swaps while a request walks is
+seen as the walk opens it. The request then reads content inside the held
+directory, is `denied`, or is `notFound` when the name is absent at that
+moment, as it is between the two renames of a swap on a platform with no
+atomic exchange; it never reaches content outside the held directory.
 
 Two limits of this design are part of the contract and MUST appear in what a
 user is shown when approving a target:

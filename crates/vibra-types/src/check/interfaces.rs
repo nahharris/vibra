@@ -13,14 +13,13 @@
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 use vibra_ir::external::compiler::CompilerIntrinsic;
 use vibra_ir::{FnType, NamedTypes, Substitution, Type, TypeId};
-use vibra_syntax::source::{
-    Callable, CallableKind, Given, Ident, Impl, Path, TypeExpr, TypeForm,
-};
+use vibra_syntax::source::{Callable, Given, Ident, Impl, Path, TypeExpr, TypeForm};
 
 use super::declare::{
     BoundData, BoundGoal, Entity, FnData, GoalHead, Host, ImplData,
-    InterfaceMemberData, NoType, Program, Scope, TypeKind, unguarded,
+    InterfaceMemberData, NoType, Program, Scope, TypeKind,
 };
+use super::effects::{self, Hook};
 
 /// An interface as applied: its index, its positional arguments, and the
 /// choices its labels fix, in canonical name order.
@@ -387,8 +386,10 @@ impl<'a> Program<'a> {
             for member in view.members() {
                 let Some(name) = member.name() else { continue };
                 let what = format!("the member `{interface_name}.{}`", name.text());
-                if member.performs().is_some() || member.kind() == CallableKind::Proc {
-                    self.unsupported(module, member.construct().span(), &what);
+                if effects::members::contract_member(
+                    self, module, index, &member, &what,
+                ) == Hook::Reported
+                {
                     continue;
                 }
                 let mut binders = params.clone();
@@ -451,7 +452,8 @@ impl<'a> Program<'a> {
                 }
                 let mut all_bounds = bounds.clone();
                 all_bounds.extend(own_bounds.into_iter().skip(params.len()));
-                let default = member.body().map(|_| {
+                let bound = effects::members::bound(&member);
+                let default = (member.body().is_some() || bound).then(|| {
                     self.default_function(
                         index,
                         &member,
@@ -468,6 +470,7 @@ impl<'a> Program<'a> {
                     bounds: all_bounds,
                     receiver,
                     default,
+                    row: effects::members::contract_row(self, index, &member),
                 });
             }
             if let Some(data) = self.interfaces.get_mut(index) {
@@ -503,7 +506,13 @@ impl<'a> Program<'a> {
             .get(module)
             .map(|data| (data.path.clone(), data.embedded))
             .unwrap_or_default();
-        let identity = self.identity_of(&path, embedded, &interface_name, "@fn", &name);
+        let identity = self.identity_of(
+            &path,
+            embedded,
+            &interface_name,
+            effects::procs::identity_kind(member),
+            &name,
+        );
         self.functions.push(FnData {
             module,
             owner: None,
@@ -521,7 +530,7 @@ impl<'a> Program<'a> {
             self_type: Some(Type::SelfType),
             associated,
             signature: Some(signature),
-            external: None,
+            external: effects::members::bound_intrinsic(member),
         });
         fn_index
     }
@@ -591,6 +600,30 @@ impl<'a> Program<'a> {
             );
             return None;
         };
+        // 02 "Implementations": every type conforms to `Any`, and to
+        // `Encodable` when it has an encoding, with no implementation.
+        let redundant = |program: &Self, interface: Option<usize>| {
+            let any = path.dotted() == "Any"
+                && positional.is_empty()
+                && labelled.is_empty()
+                && program.lookup(module, "Any").is_none();
+            let encodable = interface.is_some()
+                && interface == program.prelude_interface("Encodable");
+            (any || encodable).then(|| {
+                Diagnostic::new(
+                    DiagnosticCode::TypeRedundantImplementation,
+                    target.span(),
+                    format!(
+                        "every type that conforms to `{}` does so without an implementation",
+                        path.dotted()
+                    ),
+                )
+            })
+        };
+        if let Some(diagnostic) = redundant(self, None) {
+            self.fault(module, diagnostic);
+            return None;
+        }
         let interface = match self.path_entity(module, &path) {
             Some(Entity::Interface(interface)) => interface,
             Some(_) => {
@@ -609,6 +642,10 @@ impl<'a> Program<'a> {
             }
             None => return None,
         };
+        if let Some(diagnostic) = redundant(self, Some(interface)) {
+            self.fault(module, diagnostic);
+            return None;
+        }
         let idata = self.interfaces.get(interface)?;
         if idata.id.is_none() {
             let what = format!("an implementation in `{host}`");
@@ -1009,7 +1046,10 @@ impl<'a> Program<'a> {
                 usable = false;
                 continue;
             };
-            if let Some(default) = declared.default {
+            if let Some(default) = declared
+                .default
+                .filter(|_| !effects::members::sealed(self, declared.default))
+            {
                 let span = self
                     .functions
                     .get(default)
@@ -1036,8 +1076,14 @@ impl<'a> Program<'a> {
                 "the member `{}` of an implementation in `{host}`",
                 name.text()
             );
-            if !unguarded(&member) || member.kind() == CallableKind::Proc {
+            if member.requires().is_some() || member.ensures().is_some() {
                 self.unsupported(module, member.construct().span(), &what);
+                usable = false;
+                continue;
+            }
+            if effects::members::impl_member(self, module, interface, &member, &what)
+                == Hook::Reported
+            {
                 usable = false;
                 continue;
             }
@@ -1187,7 +1233,8 @@ impl<'a> Program<'a> {
             members.push((name.text().to_owned(), fn_index));
         }
         for declared in &declared_members {
-            if declared.default.is_none()
+            if (declared.default.is_none()
+                || effects::members::sealed(self, declared.default))
                 && !members.iter().any(|(name, _)| *name == declared.name)
             {
                 if seen.iter().any(|(name, _)| *name == declared.name) {
@@ -1503,6 +1550,12 @@ pub(crate) fn same_head(left: &Type, right: &Type) -> bool {
             x.parameters.len() == y.parameters.len()
                 && x.labels.names().eq(y.labels.names())
         }
+        (Type::Proc(x), Type::Proc(y)) => {
+            x.parameters.len() == y.parameters.len()
+                && x.labels.names().eq(y.labels.names())
+                && x.effects == y.effects
+        }
+        (Type::Intent(x), Type::Intent(y)) => x.effects == y.effects,
         _ => {
             left.components().is_empty()
                 && right.components().is_empty()

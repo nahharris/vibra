@@ -1,0 +1,6 @@
+{
+  format: @project.v2
+  package: {name: "pilot" version: "0.1.0"}
+  targets: [{name: @pilot kind: @lib root: "src/pilot"}]
+  dependencies: [:]
+}

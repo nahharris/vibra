@@ -9,6 +9,7 @@ use serde::Serialize;
 use crate::SCHEMA_VERSION;
 use crate::capability::CommandCapability;
 use crate::diagnostic::{DiagnosticDocument, SpanDocument};
+use crate::run_payload::RunPayload;
 use crate::test_payload::TestPayload;
 use crate::validate::{SchemaViolation, validate_command_result};
 
@@ -192,7 +193,7 @@ pub struct CheckPayload {
 }
 
 /// The payload, keyed by the command. This version publishes the `help`,
-/// `fmt`, `check`, and `test` payloads and the empty payload.
+/// `fmt`, `check`, `test`, and `run` payloads and the empty payload.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(untagged)]
 pub enum Payload {
@@ -206,6 +207,8 @@ pub enum Payload {
     Check(CheckPayload),
     /// The payload of `test` once its selector was admitted.
     Test(TestPayload),
+    /// The payload of `run` once its target was selected.
+    Run(Box<RunPayload>),
 }
 
 /// The closed object every structured response is.

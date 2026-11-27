@@ -38,6 +38,7 @@ fn path(library: Library) -> &'static str {
         Library::Iter => "std.iter.Iter",
         Library::Equatable => "std.equatable.Equatable",
         Library::Ordered => "std.ordered.Ordered",
+        Library::Encodable => "std.encodable.Encodable",
         Library::Ordering => "std.ordering.Ordering",
         Library::ArithmeticError => "std.number.ArithmeticError",
         Library::ConversionError => "std.number.ConversionError",

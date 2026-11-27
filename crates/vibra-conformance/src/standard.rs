@@ -13,6 +13,7 @@ use crate::project::{ProjectDecodeHandler, SourceGraphHandler};
 use crate::reader::ReaderV2Handler;
 use crate::resolve::ResolveHandler;
 use crate::workspace_check::WorkspaceCheckHandler;
+use crate::workspace_run::WorkspaceRunHandler;
 use crate::workspace_test::WorkspaceTestHandler;
 
 /// Selects the closest registered handler that can run each case.
@@ -182,10 +183,9 @@ pub enum DispatchResult {
 /// Every handler the workspace has, registered under its profile.
 ///
 /// The reader runs under `readerV2`; the project decoder, the source graph,
-/// resolution, and the workspace check run under `staticV2`; `interpret` and
-/// `workspaceTest` run under `interpreterV2`; `format` runs under
-/// `toolingV2`. Every other
-/// operation has no handler yet.
+/// resolution, and the workspace check run under `staticV2`; `interpret`,
+/// `workspaceRun`, and `workspaceTest` run under `interpreterV2`; `format`
+/// runs under `toolingV2`. Every other operation has no handler yet.
 /// The binary and the host tests build this one dispatcher, so the two cannot
 /// disagree about which handlers exist.
 #[must_use]
@@ -197,6 +197,7 @@ pub fn standard_dispatcher() -> ProfileDispatcher {
         .with_handler(ConformanceProfile::StaticV2, ResolveHandler)
         .with_handler(ConformanceProfile::StaticV2, WorkspaceCheckHandler)
         .with_handler(ConformanceProfile::InterpreterV2, InterpretHandler)
+        .with_handler(ConformanceProfile::InterpreterV2, WorkspaceRunHandler)
         .with_handler(ConformanceProfile::InterpreterV2, WorkspaceTestHandler)
         .with_handler(ConformanceProfile::ToolingV2, FormatHandler)
 }

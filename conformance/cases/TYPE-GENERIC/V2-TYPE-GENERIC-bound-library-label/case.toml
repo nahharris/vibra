@@ -16,4 +16,4 @@ code = "@type.unsatisfiedBound"
 level = "@error"
 source = "src/app/main.vib"
 span = { start = 131, end = 143 }
-related = [{ source = "stdlib/src/std/iter.vib", span = { start = 1927, end = 1934 } }]
+related = [{ source = "@std.iter", span = { start = 1927, end = 1934 } }]

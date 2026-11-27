@@ -1,0 +1,13 @@
+id = "V2-RUNTIME-await-twice-two-events"
+rule = "V2-RUNTIME-await-twice-two-events"
+profile = "interpreterV2"
+operation = "workspaceRun"
+description = "03-effects.md#delivery-and-typed-outcomes: two awaits of one plan are two invocations, so one stored write plan awaited twice writes twice and records two events, invocations 2 and 3, each with parent 1 and its own await as origin"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+targetRun = "target-run.vibon"

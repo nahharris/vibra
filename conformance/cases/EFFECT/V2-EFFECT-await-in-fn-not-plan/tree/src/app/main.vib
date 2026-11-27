@@ -1,0 +1,1 @@
+fn f returns n: I32 do return await 1i32 endfn

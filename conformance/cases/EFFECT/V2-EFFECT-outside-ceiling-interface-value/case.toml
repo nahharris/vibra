@@ -1,0 +1,19 @@
+id = "V2-EFFECT-outside-ceiling-interface-value"
+rule = "V2-EFFECT-outside-ceiling-interface-value"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "07-diagnostics-and-conformance.md#contract-effect-and-authority-diagnostics: a hop through an interface member of an interface value is indirect"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@effect.outsideCeiling"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 689, end = 712 }
+related = [{ source = "src/app/main.vib", span = { start = 695, end = 712 } }]

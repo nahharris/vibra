@@ -4,9 +4,8 @@
 //! `test` outside `@tests` is `@module.testOutsideTests`; a module of
 //! `@tests` that declares a test contains an import that resolves to the
 //! module `@std.assert` (`@module.missingRequiredImport` at its first test's
-//! name). A test that takes a world or performs operations needs the test
-//! world, which this toolchain does not implement yet: it is
-//! `@tool.unavailable` over the test.
+//! name). [`effects::procs::test_header`] decides whether the header of a
+//! test is checked: its row resolves, and it takes no world.
 //!
 //! When every error is `@tool.unavailable`, a test whose declaration
 //! closure holds an unsupported form is unavailable and the other tests
@@ -18,6 +17,7 @@ use std::collections::BTreeMap;
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 
 use super::declare::{Entity, Program};
+use super::effects;
 use super::expr::{Reference, Target};
 
 /// The module path the required import resolves to.
@@ -27,17 +27,19 @@ const ASSERT_MODULE: &str = "@std.assert";
 pub(crate) struct TestFaults {
     /// Every fault, in written order per module.
     pub(crate) diagnostics: Vec<Diagnostic>,
-    /// The `@tool.unavailable` of each test that takes a world or performs
-    /// operations, by test index.
+    /// The `@tool.unavailable` over each test whose own header holds a form
+    /// this checker does not support, by test index. [`unavailable_closure`]
+    /// starts from these and adds every declaration whose closure reaches
+    /// an unavailable form.
     pub(crate) unavailable: BTreeMap<usize, Diagnostic>,
 }
 
 /// Whether the test `index` has a body this checker checks: a test of a
-/// module of `@tests` in scope that neither takes a world nor performs.
+/// module of `@tests` in scope whose header [`effects::procs::test_header`]
+/// supports.
 pub(crate) fn checked_test(program: &Program<'_>, index: usize) -> bool {
     program.tests.get(index).is_some_and(|test| {
-        test.view.takes().is_none()
-            && test.view.performs().is_none()
+        effects::procs::test_header(program, test).is_none()
             && program
                 .modules
                 .get(test.module)
@@ -98,18 +100,14 @@ pub(crate) fn declaration_faults(program: &Program<'_>) -> TestFaults {
             );
         }
         for (index, test) in tests {
-            if test.view.takes().is_none() && test.view.performs().is_none() {
+            let Some(diagnostic) = effects::procs::test_header(program, test) else {
                 continue;
-            }
-            let diagnostic = Diagnostic::new(
-                DiagnosticCode::ToolUnavailable,
-                test.view.construct().span(),
-                "a test that takes a world or performs operations is not supported \
-                 by this checker yet",
-            )
-            .with_source_id(source);
+            };
+            let diagnostic = diagnostic.with_source_id(source);
             faults.diagnostics.push(diagnostic.clone());
-            faults.unavailable.insert(index, diagnostic);
+            if diagnostic.code() == DiagnosticCode::ToolUnavailable {
+                faults.unavailable.insert(index, diagnostic);
+            }
         }
     }
     faults

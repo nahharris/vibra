@@ -1,0 +1,11 @@
+identity	status	anchor
+V2-EFFECT-await-in-test	active	03-effects.md#cold-plans-and-performed-rows
+V2-EFFECT-await-in-test-anon-fn	active	01-source-language.md#return-try-await
+V2-RUNTIME-plan-built-not-run	active	03-effects.md#cold-plans-and-performed-rows
+V2-RUNTIME-plan-awaited-twice	active	03-effects.md#cold-plans-and-performed-rows
+V2-RUNTIME-requires-else-on-await	active	06-runtime.md#callable-contract-execution
+V2-RUNTIME-ensures-else-on-await	active	06-runtime.md#callable-contract-execution
+V2-RUNTIME-return-await-tail	active	07-diagnostics-and-conformance.md#required-coverage
+V2-RUNTIME-await-unbounded	active	05-tooling.md#tests-and-selection
+V2-EFFECT-test-row-empty-written	active	03-effects.md#effect-ceilings
+V2-TOOL-unavailable-test-row	retired	03-effects.md#effect-ceilings

@@ -105,6 +105,8 @@ pub enum Domain {
     Grant,
     /// Tool commands, limits, and builds.
     Tool,
+    /// The setup of a test in its fake world.
+    Test,
 }
 
 impl Domain {
@@ -124,6 +126,7 @@ impl Domain {
         Self::Contract,
         Self::Grant,
         Self::Tool,
+        Self::Test,
     ];
 
     /// The domain's spelling, without the leading `@` of a code.
@@ -144,6 +147,7 @@ impl Domain {
             Self::Contract => "contract",
             Self::Grant => "grant",
             Self::Tool => "tool",
+            Self::Test => "test",
         }
     }
 }
@@ -305,13 +309,11 @@ diagnostic_registry! {
     TypeTypeArgumentMismatch => "@type.typeArgumentMismatch", Type, Error, None,
         "a type application has the wrong arguments or labels";
     TypeRedundantImplementation => "@type.redundantImplementation", Type, Error, None,
-        "an `impl` inside an interface targets a type of the same module";
+        "an `impl` gives a conformance the language already gives";
     TypeDefaultOverride => "@type.defaultOverride", Type, Error, None,
         "an implementation supplies a default member again";
     TypeMissingAbstractMember => "@type.missingAbstractMember", Type, Error, None,
         "an implementation does not supply an abstract member or an associated type";
-    TypeFunctionNotEquatable => "@type.functionNotEquatable", Type, Error, None,
-        "a callable is used where equality is required";
     TypeNotApplicable => "@type.notApplicable", Type, Error, None,
         "a value that is not applicable is applied";
     TypeUnknownRecordField => "@type.unknownRecordField", Type, Error, None,
@@ -404,12 +406,8 @@ diagnostic_registry! {
         "package dependencies form a cycle";
     ProjectEntryOutsideTarget => "@project.entryOutsideTarget", Project, Error, None,
         "a target `entry` does not start with the target's name";
-    ProjectEntryOnLibrary => "@project.entryOnLibrary", Project, Error, None,
-        "a library target has an `entry`";
     ProjectInvalidEntrySignature => "@project.invalidEntrySignature", Project, Error, None,
         "an `entry` is not a module-level `proc` with an entry signature";
-    ProjectAmbiguousDependencyTarget => "@project.ambiguousDependencyTarget", Project, Error, None,
-        "a dependency without `target` names a package with several library targets";
     ProjectReservedUnitName => "@project.reservedUnitName", Project, Error, None,
         "a target or dependency is named `tests` or `std`";
     ProjectDuplicateName => "@project.duplicateName", Project, Error, None,
@@ -474,6 +472,8 @@ diagnostic_registry! {
         "a link step failed";
     ToolIncompatibleArtifact => "@tool.incompatibleArtifact", Tool, Error, None,
         "the runtime cannot admit an artifact's ABI, registry, or identities";
+    TestConflictingFixture => "@test.conflictingFixture", Test, Error, None,
+        "a `TestWorld.directory` fixture names a path as a file and a directory";
 }
 
 impl fmt::Display for DiagnosticCode {
@@ -488,7 +488,7 @@ mod tests {
     use std::collections::BTreeSet;
 
     /// The count of the specification table.
-    const REGISTERED_CODES: usize = 119;
+    const REGISTERED_CODES: usize = 117;
 
     #[test]
     fn the_registry_has_every_code_in_the_specification_table() {

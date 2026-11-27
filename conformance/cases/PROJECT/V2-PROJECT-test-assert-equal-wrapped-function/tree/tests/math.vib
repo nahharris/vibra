@@ -1,0 +1,9 @@
+use @std.assert enduse
+
+fn one takes {} returns r: I32 do return 1i32 endfn
+
+// A wrapper over a callable: its representation shows that no value of it
+// has an encoding.
+type Wrapped of Fn({} I32) endtype
+
+test "wrapped" do assert.equal(Wrapped(one) Wrapped(one)) endtest

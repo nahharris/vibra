@@ -1,0 +1,13 @@
+use @std.assert enduse
+
+use @std.test.TestWorld enduse
+
+use @std.time.WallClock enduse
+
+test "row"
+  takes {world: TestWorld}
+  performs {WallClock}
+  do
+    let {wall: wall} be await TestWorld.clocks(world) endlet
+    assert.equal(Result.ok(value: 0i64) await WallClock.read(wall))
+endtest

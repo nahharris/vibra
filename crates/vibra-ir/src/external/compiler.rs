@@ -3,12 +3,24 @@
 //!
 //! Every row has a wire symbol `<owner>.<member>`, with a lower-case owner
 //! and a camelCase member, exact generic, parameter, and result types over
-//! the role-bound library types, and a purity flag. Every row is pure except
-//! the three assertion rows. Only the embedded standard library binds a row.
+//! the role-bound library types and the [narrowing types](NarrowingType),
+//! a purity flag, and a totality mark. Every row is pure except the three
+//! assertion rows. Only the embedded standard library binds a row.
+//!
+//! A row marked **total** is pure, total, and cannot fault, so a call of a
+//! function bound to it is an atom of the certified fragment of guard
+//! predicates (`docs/spec/02-type-system.md`, "Predicates"). The one such
+//! row is `fs.validNames`, the name profile of `RelativePath`
+//! ([`crate::names`]).
+//!
+//! The rows `grant.restrict`, `grant.sub`, and `grant.limit` are the three
+//! narrowing members of every standard operation interface, generic over the
+//! grant type `G`. They are rows of 2.0, with `since` 0.
 //!
 //! The rows are frozen in `registry/compiler-2.0.txt`, one line per row in
-//! symbol order: the symbol, the generics, the parameters, and the result,
-//! separated by tabs, the types in source spelling.
+//! symbol order: the symbol, the generics, the parameters, the result, and
+//! the marks, separated by tabs, the types in source spelling. The marks are
+//! `@total` for a total row and empty otherwise.
 
 use std::fmt::Write as _;
 
@@ -385,10 +397,56 @@ pub enum CompilerIntrinsic {
     AssertFalse,
     /// `assert.equal`, expected then actual.
     AssertEqual,
+    /// `grant.restrict`: a sealed grant narrowed by a policy.
+    GrantRestrict,
+    /// `grant.sub`: a sealed grant narrowed below a path prefix.
+    GrantSub,
+    /// `grant.limit`: a sealed grant narrowed by limits.
+    GrantLimit,
+    /// `fs.validNames`: whether every name of a list satisfies the name
+    /// profile of `RelativePath` ([`crate::names::valid_names`]). Total.
+    FsValidNames,
+}
+
+/// A declaration of the embedded library that plays no role and that the
+/// grant rows name (`docs/spec/03-effects.md`, "Narrowing").
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum NarrowingType {
+    /// `FsPolicy` of `@std.fs`.
+    FsPolicy,
+    /// `RelativePath` of `@std.fs`.
+    RelativePath,
+    /// `ScopeError` of `@std.policy`.
+    ScopeError,
+    /// `GrantLimits` of `@std.policy`.
+    GrantLimits,
+}
+
+impl NarrowingType {
+    /// The declaration's name, such as `FsPolicy`.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::FsPolicy => "FsPolicy",
+            Self::RelativePath => "RelativePath",
+            Self::ScopeError => "ScopeError",
+            Self::GrantLimits => "GrantLimits",
+        }
+    }
+
+    /// The module path atom that declares it, such as `@std.fs`.
+    #[must_use]
+    pub const fn module(self) -> &'static str {
+        match self {
+            Self::FsPolicy | Self::RelativePath => "@std.fs",
+            Self::ScopeError | Self::GrantLimits => "@std.policy",
+        }
+    }
 }
 
 /// The type language of registry signatures: compiler-owned types, the
-/// row's generics, and the library types, which a module set binds.
+/// row's generics, the library types, which a module set binds, and the
+/// narrowing types.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum RowType {
     /// A compiler-owned scalar type.
@@ -403,6 +461,8 @@ pub enum RowType {
     Fn(Vec<Self>, Box<Self>),
     /// A library type applied to its arguments.
     Library(Library, Vec<Self>),
+    /// A narrowing type, which takes no arguments.
+    Narrowing(NarrowingType),
 }
 
 impl RowType {
@@ -410,7 +470,8 @@ impl RowType {
     ///
     /// # Errors
     ///
-    /// A library type it names is not bound, or a generic has no argument.
+    /// A library type or a narrowing type it names is not bound, or a
+    /// generic has no argument.
     pub fn instantiate(
         &self,
         library: &LibraryTypes,
@@ -437,6 +498,16 @@ impl RowType {
             )),
             Self::Library(declaration, arguments) => {
                 library.declared(*declaration, all(arguments)?)?
+            }
+            Self::Narrowing(declaration) => {
+                let id = library.narrowing(*declaration).ok_or_else(|| {
+                    IrError::UnknownType(format!(
+                        "{}.{}",
+                        declaration.module(),
+                        declaration.name()
+                    ))
+                })?;
+                Type::Declared(id.clone(), Vec::new())
             }
         })
     }
@@ -468,6 +539,7 @@ impl RowType {
             Self::Library(declaration, arguments) => {
                 format!("{}({})", declaration.name(), list(arguments))
             }
+            Self::Narrowing(declaration) => declaration.name().to_owned(),
         }
     }
 }
@@ -479,18 +551,24 @@ pub struct IntrinsicRow {
     pub symbol: String,
     /// The generics, in order.
     pub generics: &'static [&'static str],
+    /// The bound of each bounded generic, by its position: the interface it
+    /// must conform to.
+    pub bounds: &'static [(usize, Library)],
     /// The parameter types, in order.
     pub parameters: Vec<RowType>,
     /// The result type.
     pub result: RowType,
     /// Whether the row is pure: every row but the assertion rows.
     pub pure: bool,
+    /// Whether the row is total: pure, defined for every operand, and
+    /// unable to fault.
+    pub total: bool,
 }
 
 impl IntrinsicRow {
     /// The row's line in `registry/compiler-2.0.txt`: the symbol, the
-    /// generics, the parameters as an input vector, and the result,
-    /// separated by tabs.
+    /// generics, each with its bound as `T: Encodable`, the parameters as an input vector, the result, and the
+    /// marks (`@total` or nothing), separated by tabs.
     #[must_use]
     pub fn snapshot_line(&self) -> String {
         let parameters = self
@@ -502,14 +580,32 @@ impl IntrinsicRow {
         let mut line = String::new();
         let _ = write!(
             line,
-            "{}\t{}\t{{{}}}\t{}",
+            "{}\t{}\t{{{}}}\t{}\t{}",
             self.symbol,
-            self.generics.join(" "),
+            spell_generics(self.generics, self.bounds),
             parameters,
-            self.result.spelling(self.generics)
+            self.result.spelling(self.generics),
+            if self.total { "@total" } else { "" }
         );
         line
     }
+}
+
+/// The generics of a row in source spelling, each bounded one as
+/// `T: Encodable`, separated by spaces.
+#[must_use]
+pub fn spell_generics(generics: &[&str], bounds: &[(usize, Library)]) -> String {
+    generics
+        .iter()
+        .enumerate()
+        .map(|(index, name)| {
+            bounds.iter().find(|(at, _)| *at == index).map_or_else(
+                || (*name).to_owned(),
+                |(_, bound)| format!("{name}: {}", bound.name()),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn core(ty: Type) -> RowType {
@@ -548,6 +644,18 @@ fn option(value: RowType) -> RowType {
 
 fn named(declaration: Library) -> RowType {
     library(declaration, Vec::new())
+}
+
+const fn narrowing(declaration: NarrowingType) -> RowType {
+    RowType::Narrowing(declaration)
+}
+
+/// `Result(value ScopeError)`.
+fn scoped(value: RowType) -> RowType {
+    library(
+        Library::Result,
+        vec![value, narrowing(NarrowingType::ScopeError)],
+    )
 }
 
 fn camel_case_type(owner: &str) -> String {
@@ -617,6 +725,8 @@ impl CompilerIntrinsic {
             | Self::ListFold
             | Self::ListNext => "list",
             Self::AssertTrue | Self::AssertFalse | Self::AssertEqual => "assert",
+            Self::GrantRestrict | Self::GrantSub | Self::GrantLimit => "grant",
+            Self::FsValidNames => "fs",
         }
     }
 
@@ -651,6 +761,10 @@ impl CompilerIntrinsic {
             Self::ListFold => "fold".to_owned(),
             Self::AssertTrue => "true".to_owned(),
             Self::AssertFalse => "false".to_owned(),
+            Self::GrantRestrict => "restrict".to_owned(),
+            Self::GrantSub => "sub".to_owned(),
+            Self::GrantLimit => "limit".to_owned(),
+            Self::FsValidNames => "validNames".to_owned(),
         }
     }
 
@@ -669,6 +783,14 @@ impl CompilerIntrinsic {
         )
     }
 
+    /// Whether the row is total: pure, defined for every operand, and
+    /// unable to fault. A call of a function bound to a total row is an
+    /// atom of the certified fragment. Only `fs.validNames` is.
+    #[must_use]
+    pub const fn is_total(self) -> bool {
+        matches!(self, Self::FsValidNames)
+    }
+
     /// The generics of the row, in order.
     #[must_use]
     pub const fn generics(self) -> &'static [&'static str] {
@@ -681,6 +803,18 @@ impl CompilerIntrinsic {
             | Self::ListSlice
             | Self::ListNext
             | Self::AssertEqual => &["T"],
+            Self::GrantRestrict | Self::GrantSub | Self::GrantLimit => &["G"],
+            _ => &[],
+        }
+    }
+
+    /// The bound of each bounded generic of the row, by its position. Only
+    /// `assert.equal` has one: its `T` must be `Encodable`, so that the
+    /// two operands have canonical encodings to compare.
+    #[must_use]
+    pub const fn bounds(self) -> &'static [(usize, Library)] {
+        match self {
+            Self::AssertEqual => &[(0, Library::Encodable)],
             _ => &[],
         }
     }
@@ -801,6 +935,19 @@ impl CompilerIntrinsic {
             ),
             Self::AssertTrue | Self::AssertFalse => (vec![boolean()], core(Type::Void)),
             Self::AssertEqual => (vec![generic(0), generic(0)], core(Type::Void)),
+            Self::GrantRestrict => (
+                vec![generic(0), narrowing(NarrowingType::FsPolicy)],
+                scoped(generic(0)),
+            ),
+            Self::GrantSub => (
+                vec![generic(0), narrowing(NarrowingType::RelativePath)],
+                scoped(generic(0)),
+            ),
+            Self::GrantLimit => (
+                vec![generic(0), narrowing(NarrowingType::GrantLimits)],
+                generic(0),
+            ),
+            Self::FsValidNames => (vec![list(str_type())], boolean()),
         }
     }
 
@@ -811,9 +958,11 @@ impl CompilerIntrinsic {
         IntrinsicRow {
             symbol: self.symbol(),
             generics: self.generics(),
+            bounds: self.bounds(),
             parameters,
             result,
             pure: self.is_pure(),
+            total: self.is_total(),
         }
     }
 
@@ -880,6 +1029,10 @@ impl CompilerIntrinsic {
             Self::AssertTrue,
             Self::AssertFalse,
             Self::AssertEqual,
+            Self::GrantRestrict,
+            Self::GrantSub,
+            Self::GrantLimit,
+            Self::FsValidNames,
         ]);
         all.retain(|intrinsic| intrinsic.is_row());
         all.sort_by_cached_key(|intrinsic| intrinsic.symbol());

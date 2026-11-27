@@ -241,8 +241,11 @@ caller of the enclosing activation with no work left to do.
 | the operand of `try` | no: the carrier is inspected after the call |
 | the plan of `return await p` | yes, under the same rule as a call: the invocation replaces the activation |
 
-Widening to an interface value is work after the return. A bare `ensures`,
-proved and erased, is none. An `ensures … else` that remains is work.
+Widening to an interface value is work after the return, and so is
+reboxing the `Self` positions of the result of a member dispatched through
+an interface value, whether it is called or its plan is awaited. A bare
+`ensures`, proved and erased, is none. An `ensures … else` that remains is
+work.
 
 Every call in tail position MUST replace its activation, and so MUST every
 `await` in tail position. This holds for module functions, anonymous
@@ -311,10 +314,10 @@ defines. A row alone MUST NOT create a grant or permit a real effect.
 - A false assertion records `@test.assertionFailed` and stops only its own
   test. It is an outcome of the runner. It is not a `Result` and not a trap,
   and source cannot catch it.
-- A type known to contain a function, a plan, or a grant is rejected
-  statically wherever a value must be observed. An interface value that
-  holds one gives an explicit observation error, `@tool.unsupportedValue`,
-  and never a trap.
+- A type that is not [`Encodable`](02-type-system.md#interfaces) is
+  rejected statically wherever a value must be observed. An interface value
+  that holds a function, a plan, or a grant gives an explicit observation
+  error, `@tool.unsupportedValue`, and never a trap.
 - Defect traps and host events keep their own categories.
 
 ## Compiler intrinsic registry
@@ -349,9 +352,23 @@ operation interface: `Fn({G FsPolicy} Result(G ScopeError))`,
 `Fn({G RelativePath} Result(G ScopeError))`, and `Fn({G GrantLimits} G)`.
 They are rows of 2.0, with `since` 0. Bound in an interface, each is the
 implementation of a sealed grant only, which the broker provides; it
-performs no host operation and appends no event. An `impl` supplies its own
-narrowing members, as the
-[effects chapter](03-effects.md#operation-interfaces) states.
+performs no host operation and appends no event. A refusal the broker gives
+for a narrowing that [Narrowing](03-effects.md#narrowing) says the member
+never returns, such as `foreignRoot`, `unsupportedVersion`, or
+`invalidPath` from `restrict`, any case but `policyTooComplex` from `sub`,
+or any refusal from `limit`, is the defect trap
+`@runtime.invalidHostValue`. An `impl` supplies its own narrowing members,
+as the [effects chapter](03-effects.md#operation-interfaces) states.
+
+A row may be marked **total**: it is pure, it is defined for every value of
+its parameter types, and it cannot fault, so a function of the library bound
+to it is a total compiler primitive, which the
+[type chapter](02-type-system.md#predicates) admits in a certified
+expression. The one total row is `fs.validNames`, of 2.0 with `since` 0:
+`Fn({List(Str)} Bool)`, true exactly when every name of the list satisfies
+the name profile of the
+[filesystem policies](03-effects.md#filesystem-policies). `@std.fs` binds it
+as `validNames`, the predicate of `RelativePath`.
 
 Three core types are used below:
 
@@ -501,7 +518,7 @@ rows.
 | --- | --- | --- |
 | `assert.true` | `Fn({Bool} Void)` | returns `void` when the operand is `true` |
 | `assert.false` | `Fn({Bool} Void)` | returns `void` when the operand is `false` |
-| `assert.equal` | generic over `T`: `Fn({T T} Void)`, expected then actual | returns `void` when both operands have the same [canonical value encoding](#canonical-value-encoding) |
+| `assert.equal` | generic over `T` with `given {T: Encodable}`: `Fn({T T} Void)`, expected then actual | returns `void` when both operands have the same [canonical value encoding](#canonical-value-encoding) |
 
 Otherwise the row does not return: it records the structured failure of
 [Test assertions](#test-assertions) and ends the body of the running
@@ -889,8 +906,9 @@ value encoding:
 A function, a procedure, a plan, and a sealed authority have no value
 encoding, and nothing decodes into one.
 
-- A type statically known to contain one is rejected wherever an encoding
-  is required.
+- [`Encodable`](02-type-system.md#interfaces) is the bound that states
+  which types have an encoding as far as their static type shows: a type
+  that is not `Encodable` is rejected wherever an encoding is required.
 - An interface value whose held value is one of these gives an explicit
   encoding error, because its static type did not show it. It never gives a
   trap, a fake null, or a truncated value.
@@ -943,9 +961,10 @@ resource and append no `@host` event. No target can perform one of them: no
 provider issues a `TestWorld`, so no recipe can bind one.
 
 A row is a symbol, an owner, an exact signature, a `since` minor version,
-and a delivery class. Every row below has `since` 0 and delivery `@once`.
-The table gives the result of an invocation: applying the source `proc`
-first builds a plan carrying the owner's row.
+and a delivery class. Every row of the host table below and of the
+test-world registry has `since` 0 and delivery `@once`. The table gives the
+result of an invocation: applying the source `proc` first builds a plan
+carrying the owner's row.
 
 Each operation's first parameter is the grant, of the owning interface's
 type. The grant MUST legitimately implement that interface; a record with
@@ -1040,25 +1059,45 @@ access by itself.
   the reserved count, so a loop that reads to the end through a bound
   smaller than the input reads up to the bound and then receives
   `limitExceeded`.
-- A text read returns the longest prefix of whole scalars that fits in its
-  reservation, and consumes exactly those bytes. A text `max` below 4, the
+- A text read takes a **window**: the next bytes of the input, as many as
+  its reservation allows. A window that is valid UTF-8 is returned whole. A
+  window that ends inside a scalar whose bytes are valid so far, before the
+  end of input, returns the whole scalars before that scalar and consumes
+  exactly their bytes, so the read returns the longest prefix of whole
+  scalars that fits in its reservation. Any other window, with an invalid
+  sequence in it or a scalar cut off by the end of input, is
+  `invalidText`: the read consumes the whole window, and charges it as the
+  progress [Limits](03-effects.md#limits) counts. A text `max` below 4, the
   length of the longest scalar, is `unsupported` before the stream is
   read. A text read of unknown size whose `max` is at least 4 and whose
   reservation is below 4 is `limitExceeded` before the stream is read, so
   a completed text read is empty only at the end of input. A byte read
   accepts every count; a `max` of zero returns the empty value and
   consumes nothing, as a zero `count` of random bytes does.
+- To tell a scalar cut off by the end of input from one that continues, a
+  text read of an input of unknown size whose window ends inside a scalar
+  that is valid so far may take one byte past its reservation. That byte,
+  like the bytes of a scalar the read does not return, is kept by the
+  adapter for the next read: it is neither delivered nor charged. A
+  console read may also buffer input ahead inside the process.
 - A rejection before the stream is read (`denied`, `limitExceeded`,
   `unsupported`) consumes nothing.
-- Input that cannot be read is `other`. Text that cannot be decoded is
-  `invalidText`, and the bytes the adapter took for it are consumed.
+- Input that cannot be read is `other`.
+- When the grant is released, a process's standard input that is a regular
+  file is positioned just after the bytes delivered to the program, so a later
+  reader of the same input starts where the program stopped. A pipe or a
+  console cannot take back the bytes the adapter kept: a later reader of it
+  does not see them. This is an accepted limit of the platform, not a
+  guarantee.
 
 **Standard output and error.**
 
 - A write delivers its whole value, in invocation order.
 - A closed stream is `closed`; another failure is `other`.
 - A failed write may have written a prefix. The outcome MUST still say
-  accurately whether the write completed or was submitted.
+  accurately whether the write completed or was submitted. A failed write
+  to a console has uncertain progress, since the process buffers the
+  console stream.
 - These reads and writes consume a stream and are not repeatable.
 
 **Filesystem, common rules.**
@@ -1097,7 +1136,7 @@ access by itself.
 | `permissionDenied` | the operating system refused |
 | `notAFile` | a directory or other non-regular target where a file is required |
 | `notADirectory` | a non-directory where a directory is required |
-| `invalidPath` | a path the native adapter cannot interpret |
+| `invalidPath` | a path the native adapter cannot interpret, such as a name that `RelativePath` accepts and the platform cannot represent, `*` or `?` on Windows |
 | `invalidText` | text or a name that is not Unicode where Unicode is required |
 | `other` | any other ordinary host failure |
 
@@ -1137,11 +1176,17 @@ link, and so gains no wider traversal authority.
   no event is appended and the process environment is not consulted. A
   permitted name that is missing is `notPresent`. So is a name no
   environment can hold: an empty one, or one containing `=` or NUL. A
-  value that is not Unicode is `notUnicode`.
+  value that is not Unicode is `notUnicode`. A name is compared exactly,
+  by Unicode scalar, on every platform, so on Windows `Path` does not find
+  a variable `PATH`. A variable's value is copied from the process's
+  environment block before its size is reserved; the operating system
+  bounds that block, so the copy is not an unbounded payload.
 - `EnvReadArgs.read` returns the program's arguments in their original
   order, without the executable's path, under the
   [program arguments](05-tooling.md#program-arguments-execution-and-evaluation)
-  contract. An argument that is not Unicode is `notUnicode`.
+  contract. An argument that is not Unicode is `notUnicode`. The size the
+  read reserves and charges as input bytes is the sum of the UTF-8 lengths
+  of the arguments; nothing is counted between them.
 - Neither grant exposes anything outside its reviewed scope.
 
 **Clocks and randomness.**
@@ -1149,7 +1194,8 @@ link, and so gains no wider traversal authority.
 - `WallClock.read` returns `I64` nanoseconds since the Unix epoch in UTC,
   ignoring leap seconds.
 - `MonotonicClock.read` returns `U64` nanoseconds from an origin fixed for
-  the instance, and never decreases within it.
+  the instance, and never decreases within it. A process's clock fixes its
+  origin when its resource is acquired at startup.
 - A clock that cannot be read, or whose value does not fit its type, is
   `unavailable`.
 - `RandomBytes.generate` returns exactly `count` bytes from its bound
@@ -1186,15 +1232,58 @@ the runtime MUST do the following, in order:
    it found (create or replace) and the name test against the name the
    filesystem reports. A failure there is `denied`, returned by the adapter
    as a completed call. The bytes of a read are reserved here, when the
-   adapter reports the size it found, and reservation ends there: a call
-   passes reservation, and holds its invocation, only when that size is
-   reserved. A size over the remaining limit is `limitExceeded`, and an
-   action whose rule needs a fact the platform does not report is
-   `unsupported`; neither is a completed call. Keep three outcomes
-   distinct: known not submitted, completed, and may have run.
+   adapter reports the size it found, and reservation ends there. A read
+   refused while its size is reserved did not pass reservation and holds no
+   invocation: a size over the remaining limit is `limitExceeded`, and a
+   size that would overflow a counter is `denied`. Every other refusal of
+   this step holds the invocation step 3 reserved, among them `unsupported`
+   for an action whose rule needs a fact the platform does not report and
+   for a text read whose `max` is below one scalar. Of the refusals this
+   step's checks make, only the adapter's `denied` is a completed call;
+   `limitExceeded`, `unsupported`, and the `denied` of an overflow are not.
+   A driver may also answer `denied` as known not submitted: that is a
+   refusal, with no event, its bytes refunded and its invocation held.
+   Keep three outcomes distinct: known not submitted, completed, and may
+   have run.
 5. **Advance the continuation** consistently with the completion, and then
    append the completed event, if one is due. A refusal in steps 1 to 3
    appends nothing.
+
+**Memory.** The bytes a call will hand the program are also compared with
+what the caller's memory budget, under
+[Activations and memory](#activations-and-memory), can still account: a
+`count` of random bytes in step 3, before any counter is reserved, and the
+reservation of a read in step 4, after its bounds are checked. A call that
+does not fit is memory exhaustion, a host event, and reserves nothing. For
+a read of unknown size the reservation is compared, not the input that is
+there, so a large `max` exhausts memory even on a short input. When the
+reply arrives, every part of it, each entry of a list and each text or
+bytes value in it included, is counted against the room the request was
+given before the reply is accepted; a reply that does not fit is memory
+exhaustion, and the call appends no event. Issuing or
+narrowing a grant that the broker has no room left to record is memory
+exhaustion as well. So is an allocation that the operating system refuses
+inside a driver, for a reply the broker had already admitted: the driver
+reports memory exhaustion, never an error case of the operation, and the
+call appends no event that claims it completed. What the adapter moved
+before the operating system refused the allocation is charged as it
+measured it. A startup read runs before the program and has no program
+memory budget: only the limits of its `source` grant bound it.
+
+**Driver faults.** A driver that breaks this protocol is the defect trap
+`@runtime.invalidHostValue`: it acts after a refusal, reports a refusal no
+check made, answers with a case of another error type, asks for step 4's
+check twice, finds an action its operation cannot perform, reads an
+object whose size it does not report, or answers with a completion class
+and an error case that disagree. The classes partition the cases: a
+refusal (`denied`, `limitExceeded`, `unsupported`) may be known not
+submitted, and `denied` may also be completed; a case of the operation's
+own error type, such as `notFound` or `invalidText`, is always completed,
+since the driver observed the world; `outcomeUnknown` is completed and
+never known not submitted. So `outcomeUnknown` or an operation's own case
+as known not submitted, and `limitExceeded` or `unsupported` as completed,
+are faults. No event is appended for the call, and the whole reservation
+is charged, since what the driver did may have happened.
 
 **Suspension.** Suspending and resuming around a submitted host instruction
 MUST NOT submit it again. The first, sequential protocol treats a
@@ -1213,7 +1302,9 @@ and a wait transfer; an ordinary call does not define it.
   [Limits](03-effects.md#limits) counts them.
 - A reservation is released or refunded only when the capacity is known to
   be unused. A consumption that might have happened MUST NOT be refunded.
-- A counter that would overflow MUST reject and MUST NOT wrap.
+- A counter that would overflow MUST reject and MUST NOT wrap: the call is
+  `denied`, in step 3 or in step 4, with every counter as it was and no
+  event.
 - A grant outlives the variable that introduced it for as long as a
   legitimate child or closure holds it. Dropping a parent value releases
   nothing, so a child of it stays usable.
@@ -1260,6 +1351,10 @@ worlds, with fake sealed grants.
 
 - A test receives the root grant of its own world as a `TestWorld` and
   derives every other fake grant from it.
+- The runtime's host interface is the trusted embedding boundary: checked
+  source cannot reach it. Only a test runner issues the root grant of a
+  test world, and no target can obtain one, since no binding recipe names
+  `TestWorld`.
 - A model target MUST contain no real driver or grant, directly or
   transitively.
 - Every executor and every test gets a fresh copy of the world. Effects
@@ -1307,14 +1402,27 @@ field is omitted instead. The members of `clock` are written in the order
 }
 ```
 
+A content, the value of `stdin` or of a `files` entry, is a `Str` literal,
+which holds its UTF-8 bytes, or a bytes record: exactly the fields `kind`,
+which is `@bytes`, and `values`, a list of `U8` literals. A content of
+another form is `@data.invalidShape`, and a wrong atom, number, or byte
+literal in a content is `@data.invalidValue`, as the
+[schema rules](04-programs-and-packages.md#schemas) classify faults.
+
 **Paths.** The default world has a root directory and nothing else.
 
-- A virtual path is absolute, slash-separated, and canonical. It has no
-  empty, `.`, or `..` component, no backslash or NUL, and no drive, device,
-  or alternate-stream spelling. No canonical entry repeats.
-- The root cannot be a file. A conflict between a file and a directory,
-  including an ancestor used as both, is invalid data. Missing ancestor
-  directories are implied.
+- A virtual path is absolute, slash-separated, and canonical; `/` is the
+  root. A component MUST NOT be empty, `.`, or `..`, and MUST NOT hold a
+  backslash, NUL, or `:`, so no drive or alternate-stream spelling can be
+  written. A component that, once its trailing dots and spaces are removed,
+  is a [reserved device name](03-effects.md#filesystem-policies) is a device
+  spelling and is rejected too, so `CON.` and `aux.txt` are. Any other
+  character is accepted, a control character included. A path that breaks
+  these rules is `@data.invalidValue` at the path.
+- The root cannot be a file. A directory listed twice is
+  `@data.invalidValue` at the later entry, and so is a file path that is
+  also a directory, listed or implied as an ancestor of another path, at
+  the file's key. Missing ancestor directories are implied.
 - These paths name the fixture. A source `RelativePath` stays subject to
   its own stricter name profile and to its grant.
 - This world has no links. Link and race cases need dedicated adapter
@@ -1331,14 +1439,19 @@ field is omitted instead. The members of `clock` are written in the order
   are recorded in the fake trace and never reach the real process.
 - `WallClock.read` always returns `clock.wall`.
 - The first `MonotonicClock.read` returns `clock.monotonic`. Each later one
-  adds `step`, and returns `unavailable` if the `U64` would overflow.
+  adds `step`. The first read whose value would overflow the `U64`, and
+  every read after it, returns `unavailable`.
 - `RandomBytes.generate` uses SplitMix64 from `seed`. Each call consumes
   ceil(count / 8) outputs, encodes each little-endian, keeps `count` bytes,
   discards the unused tail, and continues the state on the next call. A
   count of zero consumes nothing.
-- Every integer literal in a world carries its exact width suffix. A
-  literal out of range or a malformed field fails data decoding, not
-  program execution.
+- Every integer literal in a world carries its exact width suffix: a world
+  narrows the [schema rules](04-programs-and-packages.md#schemas), and an
+  unsuffixed integer, in `clock`, in `random`, or as a byte of a bytes
+  record, is `@data.invalidValue`. A literal out of range or a malformed
+  field fails data decoding, not program execution.
+- An `env` key may be a name no environment can hold; a read of it is
+  `notPresent`, as for the process.
 
 **Recipes under a world.** A binary target run under a world, in the
 interpreter or the harness launcher, acquires its grants from the same
@@ -1348,9 +1461,12 @@ indexes the world's `args`; a `@variablePath` reads its `env`; and the
 stream, clock, and random providers bind the world's streams, clocks, and
 random source. Policies, limits, the startup order, and the refusals of the
 [programs chapter](04-programs-and-packages.md#startup-order) apply
-unchanged, so a virtual directory that is absent is a refusal. The world's
-`stdin` feeds an entry run under it; a test's streams come from
-`TestWorld.streams`.
+unchanged, so a virtual directory that is absent is a refusal. The path of
+a `@fixedPath`, or the one an `@argumentPath` or a `@variablePath` reads,
+is taken under the same rules: the empty path names the root, and a path
+that is not a canonical virtual path, such as `/a/../b`, names nothing and
+is refused. The world's `stdin` feeds an entry run under it; a test's
+streams come from `TestWorld.streams`.
 
 A conformance case may supply the path of such a document. The shipped
 launcher has no user-selectable world or replay switch; the harness profile
@@ -1366,10 +1482,16 @@ steps that came before them. Its persistent format is `@auditTrace.v2`:
 | `format` | `@auditTrace.v2` | required |
 | `revision` | `Str` | the workspace revision of the source that ran |
 | `target` | optional atom | the binary target; absent for a test or an evaluation |
-| `drivers` | list of `{provider: Atom version: Str}` sorted by `provider` | every driver bound in the run; `provider` is `@hostWorld.v2` for a fake world's driver; `version` is the release of the toolchain that ships the driver, the fake world's included |
-| `policies` | dict from `Str` policy hash to the normalized `@scopePolicy.v1` document | every policy a grant projection refers to |
+| `drivers` | list of `{provider: Atom version: Str}` sorted by the UTF-8 bytes of the provider's spelling, then of the version, each pair once | every driver bound in the run; `provider` is `@hostWorld.v2` for a fake world's driver; `version` is the release of the toolchain that ships the driver, the fake world's included. The trace of every test item lists the world driver, whether or not the test ran |
+| `policies` | dict from `Str` [policy hash](03-effects.md#the-wire-form) to the normalized `@scopePolicy.v1` document | every policy a grant projection refers to |
 | `redaction` | atom | `@none`, or the redaction profile applied |
 | `events` | list of event records | in completion order |
+
+A trace is read under the
+[schema rules](04-programs-and-packages.md#schemas): an integer field may
+be written with no suffix or with its exact suffix, and any other suffix is
+`@data.invalidValue`. A trace is written as its canonical bytes, every
+integer with its suffix.
 
 A **startup event** records one leaf of the
 [startup order](04-programs-and-packages.md#startup-order), and a **host
@@ -1383,7 +1505,7 @@ is `kind`:
 | `provider` | the issuer's atom |
 | `status` | `@acquired`, `@refused`, or `@failed`: the three outcomes of the [startup order](04-programs-and-packages.md#startup-order) |
 | `grant` | optional, present when acquired: the grant projection |
-| `failure` | optional, present exactly when this leaf stopped startup: `{code: Atom message: Str}`. `code` is `@grant.requiredUnavailable` for a refused required leaf and `@grant.acquisitionFailed` for a failed one. A refused optional leaf, bound to `Option.none()`, has none |
+| `failure` | optional, present exactly when this leaf stopped startup: `{code: Atom message: Str}`. `code` is `@grant.requiredUnavailable` for a refused required leaf and `@grant.acquisitionFailed` for a failed one; `message` is text for a person, not part of the contract, and conformance compares the record by its fields and its `code` only. A refused optional leaf, bound to `Option.none()`, has none |
 
 One `@startup` event is appended for each processed leaf, in processing
 order. A leaf that startup never reached has no event.
@@ -1396,7 +1518,7 @@ order. A leaf that startup never reached has no event.
 | `phase` | `@startup` for a read a recipe performs, `@entry` otherwise |
 | `op` | the exact registered wire symbol, `Str` |
 | `driver` | `{provider: Atom version: Str}`, the bound driver |
-| `origin` | the source-origin ordinal, `U64`; zero means no source origin |
+| `origin` | optional: the [source origin](#audit-trace) of the `await`; absent when none is known |
 | `grant` | the grant projection |
 | `args` | list of the canonical argument values after the grant, in parameter order; a path as the program wrote it, before a `sub` rebases it |
 | `result` | the canonical data of the operation's complete `Result` value |
@@ -1413,11 +1535,20 @@ test, the runner's run of the test body is invocation 1, and it is the
 parent of each `await` in that body. Because evaluation order is fixed,
 every executor numbers a run alike.
 
-**Origins.** The source origins of a checked program form one canonical
-**origin table**: every source origin of the reachable program, sorted by
-source identity, then start, then end, numbered from 1. The interpreter, the
-lowering, and the trace of a [trap](#traps) all write ordinals of this table,
-so the executors agree on them.
+**Origins.** A **source origin** says where a node of the checked program
+was written. It is a
+[span record](07-diagnostics-and-conformance.md#persistent-observations),
+`{sourceId: Str start: U64 end: U64}`: the source identity, as spans and
+diagnostics spell it (for a node of an embedded library module, its module
+atom, as the
+[source snapshot](04-programs-and-packages.md#discovery-and-the-source-snapshot)
+defines), and the half-open byte offsets of the node. Nothing
+numbers origins. Where no source origin is known, a document omits its
+optional `origin` field, a JSON projection writes `null`, and a value holds
+`Option.none()`; where one is known, a JSON projection writes it as a
+[`SpanDocument`](07-diagnostics-and-conformance.md#diagnostic-documents-and-spans).
+The interpreter, native code, and the trace of a [trap](#traps) write the
+same record, so the executors agree on origins because they agree on spans.
 
 A **grant projection** is a closed record of `issuedBy` (the origin record
 below); `policy` (`Str`, the hash of its normalized
@@ -1443,7 +1574,8 @@ descends from a `TestWorld` has `{kind: @testWorld}`: a test has no startup
 leaf, and no leaf name can be mistaken for this form. Narrowing keeps the
 origin record of the grant it narrows.
 
-The example is shape only; its identities are placeholders:
+The example is shape only; its identities and the offsets of its origin are
+placeholders:
 
 ```vibon
 {
@@ -1478,7 +1610,7 @@ The example is shape only; its identities are placeholders:
       phase: @entry
       op: "io.stdoutText"
       driver: {provider: @host.io.stdout version: "0.0.2"}
-      origin: 1u64
+      origin: {sourceId: "src/hello/main.vib" start: 42u64 end: 68u64}
       grant: {
         issuedBy: {kind: @binding leaf: @out}
         policy: ""
@@ -1527,7 +1659,10 @@ The example is shape only; its identities are placeholders:
 **When an event is appended.**
 
 - One `@host` event is appended after each completed call, after its
-  continuation has advanced.
+  continuation has advanced: the event is committed once the `await` has
+  taken the value, before the next node is evaluated. A trap or exhaustion
+  before then, such as a reply that does not fit the memory budget, drops
+  the event; one in a later node keeps it.
 - A typed denial returned by the adapter is a completed result and is
   recorded.
 - A driver that returns `outcomeUnknown` has completed its adapter call.
@@ -1540,7 +1675,8 @@ The example is shape only; its identities are placeholders:
   fields and is not part of this format.
 - A `limitExceeded` or `unsupported` decided in step 4, after the adapter
   opened an entry, appends nothing either: wherever they are decided, these
-  two refusals are not completed calls.
+  two refusals are not completed calls. Nor is a `denied` for a counter
+  that would overflow.
 - A trap, a host event, or an interrupted completion appends no completed
   success to fill the trace.
 - The absence of a completed event MUST NOT be reported as proof that
@@ -1596,12 +1732,19 @@ signature and its binding recipes.
 - Releasing a grant first makes it and every grant narrowed from it
   unusable, and only then releases its resource.
 - A release that the operating system reports as failed does not fail the
-  run: the binding is still `released`, and the failure goes to the tool's
-  log.
-- A defect trap during startup ends the run as a trap: the result is
-  `@command.trap`, exit 5, with the trap record. Startup has failed, but no
-  leaf stopped it, so the startup record's `failure` is `null`. Every leaf
-  acquired so far is released.
+  run: the binding is still `released`, the result is unchanged, and the
+  failure is one line in the tool's log, which is the command's standard
+  error, as [Streams](05-tooling.md#versioned-envelope-and-results) states.
+- A fault of the broker during startup ends startup as that fault. A
+  driver that breaks the host-call protocol, at an acquisition or at a
+  startup read, is a defect trap: the run ends as a trap, with the trap
+  record and no origin. A grant the broker has no room left to record is
+  memory exhaustion, and the run ends as memory exhausted. The
+  [result table](05-tooling.md#versioned-envelope-and-results) gives the
+  command result of each. Either way startup has failed, but no leaf stopped
+  it: the startup record's status is `failed` and its `failure` is `null`,
+  the leaf being processed has no `@startup` event and no binding record,
+  and every leaf acquired so far is released.
 - The entry MUST NOT have a bare `requires`: no call site exists where it
   could be discharged, so it is `@project.invalidEntrySignature`. A
   `requires … else` and either form of `ensures` behave as on any `proc`.
@@ -1652,10 +1795,11 @@ runtime is wrong.
 
 - Source cannot catch a defect trap, and one MUST NOT be reported as an
   ordinary environmental error.
-- A trap keeps its source origin when one is known. Otherwise the
-  diagnostic has no source identity and primary span `0..0`.
-- The observation holds the exact trap code and origin, and every executor
-  MUST agree on them.
+- A trap keeps the [source origin](#audit-trace) of the failing operation
+  when one is known. Otherwise the diagnostic has no source identity and
+  primary span `0..0`.
+- The observation holds the exact trap code and the source origin record,
+  or no origin when none is known, and every executor MUST agree on them.
 
 `@runtime.divisionByZero` and `@runtime.unobservableFunction` are not trap
 codes and MUST NOT be emitted. Memory exhaustion and termination from

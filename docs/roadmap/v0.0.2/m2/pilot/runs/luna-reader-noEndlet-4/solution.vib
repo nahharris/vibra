@@ -1,0 +1,18 @@
+use @std.fs.DirReadText enduse
+use @std.fs.FsError enduse
+
+use @std.fs.RelativePath enduse
+
+proc readOptional
+  takes {reader: Option(DirReadText) at: RelativePath fallback: Str}
+  returns text: Result(Str FsError)
+  performs {DirReadText}
+  visibility @public
+  do
+    return match reader
+      case Option.none()
+        Result.ok(value: fallback)
+      case Option.some(value: grant)
+        await DirReadText.read(grant at)
+    endmatch
+endproc

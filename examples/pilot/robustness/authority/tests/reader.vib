@@ -1,0 +1,17 @@
+use @std.assert enduse
+
+use @std.fs.DirReadText enduse
+
+use @std.fs.RelativePath enduse
+
+use @pilot.reader enduse
+
+test "no reader gives the fallback"
+  performs {DirReadText}
+  do
+    let Result.ok(value: at) be RelativePath(["a.txt"]) endlet
+    assert.equal(
+      Result.ok(value: "fallback")
+      await reader.readOptional(Option.none() at "fallback")
+    )
+endtest

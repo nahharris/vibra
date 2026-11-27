@@ -1,0 +1,13 @@
+id = "V2-RUNTIME-return-await-tail"
+rule = "V2-RUNTIME-return-await-tail"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "07-diagnostics-and-conformance.md#required-coverage: return await reuses its activation for 100,000 transfers"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

@@ -1,0 +1,1 @@
+{format: @hostWorld.v2 directories: ["/logs" "/notes"] files: ["/notes/a.txt": "one\ntwo\n" "/notes/b.txt": "1\n2\n3" "/notes/c.md": "x\n"] args: ["/notes"]}

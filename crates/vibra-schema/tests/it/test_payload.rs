@@ -217,8 +217,39 @@ fn a_test_item_projects_the_test_record() {
     validate_command_result(&observed).expect("an observation failure validates");
     assert_eq!(
         observed["payload"]["tests"][0]["failure"]["observationError"],
-        json!({"code": "unsupportedValue", "type": null, "origin": null})
+        json!({"code": "@tool.unsupportedValue", "type": null, "origin": null})
     );
+}
+
+/// 05 `TrapRecord` and 06 Origins: an origin is the `SpanDocument` of the
+/// trapping operation, or `null`; an ordinal is not an origin.
+#[test]
+fn a_trap_origin_is_a_span_document_or_null() {
+    let mut known = trapped();
+    if let Some(trap) = &mut known.trap {
+        trap.origin = Some(SpanDocument::render(
+            ByteSpan::new(2, 5),
+            &LineIndex::new("a\nbcdef"),
+            Some("tests/math.vib"),
+        ));
+    }
+    let document = run(CommandOutcome::Trap, Status::Unknown, vec![known]);
+    validate_command_result(&document).expect("a known origin validates");
+    assert_eq!(
+        document["payload"]["tests"][0]["trap"]["origin"],
+        json!({
+            "sourceId": "tests/math.vib",
+            "start": 2,
+            "end": 5,
+            "startPosition": {"line": 2, "column": 1},
+            "endPosition": {"line": 2, "column": 4}
+        })
+    );
+    let absent = run(CommandOutcome::Trap, Status::Unknown, vec![trapped()]);
+    validate_command_result(&absent).expect("an absent origin validates");
+    let mut ordinal = absent;
+    ordinal["payload"]["tests"][0]["trap"]["origin"] = json!(1);
+    assert!(validate_command_result(&ordinal).is_err());
 }
 
 #[test]
@@ -230,7 +261,7 @@ fn a_test_item_relates_its_result_to_its_fields() {
         ("/payload/tests/0/status", json!("passed")),
         (
             "/payload/tests/0/failure/observationError",
-            json!({"code": "unsupportedValue", "type": null, "origin": null}),
+            json!({"code": "@tool.unsupportedValue", "type": null, "origin": null}),
         ),
         ("/payload/tests/0/failure/kind", json!("@assertion")),
         ("/payload/tests/0/auditTrace", json!([{"kind": "@host"}])),
@@ -291,4 +322,40 @@ fn a_refused_test_and_the_tool_trap_have_the_empty_payload() {
         validate_command_result(&empty).is_err(),
         "a run carries its payload"
     );
+}
+
+#[test]
+fn a_test_item_carries_its_host_events() {
+    let mut item = passed();
+    item.audit_trace = vec![vibra_schema::AuditEvent(json!({
+        "kind": "@host",
+        "invocation": 2,
+        "parent": 1,
+        "phase": "@entry",
+        "op": "fs.readText",
+        "driver": {"provider": "@hostWorld.v2", "version": "0.0.2"},
+        "origin": null,
+        "grant": {
+            "issuedBy": {"kind": "@testWorld"},
+            "policy": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+            "rights": [{"path": "@std.fs.DirReadText", "seed": "sha256:00"}],
+            "limits": null,
+            "root": 3
+        },
+        "args": ["[\"note.txt\"]"],
+        "result": "{kind: @enum}"
+    }))];
+    let good = run(CommandOutcome::Ok, Status::Passed, vec![item]);
+    validate_command_result(&good).expect("a host event validates");
+    let edits: [(&str, Value); 4] = [
+        ("/payload/tests/0/auditTrace/0/kind", json!("@startup")),
+        ("/payload/tests/0/auditTrace/0/args", json!([["note.txt"]])),
+        ("/payload/tests/0/auditTrace/0/grant/rights", json!([])),
+        ("/payload/tests/0/auditTrace/0/phase", json!("@startup")),
+    ];
+    for (pointer, replacement) in edits {
+        let mut bad = good.clone();
+        *bad.pointer_mut(pointer).expect("the field") = replacement;
+        assert!(validate_command_result(&bad).is_err(), "{pointer}");
+    }
 }

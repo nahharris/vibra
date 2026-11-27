@@ -1,0 +1,13 @@
+id = "V2-GRANT-test-each-fs-operation"
+rule = "V2-GRANT-test-each-fs-operation"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "07-diagnostics-and-conformance.md#required-coverage: every filesystem operation of a test directory succeeds and is traced in order"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

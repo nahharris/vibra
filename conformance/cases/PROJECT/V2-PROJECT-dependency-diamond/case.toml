@@ -1,0 +1,12 @@
+id = "V2-PROJECT-dependency-diamond"
+rule = "V2-PROJECT-dependency-diamond"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "04-programs-and-packages.md#packages-units-and-targets: two dependencies that both reach one library target of one package share one unit, which is no fault"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

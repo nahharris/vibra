@@ -1,0 +1,12 @@
+id = "V2-EFFECT-recursion-closes"
+rule = "V2-EFFECT-recursion-closes"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#cold-plans-and-performed-rows: a recursive proc contributes its written ceiling, so the row analysis closes the cycle"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

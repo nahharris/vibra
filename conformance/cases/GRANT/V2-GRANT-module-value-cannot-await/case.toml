@@ -1,0 +1,21 @@
+# F7 of the review of grants: a grant kept across tests cannot be written. The
+# language has no assignment to a module value, and
+# V2-GRANT-module-value-holds-model shows a pure initializer holds a model.
+id = "V2-GRANT-module-value-cannot-await"
+rule = "V2-GRANT-module-value-cannot-await"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#capability-values: a module value cannot hold a grant one test leaves for another: a grant is had only by an await, and a module-value initializer is pure, so its await is invalid"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@effect.invalidAwait"
+level = "@error"
+source = "tests/grants.vib"
+span = { start = 2084, end = 2098 }

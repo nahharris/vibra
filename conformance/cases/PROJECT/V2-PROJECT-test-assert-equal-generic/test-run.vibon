@@ -1,0 +1,8 @@
+{
+  format: @testRun.v2
+  result: @command.ok
+  tests: [
+    {name: "@tests.same::\"ints\"" result: @test.passed auditTrace: {format: @auditTrace.v2 revision: "sha256:b5946a91abc7074887645bcfd633e738ae3696bc489a9e04248e86ed51672074" drivers: [{provider: @hostWorld.v2 version: "0.0.2"}] policies: [:] redaction: @none events: []}}
+    {name: "@tests.same::\"texts\"" result: @test.passed auditTrace: {format: @auditTrace.v2 revision: "sha256:b5946a91abc7074887645bcfd633e738ae3696bc489a9e04248e86ed51672074" drivers: [{provider: @hostWorld.v2 version: "0.0.2"}] policies: [:] redaction: @none events: []}}
+  ]
+}

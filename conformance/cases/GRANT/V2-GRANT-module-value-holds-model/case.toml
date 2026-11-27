@@ -1,0 +1,13 @@
+id = "V2-GRANT-module-value-holds-model"
+rule = "V2-GRANT-module-value-holds-model"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "03-effects.md#capability-values: a module value of type DirReadText is initialized by a pure expression, which makes no grant: it holds a model, and a read through it has no event"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

@@ -1,0 +1,8 @@
+use @std.fs.RelativePath enduse
+
+fn notes
+  returns found: RelativePath
+  do
+    let Result.ok(value: path) be RelativePath(["a.txt"]) endlet
+    return path
+endfn

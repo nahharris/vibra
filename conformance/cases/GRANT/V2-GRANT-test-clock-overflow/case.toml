@@ -1,0 +1,14 @@
+id = "V2-GRANT-test-clock-overflow"
+rule = "V2-GRANT-test-clock-overflow"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "06-runtime.md#host-world: the first monotonic read that would overflow, and every read after it, is unavailable"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+hostWorld = "world.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

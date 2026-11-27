@@ -1,0 +1,16 @@
+use @std.fs.DirReadText enduse
+
+use @std.fs.DirWriteText enduse
+
+use @std.fs.FsError enduse
+
+use @std.fs.RelativePath enduse
+
+proc copyNote
+  takes {reader: DirReadText writer: DirWriteText path: RelativePath}
+  returns outcome: Result(Void FsError)
+  performs {DirReadText DirWriteText}
+  do
+    let text be try await DirReadText.read(reader path) endlet
+    return await DirWriteText.write(writer path text)
+endproc

@@ -1,0 +1,300 @@
+// The scoped filesystem: the six operation interfaces of the `fs` rows of the
+// host registry, their error and metadata types, `RelativePath`, and the
+// source form of a filesystem policy. Each interface binds its one operation
+// with `external @host` and its three narrowing members with
+// `external @compiler`; both are the implementation of a sealed grant only,
+// so an `impl` supplies them. `RelativePath`'s predicate is the total
+// compiler row `fs.validNames`.
+
+use @std.policy.GrantLimits enduse
+
+use @std.policy.ScopeError enduse
+
+use @std.iter.compareLexicographic enduse
+
+type FsError
+  case notFound
+  case permissionDenied
+  case notAFile
+  case notADirectory
+  case invalidPath
+  case invalidText
+  case other
+  case denied
+  case limitExceeded
+  case unsupported
+  case outcomeUnknown
+  visibility @public
+endtype
+
+type FsKind
+  case file
+  case directory
+  case other
+  visibility @public
+endtype
+
+type FsMetadata of {kind: FsKind size: U64}
+  visibility @public
+endtype
+
+// A path below the directory a grant holds: a list of names, each under the
+// name profile of the scope policies. The empty path names that directory.
+// Two paths compare their names in order, each name as a `Str`.
+type RelativePath of List(Str)
+  where validNames else ScopeError.invalidPath()
+  visibility @public
+  impl Equatable
+    fn equal
+      takes {left: Self right: Self}
+      returns same: Bool
+      do
+        match Ordered.compare(left right)
+          case Ordering.equal()
+            return true
+          case _
+            return false
+        endmatch
+    endfn
+  endimpl
+  impl Ordered
+    fn compare
+      takes {left: Self right: Self}
+      returns order: Ordering
+      do
+        let RelativePath(leftNames) be left endlet
+        let RelativePath(rightNames) be right endlet
+        return compareLexicographic(leftNames rightNames)
+    endfn
+  endimpl
+endtype
+
+type FileDepth
+  case children
+  case tree
+  visibility @public
+endtype
+
+type DirDepth
+  case self
+  case children
+  case tree
+  visibility @public
+endtype
+
+type FileAction
+  case read
+  case replace
+  case create
+  case stat
+  visibility @public
+endtype
+
+type DirAction
+  case list
+  case stat
+  visibility @public
+endtype
+
+type FsPolicy
+  case none
+  case allOf {items: List(FsPolicy)}
+  case anyOf {items: List(FsPolicy)}
+  case files {
+    prefix: RelativePath
+    depth: FileDepth
+    actions: List(FileAction)
+    names: NameTest
+  }
+  case directories {prefix: RelativePath depth: DirDepth actions: List(DirAction)}
+  visibility @public
+endtype
+
+type NameTest
+  case anyName
+  case exact {names: List(Str)}
+  case suffix {value: Str}
+  case allOf {items: List(NameTest)}
+  case anyOf {items: List(NameTest)}
+  visibility @public
+endtype
+
+interface DirReadBytes
+  visibility @public
+  proc read
+    takes {grant: Self at: RelativePath}
+    returns outcome: Result(Bytes FsError)
+    external @host
+    symbol "fs.readFile"
+  endproc
+  fn restrict
+    takes {grant: Self policy: FsPolicy}
+    returns narrowed: Result(Self ScopeError)
+    external @compiler
+    symbol "grant.restrict"
+  endfn
+  fn sub
+    takes {grant: Self prefix: RelativePath}
+    returns narrowed: Result(Self ScopeError)
+    external @compiler
+    symbol "grant.sub"
+  endfn
+  fn limit
+    takes {grant: Self limits: GrantLimits}
+    returns narrowed: Self
+    external @compiler
+    symbol "grant.limit"
+  endfn
+endinterface
+
+interface DirReadText
+  visibility @public
+  proc read
+    takes {grant: Self at: RelativePath}
+    returns outcome: Result(Str FsError)
+    external @host
+    symbol "fs.readText"
+  endproc
+  fn restrict
+    takes {grant: Self policy: FsPolicy}
+    returns narrowed: Result(Self ScopeError)
+    external @compiler
+    symbol "grant.restrict"
+  endfn
+  fn sub
+    takes {grant: Self prefix: RelativePath}
+    returns narrowed: Result(Self ScopeError)
+    external @compiler
+    symbol "grant.sub"
+  endfn
+  fn limit
+    takes {grant: Self limits: GrantLimits}
+    returns narrowed: Self
+    external @compiler
+    symbol "grant.limit"
+  endfn
+endinterface
+
+interface DirList
+  visibility @public
+  proc entries
+    takes {grant: Self at: RelativePath}
+    returns outcome: Result(List(Str) FsError)
+    external @host
+    symbol "fs.readEntries"
+  endproc
+  fn restrict
+    takes {grant: Self policy: FsPolicy}
+    returns narrowed: Result(Self ScopeError)
+    external @compiler
+    symbol "grant.restrict"
+  endfn
+  fn sub
+    takes {grant: Self prefix: RelativePath}
+    returns narrowed: Result(Self ScopeError)
+    external @compiler
+    symbol "grant.sub"
+  endfn
+  fn limit
+    takes {grant: Self limits: GrantLimits}
+    returns narrowed: Self
+    external @compiler
+    symbol "grant.limit"
+  endfn
+endinterface
+
+interface DirWriteBytes
+  visibility @public
+  proc write
+    takes {grant: Self at: RelativePath contents: Bytes}
+    returns outcome: Result(Void FsError)
+    external @host
+    symbol "fs.writeFile"
+  endproc
+  fn restrict
+    takes {grant: Self policy: FsPolicy}
+    returns narrowed: Result(Self ScopeError)
+    external @compiler
+    symbol "grant.restrict"
+  endfn
+  fn sub
+    takes {grant: Self prefix: RelativePath}
+    returns narrowed: Result(Self ScopeError)
+    external @compiler
+    symbol "grant.sub"
+  endfn
+  fn limit
+    takes {grant: Self limits: GrantLimits}
+    returns narrowed: Self
+    external @compiler
+    symbol "grant.limit"
+  endfn
+endinterface
+
+interface DirWriteText
+  visibility @public
+  proc write
+    takes {grant: Self at: RelativePath contents: Str}
+    returns outcome: Result(Void FsError)
+    external @host
+    symbol "fs.writeText"
+  endproc
+  fn restrict
+    takes {grant: Self policy: FsPolicy}
+    returns narrowed: Result(Self ScopeError)
+    external @compiler
+    symbol "grant.restrict"
+  endfn
+  fn sub
+    takes {grant: Self prefix: RelativePath}
+    returns narrowed: Result(Self ScopeError)
+    external @compiler
+    symbol "grant.sub"
+  endfn
+  fn limit
+    takes {grant: Self limits: GrantLimits}
+    returns narrowed: Self
+    external @compiler
+    symbol "grant.limit"
+  endfn
+endinterface
+
+interface DirStat
+  visibility @public
+  proc stat
+    takes {grant: Self at: RelativePath}
+    returns outcome: Result(FsMetadata FsError)
+    external @host
+    symbol "fs.metadataStat"
+  endproc
+  fn restrict
+    takes {grant: Self policy: FsPolicy}
+    returns narrowed: Result(Self ScopeError)
+    external @compiler
+    symbol "grant.restrict"
+  endfn
+  fn sub
+    takes {grant: Self prefix: RelativePath}
+    returns narrowed: Result(Self ScopeError)
+    external @compiler
+    symbol "grant.sub"
+  endfn
+  fn limit
+    takes {grant: Self limits: GrantLimits}
+    returns narrowed: Self
+    external @compiler
+    symbol "grant.limit"
+  endfn
+endinterface
+
+// The name profile of the scope policies, true when every name satisfies it:
+// a name is non-empty and is not `.` or `..`; it contains no `/`, `\`, `:`,
+// or control character, NUL among them; it does not end in a dot or a space;
+// and it is no reserved device name. It is the total compiler row
+// `fs.validNames`, so `RelativePath`'s predicate is certified.
+fn validNames
+  takes {names: List(Str)}
+  returns valid: Bool
+  external @compiler
+  symbol "fs.validNames"
+endfn

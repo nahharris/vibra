@@ -1,0 +1,13 @@
+id = "V2-GRANT-dict-key-ordered-brand"
+rule = "V2-GRANT-dict-key-ordered-brand"
+profile = "interpreterV2"
+operation = "workspaceTest"
+description = "03-effects.md#capability-values: a declared type that holds a test-world grant and implements Ordered (and Equatable, in agreement) over a field its code reads is a dict key: a dict of two such keys finds one by lookup and is traversed in the order of its implementation"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+testRun = "test-run.vibon"

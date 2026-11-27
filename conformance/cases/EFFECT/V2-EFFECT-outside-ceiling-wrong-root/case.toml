@@ -1,0 +1,19 @@
+id = "V2-EFFECT-outside-ceiling-wrong-root"
+rule = "V2-EFFECT-outside-ceiling-wrong-root"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "03-effects.md#effect-ceilings: there is no relation between roots, so a ceiling of Clock does not hold Log"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@effect.outsideCeiling"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 744, end = 767 }
+related = [{ source = "src/app/main.vib", span = { start = 750, end = 767 } }]
