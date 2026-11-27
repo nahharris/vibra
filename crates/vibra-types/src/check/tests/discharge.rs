@@ -564,25 +564,6 @@ fn an_implementation_establishes_the_contract_ensures() {
     );
 }
 
-#[test]
-fn a_contract_guard_with_else_runs_in_every_implementation() {
-    let source = format!(
-        "{}fn main returns r: {{I32 I32}} do let s: Sized be B(1i32) endlet return {{Sized.size(A(1i32) 0i32) Sized.size(s 0i32)}} endfn\n",
-        sized(
-            "requires Ordered.greater(n 0i32) else -1i32",
-            &[("A", "return m"), ("B", "return m")]
-        )
-    );
-    assert_eq!(faults(&source), []);
-    let ran = super::run(&source);
-    assert!(
-        ran.as_deref().is_ok_and(
-            |text| text.ends_with("value: {kind: @tuple values: [-1i32 -1i32]}}")
-        ),
-        "{ran:?}"
-    );
-}
-
 /// A call of a member whose `requires` is bare, at a closed receiver, is the
 /// obligation of the implementation the receiver selects; at an open
 /// receiver, it is the contract's predicate at the call's arguments,

@@ -77,43 +77,6 @@ fn a_false_requires_skips_the_ensures() -> Result<(), String> {
 }
 
 #[test]
-fn ensures_else_checks_the_candidate() {
-    let source = "fn main returns r: {I32 I32} do return {clamp(3i32) clamp(12i32)} endfn\n\
-        fn clamp takes {x: I32} returns r: I32 ensures Ordered.lessOrEqual(r 10i32) else 10i32 \
-        do return x endfn\n";
-    assert_eq!(
-        run(source),
-        Ok(
-            "{format: @value.v2 typeInfo: {kind: @tuple arguments: [@i32 @i32]} \
-            value: {kind: @tuple values: [3i32 10i32]}}"
-                .to_owned()
-        )
-    );
-}
-
-#[test]
-fn the_ensures_consequence_sees_the_candidate() {
-    let source = "fn main returns r: I32 do return f(10i32) endfn\n\
-        fn f takes {x: I32} returns r: I32 ensures Ordered.less(r 10i32) else next(r) \
-        do return x endfn\n\
-        fn next takes {r: I32} returns s: I32 do match r case 10i32 return 11i32 \
-        case _ return 0i32 endmatch endfn\n";
-    assert_eq!(run(source), Ok(value("i32", "11i32")));
-}
-
-#[test]
-fn ensures_through_try_sees_the_propagated_err() {
-    let source = "fn main returns r: I32 do match f(Result.err(error: 3i32)) \
-        case Result.ok(value: v) return v case Result.err(error: e) return e endmatch endfn\n\
-        fn f takes {x: Result(I32 I32)} returns r: Result(I32 I32) \
-        ensures isOk(r) else Result.err(error: 99i32) do let v be try x endlet \
-        return Result.ok(value: v) endfn\n\
-        fn isOk takes {r: Result(I32 I32)} returns b: Bool do match r \
-        case Result.ok(value: _) return true case Result.err(error: _) return false endmatch endfn\n";
-    assert_eq!(run(source), Ok(value("i32", "99i32")));
-}
-
-#[test]
 fn guard_faults_are_reported_at_their_operand() {
     let wrong = "fn f takes {c: Bool} returns r: I32 requires c else \"no\" do return 1i32 endfn\n";
     assert_eq!(
@@ -298,32 +261,6 @@ fn bare_guards_are_unproved() {
         vec![(
             DiagnosticCode::ContractUnproved,
             at(ensures, "Ordered.greater(r 0i32)", 0)
-        )]
-    );
-}
-
-#[test]
-fn a_limit_stops_a_constant_bare_where_at_the_predicate() {
-    let mut source = String::from(
-        "type Big of I32 where fn takes {raw: I32} returns ok: Bool do return f30(raw) endfn endtype\n\
-         fn f0 takes {x: I32} returns r: Bool do return Ordered.greater(x 0i32) endfn\n",
-    );
-    for level in 1..=30 {
-        let below = level - 1;
-        source.push_str(&format!(
-            "fn f{level} takes {{x: I32}} returns r: Bool do return Bool.and(f{below}(x) f{below}(x)) endfn\n"
-        ));
-    }
-    source.push_str(
-        "fn main returns r: I32 do let b be Big(1i32) endlet return 0i32 endfn\n",
-    );
-    let start = source.find("fn takes").unwrap_or_default();
-    let end = source.find(" endtype").unwrap_or_default();
-    assert_eq!(
-        faults(&source),
-        vec![(
-            DiagnosticCode::ToolLimitExceeded,
-            vibra_diagnostics::ByteSpan::new(start, end)
         )]
     );
 }

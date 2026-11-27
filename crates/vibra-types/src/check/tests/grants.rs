@@ -7,11 +7,8 @@
 //! unsatisfied bound is reported once, at the operand that fixes `T`.
 
 use vibra_diagnostics::{ByteSpan, DiagnosticCode};
-use vibra_resolve::{PackageId, ResolveInput, SourceModule, SourceUnit, UnitKind};
 
-use super::{at, faults};
-use crate::check::check_workspace;
-use crate::stdlib::load_stdlib;
+use super::{at, faults, faults_of, workspace};
 
 /// The imports every fixture of this file uses.
 const IMPORTS: &str = "use @std.assert enduse\n\nuse @std.test.TestWorld enduse\n\n\
@@ -20,36 +17,15 @@ const IMPORTS: &str = "use @std.assert enduse\n\nuse @std.test.TestWorld enduse\
 /// The code and span of every diagnostic of the test module
 /// `@tests.grants` holding `source`, beside a one-function library module.
 fn test_faults(source: &str) -> Result<Vec<(DiagnosticCode, ByteSpan)>, String> {
-    let stdlib = load_stdlib().map_err(|error| error.to_string())?;
-    let input = ResolveInput::new(
-        PackageId::new("hello", "0.1.0"),
-        vec![
-            SourceUnit::new(
-                "@app",
-                UnitKind::Lib,
-                vec![SourceModule::new(
-                    "@app.main",
-                    "src/app/main.vib",
-                    b"fn answer returns r: I32 do return 42i32 endfn\n".to_vec(),
-                )],
-            ),
-            SourceUnit::new(
-                "@tests",
-                UnitKind::Tests,
-                vec![SourceModule::new(
-                    "@tests.grants",
-                    "tests/grants.vib",
-                    source.as_bytes().to_vec(),
-                )],
-            ),
-        ],
-        stdlib.overlay().embedded_unit(),
-    );
-    Ok(check_workspace(&input, &["@tests".to_owned()])
-        .diagnostics()
-        .iter()
-        .map(|diagnostic| (diagnostic.code(), diagnostic.primary_span()))
-        .collect())
+    let result = workspace(
+        &[(
+            "@app.main",
+            "fn answer returns r: I32 do return 42i32 endfn\n",
+        )],
+        &[("@tests.grants", source)],
+        &["@tests"],
+    )?;
+    Ok(faults_of(&result))
 }
 
 /// A test module whose one test binds `reader` and `lister`, the

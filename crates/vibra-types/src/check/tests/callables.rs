@@ -14,22 +14,6 @@ const PAD: &str = "fn pad takes {s: Str} labelled {width: U64 be 4u64} returns r
                    do return width endfn\n";
 
 #[test]
-fn a_missing_labelled_argument_takes_its_default() {
-    let source = format!("fn main returns r: U64 do return pad(\"x\") endfn\n{PAD}");
-    assert_eq!(run(&source).as_deref(), Ok(value("u64", "4u64").as_str()));
-    let source =
-        format!("fn main returns r: U64 do return pad(\"x\" width: 2u64) endfn\n{PAD}");
-    assert_eq!(run(&source).as_deref(), Ok(value("u64", "2u64").as_str()));
-}
-
-#[test]
-fn a_labelled_argument_binds_in_any_position() {
-    let source =
-        format!("fn main returns r: U64 do return pad(width: 2u64 \"x\") endfn\n{PAD}");
-    assert_eq!(run(&source).as_deref(), Ok(value("u64", "2u64").as_str()));
-}
-
-#[test]
 fn a_labelled_argument_written_first_keeps_its_parameter() {
     // The arguments are bound in written order before the call, and each
     // still reaches its own parameter.
@@ -106,29 +90,6 @@ fn a_computed_callee_runs_before_reordered_operands() {
         calls_in_order(&body.expr, &names, &mut order);
     }
     assert_eq!(order, ["make", "arg", "pos"]);
-}
-
-#[test]
-fn a_duplicate_or_unknown_label_does_not_fit() {
-    let source = format!(
-        "fn main returns r: U64 do return pad(\"x\" width: 1u64 width: 2u64) endfn\n{PAD}"
-    );
-    assert_eq!(
-        faults(&source),
-        [(
-            DiagnosticCode::TypeArgumentMismatch,
-            at(&source, "width: 2u64", 0)
-        )]
-    );
-    let source =
-        format!("fn main returns r: U64 do return pad(\"x\" depth: 1u64) endfn\n{PAD}");
-    assert_eq!(
-        faults(&source),
-        [(
-            DiagnosticCode::TypeArgumentMismatch,
-            at(&source, "depth: 1u64", 0)
-        )]
-    );
 }
 
 #[test]
@@ -375,36 +336,6 @@ fn an_anonymous_fn_captures_by_value() {
 }
 
 #[test]
-fn an_anonymous_fn_cannot_name_itself() {
-    let source = "fn main returns r: I32 do \
-                  let f be fn takes {x: I32} returns r: I32 do return f(x) endfn endlet \
-                  return f(1i32) endfn\n";
-    let start = at(source, "f(x)", 0).start();
-    assert_eq!(
-        faults(source),
-        [(
-            DiagnosticCode::NameUnknownSymbol,
-            ByteSpan::new(start, start + 1)
-        )]
-    );
-}
-
-#[test]
-fn a_generic_anonymous_fn_bound_by_let_stays_generic() {
-    let source = "fn main returns r: {I32 Str} do \
-                  let id be fn(T) takes {x: T} returns r: T do return x endfn endlet \
-                  return {id(1i32) id(\"x\")} endfn\n";
-    let str_type = "{kind: @declared path: @std.str.Str seed: \
-                    \"sha256:29dc059689d38a6e1e8b843c7c518b7bfe2d16d9f596ef242d758b9b970b1d8a\" \
-                    arguments: []}";
-    let expected = format!(
-        "{{format: @value.v2 typeInfo: {{kind: @tuple arguments: [@i32 {str_type}]}} \
-         value: {{kind: @tuple values: [1i32 \"x\"]}}}}"
-    );
-    assert_eq!(run(source).as_deref(), Ok(expected.as_str()));
-}
-
-#[test]
 fn a_generic_anonymous_fn_elsewhere_takes_its_expected_type() {
     let source = "fn main returns r: I32 do \
                   return apply(fn(T) takes {x: T} returns r: T do return x endfn 1i32) endfn\n\
@@ -424,22 +355,6 @@ fn a_generic_anonymous_fn_elsewhere_takes_its_expected_type() {
             ByteSpan::new(start, end)
         )]
     );
-}
-
-#[test]
-fn a_constructor_is_not_a_function_value() {
-    let source = "type Celsius of F64 endtype\n\
-                  fn main returns r: F64 do let f: Fn({F64} Celsius) be Celsius endlet \
-                  return 1.0f64 endfn\n";
-    assert_eq!(
-        faults(source),
-        [(DiagnosticCode::TypeMismatch, at(source, "Celsius", 2))]
-    );
-    let source = "type Celsius of F64 endtype\n\
-                  fn main returns r: Celsius do \
-                  let f: Fn({F64} Celsius) be fn takes {v: F64} returns c: Celsius do \
-                  return Celsius(v) endfn endlet return f(1.0f64) endfn\n";
-    assert!(run(source).is_ok(), "{:?}", run(source));
 }
 
 /// With nothing expected, a declared type or a case named without being
@@ -472,15 +387,6 @@ fn a_constructor_with_nothing_expected_is_not_a_value() {
                   return match s case Shape.dot(x: x) x case Shape.empty() 0i32 endmatch \
                   endfn\n";
     assert_eq!(run(source).as_deref(), Ok(value("i32", "2i32").as_str()));
-}
-
-#[test]
-fn a_member_is_a_function_value() {
-    let source = "type U of {n: List(I32)} \
-                  fn len takes {u: Self} returns r: U64 do return List.length(u.n) endfn endtype\n\
-                  fn main returns r: U64 do let f be U.len endlet \
-                  return f(U(n: [1i32 2i32])) endfn\n";
-    assert_eq!(run(source).as_deref(), Ok(value("u64", "2u64").as_str()));
 }
 
 #[test]

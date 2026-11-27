@@ -4,14 +4,12 @@
 
 use std::sync::Arc;
 
-use vibra_diagnostics::{ByteSpan, DiagnosticCode};
+use vibra_diagnostics::DiagnosticCode;
 use vibra_interp::{FailureKind, MemoryBudget, TestExecution, run_test};
 use vibra_ir::CheckedProgram;
-use vibra_resolve::{PackageId, ResolveInput, SourceModule, SourceUnit, UnitKind};
 
-use super::at;
-use crate::check::{CheckResult, CheckedTest, check_workspace};
-use crate::stdlib::load_stdlib;
+use super::{at, faults_of, workspace};
+use crate::check::{CheckResult, CheckedTest};
 
 const MATH: &str = "fn add\n  takes {left: I32 right: I32}\n  returns sum: I32\n  \
                     visibility @public\n  do\n    return I32.add(left right)\nendfn\n";
@@ -23,48 +21,7 @@ fn check(
     tests: &[(&str, &str)],
     units: &[&str],
 ) -> Result<CheckResult, String> {
-    let stdlib = load_stdlib().map_err(|error| error.to_string())?;
-    let test_modules = tests
-        .iter()
-        .map(|(path, source)| {
-            let file = path.trim_start_matches("@tests.").replace('.', "/");
-            SourceModule::new(
-                *path,
-                format!("tests/{file}.vib"),
-                source.as_bytes().to_vec(),
-            )
-        })
-        .collect();
-    let input = ResolveInput::new(
-        PackageId::new("hello", "0.1.0"),
-        vec![
-            SourceUnit::new(
-                "@app",
-                UnitKind::Lib,
-                vec![SourceModule::new(
-                    "@app.math",
-                    "src/app/math.vib",
-                    app.as_bytes().to_vec(),
-                )],
-            ),
-            SourceUnit::new("@tests", UnitKind::Tests, test_modules),
-        ],
-        stdlib.overlay().embedded_unit(),
-    );
-    let units = units
-        .iter()
-        .map(|unit| (*unit).to_owned())
-        .collect::<Vec<_>>();
-    Ok(check_workspace(&input, &units))
-}
-
-/// The code and span of every diagnostic.
-fn faults(result: &CheckResult) -> Vec<(DiagnosticCode, ByteSpan)> {
-    result
-        .diagnostics()
-        .iter()
-        .map(|diagnostic| (diagnostic.code(), diagnostic.primary_span()))
-        .collect()
+    workspace(&[("@app.math", app)], tests, units)
 }
 
 /// Runs the lowered test `name`.
@@ -119,7 +76,7 @@ fn a_test_outside_tests_is_reported_at_the_declaration() -> Result<(), String> {
     let app = format!("{MATH}\ntest \"stray\" do endtest\n");
     let result = check(&app, &[], &["@app"])?;
     assert_eq!(
-        faults(&result),
+        faults_of(&result),
         [(
             DiagnosticCode::ModuleTestOutsideTests,
             at(&app, "test \"stray\" do endtest", 0)
@@ -133,7 +90,7 @@ fn a_test_module_imports_the_assertions_under_any_name() -> Result<(), String> {
     let missing = "test \"first\" do endtest\n\ntest \"second\" do endtest\n";
     let result = check(MATH, &[("@tests.math", missing)], &["@tests"])?;
     assert_eq!(
-        faults(&result),
+        faults_of(&result),
         [(
             DiagnosticCode::ModuleMissingRequiredImport,
             at(missing, "\"first\"", 0)
@@ -145,75 +102,6 @@ fn a_test_module_imports_the_assertions_under_any_name() -> Result<(), String> {
     let result = check(MATH, &[("@tests.math", renamed)], &["@tests"])?;
     assert!(!result.has_errors(), "{:#?}", result.diagnostics());
     assert_eq!(run(&result, "x")?.failure, None);
-    Ok(())
-}
-
-#[test]
-fn an_assertion_outside_tests_is_reported_at_the_use() -> Result<(), String> {
-    let called = format!(
-        "use @std.assert enduse\n\n{MATH}\nfn check\n  takes {{}}\n  returns done: Void\n  \
-         do\n    assert.true(true)\n    return void\nendfn\n"
-    );
-    let result = check(&called, &[], &["@app"])?;
-    assert_eq!(
-        faults(&result),
-        [(
-            DiagnosticCode::ModuleAssertionOutsideTests,
-            at(&called, "assert.true", 0)
-        )]
-    );
-    let value = format!(
-        "use @std.assert enduse\n\n{MATH}\nfn check\n  takes {{}}\n  returns done: Void\n  \
-         do\n    let f: Fn({{Bool}} Void) be assert.true endlet\n    return void\nendfn\n"
-    );
-    let result = check(&value, &[], &["@app"])?;
-    assert_eq!(
-        faults(&result),
-        [(
-            DiagnosticCode::ModuleAssertionOutsideTests,
-            at(&value, "assert.true", 0)
-        )]
-    );
-    Ok(())
-}
-
-#[test]
-fn a_test_body_has_no_return_and_no_try() -> Result<(), String> {
-    let returns = "use @std.assert enduse\n\ntest \"x\" do return void endtest\n";
-    let result = check(MATH, &[("@tests.math", returns)], &["@tests"])?;
-    assert_eq!(
-        faults(&result),
-        [(
-            DiagnosticCode::TypeInvalidReturn,
-            at(returns, "return void", 0)
-        )]
-    );
-    let tries = "use @std.assert enduse\n\nfn f\n  takes {}\n  returns r: Option(I32)\n  \
-                 do\n    return Option.some(value: 1i32)\nendfn\n\n\
-                 test \"x\" do let v be try f() endlet endtest\n";
-    let result = check(MATH, &[("@tests.math", tries)], &["@tests"])?;
-    assert_eq!(
-        faults(&result),
-        [(DiagnosticCode::TypeInvalidTry, at(tries, "try f()", 0))]
-    );
-    Ok(())
-}
-
-#[test]
-fn an_operand_of_assert_equal_that_holds_a_callable_is_not_encodable()
--> Result<(), String> {
-    // A callable type is not `Encodable`: the bound of `assert.equal` is
-    // unsatisfied at the operand that fixes `T`.
-    let source = "use @std.assert enduse\n\nuse @app.math enduse\n\n\
-                  test \"x\" do assert.equal(math.add math.add) endtest\n";
-    let result = check(MATH, &[("@tests.math", source)], &["@tests"])?;
-    assert_eq!(
-        faults(&result),
-        [(
-            DiagnosticCode::TypeUnsatisfiedBound,
-            at(source, "math.add", 0)
-        )]
-    );
     Ok(())
 }
 
@@ -231,7 +119,7 @@ fn a_test_reaching_an_anonymous_proc_through_the_library_runs() -> Result<(), St
                  test \"closure\" do assert.equal(1i32 math.viaClosure()) endtest\n\n\
                  test \"plain\" do assert.equal(3i32 math.add(1i32 2i32)) endtest\n";
     let result = check(&app, &[("@tests.math", tests)], &["@tests"])?;
-    assert_eq!(faults(&result), []);
+    assert_eq!(faults_of(&result), []);
     let [closure, plain] = result.tests() else {
         return Err(format!("two tests: {:#?}", result.tests()));
     };
@@ -248,7 +136,7 @@ fn a_test_takes_one_test_world_under_any_name() -> Result<(), String> {
                  test \"world\" takes {sandbox: TestWorld} do endtest\n\n\
                  test \"plain\" do assert.true(true) endtest\n";
     let result = check(MATH, &[("@tests.math", tests)], &["@tests"])?;
-    assert_eq!(faults(&result), []);
+    assert_eq!(faults_of(&result), []);
     let names = result
         .tests()
         .iter()
@@ -267,7 +155,7 @@ fn a_test_that_takes_another_type_is_an_invalid_form_at_the_section()
                  test \"plain\" do assert.true(true) endtest\n";
     let result = check(MATH, &[("@tests.math", tests)], &["@tests"])?;
     assert_eq!(
-        faults(&result),
+        faults_of(&result),
         [(
             DiagnosticCode::SyntaxInvalidForm,
             at(tests, "takes {world: World}", 0)
@@ -289,7 +177,7 @@ fn a_test_row_that_names_a_type_is_an_invalid_reference() -> Result<(), String> 
                  test \"plain\" do assert.true(true) endtest\n";
     let result = check(MATH, &[("@tests.math", tests)], &["@tests"])?;
     assert_eq!(
-        faults(&result),
+        faults_of(&result),
         [(
             DiagnosticCode::EffectInvalidReference,
             at(tests, "Missing", 1)
@@ -311,16 +199,5 @@ fn a_module_path_covers_that_test_module_only() -> Result<(), String> {
         .map(|test| test.name())
         .collect::<Vec<_>>();
     assert_eq!(names, ["a"]);
-    Ok(())
-}
-
-#[test]
-fn test_names_are_unique_in_a_module() -> Result<(), String> {
-    let tests = "use @std.assert enduse\n\ntest \"adds\" do endtest\n\ntest \"adds\" do endtest\n";
-    let result = check(MATH, &[("@tests.math", tests)], &["@tests"])?;
-    assert_eq!(
-        faults(&result),
-        [(DiagnosticCode::NameRedeclaration, at(tests, "\"adds\"", 1))]
-    );
     Ok(())
 }

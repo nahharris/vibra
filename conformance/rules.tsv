@@ -656,11 +656,11 @@ V2-TYPE-GENERIC-bound-impl-target-parameter	active	02-type-system.md#implementat
 V2-TYPE-GENERIC-bound-impl-target-satisfied	active	02-type-system.md#implementations
 V2-TYPE-GENERIC-bound-impl-target-nested	active	02-type-system.md#implementations
 V2-TYPE-GENERIC-bound-interface-parameter	active	02-type-system.md#generics
-V2-TYPE-GENERIC-bound-interface-result	retired	02-type-system.md#generics
-V2-TYPE-GENERIC-bound-interface-let	retired	02-type-system.md#generics
-V2-TYPE-GENERIC-bound-interface-field	retired	02-type-system.md#generics
-V2-TYPE-GENERIC-bound-interface-representation	retired	02-type-system.md#generics
-V2-TYPE-GENERIC-bound-interface-callable-type	retired	02-type-system.md#generics
+V2-TYPE-GENERIC-bound-interface-result	active	02-type-system.md#generics
+V2-TYPE-GENERIC-bound-interface-let	active	02-type-system.md#generics
+V2-TYPE-GENERIC-bound-interface-field	active	02-type-system.md#generics
+V2-TYPE-GENERIC-bound-interface-representation	active	02-type-system.md#generics
+V2-TYPE-GENERIC-bound-interface-callable-type	active	02-type-system.md#generics
 V2-TYPE-GENERIC-bound-in-bound	active	02-type-system.md#bounds
 V2-TYPE-GENERIC-bound-in-bound-parameter	active	02-type-system.md#bounds
 V2-TYPE-GENERIC-bound-interface-satisfied	active	02-type-system.md#generics
