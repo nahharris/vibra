@@ -4,7 +4,7 @@ use std::path::Path;
 
 use vibra_diagnostics_v1::{ByteSpan, DiagnosticCode};
 use vibra_syntax_v1::{
-    NameClassification, NameKind, TokenKind, parse_data, parse_source,
+    DocumentMode, NameClassification, NameKind, TokenKind, parse_data, parse_with_mode,
 };
 
 fn name_tokens(document: &vibra_syntax_v1::Document) -> Vec<(&str, NameKind)> {
@@ -30,7 +30,9 @@ fn span_of(source: &str, text: &str, occurrence: usize) -> ByteSpan {
 #[test]
 fn valid_names_expose_category_value_segments_and_raw_spelling() {
     let source = "(alpha alpha1 alpha- alpha--b a.b2-c some.name: @some.name - @- -:)";
-    let document = parse_source(Path::new("names.vib"), source).expect("source mode");
+    let document =
+        parse_with_mode(Path::new("names.vib"), source, DocumentMode::Source)
+            .expect("source mode");
 
     assert!(document.accepted(), "{:?}", document.diagnostics());
     let names = document
@@ -80,7 +82,6 @@ fn valid_names_expose_category_value_segments_and_raw_spelling() {
             panic!("discard classification")
         };
         assert_eq!(name.kind(), NameKind::Discard);
-        assert!(name.is_discard());
         assert_eq!(name.raw(), discard);
     }
 }
@@ -88,7 +89,9 @@ fn valid_names_expose_category_value_segments_and_raw_spelling() {
 #[test]
 fn malformed_names_report_complete_spans_and_keep_following_siblings() {
     let source = "(seed -a a..b a.1b Upper _x a/b a? a! -.name @-.name -:.name ok)";
-    let document = parse_source(Path::new("names.vib"), source).expect("source mode");
+    let document =
+        parse_with_mode(Path::new("names.vib"), source, DocumentMode::Source)
+            .expect("source mode");
 
     assert!(!document.accepted());
     let invalid = [
@@ -133,7 +136,9 @@ fn malformed_names_report_complete_spans_and_keep_following_siblings() {
 #[test]
 fn literal_diagnostics_take_precedence_over_name_validation() {
     let source = r#"(true void 1u128 1e+ "bad\q" \ab valid)"#;
-    let document = parse_source(Path::new("names.vib"), source).expect("source mode");
+    let document =
+        parse_with_mode(Path::new("names.vib"), source, DocumentMode::Source)
+            .expect("source mode");
 
     assert!(!document.accepted());
     assert_eq!(
@@ -160,14 +165,10 @@ fn literal_diagnostics_take_precedence_over_name_validation() {
 }
 
 #[test]
-fn the_name_surface_is_identical_in_source_and_data_modes() {
-    let source = "(alpha some.name: @some.name - @- -: valid-name)";
+fn data_documents_classify_symbols_labels_and_atoms() {
     let data = "(record some.name: @some.name version: @some.name)";
-    let source_document =
-        parse_source(Path::new("names.vib"), source).expect("source mode");
     let data_document = parse_data(Path::new("names.vibon"), data).expect("data mode");
 
-    assert!(source_document.accepted());
     assert!(data_document.accepted());
     assert_eq!(
         name_tokens(&data_document),

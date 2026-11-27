@@ -1,17 +1,13 @@
-//! The audit event, its codecs, and the value-access trait (Milestone 4, Step
-//! 16a; ledger D18, D30.2).
+//! The audit event and the value-access trait (Milestone 4, Step 16a; ledger
+//! D18, D30.2).
 //!
-//! `docs/spec/06-runtime.md`, "The audit trace". The JSON cases are the ones of
-//! the command-result schema test of Step 13
-//! (`the_audit_trace_is_an_array_of_event_records_and_keeps_an_unknown_kind`).
+//! `docs/spec/06-runtime.md`, "The audit trace".
 
-use serde_json::json;
-use vibra_diagnostics_v1::DiagnosticCode;
 use vibra_host_v1::{
     AuditEvent, EnvError, FsError, FsKind, HostCall, HostEnum, HostEvent, HostOk,
     HostRecord, HostReply, HostWorld, IoError, Metadata, OpaqueEvent, OperationError,
-    RandomError, ReadError, TimeError, WorldProvider, build_reply, decode_trace,
-    perform, trace_to_vibon,
+    RandomError, ReadError, TimeError, WorldProvider, build_reply, perform,
+    trace_to_vibon,
 };
 use vibra_ir_v1::external::host::{HOST_ROWS, HostErrorType, HostType};
 
@@ -166,17 +162,10 @@ fn events_of_every_argument_and_result_shape() {
     for (call, reply, expected) in cases {
         let event = AuditEvent::completed(&call, &reply);
         assert_eq!(event, expected, "{call:?}");
-        // Every event round-trips through the canonical VIBON text it prints.
-        let text = event.to_vibon();
-        assert_eq!(
-            AuditEvent::decode("event.vibon", &text).expect("decodes"),
-            event,
-            "{text}"
-        );
     }
 }
 
-// --- VIBON and JSON codecs ----------------------------------------------------
+// --- the VIBON text -----------------------------------------------------------
 
 fn unknown_event() -> AuditEvent {
     AuditEvent::Opaque(OpaqueEvent {
@@ -188,94 +177,15 @@ fn unknown_event() -> AuditEvent {
 #[test]
 fn an_event_of_an_unknown_kind_is_preserved_as_opaque_data() {
     let text = "(record kind: @deliver channel: (record id: 1u64) note: \"x\")";
-    let event = AuditEvent::decode("event.vibon", text).expect("not a failure");
-    assert_eq!(
-        event,
-        AuditEvent::Opaque(OpaqueEvent {
-            kind: "deliver".to_owned(),
-            fields: vec![
-                ("channel".to_owned(), "(record id: 1u64)".to_owned()),
-                ("note".to_owned(), "\"x\"".to_owned()),
-            ],
-        })
-    );
+    let event = AuditEvent::Opaque(OpaqueEvent {
+        kind: "deliver".to_owned(),
+        fields: vec![
+            ("channel".to_owned(), "(record id: 1u64)".to_owned()),
+            ("note".to_owned(), "\"x\"".to_owned()),
+        ],
+    });
     assert_eq!(event.to_vibon(), text);
     assert_eq!(event.kind(), "deliver");
-}
-
-#[test]
-fn json_events_match_the_command_result_schema_cases() {
-    let host_json = json!({
-        "kind": "@host",
-        "op": "fs.read-file",
-        "args": ["(record kind: @wrapper type: @std.fs.path value: \"/in.txt\")"],
-        "result": "(record kind: @enum type: @std.result.result variant: @ok payload: (record kind: @bytes values: (array 104u8 105u8)))"
-    });
-    let event = AuditEvent::completed(
-        &HostCall::ReadFile("/in.txt".to_owned()),
-        &Ok(HostOk::Bytes(b"hi".to_vec())),
-    );
-    assert_eq!(event.to_json(), host_json);
-    assert_eq!(AuditEvent::from_json(&host_json).expect("reads"), event);
-
-    let future = json!({ "kind": "@deliver", "channel": "(record id: 1u64)" });
-    assert_eq!(unknown_event().to_json(), future);
-    assert_eq!(
-        AuditEvent::from_json(&future).expect("reads"),
-        unknown_event()
-    );
-
-    let test_item = json!({
-        "kind": "@host", "op": "io.stdout-text",
-        "args": ["\"hi\\n\""],
-        "result": "(record kind: @enum type: @std.result.result variant: @ok)"
-    });
-    let event = AuditEvent::completed(
-        &HostCall::StdoutText("hi\n".to_owned()),
-        &Ok(HostOk::Void),
-    );
-    assert_eq!(event.to_json(), test_item);
-}
-
-#[test]
-fn malformed_json_events_are_rejected() {
-    for value in [
-        json!("fs.read-file"),
-        json!({ "op": "x", "args": [], "result": "y" }),
-        json!({ "kind": "host", "op": "x", "args": [], "result": "y" }),
-        json!({ "kind": "@host", "op": "x", "args": [] }),
-        json!({ "kind": "@host", "op": "x", "args": [], "result": "y", "note": "z" }),
-        json!({ "kind": "@host", "op": "x", "args": [1], "result": "y" }),
-        json!({ "kind": "@deliver", "channel": 1 }),
-    ] {
-        assert!(AuditEvent::from_json(&value).is_err(), "{value}");
-    }
-}
-
-#[test]
-fn an_unknown_field_in_a_known_kind_is_rejected() {
-    let text = "(record kind: @host op: \"io.stdin-text\" args: (array) result: 1u8 note: \"x\")";
-    let diagnostics = AuditEvent::decode("event.vibon", text).expect_err("rejected");
-    assert_eq!(diagnostics.len(), 1);
-    assert_eq!(diagnostics[0].code(), DiagnosticCode::DataInvalidShape);
-    assert_eq!(diagnostics[0].source_id(), Some("event.vibon"));
-}
-
-#[test]
-fn malformed_events_are_rejected_with_data_diagnostics() {
-    for text in [
-        "(array)",
-        "(record op: \"x\")",
-        "(record kind: \"host\")",
-        "(record kind: @host op: 1u8 args: (array) result: 1u8)",
-        "(record kind: @host op: \"x\" args: 1u8 result: 1u8)",
-        "(record kind: @host op: \"x\" args: (array))",
-        "(record kind: @host op: \"x\" op: \"y\" args: (array) result: 1u8)",
-        "(record kind: @host op: \"x\" args: (array) result: 1u8",
-    ] {
-        let diagnostics = AuditEvent::decode("event.vibon", text).expect_err(text);
-        assert!(!diagnostics.is_empty(), "{text}");
-    }
 }
 
 #[test]
@@ -287,29 +197,11 @@ fn a_trace_is_the_record_of_its_events_and_keeps_unknown_kinds() {
     ];
     let text = trace_to_vibon(&events);
     assert!(text.starts_with("(record format: @audit-trace.v1 events: (array "));
-    assert_eq!(decode_trace("trace.vibon", &text).expect("decodes"), events);
 
     assert_eq!(
         trace_to_vibon(&[]),
         "(record format: @audit-trace.v1 events: (array))"
     );
-    assert_eq!(
-        decode_trace(
-            "trace.vibon",
-            "(record format: @audit-trace.v1 events: (array))"
-        )
-        .expect("decodes"),
-        Vec::new()
-    );
-    for bad in [
-        "(record format: @audit-trace.v2 events: (array))",
-        "(record events: (array))",
-        "(record format: @audit-trace.v1)",
-        "(record format: @audit-trace.v1 events: (array 1u8))",
-        "(record format: @audit-trace.v1 events: (array) extra: 1u8)",
-    ] {
-        assert!(decode_trace("trace.vibon", bad).is_err(), "{bad}");
-    }
 }
 
 // --- the value-access trait ---------------------------------------------------
@@ -484,8 +376,10 @@ fn a_call_performed_on_a_world_gives_the_event_and_the_value_from_one_reply() {
         build_reply(&reply, &mut Plain),
         Tree::Enum(HostEnum::Result, 0, Some(Box::new(Tree::Text("hi".into()))))
     );
-    let event = AuditEvent::completed(&call, &reply);
-    assert_eq!(event.to_json()["op"], json!("fs.read-text"));
+    let AuditEvent::Host(event) = AuditEvent::completed(&call, &reply) else {
+        panic!("a host event");
+    };
+    assert_eq!(event.op, "fs.read-text");
 
     // A failed call is a completed call with an `err` result, and has an event.
     let missing = HostCall::ReadText("/missing".to_owned());

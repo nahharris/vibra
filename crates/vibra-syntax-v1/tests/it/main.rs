@@ -11,9 +11,6 @@
 )]
 
 mod data;
-mod declarations;
-mod expressions;
 mod literals;
 mod names;
-mod queries;
 mod reader;

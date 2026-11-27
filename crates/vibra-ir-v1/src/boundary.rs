@@ -5,8 +5,6 @@
 //! codes are written once here, beside the closed tables of the compiler
 //! registry.
 
-use vibra_diagnostics_v1::DiagnosticCode;
-
 /// The closed trap codes of "Traps".
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TrapCode {
@@ -44,17 +42,6 @@ impl TrapCode {
             _ => None,
         }
     }
-
-    /// The registered diagnostic the trap is reported as.
-    #[must_use]
-    pub const fn diagnostic_code(self) -> DiagnosticCode {
-        match self {
-            Self::InvalidCheckedProgram => DiagnosticCode::RuntimeInvalidCheckedProgram,
-            Self::UnobservableFunction => DiagnosticCode::RuntimeUnobservableFunction,
-            Self::InvalidHostValue => DiagnosticCode::RuntimeInvalidHostValue,
-            Self::DivisionByZero => DiagnosticCode::RuntimeDivisionByZero,
-        }
-    }
 }
 
 #[cfg(test)]
@@ -72,15 +59,11 @@ mod tests {
         ] {
             assert_eq!(TrapCode::from_code(trap.code()), Some(trap));
         }
-        for failure in TestAssertion::ALL {
-            assert_eq!(TestAssertion::from_code(failure.code()), Some(failure));
-        }
         assert_eq!(
             TestAssertion::ALL.map(TestAssertion::code),
             [1, 2, 3],
             "the failure codes are part of the runtime boundary"
         );
         assert_eq!(TrapCode::from_code(0), None);
-        assert_eq!(TestAssertion::from_code(0), None);
     }
 }

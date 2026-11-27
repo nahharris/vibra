@@ -20,13 +20,6 @@ pub use native::{
 };
 pub use vectors::{CHARS, Outcome, SCALARS, Vector};
 
-/// The compiler registry identity used by the runtime contract.
-///
-/// `vibra_v1` is the version named by the v1 runtime specification. The
-/// compiler registry and the host registry are separate namespaces, but share
-/// this stable toolchain ABI version.
-pub const REGISTRY_VERSION: &str = "vibra_v1";
-
 /// A numeric primitive type that carries registry static methods.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum NumericType {
@@ -387,40 +380,6 @@ pub struct RoleTypes {
 }
 
 impl RoleTypes {
-    /// Roles bound to the type playing `@option`, when one does.
-    #[must_use]
-    pub const fn new(option: Option<TypeId>) -> Self {
-        Self {
-            option,
-            result: None,
-            ordering: None,
-            arithmetic_error: None,
-            conversion_error: None,
-        }
-    }
-
-    /// The same roles with the type playing `@result`.
-    #[must_use]
-    pub fn with_result(mut self, result: Option<TypeId>) -> Self {
-        self.result = result;
-        self
-    }
-
-    /// The same roles with `@std.core`'s `ordering`, `arithmetic-error`, and
-    /// `conversion-error`.
-    #[must_use]
-    pub fn with_core(
-        mut self,
-        ordering: Option<TypeId>,
-        arithmetic_error: Option<TypeId>,
-        conversion_error: Option<TypeId>,
-    ) -> Self {
-        self.ordering = ordering;
-        self.arithmetic_error = arithmetic_error;
-        self.conversion_error = conversion_error;
-        self
-    }
-
     /// `(option value)`.
     #[must_use]
     pub fn option_of(&self, value: Type) -> Type {
@@ -519,36 +478,6 @@ impl CompilerIntrinsic {
         }
     }
 
-    /// Whether this entry is a native implementation of a standard-library
-    /// function that keeps its Vibra body, named with `native:`, rather than a
-    /// bodiless primitive operation named with `external:`.
-    #[must_use]
-    pub const fn is_native(self) -> bool {
-        !matches!(
-            self,
-            Self::Integer(..)
-                | Self::Float(..)
-                | Self::Convert(..)
-                | Self::CharToU32
-                | Self::CharFromU32
-                | Self::DictEntries
-                | Self::ArrayLength
-                | Self::ArrayAppend
-                | Self::ArrayConcat
-                | Self::ArraySlice
-        )
-    }
-
-    /// Whether a module runs the checked Vibra body of this row: a native
-    /// implementation with no import, which the table of native imports
-    /// leaves out because its meaning applies a function value and a pure
-    /// import cannot call back into the module. Every other row is an inline
-    /// instruction sequence or an import.
-    #[must_use]
-    pub fn runs_body(self) -> bool {
-        self.is_native() && self.native_import().is_none()
-    }
-
     /// The sample vectors of this row: operands, and the outcome the
     /// specification gives them, computed once from Rust's own integer and
     /// float types, formatting, and parsing and independent of any backend.
@@ -559,21 +488,6 @@ impl CompilerIntrinsic {
     #[must_use]
     pub fn vectors(self) -> &'static [Vector] {
         vectors::of(self)
-    }
-
-    /// The generic parameters of the exact signature, in `where:` order.
-    #[must_use]
-    pub fn type_parameters(self) -> Vec<String> {
-        match self {
-            Self::DictOf | Self::DictEntries => vec!["k".to_owned(), "v".to_owned()],
-            Self::ArrayFold => vec!["t".to_owned(), "a".to_owned()],
-            Self::ArrayOf
-            | Self::ArrayLength
-            | Self::ArrayAppend
-            | Self::ArrayConcat
-            | Self::ArraySlice => vec!["t".to_owned()],
-            _ => Vec::new(),
-        }
     }
 
     /// The exact checked signature, with the library types bound by `roles`.
@@ -693,14 +607,6 @@ impl CompilerIntrinsic {
                 function(vec![items(), param("a"), step], param("a"))
             }
         }
-    }
-
-    /// Resolves only a symbol in the closed registry.
-    #[must_use]
-    pub fn from_symbol(symbol: &str) -> Option<Self> {
-        Self::all()
-            .into_iter()
-            .find(|intrinsic| intrinsic.symbol() == symbol)
     }
 
     /// Every compiler intrinsic in canonical registry order: the numeric

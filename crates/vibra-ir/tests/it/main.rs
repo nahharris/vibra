@@ -14,7 +14,6 @@
 mod effects;
 mod encode;
 mod instantiation;
-mod migration;
 mod registry;
 mod shape;
 mod soundness;

@@ -1,18 +1,13 @@
-//! The Step 4–10 UTF-8 reader spine, literal/name surface, contextual
-//! declaration/type/expression/pattern view, and structural query surface.
+//! The UTF-8 reader spine: lexer, literal and name classification over
+//! retained leaf text, and the lossless delimiter-aware CST.
 //!
-//! This module keeps one lossless, delimiter-aware tree. Step 5 literal, Step 6
-//! name, and Step 8–9 contextual classification are layered over retained leaf
-//! text without changing source bytes. Resolution and semantic checking remain
-//! later-step concerns. Step 10 queries remain structural: they do not resolve
-//! names or infer types.
-
+//! Classification never changes source bytes. Resolution and semantic checking
+//! are not done here.
 use std::fmt;
 use std::path::{Path, PathBuf};
 
 use vibra_diagnostics_v1::{ByteSpan, Diagnostic, DiagnosticCode, Level};
 
-use crate::ast::{SourceAst, decode_source_root};
 use crate::data::{DataNode, decode_data_root};
 use crate::literal::{LiteralClassification, classify};
 use crate::name::{NameClassification, classify_name};
@@ -220,26 +215,6 @@ impl Lexed {
     #[must_use]
     pub fn accepted(&self) -> bool {
         self.diagnostics.is_empty()
-    }
-}
-
-/// A UTF-8 lexer for the shared source/data reader.
-#[derive(Clone, Copy, Debug)]
-pub struct Lexer<'source> {
-    source: &'source str,
-}
-
-impl<'source> Lexer<'source> {
-    /// Creates a lexer over valid UTF-8 text.
-    #[must_use]
-    pub const fn new(source: &'source str) -> Self {
-        Self { source }
-    }
-
-    /// Lexes the input while retaining every byte in token text.
-    #[must_use]
-    pub fn lex(self) -> Lexed {
-        lex(self.source)
     }
 }
 
@@ -565,36 +540,6 @@ impl CstNode {
         }
     }
 
-    /// Classifies an atom leaf as a literal under the `.vib` source grammar.
-    ///
-    /// The source grammar has no boolean literal: `true` and `false` are
-    /// ordinary symbols there, names of `@std.bool` values. Every other leaf
-    /// classifies as [`Self::literal`] does, and `.vibon` data keeps both
-    /// spellings as boolean literals.
-    #[must_use]
-    pub fn source_literal(&self) -> Option<LiteralClassification> {
-        if self.is_boolean_spelling() {
-            return Some(LiteralClassification::Opaque);
-        }
-        self.literal()
-    }
-
-    /// Classifies a complete atom leaf as a name under the `.vib` source
-    /// grammar.
-    #[must_use]
-    pub fn source_name(&self) -> Option<NameClassification> {
-        if self.is_boolean_spelling() {
-            return Some(classify_name(&self.text));
-        }
-        self.name()
-    }
-
-    fn is_boolean_spelling(&self) -> bool {
-        self.kind == SyntaxKind::Atom
-            && !self.unterminated_quote
-            && matches!(self.text.as_str(), "true" | "false")
-    }
-
     /// Child nodes in source order. Trivia and delimiters are retained.
     #[must_use]
     pub fn children(&self) -> &[CstNode] {
@@ -648,7 +593,6 @@ pub struct Document {
     root: CstNode,
     diagnostics: Vec<Diagnostic>,
     data: Option<DataNode>,
-    ast: Option<SourceAst>,
 }
 
 impl fmt::Debug for Document {
@@ -666,23 +610,6 @@ impl fmt::Debug for Document {
 }
 
 impl Document {
-    /// Parses a document using its exact filename extension.
-    pub fn parse(
-        path: impl AsRef<Path>,
-        source: &str,
-    ) -> Result<Self, DocumentModeError> {
-        parse_document(path, source)
-    }
-
-    /// Parses a document through an explicitly selected loader mode.
-    pub fn parse_with_mode(
-        path: impl AsRef<Path>,
-        source: &str,
-        expected_mode: DocumentMode,
-    ) -> Result<Self, DocumentModeError> {
-        parse_with_mode(path, source, expected_mode)
-    }
-
     /// The path used for extension selection.
     #[must_use]
     pub fn path(&self) -> &Path {
@@ -739,44 +666,6 @@ impl Document {
     pub const fn data(&self) -> Option<&DataNode> {
         self.data.as_ref()
     }
-
-    /// The native declaration/type AST for a recognized source module.
-    #[must_use]
-    pub const fn ast(&self) -> Option<&SourceAst> {
-        self.ast.as_ref()
-    }
-
-    /// Returns structural facts for the smallest CST node at a UTF-8 byte
-    /// offset.
-    pub fn query_position(
-        &self,
-        offset: usize,
-    ) -> Result<crate::query::StructuralQuery, crate::query::QueryError> {
-        crate::query::query_position(self, offset)
-    }
-}
-
-/// Parses a document using the exact mode selected by its extension.
-pub fn parse_document(
-    path: impl AsRef<Path>,
-    source: &str,
-) -> Result<Document, DocumentModeError> {
-    let path = path.as_ref();
-    let mode = DocumentMode::from_path(path)?;
-    Ok(parse_selected(path, mode, source))
-}
-
-/// Short alias for [`parse_document`].
-pub fn parse(
-    path: impl AsRef<Path>,
-    source: &str,
-) -> Result<Document, DocumentModeError> {
-    parse_document(path, source)
-}
-
-/// Lexes bytes after validating that they are UTF-8.
-pub fn lex_bytes(bytes: &[u8]) -> Result<Lexed, std::str::Utf8Error> {
-    std::str::from_utf8(bytes).map(lex)
 }
 
 /// Parses with an explicitly requested loader mode.
@@ -801,14 +690,6 @@ pub fn parse_with_mode(
     Ok(parse_selected(path, selected_mode, source))
 }
 
-/// Parses through the source loader, requiring a `.vib` extension.
-pub fn parse_source(
-    path: impl AsRef<Path>,
-    source: &str,
-) -> Result<Document, DocumentModeError> {
-    parse_with_mode(path, source, DocumentMode::Source)
-}
-
 /// Parses through the persistent-data loader, requiring a `.vibon` extension.
 pub fn parse_data(
     path: impl AsRef<Path>,
@@ -822,21 +703,11 @@ fn parse_selected(path: &Path, mode: DocumentMode, source: &str) -> Document {
     let tokens = lexed.tokens.clone();
     let mut parser = Parser::new(&tokens, source, lexed.diagnostics.clone());
     let root = parser.parse_root();
-    let source_decode =
-        (mode == DocumentMode::Source).then(|| decode_source_root(&root));
-    let ast = source_decode
-        .as_ref()
-        .and_then(|decoded| decoded.ast().cloned());
     let mut data_decode = (mode == DocumentMode::Data).then(|| decode_data_root(&root));
     let data = data_decode
         .as_mut()
         .and_then(|decoded| decoded.take_value());
     if let Some(decoded) = &data_decode {
-        parser.diagnostics.extend_from_slice(decoded.diagnostics());
-    }
-    if let Some(decoded) = &source_decode
-        && decoded.recognized()
-    {
         parser.diagnostics.extend_from_slice(decoded.diagnostics());
     }
     // Lexer errors are collected before parsing, but consumers see one
@@ -853,7 +724,6 @@ fn parse_selected(path: &Path, mode: DocumentMode, source: &str) -> Document {
         root,
         diagnostics: parser.diagnostics,
         data,
-        ast,
     }
 }
 
@@ -883,7 +753,6 @@ fn invalid_extension_document(
         root,
         diagnostics: vec![diagnostic],
         data: None,
-        ast: None,
     }
 }
 
@@ -1117,7 +986,6 @@ mod tests {
                 "operands are in a noncanonical order",
             )],
             data: None,
-            ast: None,
         };
 
         assert!(document.accepted());

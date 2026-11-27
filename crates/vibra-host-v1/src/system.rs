@@ -78,15 +78,6 @@ impl SystemProvider {
             Sink::Inherit => &[],
         }
     }
-
-    /// The bytes written to standard error so far, when it is captured.
-    #[must_use]
-    pub fn captured_stderr(&self) -> &[u8] {
-        match &self.sink {
-            Sink::Capture { stderr, .. } => stderr,
-            Sink::Inherit => &[],
-        }
-    }
 }
 
 fn io_error(error: &std::io::Error) -> IoError {
