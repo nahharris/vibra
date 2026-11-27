@@ -18,7 +18,7 @@ roadmap until evidence justifies them.
 | --- | --- |
 | [An Aurum target for Vibra](vibra-target.md) | How one language serves two kinds of machine, which Vibra features a fabric can run, and how the compiler reports the rest |
 | [Execution models and their evidence](execution-models.md) | What has been built and measured for each model the prospectus considers |
-| [Number systems](number-systems.md) | Whether the prospectus's arithmetic holds up, and how numeric domains reach Vibra |
+| [Number systems](number-systems.md) | Whether the prospectus's arithmetic holds up, how numeric domains reach Vibra, and whether exact rationals should sit beside the floats |
 | [Resources, determinism, and verification](correctness.md) | Where linearity and proofs can live, given the charter, and what verified stacks have cost |
 | [An operating system for the fabric](operating-system.md) | What is left for an operating system to do when isolation, authority, and determinism come from the machine and the language |
 | [A shell for the fabric](shell.md) | How launching, naming, piping, and job control change when the command language is Vibra |

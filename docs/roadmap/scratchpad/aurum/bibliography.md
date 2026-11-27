@@ -138,6 +138,11 @@ found by its title and venue.
 | Shewchuk97 | J. Shewchuk. *Adaptive precision floating-point arithmetic and fast robust geometric predicates.* Discrete & Computational Geometry 18, 1997. | recalled | Exact predicates without exact numbers |
 | Richardson68 | D. Richardson. *Some undecidable problems involving elementary functions of a real variable.* Journal of Symbolic Logic 33(4), 1968. | recalled | Zero-testing is undecidable for rich enough expressions |
 | Lindemann82 | F. Lindemann. *Über die Zahl π.* Mathematische Annalen 20, 1882. | recalled | π is transcendental |
+| Hermite73 | C. Hermite. *Sur la fonction exponentielle.* Comptes rendus de l'Académie des sciences 77, 1873. | recalled | e is transcendental |
+| Khinchin64 | A. Ya. Khinchin. *Continued Fractions.* University of Chicago Press, 1964. | recalled | Convergents are the best rational approximations for their denominator |
+| R7RS | A. Shinn, J. Cowan, A. Gleckler (eds.). *Revised⁷ report on the algorithmic language Scheme.* 2013. | recalled | Exact and inexact numbers as separate kinds, converted on purpose |
+| Pyret | *Pyret*, language documentation. | recalled | Exact rationals by default, with approximate numbers marked in source |
+| Raku | *Raku*, language documentation. | recalled | Rationals for decimal literals, with a fallback to floats when a denominator outgrows 64 bits |
 
 ## Equality saturation
 

@@ -147,7 +147,8 @@ integers.
 
 **Recommendation.** Bounded domains whose overflowing operations return
 `Result`. A big-integer type built on `List` is a separate library, outside
-the static fragment.
+the static fragment. A rational type cannot take this route; see
+[question 37](#37-unbounded-integers).
 
 ### 17. Whether to build base-φ digit arithmetic at all
 
@@ -335,6 +336,63 @@ user can select, and whether the audit trace suffices for replay.
 person is a rendering of the same facts and can follow. This matches the
 charter's account of who writes Vibra, and it lets the environment be
 tested before any interface is designed.
+
+## Exact numbers in the language
+
+These concern Vibra on every machine, and come from the proposal to put
+[exact rationals beside the floats](number-systems.md#exact-rationals-beside-the-floats).
+They are decisions for the specification, recorded here because the Aurum
+number work raised them.
+
+### 37. Unbounded integers
+
+A rational over fixed-width integers overflows within a few dozen
+operations, so an exact default for fractional quantities needs integers
+that grow. Vibra's scalar set is fixed-width today.
+
+**Recommendation.** Add an unbounded natural and an unbounded integer, with
+representations the compiler owns, and keep the fixed widths for layout
+and interchange. A version built on `List` is enough to try the idea and
+too slow to be the default. Tool limits have to charge these operations by
+size.
+
+**Settled by** a pilot: whether agent-written programs choose the
+unbounded types unprompted, and what the size-dependent cost does to work
+accounting.
+
+### 38. Rationals beside the floats, or in place of them
+
+**Recommendation.** Beside them. `Rational` is a library type and the
+standard library's default for anything that is not whole. `F32` and `F64`
+stay unchanged for interchange and for numeric work at a fixed cost.
+Removing the floats would delete several special rules from the
+specification, and it would leave iterative numerics with rounding placed
+by hand and no interchange type.
+
+**Settled by** how often a pilot's programs reach for `F64` where a
+rational would do. If the answer is rarely, removal can be reconsidered
+with evidence.
+
+### 39. Literals for a library number type
+
+An unsuffixed literal is typed by its expected type among the builtin
+number types, so a library `Rational` cannot be written `2.5`.
+
+**Recommendation.** Do not make `Rational` a builtin for the sake of its
+literals. Decide whether a general rule should let any type accept a
+decimal literal exactly, which would serve the algebraic domains as well.
+Until then a rational is a constructor call.
+
+### 40. Conversion between floats and rationals
+
+"The floating-point types convert to and from other number types through
+no interface."
+
+**Recommendation.** Keep that sentence true. From a float to a rational is
+a static member that returns `Result`, failing for the infinities and NaN.
+From a rational to a float is a static member whose name states the
+rounding. Neither is `From` or `TryFrom`, so no expected type ever turns
+an exact number into an approximate one.
 
 [MADAR26]: bibliography.md#dataflow-spatial-and-statically-scheduled-machines
 [TinyTapeout]: bibliography.md#fabrication-access

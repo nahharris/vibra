@@ -6,7 +6,8 @@ its values live in are independent choices, and it works three examples: a
 π-based domain, the golden ratio, and the twelfth roots of unity. This note
 checks the mathematics, separates the claims that the literature supports
 from the one it does not, and says how numeric domains reach Vibra without
-changing its scalar types.
+changing its scalar types. It then takes up a question about Vibra itself:
+whether an exact rational type should sit beside the IEEE floats.
 
 ## Theory
 
@@ -169,7 +170,8 @@ has to be added to the scalar set to host other domains, for three reasons.
 The last point is a real constraint. Vibra has no arbitrary-precision
 integer. An exact-arithmetic library needs either bounded domains with
 checked operations or a big-integer type built from `List`, and the second
-is outside the static fragment.
+is outside the static fragment. A rational type cannot take the bounded
+route, as [the next section](#exact-rationals-beside-the-floats) shows.
 
 On the fabric, a library domain is a composite value made of integer nodes,
 and it needs no special support to be correct. A fabric that implements a
@@ -183,6 +185,140 @@ That tests H3 in software, on the existing executors, with no hardware and
 no language change, and it produces the benchmark programs the fabric
 experiments need.
 
+## Exact rationals beside the floats
+
+The proposal is that a quantity which is not whole is exact unless the
+program says otherwise. Naturals, integers, and rationals are the exact
+numbers. The algebraic domains above extend them where a workload needs
+more. Approximation is something a program asks for by name. `F32` and
+`F64` stay as they are, for compatibility.
+
+### Theory
+
+- **ℚ is an ordered field with a normal form.** It is closed under the four
+  operations except division by zero, and every element has exactly one
+  representation in lowest terms with a positive denominator. Equality and
+  order are therefore decidable, and equal values have equal
+  representations.
+- **A finite float is a dyadic rational**, an integer times a power of two.
+  The IEEE types add two infinities, the NaNs, and a signed zero to that
+  subset, and they round after every operation. Approximation is not what
+  is wrong with them. The rounding that nobody wrote and the values that
+  are not numbers are.
+- **The best approximations to a number by fractions of bounded denominator
+  are the convergents of its continued fraction** [Khinchin64]. So "a
+  rational close to this value" has a canonical answer for each bound.
+- **Exactness can be a property of a number's kind.** Scheme separates
+  exact numbers from inexact ones and makes a program convert between them
+  on purpose [R7RS].
+
+### The types
+
+The names are illustrative.
+
+| Type | Values | Its one job |
+| --- | --- | --- |
+| Unbounded natural and integer | ℕ and ℤ | Exact whole numbers with no overflow case |
+| `Rational` | ℚ, in lowest terms | The default for any quantity that is not whole |
+| `F32`, `F64`, unchanged | IEEE 754 | Interchange with formats and systems that use IEEE, and approximation at a fixed cost |
+| The domains above | ℚ extended by φ, π, or a root of unity | Exactness beyond ℚ |
+
+Each type has one job, so the float and the rational are not two spellings
+of one idea.
+
+### What the specification already provides
+
+- **Nothing mixes silently.** "The floating-point types convert to and from
+  other number types through no interface." No rule of contagion between
+  exact and inexact numbers has to be designed.
+- **A rational can be what a float cannot.** "The float types implement
+  neither `Equatable` nor `Ordered`, because IEEE equality is not
+  reflexive", and they are not admissible dictionary keys. A rational in
+  lowest terms is all three.
+- **`Rational` is a library type.** "Vibra is library-first. The compiler
+  owns only what the language cannot build for itself". A rational is a
+  wrapper over two integers whose `where` invariant says the denominator is
+  positive and the pair is in lowest terms. Only the unbounded integer is a
+  candidate for the compiler to own.
+- **Conversion has an obvious shape.** From a float to a rational is exact
+  for every finite value, fails for the infinities and NaN, and maps
+  negative zero to zero. From a rational to a float is a rounding, and
+  gets a name that says so.
+
+### Approximation as an operation
+
+- **Inside ℚ.** Two rounding operations cover the uses: to the nearest
+  fraction under a denominator bound, which is the continued-fraction
+  answer, and to the nearest multiple of a power of two, which is a shift.
+- **Leaving ℚ.** A square root, an exponential, or a sine of a rational is
+  usually irrational. Such a function takes a tolerance and returns a
+  rational within it.
+- **Executors agree for free.** These functions are ordinary Vibra over
+  exact integers, so the interpreter, native code, and a fabric compute the
+  same rational with no rule written for the purpose. For floats this is
+  the expensive part. The runtime chapter gives the float types `add`,
+  `sub`, `mul`, `div`, and `neg`, and no square root or transcendental
+  function.
+
+### Literals
+
+"An unsuffixed literal takes its type from its expected type", among the
+builtin number types. A library `Rational` receives the literal `2.5`
+exactly only if it becomes a builtin, or if a general rule lets a library
+type accept a decimal literal. Without either, a rational is written as a
+constructor call or parsed from text.
+
+### What it costs
+
+- **Denominators grow.** Adding 1/1, 1/2, 1/3, and so on overflows a pair
+  of 64-bit integers at the 47th term. Newton's iteration for √2 from 1
+  doubles the size of its numerator every step and passes 64 bits at the
+  sixth. With fixed-width parts, every operation returns `Result` and
+  ordinary programs soon take the failing case. The proposal therefore
+  needs unbounded integers.
+- **Unbounded integers are a language decision.** Their operations are not
+  constant-time, so tool limits that count work have to charge by size.
+  They allocate, so they are outside the
+  [static fragment](vibra-target.md#two-fragments). They add no new kind of
+  failure, because memory exhaustion is already a host event.
+- **Iterative numerics need rounding placed by hand.** A simulation or a
+  linear solver over exact rationals grows without bound unless every step
+  rounds. Rounding each step to a fixed number of significant bits is
+  floating point written out by hand, and that workload is what `F64` is
+  kept for.
+- **The specification does not shrink.** NaN canonicalization, signed zero,
+  total comparison, and the canonical float text all remain.
+- **Habit.** Agents write `F64` because the code they learned from does.
+  The counterweight is a standard library that takes and returns rationals
+  for ratios, durations, percentages, and parsed decimals. Whether that is
+  enough is a question for a pilot.
+
+### Precedents
+
+| System | Choice |
+| --- | --- |
+| Scheme | Exact integers and rationals beside inexact reals, with explicit conversion [R7RS] |
+| Android's calculator | Rationals and a few symbolic constants where equality is decidable, with computable reals behind them [Boehm20] |
+| Pyret | Exact rationals by default; an approximate number is marked as one in source [Pyret] |
+| Raku | Rationals for decimal literals, falling back to floats without notice when a denominator outgrows 64 bits [Raku] |
+
+Raku's fallback is the outcome that unbounded integers avoid.
+
+### The domains depend on it
+
+The π domain is Q[π, π⁻¹], whose coefficients are rationals, and division
+in the golden field Q(√5) needs them too. `Rational` is a prerequisite of
+the prospectus's own examples. A domain for e has the same shape as the
+one for π, because e is transcendental as well [Hermite73]. The two
+constants must not share a type, for the reason given
+[above](#the-three-example-domains): their algebraic independence is
+unproven.
+
+**Recommendation.** Add `Rational` as a library type and make it the
+standard library's default for quantities that are not whole. Keep the
+floats unchanged. Both steps wait on the decision about unbounded integers,
+which is [open](open-questions.md#37-unbounded-integers).
+
 ## Floating point
 
 `F32` and `F64` are IEEE with a canonical NaN, and executors must agree on
@@ -190,6 +326,11 @@ results. An Aurum fabric would need bit-exact IEEE units to accept them.
 That is a large node for a domain the prospectus is trying to move away
 from, so the first Aurum profiles should report floating point unavailable.
 In co-processor mode the affected functions stay on the processor.
+
+With rationals in the language this division is convenient. The exact
+types are composites of integer nodes and run on the fabric. The type kept
+for compatibility with conventional machines is the one a fabric profile
+rejects.
 
 [Renyi57]: bibliography.md#number-systems-and-exact-arithmetic
 [Parry60]: bibliography.md#number-systems-and-exact-arithmetic
@@ -210,3 +351,9 @@ In co-processor mode the affected functions stay on the processor.
 [Posit17]: bibliography.md#number-systems-and-exact-arithmetic
 [PositCritique19]: bibliography.md#number-systems-and-exact-arithmetic
 [Zeckendorf72]: bibliography.md#number-systems-and-exact-arithmetic
+[Khinchin64]: bibliography.md#number-systems-and-exact-arithmetic
+[R7RS]: bibliography.md#number-systems-and-exact-arithmetic
+[Pyret]: bibliography.md#number-systems-and-exact-arithmetic
+[Raku]: bibliography.md#number-systems-and-exact-arithmetic
+[Hermite73]: bibliography.md#number-systems-and-exact-arithmetic
+[Boehm20]: bibliography.md#interaction-live-environments-and-agents
