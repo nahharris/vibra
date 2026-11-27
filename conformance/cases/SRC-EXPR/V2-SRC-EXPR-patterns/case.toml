@@ -10,3 +10,4 @@ source = "input.vib"
 [expect]
 verdict = "accepted"
 tree = "tree.vibon"
+formatted = "formatted.vib"

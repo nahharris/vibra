@@ -1,4 +1,4 @@
-# F7 of the review of grants. A sub is lexical, so naming a file is no refusal.
+# A sub is lexical, so naming a file is no refusal.
 # A read of ["x"] is the rebased ["a.txt" "x"], which both rules select, and the
 # world finds a file above it. A read of the empty path is the rebased
 # ["a.txt"]: the file rule of the sub needs a positive number of further names,

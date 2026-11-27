@@ -1,4 +1,4 @@
-# F7 of the review of grants. As a dict key the same kind of brand is
+# As a dict key the same kind of brand is
 # V2-GRANT-dict-key-ordered-brand; its own Equatable.equal is
 # V2-GRANT-equatable-brand-equal.
 id = "V2-GRANT-assert-equal-brand"

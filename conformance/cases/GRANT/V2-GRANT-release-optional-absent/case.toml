@@ -2,7 +2,7 @@ id = "V2-GRANT-release-optional-absent"
 rule = "V2-GRANT-release-optional-absent"
 profile = "interpreterV2"
 operation = "workspaceRun"
-description = "03-effects.md#target-admission: the release program under a world without GATE_METRICS; the optional @metrics leaf is refused and arrives as Option.none(), the entry runs, c.md is denied with no event (Q17, Q22)"
+description = "03-effects.md#target-admission: the release program under a world without GATE_METRICS; the optional @metrics leaf is refused and arrives as Option.none(), the entry runs, c.md is denied with no event"
 
 [inputs]
 tree = "tree"

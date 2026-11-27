@@ -1,10 +1,10 @@
-# Q7: sub rebases. Under the other reading the read is Err(denied) and has no
+# Sub rebases. Under the other reading the read is Err(denied) and has no
 # event.
 id = "V2-GRANT-sub-rebases"
 rule = "V2-GRANT-sub-rebases"
 profile = "interpreterV2"
 operation = "workspaceTest"
-description = "03-effects.md#narrowing: sub(dir.readText [\"sub\"]) reads [\"s.txt\"] as sub/s.txt; the event's args hold the path as written (Q7)"
+description = "03-effects.md#narrowing: sub(dir.readText [\"sub\"]) reads [\"s.txt\"] as sub/s.txt; the event's args hold the path as written"
 
 [inputs]
 tree = "tree"

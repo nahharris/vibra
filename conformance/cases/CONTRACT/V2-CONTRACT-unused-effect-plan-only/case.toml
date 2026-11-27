@@ -2,7 +2,7 @@ id = "V2-CONTRACT-unused-effect-plan-only"
 rule = "V2-CONTRACT-unused-effect-plan-only"
 profile = "staticV2"
 operation = "workspaceCheck"
-description = "03-effects.md#effect-ceilings: building a plan performs nothing, so a proc that only builds one does not perform its interface (Q5)"
+description = "03-effects.md#effect-ceilings: building a plan performs nothing, so a proc that only builds one does not perform its interface"
 
 [inputs]
 tree = "tree"

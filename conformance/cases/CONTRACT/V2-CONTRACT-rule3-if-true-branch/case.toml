@@ -10,3 +10,4 @@ project = "tree/project.vibon"
 
 [expect]
 verdict = "accepted"
+types = "types.vibon"

@@ -2,7 +2,7 @@ id = "V2-PROJECT-entry-unknown"
 rule = "V2-PROJECT-entry-unknown"
 profile = "staticV2"
 operation = "workspaceCheck"
-description = "07-diagnostics-and-conformance.md#availability-discovery-and-resolution: an entry that resolves to nothing is @name.unknownSymbol at the field"
+description = "04-programs-and-packages.md#targets: an entry that resolves to nothing is @name.unknownSymbol at the field"
 
 [inputs]
 tree = "tree"

@@ -1,5 +1,0 @@
-type Sorted(T) of List(T)
-  given {T: Ordered}
-endtype
-type Plain of I32 endtype
-fn f returns r: Option(Sorted(Plain)) do return Option.none() endfn

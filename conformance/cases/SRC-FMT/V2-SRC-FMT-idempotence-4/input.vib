@@ -1,1 +1,0 @@
-fn splitCents takes {total: Cents parts: I32} labelled {roundUp: Bool be false} returns shares: Result(List(Cents) SplitError) requires Ordered.greaterOrEqual(parts 1i32) else Result.err(error: SplitError.noParts()) do return Result.ok(value: divide(total parts roundUp: roundUp)) endfn

@@ -1,4 +1,4 @@
-# F5b of the review of grants. The first read goes through sub(dir.readText
+# The first read goes through sub(dir.readText
 # ["sub"]): root 3, the policy allOf(root, sub ["sub"]), the path as written.
 # The restrict returns a model over dir.readText, so the second read projects
 # dir.readText: root 3, the root policy alone. Neither event claims the textOnly

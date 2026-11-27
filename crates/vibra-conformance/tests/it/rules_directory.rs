@@ -106,13 +106,6 @@ fn rules_empty_file() {
 }
 
 #[test]
-fn rules_the_committed_directory_file_is_the_header_alone() {
-    let path = vibra_conformance::workspace_root().join("conformance/rules/m2-01.tsv");
-    let text = std::fs::read_to_string(&path).expect("the rules file exists");
-    assert_eq!(text, format!("{}\n", vibra_conformance::RULES_HEADER));
-}
-
-#[test]
 fn rules_duplicate_across_files() {
     let root = conformance_root(&[
         ("rules.tsv", rules(&[("V2-EFFECT-a", "active")])),

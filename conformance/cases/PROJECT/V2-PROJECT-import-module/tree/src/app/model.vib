@@ -1,3 +1,0 @@
-type User of {name: Str}
-  visibility @public
-endtype

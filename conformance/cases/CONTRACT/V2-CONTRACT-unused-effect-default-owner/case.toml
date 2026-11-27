@@ -2,7 +2,7 @@ id = "V2-CONTRACT-unused-effect-default-owner"
 rule = "V2-CONTRACT-unused-effect-default-owner"
 profile = "staticV2"
 operation = "workspaceCheck"
-description = "03-effects.md#effect-ceilings: the owner root of a default member is not written, so a body that performs nothing of it is no warning (Q5)"
+description = "03-effects.md#effect-ceilings: the owner root of a default member is not written, so a body that performs nothing of it is no warning"
 
 [inputs]
 tree = "tree"

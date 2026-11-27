@@ -1,11 +1,11 @@
-# Q1: Forward's own restrict runs and forwards under try. Were restrict to
+# Forward's own restrict runs and forwards under try. Were restrict to
 # return a value that is not a sealed grant unchanged, the read of b.bin would
 # be Ok("B") with an event.
 id = "V2-GRANT-narrow-forward-restrict"
 rule = "V2-GRANT-narrow-forward-restrict"
 profile = "interpreterV2"
 operation = "workspaceTest"
-description = "03-effects.md#narrowing: DirReadText.restrict on a Forward forwards the policy: b.bin is Err(denied), a.txt is Ok(\"A\") (Q1)"
+description = "03-effects.md#narrowing: DirReadText.restrict on a Forward forwards the policy: b.bin is Err(denied), a.txt is Ok(\"A\")"
 
 [inputs]
 tree = "tree"

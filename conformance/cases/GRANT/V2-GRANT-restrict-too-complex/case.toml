@@ -1,4 +1,4 @@
-# Q9: depth is the nesting of the normal form plus one per restrict. The
+# Depth is the nesting of the normal form plus one per restrict. The
 # effective policy is allOf[root rule, textOnly rule] (depth 3) whatever the
 # count, since normalization keeps each item once, so 61 restricts give 64 and
 # the 62nd gives 65. The guide says the 65th; under that count the 65th would be
@@ -7,7 +7,7 @@ id = "V2-GRANT-restrict-too-complex"
 rule = "V2-GRANT-restrict-too-complex"
 profile = "interpreterV2"
 operation = "workspaceTest"
-description = "03-effects.md#the-wire-form: a chain of restrict calls built by a recursive fn: the 61st fits and the 62nd is Err(ScopeError.policyTooComplex), counting ancestors acquired by restriction (Q9)"
+description = "03-effects.md#the-wire-form: a chain of restrict calls built by a recursive fn: the 61st fits and the 62nd is Err(ScopeError.policyTooComplex), counting ancestors acquired by restriction"
 
 [inputs]
 tree = "tree"

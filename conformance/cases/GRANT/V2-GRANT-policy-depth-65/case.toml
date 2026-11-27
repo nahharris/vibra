@@ -2,7 +2,7 @@ id = "V2-GRANT-policy-depth-65"
 rule = "V2-GRANT-policy-depth-65"
 profile = "staticV2"
 operation = "workspaceCheck"
-description = "07-diagnostics-and-conformance.md#contract-effect-and-authority-diagnostics: a recipe policy of depth 65 is @grant.policyTooComplex at the policy (Q9)"
+description = "07-diagnostics-and-conformance.md#contract-effect-and-authority-diagnostics: a recipe policy of depth 65 is @grant.policyTooComplex at the policy"
 
 [inputs]
 tree = "tree"

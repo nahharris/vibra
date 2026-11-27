@@ -1,5 +1,0 @@
-use @std.assert enduse
-
-use @std.test.TestWorld enduse
-
-test "two" takes {a: TestWorld b: TestWorld} do assert.true(true) endtest

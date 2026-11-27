@@ -1,11 +1,11 @@
-# Q10: a known-size reservation over the bound is Err(limitExceeded) with
+# A known-size reservation over the bound is Err(limitExceeded) with
 # nothing consumed. Were the read clipped to the bound, it would return ab and
 # the parent would read c.
 id = "V2-GRANT-limit-stdin-over"
 rule = "V2-GRANT-limit-stdin-over"
 profile = "interpreterV2"
 operation = "workspaceTest"
-description = "06-runtime.md#closed-operation-semantics: a bound of two input bytes refuses a read of 3 from abc and consumes nothing: the parent then reads abc; one event (Q10)"
+description = "06-runtime.md#closed-operation-semantics: a bound of two input bytes refuses a read of 3 from abc and consumes nothing: the parent then reads abc; one event"
 
 [inputs]
 tree = "tree"

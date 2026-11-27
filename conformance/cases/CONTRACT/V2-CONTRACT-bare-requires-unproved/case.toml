@@ -17,3 +17,4 @@ level = "@error"
 source = "src/app/main.vib"
 span = { start = 131, end = 135 }
 related = [{ source = "src/app/main.vib", span = { start = 3, end = 4 } }]
+notes = ["branch on the same predicate", "pass a value of a type whose invariant states it", "give the guard an `else`"]
