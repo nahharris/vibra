@@ -15,21 +15,9 @@ use vibra_ir::{
 
 use crate::{
     BASE, base_parts, call, call_value, closure, construct, direct, fn_type, function,
-    id, if_else, node, program, set_with, signature, tail, u64_add, u64_equal, u64_lit,
-    u64_sub, var,
+    id, if_else, node, on_small_stack, program, set_with, signature, tail, u64_add,
+    u64_equal, u64_lit, u64_sub, var,
 };
-
-const STACK: usize = 256 * 1024;
-
-/// Runs `work` on a thread whose stack is 256 KiB.
-fn on_small_stack<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> T {
-    std::thread::Builder::new()
-        .stack_size(STACK)
-        .spawn(work)
-        .expect("a thread")
-        .join()
-        .expect("the thread finished")
-}
 
 fn n() -> Node {
     var(0, Type::U64)

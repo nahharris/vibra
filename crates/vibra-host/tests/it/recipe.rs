@@ -14,9 +14,7 @@ use vibra_host::recipe::{
 };
 use vibra_ir::external::host::HostInterface;
 
-fn name(atom: &str) -> LeafName {
-    LeafName::new(atom)
-}
+use crate::support::name;
 
 /// A `.txt` read policy rooted at `root`, as the chapter's example writes it.
 fn text_policy(root: &str) -> Policy {

@@ -5,12 +5,10 @@
 //! and the release rows need a driver seam and are unit tests of `run`.
 
 use vibra_workspace::run::{CommandResult, Launch, RunOutcome, run_target};
-use vibra_workspace::{HostWorld, MemoryBudget, decode_world};
+use vibra_workspace::{HostWorld, MemoryBudget};
 
+use crate::dual_run::{STDOUT, world};
 use crate::support::{TempDir, capture};
-
-const STDOUT: &str =
-    "{provider: @host.io.stdout resource: {kind: @processStream} after: []}";
 
 /// A project of one binary target `@app` rooted at `src/app`.
 fn project(effects: &str, grants: &str) -> String {
@@ -45,10 +43,6 @@ fn hello(code: &str) -> String {
              return ExitCode({code})\n"
         ),
     )
-}
-
-fn world(text: &str) -> HostWorld {
-    decode_world(None, text.as_bytes()).expect("the world decodes")
 }
 
 /// Runs the one binary target of a tree of `document` and `main` under

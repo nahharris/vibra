@@ -13,19 +13,10 @@ use std::process::Command;
 
 use serde_json::Value;
 
-use crate::support::{LIBRARY, TempDir, single_document};
-
-/// The built `vibra`.
-const VIBRA: &str = env!("CARGO_BIN_EXE_vibra");
+use crate::support::{BINARY, ENTRY, LIBRARY, TempDir, VIBRA, codes, single_document};
 
 /// The limit `m1Default` publishes.
 const LIMIT: usize = 1_024;
-
-/// A binary project whose entry returns success, with `src/app/main.vib`.
-const BINARY: &str = "{format: @project.v2 package: {name: \"hello\" version: \"0.1.0\"} targets: [{name: @app kind: @bin root: \"src/app\" entry: @app.main.main effects: [] grants: [:]}] dependencies: [:]}";
-
-/// The entry of [`BINARY`].
-const ENTRY: &str = "use @std.process.ExitCode enduse\n\nproc main returns code: ExitCode do return ExitCode(0u8) endproc\n";
 
 /// What one run of the binary produced.
 struct Ran {
@@ -85,15 +76,6 @@ fn lists(depth: usize) -> String {
 
 fn library(label: &str, module: &str) -> TempDir {
     TempDir::project(label, LIBRARY, &[("src/app/main.vib", module)])
-}
-
-fn codes(value: &Value) -> Vec<String> {
-    value["diagnostics"]
-        .as_array()
-        .expect("diagnostics")
-        .iter()
-        .map(|diagnostic| diagnostic["code"].as_str().expect("a code").to_owned())
-        .collect()
 }
 
 /// Asserts that `value` reports the nesting limit alone, at `start` of

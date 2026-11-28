@@ -56,10 +56,7 @@ fn write_replaces_a_changed_file_and_a_second_plan_is_unchanged() {
     let root = TempDir::project("fmt-write", LIBRARY, &[("src/app/main.vib", MESSY)]);
     let first = plan(&root, "src/app/main.vib");
     assert_eq!(first.write(), Ok(true));
-    assert_eq!(
-        std::fs::read_to_string(root.join("src/app/main.vib")).expect("file"),
-        CANONICAL
-    );
+    assert_eq!(root.read("src/app/main.vib"), CANONICAL);
     let leftovers = std::fs::read_dir(root.join("src/app"))
         .expect("directory")
         .count();

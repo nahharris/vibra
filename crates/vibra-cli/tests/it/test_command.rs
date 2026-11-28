@@ -5,7 +5,7 @@
 
 use serde_json::{Value, json};
 
-use crate::support::{LIBRARY, TempDir, envelope_in, run_in};
+use crate::support::{LIBRARY, TempDir, codes, envelope_in, run_in};
 
 /// `src/app/math.vib`: the library function the tests call.
 const MATH: &str = "fn add\n  takes {left: I32 right: I32}\n  returns sum: I32\n  \
@@ -53,15 +53,6 @@ fn test(root: &TempDir, arguments: &[&str]) -> (i32, Value) {
     let mut line = vec!["--format", "json", "test"];
     line.extend_from_slice(arguments);
     envelope_in(root.path(), &line)
-}
-
-fn codes(document: &Value) -> Vec<String> {
-    document["diagnostics"]
-        .as_array()
-        .expect("diagnostics")
-        .iter()
-        .map(|diagnostic| diagnostic["code"].as_str().expect("code").to_owned())
-        .collect()
 }
 
 fn counts(document: &Value) -> (u64, u64, u64) {

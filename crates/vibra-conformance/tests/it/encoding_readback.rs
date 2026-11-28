@@ -12,160 +12,33 @@
 //! text, and the reader agree.
 
 use vibra_ir::{
-    Binder, Bound, Case, EntityRef, FnType, ImplementationRecord, IntentType,
-    InterfaceKey, Library, LibraryTypes, NamedTypes, ProcType, Row, SignatureRecord,
-    Type, TypeBody, TypeDefinition, TypeId, TypeTable, Value, Visibility, encode_type,
+    Binder, Bound, EntityRef, FnType, ImplementationRecord, IntentType, InterfaceKey,
+    Library, ProcType, Row, SignatureRecord, Type, TypeTable, Value, encode_type,
     encode_value, type_document, value_document,
 };
 use vibra_syntax::parse_data;
 
-/// The chapter's placeholder identity.
-const SEED: &str =
-    "sha256:213e3a01ef10d7c10032616f8ab0da9a97fb729b9f98d723f4beb3158a25e2ad";
+// The hand-built IR of `vibra-ir`'s tests, whose encoding tests these restate.
+#[allow(dead_code)]
+#[path = "../../../vibra-ir/tests/it/fixtures.rs"]
+mod fixtures;
 
-fn id(path: &str) -> TypeId {
-    TypeId::new(path, SEED).unwrap()
-}
+use fixtures::{
+    SEED, declared, example, id, library_definitions, library_type, library_without,
+    meters, named, pair, point,
+};
 
-fn path(library: Library) -> &'static str {
-    match library {
-        Library::Bool => "std.bool.Bool",
-        Library::Str => "std.str.Str",
-        Library::Bytes => "std.bytes.Bytes",
-        Library::Option => "std.option.Option",
-        Library::Result => "std.result.Result",
-        Library::Dict => "std.dict.Dict",
-        Library::Iter => "std.iter.Iter",
-        Library::Equatable => "std.equatable.Equatable",
-        Library::Ordered => "std.ordered.Ordered",
-        Library::Encodable => "std.encodable.Encodable",
-        Library::Ordering => "std.ordering.Ordering",
-        Library::ArithmeticError => "std.number.ArithmeticError",
-        Library::ConversionError => "std.number.ConversionError",
-    }
-}
-
-fn declared(library: Library, arguments: &str) -> String {
-    format!(
-        "{{kind: @declared path: @{} seed: \"{SEED}\" arguments: [{arguments}]}}",
-        path(library)
-    )
-}
-
-fn example(path: &str) -> String {
-    format!("{{kind: @declared path: @{path} seed: \"{SEED}\" arguments: []}}")
-}
-
-fn library_type(library: Library, arguments: Vec<Type>) -> Type {
-    Type::Declared(id(path(library)), arguments)
-}
-
-fn named(entries: Vec<(&str, Type)>) -> NamedTypes {
-    NamedTypes::new(entries.into_iter().map(|(name, ty)| (name.to_owned(), ty)))
-        .unwrap()
-}
-
-fn definition(
-    path: &str,
-    parameters: &[&str],
-    body: TypeBody,
-    visibility: Visibility,
-) -> TypeDefinition {
-    TypeDefinition::new(
-        id(path),
-        parameters
-            .iter()
-            .map(|name| vibra_ir::Binder::new(*name, None).unwrap())
-            .collect(),
-        body,
-        None,
-        visibility,
-    )
-    .unwrap()
-}
-
-/// The library bindings and declarations the value examples use, and the
-/// three example declarations of step 12.
+/// The table of `vibra-ir`'s encoding tests: the library bindings and
+/// declarations of the fixtures, and the three example declarations of
+/// step 12.
 fn table() -> TypeTable {
-    let plain = |names: &[&str]| {
-        names
-            .iter()
-            .map(|name| Case::new(*name, Vec::new()))
-            .collect::<Vec<_>>()
-    };
-    let library = [
-        Library::Bool,
-        Library::Str,
-        Library::Bytes,
-        Library::Option,
-        Library::Dict,
-    ]
-    .into_iter()
-    .fold(LibraryTypes::new(), |bindings, library| {
-        bindings.with(library, id(path(library)))
-    });
-    let definitions = vec![
-        definition(
-            path(Library::Bool),
-            &[],
-            TypeBody::Variant(plain(&["false", "true"])),
-            Visibility::Public,
-        ),
-        definition(
-            path(Library::Option),
-            &["T"],
-            TypeBody::Variant(vec![
-                Case::new("none", Vec::new()),
-                Case::new("some", vec![("value".to_owned(), Type::Binder(0))]),
-            ]),
-            Visibility::Public,
-        ),
-        definition(
-            path(Library::Str),
-            &[],
-            TypeBody::Wrapper(Type::list(Type::Char)),
-            Visibility::Private,
-        ),
-        definition(
-            path(Library::Bytes),
-            &[],
-            TypeBody::Wrapper(Type::list(Type::U8)),
-            Visibility::Private,
-        ),
-        definition(
-            path(Library::Dict),
-            &["K", "V"],
-            TypeBody::Wrapper(Type::list(Type::Tuple(vec![
-                Type::Binder(0),
-                Type::Binder(1),
-            ]))),
-            Visibility::Private,
-        ),
-        definition(
-            "example.geometry.Point",
-            &[],
-            TypeBody::Record(vec![
-                ("y".to_owned(), Type::I32),
-                ("x".to_owned(), Type::I32),
-            ]),
-            Visibility::Public,
-        ),
-        definition(
-            "example.geometry.Pair",
-            &[],
-            TypeBody::Tuple(vec![Type::I32, Type::I32]),
-            Visibility::Public,
-        ),
-        definition(
-            "example.units.Meters",
-            &[],
-            TypeBody::Wrapper(Type::F64),
-            Visibility::Public,
-        ),
-    ];
-    TypeTable::new(library, definitions)
+    TypeTable::new(
+        library_without(&[Library::Equatable, Library::Ordered, Library::Encodable]),
+        library_definitions()
+            .into_iter()
+            .chain([point(), pair(), meters()]),
+    )
 }
-
 /// Reads `written` and `text` and asserts both read with no diagnostic and
 /// decode to equal values.
 fn agree(label: &str, written: &str, text: &str) {

@@ -15,8 +15,9 @@ use vibra_ir::{
 };
 
 use crate::{
-    BASE, bool_type, boolean, dict, function, id, int, integer, lit, node, program,
-    set_with, signature, some_value, str_type, text, var, void,
+    BASE, bool_type, boolean, dict, function, id, int, integer, lit, node,
+    on_small_stack, program, set_with, signature, some_value, str_type, text, var,
+    void,
 };
 
 /// A budget of 64 KiB.
@@ -387,16 +388,6 @@ fn v10_a_frame_larger_than_the_budget_is_not_built() {
 
 /// A depth far beyond what host recursion on a small stack survives.
 const DEEP: usize = 100_000;
-
-/// Runs `work` on a thread whose stack is 256 KiB.
-fn on_small_stack<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> T {
-    std::thread::Builder::new()
-        .stack_size(256 * 1024)
-        .spawn(work)
-        .expect("a thread")
-        .join()
-        .expect("the thread finished")
-}
 
 /// `void` inside `depth` single-statement sequences.
 fn nested_sequences(depth: usize) -> Node {

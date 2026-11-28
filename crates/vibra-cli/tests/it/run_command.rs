@@ -17,10 +17,7 @@ use std::process::{Command, Stdio};
 
 use serde_json::{Value, json};
 
-use crate::support::{TempDir, single_document};
-
-/// The built `vibra`.
-const VIBRA: &str = env!("CARGO_BIN_EXE_vibra");
+use crate::support::{TempDir, VIBRA, codes, single_document};
 
 /// The corpus of the repository.
 fn cases() -> PathBuf {
@@ -98,15 +95,6 @@ fn run_json(directory: &Path, arguments: &[&str]) -> (i32, Value) {
         panic!("the envelope of {line:?} violates its schema: {violation}")
     });
     (ran.code, document)
-}
-
-fn codes(document: &Value) -> Vec<String> {
-    document["diagnostics"]
-        .as_array()
-        .expect("diagnostics")
-        .iter()
-        .map(|diagnostic| diagnostic["code"].as_str().expect("a code").to_owned())
-        .collect()
 }
 
 fn assert_invalid_input(code: i32, document: &Value) {

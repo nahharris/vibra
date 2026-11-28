@@ -1,12 +1,14 @@
 //! The in-process harness of the host tests: run one command line through
-//! `vibra_cli::run` and read what it wrote.
+//! `vibra_cli::run` and read what it wrote; and the fixtures and readers
+//! several modules share.
 
 use std::ffi::OsString;
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::path::Path;
 
 use serde_json::Value;
+
+/// The built `vibra`.
+pub(crate) const VIBRA: &str = env!("CARGO_BIN_EXE_vibra");
 
 /// Everything one run produced.
 pub(crate) struct Outcome {
@@ -62,60 +64,39 @@ pub(crate) fn single_document(text: &str) -> Value {
     serde_json::from_str(body).unwrap_or_else(|error| panic!("{error}: {text:?}"))
 }
 
-/// A counter, not the clock, makes a name unique within the process.
-static NEXT: AtomicU64 = AtomicU64::new(0);
-
-/// The library project of the host tests, with the root `src/app`.
-pub(crate) const LIBRARY: &str = "{format: @project.v2 package: {name: \"hello\" version: \"0.1.0\"} targets: [{name: @app kind: @lib root: \"src/app\"}] dependencies: [:]}";
-
-/// A temporary directory, removed on drop.
-pub(crate) struct TempDir {
-    path: PathBuf,
+/// The codes of the diagnostics of `document`, in order.
+pub(crate) fn codes(document: &Value) -> Vec<String> {
+    document["diagnostics"]
+        .as_array()
+        .expect("diagnostics")
+        .iter()
+        .map(|diagnostic| diagnostic["code"].as_str().expect("a code").to_owned())
+        .collect()
 }
 
-impl TempDir {
-    /// A fresh directory under the canonical temporary directory.
-    pub(crate) fn new(label: &str) -> Self {
-        let serial = NEXT.fetch_add(1, Ordering::Relaxed);
-        let parent =
-            fs::canonicalize(std::env::temp_dir()).expect("temporary directory");
-        let path =
-            parent.join(format!("vibra-cli-{label}-{}-{serial}", std::process::id()));
-        let _ = fs::remove_dir_all(&path);
-        fs::create_dir_all(&path).expect("create the directory");
-        Self { path }
-    }
-
-    /// A project whose `project.vibon` holds `document`, with `files`, each
-    /// a relative path and its content.
-    pub(crate) fn project(label: &str, document: &str, files: &[(&str, &str)]) -> Self {
-        let directory = Self::new(label);
-        directory.write("project.vibon", document);
-        for (path, contents) in files {
-            directory.write(path, contents);
+/// Every file under `directory`, as a path relative to it with `/`.
+pub(crate) fn files(directory: &Path) -> Vec<String> {
+    let mut found = Vec::new();
+    let mut pending = vec![directory.to_path_buf()];
+    while let Some(next) = pending.pop() {
+        for entry in std::fs::read_dir(&next).expect("a readable directory") {
+            let path = entry.expect("a directory entry").path();
+            if path.is_dir() {
+                pending.push(path);
+            } else {
+                let relative = path.strip_prefix(directory).expect("beneath it");
+                found.push(relative.to_string_lossy().replace('\\', "/"));
+            }
         }
-        directory
     }
-
-    pub(crate) fn path(&self) -> &Path {
-        &self.path
-    }
-
-    pub(crate) fn read(&self, relative: &str) -> String {
-        fs::read_to_string(self.path.join(relative)).expect("a readable fixture")
-    }
-
-    pub(crate) fn write(&self, relative: &str, contents: &str) {
-        let path = self.path.join(relative);
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).expect("parent directory");
-        }
-        fs::write(path, contents).expect("fixture file");
-    }
+    found.sort();
+    found
 }
 
-impl Drop for TempDir {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.path);
-    }
-}
+pub(crate) use crate::workspace_support::{LIBRARY, TempDir};
+
+/// A binary project whose entry is `@app.main.main`, with `src/app/main.vib`.
+pub(crate) const BINARY: &str = "{format: @project.v2 package: {name: \"hello\" version: \"0.1.0\"} targets: [{name: @app kind: @bin root: \"src/app\" entry: @app.main.main effects: [] grants: [:]}] dependencies: [:]}";
+
+/// The entry of [`BINARY`]: it returns success.
+pub(crate) const ENTRY: &str = "use @std.process.ExitCode enduse\n\nproc main returns code: ExitCode do return ExitCode(0u8) endproc\n";

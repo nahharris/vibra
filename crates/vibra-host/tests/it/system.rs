@@ -20,7 +20,7 @@ use std::rc::Rc;
 use vibra_diagnostics::ByteSpan;
 #[cfg(not(windows))]
 use vibra_diagnostics::DiagnosticCode;
-use vibra_host::broker::{Context, Counters, RootGrant};
+use vibra_host::broker::{Context, RootGrant};
 use vibra_host::driver::{
     Acquire, Action, Completion, Driver, DriverIdentity, Found, Gate, Refused,
     Reserved, Resolved, ResourceId,
@@ -36,14 +36,14 @@ use vibra_host::system::{
     Input, InputSource, Output, OutputSink, SystemDriver, SystemInputs, Variables,
     WriteFailure,
 };
-use vibra_host::trace::{GrantOrigin, declaration_identity};
+use vibra_host::trace::GrantOrigin;
+use vibra_ir::Row;
 use vibra_ir::authority::{
-    GrantToken, HostArgument, HostContext, HostErrorCase, HostFault, HostOk, HostReply,
-    HostRequest,
+    GrantToken, HostArgument, HostContext, HostFault, HostOk, HostReply, HostRequest,
 };
 use vibra_ir::external::host::{HostInterface, HostOp};
-use vibra_ir::{EntityRef, Row};
 
+use crate::support::{VOID, bytes, counters, entity, err, text};
 use crate::trace::header;
 
 // --- In-memory streams ---------------------------------------------------
@@ -368,24 +368,6 @@ fn call(
 
 fn read(cx: &mut Context<'_>, op: HostOp, grant: GrantToken, max: u64) -> HostReply {
     call(cx, op, grant, &[HostArgument::Count(max)]).0
-}
-
-fn err(op: HostOp, case: &str) -> HostReply {
-    HostReply::Err(HostErrorCase::new(op.row().error, case).expect("a case"))
-}
-
-fn text(value: &str) -> HostReply {
-    HostReply::Ok(HostOk::Text(value.to_owned()))
-}
-
-fn bytes(value: &[u8]) -> HostReply {
-    HostReply::Ok(HostOk::Bytes(value.to_vec()))
-}
-
-const VOID: HostReply = HostReply::Ok(HostOk::Void);
-
-fn counters(cx: &Context<'_>, grant: GrantToken) -> Counters {
-    cx.counters_for_tests(grant).expect("counters")
 }
 
 /// Runs `body` on a context over a driver whose standard input is
@@ -1054,22 +1036,6 @@ fn identities() {
 fn construction_reads_nothing() {
     let driver = SystemDriver::new(SystemInputs::process(vec![os("a")]));
     assert!(format!("{driver:?}").contains("held: {}"));
-}
-
-fn entity(interface: HostInterface) -> EntityRef {
-    let owner = interface.owner();
-    EntityRef::new(
-        owner.path().trim_start_matches('@'),
-        declaration_identity(
-            "std",
-            "0.0.2",
-            owner.module,
-            "",
-            "@interface",
-            owner.name,
-        ),
-    )
-    .expect("an entity reference")
 }
 
 fn leaf(

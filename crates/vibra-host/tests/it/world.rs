@@ -16,16 +16,17 @@ use vibra_host::driver::{
     Acquire, Action, Completion, Driver, DriverIdentity, Found, FoundAction, Gate,
     Measured, Progress, Refused, Reserved, Resolved, ResourceId,
 };
-use vibra_host::policy::{self, Policy};
+use vibra_host::policy::Policy;
 use vibra_host::recipe::{Limits, PROVIDERS, Provider};
 use vibra_host::trace::GrantOrigin;
 use vibra_host::world::{Clock, HostWorld, WORLD_FORMAT, WorldDriver, decode_world};
 use vibra_ir::authority::{
-    GrantToken, HostArgument, HostContext, HostErrorCase, HostFault, HostFsKind,
-    HostOk, HostReply, HostRequest,
+    GrantToken, HostArgument, HostContext, HostFault, HostFsKind, HostOk, HostReply,
+    HostRequest,
 };
 use vibra_ir::external::host::{HostInterface, HostOp};
 
+use crate::support::{ANY_NAME, VOID, bytes, err, names, policy, text};
 use crate::trace::header;
 
 /// The chapter's example world.
@@ -39,10 +40,6 @@ const W: &str = r#"{
   clock: {wall: 1700000000000000000i64 monotonic: 0u64 step: 1000u64}
   random: {seed: 42u64}
 }"#;
-
-fn names(names: &[&str]) -> Vec<String> {
-    names.iter().map(|name| (*name).to_owned()).collect()
-}
 
 fn decoded(text: &str) -> HostWorld {
     decode_world(Some("world.vibon"), text.as_bytes()).expect("a valid world")
@@ -126,16 +123,6 @@ fn acquire_all(driver: &mut dyn Driver, notes: bool) -> Ids {
     }
 }
 
-fn policy(expression: &str) -> Policy {
-    policy::decode(
-        format!(
-            "{{format: @scopePolicy.v1 family: @filesystem expression: {expression}}}"
-        )
-        .as_bytes(),
-    )
-    .expect("a policy")
-}
-
 /// A file rule over the whole held directory with `actions` and `test`.
 fn files_rule(actions: &str, test: &str) -> Policy {
     policy(&format!(
@@ -143,8 +130,6 @@ fn files_rule(actions: &str, test: &str) -> Policy {
          names: {test}}}"
     ))
 }
-
-const ANY_NAME: &str = "{kind: @anyName}";
 
 fn root_grant(
     cx: &mut Context<'_>,
@@ -235,18 +220,6 @@ fn none(cx: &mut Context<'_>, op: HostOp, grant: GrantToken) -> HostReply {
     reply(cx, op, grant, &[])
 }
 
-fn err(op: HostOp, case: &str) -> HostReply {
-    HostReply::Err(HostErrorCase::new(op.row().error, case).expect("a case"))
-}
-
-fn text(value: &str) -> HostReply {
-    HostReply::Ok(HostOk::Text(value.to_owned()))
-}
-
-fn bytes(value: &[u8]) -> HostReply {
-    HostReply::Ok(HostOk::Bytes(value.to_vec()))
-}
-
 fn listing(entries: &[&str]) -> HostReply {
     HostReply::Ok(HostOk::Names(names(entries)))
 }
@@ -254,8 +227,6 @@ fn listing(entries: &[&str]) -> HostReply {
 fn metadata(kind: HostFsKind, size: u64) -> HostReply {
     HostReply::Ok(HostOk::Metadata { kind, size })
 }
-
-const VOID: HostReply = HostReply::Ok(HostOk::Void);
 
 // ---------------------------------------------------------------------------
 // A recording wrapper: the calls, the gate's questions and answers, and the

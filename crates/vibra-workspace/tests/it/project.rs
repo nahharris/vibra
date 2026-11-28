@@ -60,7 +60,7 @@ fn faults(text: &str) -> Vec<(DiagnosticCode, ByteSpan)> {
         .collect()
 }
 
-fn at(text: &str, needle: &str) -> ByteSpan {
+pub(crate) fn at(text: &str, needle: &str) -> ByteSpan {
     let start = text.find(needle).expect("the needle occurs");
     ByteSpan::new(start, start + needle.len())
 }

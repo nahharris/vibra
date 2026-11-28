@@ -40,10 +40,11 @@ use vibra_ir::{
 };
 
 use crate::{
-    BASE, base_parts, bytes_type, call, call_value, closure, construct, dict,
-    err_value, function, id, if_else, library, lit, node, none, ok_value, option,
-    origin, origin_at, program, result, signature, some, str_type, text, text_value,
-    u64_equal, u64_lit, u64_sub, var, variant_value, void,
+    BASE, await_, base_parts, bytes_type, call, call_value, closure, construct, dict,
+    err_value, function, id, if_else, let_in, library, lit, node, none, ok_value,
+    on_small_stack, option, origin, origin_at, program, result, ret, seq, signature,
+    some, str_type, text, text_value, u64_equal, u64_lit, u64_sub, var, variant_value,
+    void,
 };
 
 // ----- the recording context -----
@@ -610,12 +611,6 @@ fn set_of(
 
 // ----- builders -----
 
-fn await_(plan: Node) -> Node {
-    node(Expr::Await {
-        plan: Box::new(plan),
-    })
-}
-
 fn await_at(plan: Node, at: SourceOrigin) -> Node {
     Node::new(
         Expr::Await {
@@ -623,22 +618,6 @@ fn await_at(plan: Node, at: SourceOrigin) -> Node {
         },
         at,
     )
-}
-
-fn ret(value: Node) -> Node {
-    node(Expr::Return(Box::new(value)))
-}
-
-fn seq(statements: Vec<Node>) -> Node {
-    node(Expr::Sequence(statements))
-}
-
-fn let_in(slot: usize, value: Node, body: Node) -> Node {
-    node(Expr::Let {
-        slot: Some(slot),
-        value: Box::new(value),
-        body: Box::new(body),
-    })
 }
 
 fn field(record: Node, name: &str) -> Node {
@@ -2450,131 +2429,11 @@ fn grant_captured_in_a_closure() {
     assert_eq!(host.grants(), [token(4)]);
 }
 
-/// The ambient APIs: the filesystem, the environment, the clocks, the
-/// operating system's random source, and the process's standard streams.
-const AMBIENT_PATTERNS: &[&str] = &[
-    "std::fs",
-    "fs::",
-    "File::open",
-    "File::create",
-    "read_dir(",
-    "std::env",
-    "env::var",
-    "env::args",
-    "env::current_dir",
-    "SystemTime",
-    "Instant::now",
-    "std::time::Instant",
-    "UNIX_EPOCH",
-    "getrandom",
-    "RandomState",
-    "std::io::stdin",
-    "io::stdin(",
-    "io::stdout(",
-    "io::stderr(",
-    "std::process",
-    "println!",
-    "eprintln!",
-    "print!(",
-    "eprint!(",
-];
+// The scanner of the ambient-read audit of `vibra-conformance`.
+#[path = "../../../vibra-conformance/tests/it/ambient_reads/scan.rs"]
+mod ambient_scan;
 
-/// The attribute that gates host-language test code.
-const TEST_GATE: &str = "#[cfg(test)]";
-
-/// Whether `text`, trimmed, opens a module: `mod name`, with or without a
-/// visibility.
-fn opens_module(text: &str) -> bool {
-    let text = text.trim_start();
-    let text = ["pub(crate) ", "pub(super) ", "pub "]
-        .iter()
-        .find_map(|visibility| text.strip_prefix(visibility))
-        .unwrap_or(text);
-    text.starts_with("mod ")
-}
-
-/// The lines of `source`, numbered from one, that are not in a
-/// `#[cfg(test)]` module: the attribute, the `mod` it gates, and that
-/// module's block, matched brace by brace, are left out. A `#[cfg(test)]`
-/// field, function, or other item is kept, and so is every line after the
-/// module.
-fn outside_test_modules(source: &str) -> Vec<(usize, &str)> {
-    let lines = source.lines().collect::<Vec<_>>();
-    let mut kept = Vec::new();
-    let mut index = 0;
-    while let Some(line) = lines.get(index) {
-        let trimmed = line.trim_start();
-        let Some(rest) = trimmed.strip_prefix(TEST_GATE) else {
-            kept.push((index + 1, *line));
-            index += 1;
-            continue;
-        };
-        // The gated item: on the attribute's line, or on the next line that
-        // is neither an attribute nor a comment.
-        let mut item = index;
-        if rest.trim().is_empty() {
-            item += 1;
-            while lines.get(item).is_some_and(|text| {
-                let text = text.trim_start();
-                text.starts_with("#[") || text.starts_with("//")
-            }) {
-                item += 1;
-            }
-        }
-        let opens = lines.get(item).is_some_and(|text| {
-            let text = if item == index { rest } else { text };
-            opens_module(text)
-        });
-        if !opens {
-            kept.push((index + 1, *line));
-            index += 1;
-            continue;
-        }
-        // Skip through the line that closes the module's block, or through
-        // `mod name;`.
-        let mut depth: i64 = 0;
-        let mut opened = false;
-        let mut end = item;
-        while let Some(text) = lines.get(end) {
-            let text = if end == index { rest } else { text };
-            let code = text.split("//").next().unwrap_or(text);
-            for character in code.chars() {
-                match character {
-                    '{' => {
-                        depth += 1;
-                        opened = true;
-                    }
-                    '}' => depth -= 1,
-                    _ => {}
-                }
-            }
-            end += 1;
-            if (opened && depth <= 0) || (!opened && code.trim_end().ends_with(';')) {
-                break;
-            }
-        }
-        index = end;
-    }
-    kept
-}
-
-/// The ambient APIs `source` names outside comments and its `#[cfg(test)]`
-/// modules, which are host-language test code and run no program.
-fn ambient_references(source: &str) -> Vec<(usize, &'static str)> {
-    let mut found = Vec::new();
-    for (number, line) in outside_test_modules(source) {
-        if line.trim_start().starts_with("//") {
-            continue;
-        }
-        let code = line.split("//").next().unwrap_or(line);
-        for pattern in AMBIENT_PATTERNS {
-            if code.contains(pattern) {
-                found.push((number, *pattern));
-            }
-        }
-    }
-    found
-}
+use ambient_scan::ambient_references;
 
 /// Row `ATK-ambient-read-in-interp`: no source of the interpreter names an
 /// ambient API; every host effect passes through the context.
@@ -2604,42 +2463,6 @@ fn atk_ambient_read_in_interp() {
     assert_eq!(
         ambient_references("let now = std::time::SystemTime::now();"),
         [(1, "SystemTime")]
-    );
-}
-
-/// F3 of the review of grants: the scan skips only a `#[cfg(test)]`
-/// module, never the rest of a file after a `#[cfg(test)]` field or item,
-/// and the delivery observer of `src/host.rs` is such a field.
-#[test]
-fn atk_ambient_read_after_a_test_only_field() {
-    let field = "struct Slot {\n    #[cfg(test)]\n    delivered: u8,\n}\n\
-                 fn read() { let _ = std::fs::read(\"x\"); }\n";
-    assert_eq!(ambient_references(field), [(5, "std::fs"), (5, "fs::")]);
-    let module = "#[cfg(test)]\nmod tests {\n    fn f() { std::env::args(); }\n}\n\n\
-                  fn after() { let _ = std::env::var(\"X\"); }\n";
-    assert_eq!(
-        ambient_references(module),
-        [(6, "std::env"), (6, "env::var")]
-    );
-    let source = std::fs::read_to_string(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("src")
-            .join("host.rs"),
-    )
-    .unwrap();
-    let lines = source.lines().collect::<Vec<_>>();
-    let field = lines
-        .iter()
-        .position(|line| line.trim_start().starts_with("pub(crate) delivered:"))
-        .expect("the delivery observer");
-    assert_eq!(
-        lines[..field]
-            .iter()
-            .rev()
-            .map(|line| line.trim())
-            .find(|line| !line.starts_with("///")),
-        Some("#[cfg(test)]"),
-        "the delivery observer exists only in the unit tests"
     );
 }
 
@@ -2723,27 +2546,22 @@ fn down() -> CheckedFunction {
 #[test]
 fn deep_await_chain() {
     const DEPTH: u64 = 100_000;
-    let requests = std::thread::Builder::new()
-        .stack_size(256 * 1024)
-        .spawn(|| {
-            let main = main_over_r(
-                ret(await_(call(OWN, vec![var(0, r_type()), u64_lit(DEPTH)]))),
-                1,
-            );
-            let mut host = Recording::default();
-            run_main(
-                vec![down(), main],
-                Vec::new(),
-                Vec::new(),
-                vec![EntryArgument::Grant(token(1))],
-                &mut host,
-            )
-            .unwrap();
-            host.ordinals()
-        })
-        .unwrap()
-        .join()
+    let requests = on_small_stack(|| {
+        let main = main_over_r(
+            ret(await_(call(OWN, vec![var(0, r_type()), u64_lit(DEPTH)]))),
+            1,
+        );
+        let mut host = Recording::default();
+        run_main(
+            vec![down(), main],
+            Vec::new(),
+            Vec::new(),
+            vec![EntryArgument::Grant(token(1))],
+            &mut host,
+        )
         .unwrap();
+        host.ordinals()
+    });
     assert_eq!(requests.len(), 1);
     assert_eq!(requests[0].0, DEPTH + 3);
 }

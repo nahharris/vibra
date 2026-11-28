@@ -16,6 +16,8 @@ use vibra_host::policy::{
 };
 use vibra_ir::names::NameError;
 
+use crate::support::{ANY_NAME, on_small_stack, suffix};
+
 /// The document around `expression`.
 fn document(expression: &str) -> String {
     format!("{{format: @scopePolicy.v1 family: @filesystem expression: {expression}}}")
@@ -52,12 +54,6 @@ fn any_of(items: &[&str]) -> String {
 
 fn all_of(items: &[&str]) -> String {
     format!("{{kind: @allOf items: [{}]}}", items.join(" "))
-}
-
-const ANY_NAME: &str = "{kind: @anyName}";
-
-fn suffix(value: &str) -> String {
-    format!("{{kind: @suffix value: \"{value}\"}}")
 }
 
 fn exact(names: &[&str]) -> String {
@@ -534,16 +530,6 @@ fn the_count_is_taken_after_normalization() {
     assert_eq!(normal.canonical_bytes(), document(&dir_text("a")));
 }
 
-/// Runs `work` on a thread with a 256 KiB stack.
-fn on_a_small_stack<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> T {
-    std::thread::Builder::new()
-        .stack_size(256 * 1024)
-        .spawn(work)
-        .expect("the thread starts")
-        .join()
-        .expect("no stack overflow")
-}
-
 /// `levels` nested `anyOf`, each over a distinct directory rule and the next
 /// wrapper, around `none`.
 fn nested_any_of(levels: usize) -> String {
@@ -565,7 +551,7 @@ fn nested_any_of(levels: usize) -> String {
 #[test]
 fn a_deep_input_is_too_complex_without_overflow() {
     let text = nested_any_of(100_000);
-    let result = on_a_small_stack(move || decode(text.as_bytes()));
+    let result = on_small_stack(move || decode(text.as_bytes()));
     assert_eq!(result, Err(PolicyError::TooComplex));
 }
 
@@ -583,13 +569,13 @@ fn a_deep_input_of_single_item_wrappers_normalizes_to_its_item() {
     }
     let text = document(&text);
     let result =
-        on_a_small_stack(move || decode(text.as_bytes()).map(|p| p.canonical_bytes()));
+        on_small_stack(move || decode(text.as_bytes()).map(|p| p.canonical_bytes()));
     assert_eq!(result, Ok(document(&dir_text("a"))));
 }
 
 #[test]
 fn a_deep_expression_is_walked_without_recursion() {
-    let outcome = on_a_small_stack(|| {
+    let outcome = on_small_stack(|| {
         let mut deep = Expr::None;
         for level in 0..100_000 {
             let item = raw_dir(&format!("n{level}"));

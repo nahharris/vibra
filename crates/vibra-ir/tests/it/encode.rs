@@ -4,14 +4,13 @@
 
 use vibra_ir::{
     Binder, Bound, EncodeError, EntityRef, FnType, ImplementationRecord, IntentType,
-    InterfaceKey, Library, ProcType, Row, SignatureRecord, Type, TypeBody,
-    TypeDefinition, Value, Visibility, encode_type, encode_value, type_document,
-    value_document,
+    InterfaceKey, Library, ProcType, Row, SignatureRecord, Type, Value, encode_type,
+    encode_value, type_document, value_document,
 };
 
 use crate::{
-    SEED, bool_type, declared, id, iter_interface, library_type, named, option,
-    str_type, table, unlayout,
+    SEED, bool_type, declared, example, id, iter_interface, library_type, meters,
+    named, option, pair, point, str_type, table, unlayout,
 };
 
 fn str_encoding() -> String {
@@ -358,46 +357,6 @@ fn a_misplaced_open_form_is_rejected_in_a_record() {
 }
 
 // -- Values -------------------------------------------------------------------
-
-fn point() -> TypeDefinition {
-    TypeDefinition::new(
-        id("example.geometry.Point"),
-        Vec::new(),
-        TypeBody::Record(vec![
-            ("y".to_owned(), Type::I32),
-            ("x".to_owned(), Type::I32),
-        ]),
-        None,
-        Visibility::Public,
-    )
-    .unwrap()
-}
-
-fn pair() -> TypeDefinition {
-    TypeDefinition::new(
-        id("example.geometry.Pair"),
-        Vec::new(),
-        TypeBody::Tuple(vec![Type::I32, Type::I32]),
-        None,
-        Visibility::Public,
-    )
-    .unwrap()
-}
-
-fn meters() -> TypeDefinition {
-    TypeDefinition::new(
-        id("example.units.Meters"),
-        Vec::new(),
-        TypeBody::Wrapper(Type::F64),
-        None,
-        Visibility::Public,
-    )
-    .unwrap()
-}
-
-fn example(path: &str) -> String {
-    format!("{{kind: @declared path: @{path} seed: \"{SEED}\" arguments: []}}")
-}
 
 fn encode(value: &Value, ty: &Type) -> String {
     encode_value(value, ty, &table(vec![point(), pair(), meters()])).unwrap()

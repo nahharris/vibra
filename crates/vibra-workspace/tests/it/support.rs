@@ -1,4 +1,6 @@
-//! Temporary project trees, links, and the documents the tests write.
+//! Temporary project trees, links, and the documents the tests write. The
+//! tests of `vibra-cli` include this file with `#[path]` for `TempDir` and
+//! `LIBRARY`.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -10,7 +12,7 @@ use vibra_workspace::{SourceSnapshot, discover_project_at};
 /// A counter, not the clock, makes a name unique within the process.
 static NEXT: AtomicU64 = AtomicU64::new(0);
 
-/// The step's library project, with the root `src/app`.
+/// The library project of the tests, with the root `src/app`.
 pub(crate) const LIBRARY: &str = "{format: @project.v2 package: {name: \"hello\" version: \"0.1.0\"} targets: [{name: @app kind: @lib root: \"src/app\"}] dependencies: [:]}";
 
 /// A temporary directory, removed on drop.
@@ -52,6 +54,10 @@ impl TempDir {
 
     pub(crate) fn join(&self, relative: &str) -> PathBuf {
         self.path.join(relative)
+    }
+
+    pub(crate) fn read(&self, relative: &str) -> String {
+        fs::read_to_string(self.path.join(relative)).expect("a readable fixture")
     }
 
     pub(crate) fn write(&self, relative: &str, contents: &str) {

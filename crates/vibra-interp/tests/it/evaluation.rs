@@ -2,7 +2,7 @@
 //! initialization", and "Callable contract execution").
 
 use vibra_interp::{Evaluation, MemoryBudget, run};
-use vibra_ir::external::{CompilerIntrinsic, IntegerOp, IntegerType};
+use vibra_ir::external::{IntegerOp, IntegerType};
 use vibra_ir::{
     Arguments, CallTarget, CheckedFunction, Constant, Construction, ExitGuard, Expr,
     FnType, Guard, Invariant, MatchArm, NamedTypes, Node, Pattern, Trap, Type,
@@ -10,26 +10,14 @@ use vibra_ir::{
 };
 
 use crate::{
-    BASE, bool_type, boolean, call, construct, direct, eval, function, global, id,
-    if_else, int, integer, node, none, option, origin_at, program, row, set_with,
-    signature, some, some_value, text, text_value, u64_equal, u64_lit, u64_sub, var,
+    BASE, bool_type, boolean, call, construct, direct, eval, function, global, i32_sub,
+    id, if_else, int, integer, node, none, option, program, set_with, signature, some,
+    some_value, text, text_value, trap_at, u64_equal, u64_lit, u64_sub, var,
     variant_value,
 };
 
-/// An assertion, which traps outside a test, written at `start..start + 1`
-/// so that the trap names which operand ran.
-fn trap_at(start: usize) -> Node {
-    let mut trap = row(CompilerIntrinsic::AssertTrue, vec![boolean(true)]);
-    trap.origin = origin_at(start, start + 1);
-    trap
-}
-
 fn sequence(statements: Vec<Node>) -> Node {
     node(Expr::Sequence(statements))
-}
-
-fn i32_sub(left: Node, right: Node) -> Node {
-    integer(IntegerType::I32, IntegerOp::Sub, vec![left, right])
 }
 
 fn i32_equal(left: Node, right: Node) -> Node {

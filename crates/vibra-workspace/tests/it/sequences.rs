@@ -22,7 +22,7 @@ use vibra_workspace::{
     plan_format, run_tests,
 };
 
-use crate::stack::on_stack;
+use crate::stack::{PROJECT, on_stack};
 use crate::support::TempDir;
 
 /// The stack of every stage.
@@ -36,8 +36,6 @@ const ELEMENTS: usize = 2_000;
 const ARMS: usize = 2_000;
 /// The exit code of the entry when `f` returns the expected value.
 const EXIT: u8 = 7;
-
-const PROJECT: &str = "{format: @project.v2 package: {name: \"probe\" version: \"0.1.0\"} targets: [{name: @app kind: @bin root: \"src/app\" entry: @app.main.main effects: [] grants: [:]}] dependencies: [:]}";
 
 /// The module of `shape` at size `n`, and the value `f` returns.
 pub(crate) fn module(shape: &str, n: usize) -> (String, i64) {

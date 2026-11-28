@@ -7,7 +7,7 @@ use vibra_host::recipe::{BindingPlan, Provider, Resource};
 use vibra_workspace::binding::plan_of;
 use vibra_workspace::{WorkspaceCheck, check_snapshot};
 
-use crate::project::BINARY;
+use crate::project::{BINARY, at};
 use crate::support::{TempDir, capture};
 
 /// The chapter's `main`, under the root of [`BINARY`].
@@ -35,11 +35,6 @@ fn project_faults(check: &WorkspaceCheck) -> Vec<(DiagnosticCode, ByteSpan)> {
         .filter(|diagnostic| diagnostic.source_id() == Some("project.vibon"))
         .map(|diagnostic| (diagnostic.code(), diagnostic.primary_span()))
         .collect()
-}
-
-fn at(text: &str, needle: &str) -> ByteSpan {
-    let start = text.find(needle).expect("the needle occurs");
-    ByteSpan::new(start, start + needle.len())
 }
 
 fn names(plan: &BindingPlan) -> Vec<&str> {

@@ -8,7 +8,8 @@
 //! target's path issue a `TestWorld`, which `docs/spec/06-runtime.md`,
 //! "Host world", gives only to a test.
 
-use crate::support::{outside_test_modules, rust_sources, workspace_root};
+use crate::ambient_reads::scan::outside_test_modules;
+use crate::support::{rust_sources, workspace_root};
 
 /// The sources that may call `test_root`, by their paths below the
 /// workspace root: one file, or every file below a directory ending in `/`.

@@ -16,6 +16,12 @@ mod support;
 #[path = "../../../vibra-workspace/tests/it/probes.rs"]
 mod probes;
 
+// The temporary project trees of the tests of `vibra-workspace`; this crate
+// uses `TempDir` and `LIBRARY`.
+#[allow(dead_code)]
+#[path = "../../../vibra-workspace/tests/it/support.rs"]
+mod workspace_support;
+
 mod check;
 mod examples;
 mod exit;

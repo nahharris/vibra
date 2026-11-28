@@ -23,14 +23,15 @@ use vibra_host::trace::{
     StartupStatus, StdlibIdentity, TraceHeader, declaration_identity, decode, encode,
 };
 use vibra_ir::authority::{
-    GrantLimits, GrantToken, HostArgument, HostCompletion, HostContext, HostErrorCase,
-    HostFault, HostOk, HostReply, HostRequest, NarrowRequest, Narrowed, Receipt,
+    GrantLimits, GrantToken, HostArgument, HostCompletion, HostContext, HostFault,
+    HostOk, HostReply, HostRequest, NarrowRequest, Receipt,
 };
 use vibra_ir::external::host::{HostInterface, HostOp};
 use vibra_ir::{SourceOrigin, Value};
 use vibra_syntax::{DataValue, parse_data};
 
 use crate::scripted::{Scripted, Tweak};
+use crate::support::{err, granted, names, variant};
 
 /// The chapter's example, copied as written.
 const EXAMPLE: &str = r#"{
@@ -254,10 +255,6 @@ impl Driver for Versioned {
     }
 }
 
-fn names(names: &[&str]) -> Vec<String> {
-    names.iter().map(|name| (*name).to_owned()).collect()
-}
-
 fn decoded_policy(expression: &str) -> Policy {
     policy::decode(
         format!(
@@ -372,10 +369,6 @@ fn only_event(trace: &AuditTrace) -> &HostEvent {
     events[0]
 }
 
-fn err(op: HostOp, case: &str) -> HostReply {
-    HostReply::Err(HostErrorCase::new(op.row().error, case).expect("a case"))
-}
-
 fn declared(path: &str, arguments: &str) -> String {
     format!(
         "{{kind: @declared path: {path} seed: \"{}\" arguments: [{arguments}]}}",
@@ -384,16 +377,6 @@ fn declared(path: &str, arguments: &str) -> String {
 }
 
 // Source policy values, as the interpreter encodes an `FsPolicy`.
-
-fn variant(case: &str, fields: Vec<(&str, Value)>) -> Value {
-    Value::Variant {
-        case: case.to_owned(),
-        fields: fields
-            .into_iter()
-            .map(|(name, value)| (name.to_owned(), value))
-            .collect(),
-    }
-}
 
 fn files(prefix: &[&str], actions: &[&str]) -> Value {
     variant(
@@ -421,13 +404,6 @@ fn files(prefix: &[&str], actions: &[&str]) -> Value {
             ("names", variant("anyName", Vec::new())),
         ],
     )
-}
-
-fn granted(narrowed: Narrowed) -> GrantToken {
-    match narrowed {
-        Narrowed::Grant(token) => token,
-        Narrowed::Refused(refusal) => panic!("refused: {refusal:?}"),
-    }
 }
 
 fn restrict(cx: &mut Context<'_>, grant: GrantToken, policy: &Value) -> GrantToken {

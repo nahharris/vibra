@@ -14,23 +14,11 @@ use vibra_ir::{
 
 use crate::{
     BASE, LIMITS, SEED, construct, direct, function, generic_row, id, if_else, node,
-    program, set_with, signature, tail, u64_equal, u64_lit, u64_sub, var,
-    variant_value, void,
+    on_small_stack, program, set_with, signature, tail, u64_equal, u64_lit, u64_sub,
+    var, variant_value, void,
 };
 
 const DEPTH: u64 = 200_000;
-
-const STACK: usize = 256 * 1024;
-
-/// Runs `work` on a thread whose stack is 256 KiB.
-fn on_small_stack<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> T {
-    std::thread::Builder::new()
-        .stack_size(STACK)
-        .spawn(work)
-        .expect("a thread")
-        .join()
-        .expect("the thread finished")
-}
 
 const CHAIN: &str = "test.chain.Chain";
 

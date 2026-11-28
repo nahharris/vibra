@@ -2,7 +2,7 @@
 
 use serde_json::{Value, json};
 
-use crate::support::{LIBRARY, TempDir, envelope_in};
+use crate::support::{LIBRARY, TempDir, codes, envelope_in};
 
 const VALID: &str = "fn answer returns r: I32 do return 42i32 endfn";
 const MISMATCH: &str =
@@ -14,15 +14,6 @@ fn check(root: &TempDir, arguments: &[&str]) -> (i32, Value) {
     let mut line = vec!["--format", "json", "check"];
     line.extend_from_slice(arguments);
     envelope_in(root.path(), &line)
-}
-
-fn codes(document: &Value) -> Vec<String> {
-    document["diagnostics"]
-        .as_array()
-        .expect("diagnostics")
-        .iter()
-        .map(|diagnostic| diagnostic["code"].as_str().expect("code").to_owned())
-        .collect()
 }
 
 #[test]

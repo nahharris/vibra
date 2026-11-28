@@ -35,7 +35,6 @@ use vibra_host::startup::{
 };
 use vibra_host::trace::{
     AuditTrace, Event, FailureCode, GrantOrigin, Phase, StartupStatus,
-    declaration_identity,
 };
 use vibra_host::world::{HostWorld, WorldDriver, decode_world};
 use vibra_ir::authority::{
@@ -43,8 +42,9 @@ use vibra_ir::authority::{
     HostOk, HostReply, HostRequest, NarrowRequest, Narrowed,
 };
 use vibra_ir::external::host::{HostInterface, HostOp};
-use vibra_ir::{EntityRef, Row, Value};
+use vibra_ir::{Row, Value};
 
+use crate::support::{entity, name};
 use crate::trace::header;
 
 // --- The rig -------------------------------------------------------------
@@ -224,10 +224,6 @@ fn w() -> HostWorld {
     world(&["/notes"], &[])
 }
 
-fn name(atom: &str) -> LeafName {
-    LeafName::new(atom)
-}
-
 /// The policy of a directory leaf `root`: `.txt` files below it, read.
 fn notes_policy(root: &str) -> Policy {
     policy::decode(
@@ -382,22 +378,6 @@ fn o_leaves() -> Vec<Leaf> {
 
 fn o() -> BindingPlan {
     plan(o_leaves())
-}
-
-fn entity(interface: HostInterface) -> EntityRef {
-    let owner = interface.owner();
-    EntityRef::new(
-        owner.path().trim_start_matches('@'),
-        declaration_identity(
-            "std",
-            "0.0.2",
-            owner.module,
-            "",
-            "@interface",
-            owner.name,
-        ),
-    )
-    .expect("an entity reference")
 }
 
 fn row(interfaces: &[HostInterface]) -> Row {

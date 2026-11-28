@@ -24,23 +24,10 @@ use vibra_ir::{
 };
 
 use crate::{
-    BASE, LIMITS, bool_type, boolean, call, call_value, construct, function,
-    generic_row, if_else, int, integer, node, origin_at, program, row, set_with,
-    signature, u64_add, u64_equal, u64_lit, u64_sub, var, void,
+    BASE, LIMITS, await_, bool_type, boolean, call, call_value, construct, function,
+    generic_row, i32_sub, if_else, int, integer, node, on_small_stack, program, ret,
+    seq, set_with, signature, trap_at, u64_add, u64_equal, u64_lit, u64_sub, var, void,
 };
-
-const STACK: usize = 256 * 1024;
-
-/// Runs `work` on a thread whose stack is 256 KiB: a stack overflow there
-/// aborts the test binary.
-fn on_small_stack<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> T {
-    std::thread::Builder::new()
-        .stack_size(STACK)
-        .spawn(work)
-        .expect("a thread")
-        .join()
-        .expect("the thread finished")
-}
 
 // ----- fixtures -----
 
@@ -94,20 +81,6 @@ fn test_body(body: Node, slot_count: usize) -> CheckedFunction {
     test_body_in(Row::empty(), body, slot_count)
 }
 
-fn await_(plan: Node) -> Node {
-    node(Expr::Await {
-        plan: Box::new(plan),
-    })
-}
-
-fn ret(value: Node) -> Node {
-    node(Expr::Return(Box::new(value)))
-}
-
-fn seq(statements: Vec<Node>) -> Node {
-    node(Expr::Sequence(statements))
-}
-
 fn let_slot(slot: usize, value: Node, body: Node) -> Node {
     node(Expr::Let {
         slot: Some(slot),
@@ -118,10 +91,6 @@ fn let_slot(slot: usize, value: Node, body: Node) -> Node {
 
 fn i32_add(left: Node, right: Node) -> Node {
     integer(IntegerType::I32, IntegerOp::Add, vec![left, right])
-}
-
-fn i32_sub(left: Node, right: Node) -> Node {
-    integer(IntegerType::I32, IntegerOp::Sub, vec![left, right])
 }
 
 /// Whether `left` compares as `case` with `right`, on `I32`.
@@ -433,14 +402,6 @@ fn a_plan_captured_by_a_closure() {
     );
     let stats = passes(vec![inc("inc"), body]);
     assert_eq!(stats.invocation_count, 3);
-}
-
-/// An assertion, which traps outside a test, written at `start..start + 1`
-/// so that the trap names which operand ran.
-fn trap_at(start: usize) -> Node {
-    let mut trap = row(CompilerIntrinsic::AssertTrue, vec![boolean(true)]);
-    trap.origin = origin_at(start, start + 1);
-    trap
 }
 
 /// An operand that evaluates to `value`, trapping at `start` first when
