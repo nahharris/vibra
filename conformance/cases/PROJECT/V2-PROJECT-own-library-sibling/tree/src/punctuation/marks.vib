@@ -1,0 +1,8 @@
+use @greeting.text enduse
+
+fn shout
+  returns mark: Str
+  visibility @public
+  do
+    return "!\n"
+endfn

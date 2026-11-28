@@ -396,8 +396,10 @@ pub(crate) struct Vocabulary<'v> {
     pub(crate) invariant_types: BTreeSet<TypeId>,
     /// The constant module values, by global index.
     pub(crate) globals: BTreeMap<usize, Constant>,
-    /// The labelled defaults of each function, by checked index.
-    pub(crate) defaults: BTreeMap<usize, Vec<(String, Constant)>>,
+    /// The labelled defaults of each function, by checked index, in their
+    /// checked form; one that holds a function value is no constant the
+    /// prover reads.
+    pub(crate) defaults: BTreeMap<usize, Vec<(String, Node)>>,
     /// The bodies of the certified functions, by checked index.
     pub(crate) certified: BTreeMap<usize, Readable<'v>>,
     /// The index of each anonymous callable with a guard, by the source and
@@ -984,7 +986,10 @@ fn make(
                     .and_then(|defaults| {
                         defaults.iter().find(|(name, _)| name == label)
                     })
-                    .map(|(_, constant)| constant.clone());
+                    .and_then(|(_, default)| match &default.expr {
+                        Expr::Literal(constant) => Some(constant.clone()),
+                        _ => None,
+                    });
                 if let (Some(default), Some(slot)) =
                     (default, operands.get_mut(arguments.positional.len() + at))
                 {

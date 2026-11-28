@@ -15,7 +15,7 @@ mod dispatch;
 mod guards;
 mod patterns;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -26,13 +26,13 @@ use vibra_ir::{
     SourceOrigin, Type, Value,
 };
 use vibra_syntax::source::{
-    Argument, Body, Callable, Expr, ExprForm, Ident, If, Let as LetView, Match,
-    MatchArm as ArmView, Pattern, PatternForm, Postfix, Primary, Statement, Suffix,
-    TypeExpr,
+    Argument, Body, Callable, CallableKind, Expr, ExprForm, Ident, If, Let as LetView,
+    Match, MatchArm as ArmView, Pattern, PatternForm, Postfix, Primary, Statement,
+    Suffix, TypeExpr,
 };
 use vibra_syntax::{CstNode, SyntaxKind};
 
-use super::callables::{NotConstant, fold, mark_tail, substitute};
+use super::callables::{NotConstant, callable_form, fold, mark_tail, substitute};
 use super::contract::{CheckedGuard, ClosureContract, Guards, Site, constant_operands};
 use super::declare::{
     BoundData, Entity, NoType, Program, Scope, TypeKind, key_diagnostic,
@@ -52,10 +52,14 @@ pub(crate) struct Layout {
     /// The function index of each function of the program.
     pub(crate) functions: Vec<Option<usize>>,
     /// The value of each module value, by global index, whose initializer
-    /// is a constant expression.
+    /// is a constant expression that holds no function value.
     pub(crate) constants: BTreeMap<usize, Value>,
-    /// Whether `constants` is complete; before it is, a default that names a
-    /// module value is left unchecked rather than called not constant.
+    /// The module values, by global index, whose initializer is a constant
+    /// expression that holds a function value, which has no folded value.
+    pub(crate) callable_constants: BTreeSet<usize>,
+    /// Whether `constants` and `callable_constants` are complete; before
+    /// they are, a default that names a module value is left unchecked
+    /// rather than called not constant.
     pub(crate) constants_known: bool,
     /// The static type of the `else` consequence of each type's `where …
     /// else`, by the type's program index, once the invariants are checked.
@@ -565,7 +569,7 @@ pub(crate) struct ClosureState<'a> {
     instance: Option<Vec<Type>>,
     labelled: Vec<(Ident<'a>, TypeExpr<'a>, Expr<'a>)>,
     next: usize,
-    defaults: Vec<(String, Constant)>,
+    defaults: Vec<(String, Node)>,
     destructured: Vec<Destructure>,
     /// The length of the instantiations when it started.
     instantiations: usize,
@@ -667,8 +671,9 @@ pub(crate) struct Checked {
     pub(crate) node: Option<Node>,
     /// The number of slots its activation has.
     pub(crate) slot_count: usize,
-    /// The constant default of each labelled parameter, in written order.
-    pub(crate) defaults: Vec<(String, Constant)>,
+    /// The default of each labelled parameter, in written order, in its
+    /// checked form ([`BodyChecker::default_value`]).
+    pub(crate) defaults: Vec<(String, Node)>,
     /// The guards of a callable.
     pub(crate) guards: Guards,
     /// The guards of each anonymous callable in it that has one.
@@ -839,14 +844,14 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         }
     }
 
-    /// Checks each labelled default of `labelled` as a constant of its
-    /// label's type in `signature`: whether one had a fault, and the
-    /// constants, in written order.
+    /// Checks each labelled default of `labelled` as a constant expression
+    /// of its label's type in `signature`: whether one had a fault, and the
+    /// checked defaults, in written order.
     fn labelled_defaults(
         &mut self,
         signature: &FnType,
         labelled: &[(Ident<'a>, TypeExpr<'a>, Expr<'a>)],
-    ) -> (bool, Vec<(String, Constant)>) {
+    ) -> (bool, Vec<(String, Node)>) {
         // A default is checked where nothing can leave a callable.
         self.result = None;
         let mut failed = false;
@@ -878,7 +883,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         patterns: &[Pattern<'a>],
         labelled: &[(Ident<'a>, TypeExpr<'a>, Expr<'a>)],
         scope: CallableScope,
-    ) -> Vec<(String, Constant)> {
+    ) -> Vec<(String, Node)> {
         self.locals.clear();
         self.slots.clear();
         self.frames.clear();
@@ -1124,15 +1129,12 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         )
     }
 
-    /// The constant a labelled default of type `ty`, written at `span`,
-    /// denotes, once its value `out` arrived; reports a default that does
-    /// not fit its type or is not a constant expression.
-    fn default_value(
-        &mut self,
-        out: Out,
-        ty: &Type,
-        span: ByteSpan,
-    ) -> Option<Constant> {
+    /// The checked form of a labelled default of type `ty`, written at
+    /// `span`, once its value `out` arrived: one literal when the default
+    /// holds no function value, else its checked node, whose leaves are
+    /// literals, function values, and constant module values. Reports a
+    /// default that does not fit its type or is not a constant expression.
+    fn default_value(&mut self, out: Out, ty: &Type, span: ByteSpan) -> Option<Node> {
         let node = match out.ty {
             Some(Type::Never) => {
                 self.report(
@@ -1162,12 +1164,16 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         // A construction of a type whose `where` has an `else` is no
         // constant expression.
         let program = self.program;
-        let folded = if fallible_construction(program, &node) {
+        // A construction of a type whose `where` has an `else` is decided by
+        // running the predicate: no constant expression, whatever it holds.
+        let fallible = fallible_construction(program, &node);
+        let folded = if fallible {
             Err(NotConstant::Expression)
         } else {
             fold(&node, &self.layout.constants, &|id| program.library_of(id))
         };
-        match folded {
+        let folded = match folded {
+            Err(NotConstant::Expression) if fallible => Err(NotConstant::Expression),
             Ok(value) => {
                 // The default checked at `ty`, binders included, so it holds
                 // nothing at a binder's position; the checked IR keeps a
@@ -1175,12 +1181,12 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                 // Unreachable: the default checked at `ty`, so its value is
                 // one of `ty`, and no value has an open type; kept as a
                 // defect net.
-                if let Ok(constant) = Constant::new(ty.at_never(), value) {
-                    Some(constant)
+                return if let Ok(constant) = Constant::new(ty.at_never(), value) {
+                    Some(self.node(IrExpr::Literal(constant), span))
                 } else {
                     self.unavailable(span, "a labelled default of an open type");
                     None
-                }
+                };
             }
             Err(NotConstant::Dict) => {
                 self.report(
@@ -1190,16 +1196,48 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                      is no constant expression: ordering its entries would run that \
                      implementation",
                 );
+                return None;
+            }
+            // A default that holds a function value has no folded value
+            // and keeps its checked form, which its form alone decides.
+            Err(NotConstant::Pending | NotConstant::Expression) => {
+                let layout = self.layout;
+                let is_fn = |function: usize| {
+                    let index =
+                        layout.functions.iter().position(|f| *f == Some(function))?;
+                    let data = program.functions.get(index)?;
+                    Some(data.view.kind() == CallableKind::Fn)
+                };
+                callable_form(
+                    &node,
+                    &layout.constants,
+                    &layout.callable_constants,
+                    &is_fn,
+                )
+            }
+            Err(NotConstant::Procedure) => Err(NotConstant::Procedure),
+        };
+        match folded {
+            Ok(()) => Some(node),
+            Err(NotConstant::Pending) if !self.layout.constants_known => None,
+            Err(NotConstant::Procedure) => {
+                self.report(
+                    DiagnosticCode::TypeNotConstant,
+                    span,
+                    "a labelled default must be a constant expression, and a procedure \
+                     value is none: an anonymous `proc`, the name of a `proc`, and a \
+                     plan stand for effects still to be performed",
+                );
                 None
             }
-            Err(NotConstant::Pending) if !self.layout.constants_known => None,
-            Err(NotConstant::Pending | NotConstant::Expression) => {
+            Err(_) => {
                 self.report(
                     DiagnosticCode::TypeNotConstant,
                     span,
                     "a labelled default must be a constant expression: a literal, an \
-                     atom, `void`, a construction, tuple, record, list, or dict of \
-                     constants, or the name of a constant module value",
+                     atom, `void`, an anonymous `fn`, the name of a `fn`, a construction, \
+                     tuple, record, list, or dict of constants, or the name of a \
+                     constant module value",
                 );
                 None
             }

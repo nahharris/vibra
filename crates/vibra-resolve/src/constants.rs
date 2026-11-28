@@ -2,17 +2,19 @@
 //! constant.
 //!
 //! `docs/spec/02-type-system.md`, "Constant expressions and constant
-//! patterns": a constant expression is a literal, an atom, or `void`; a
-//! construction, tuple, record, list, or dict whose operands are all
-//! constant expressions and whose type has no `where … else`; or the name of
-//! a module value whose initializer is a constant expression. A function call
-//! is never one, so the property is decidable without evaluation. Whether a
+//! patterns": a constant expression is a literal, an atom, or `void`; an
+//! anonymous `fn` or the name of a `fn`; a construction, tuple, record,
+//! list, or dict whose operands are all constant expressions and whose type
+//! has no `where … else`; or the name of a module value whose initializer is
+//! a constant expression. A function call, an anonymous `proc`, and the name
+//! of a `proc` are never one, so the property is decidable without
+//! evaluation; the body of an anonymous `fn` is not looked into. Whether a
 //! constructed type has a `where … else` is the checker's: resolution records
 //! every construction of constants as a candidate. A module value whose
 //! initializer reaches itself is not constant; the cycle is the checker's
 //! `@type.initializerCycle`.
 
-use vibra_syntax::source::{Expr, ExprForm, Primary, Suffix};
+use vibra_syntax::source::{CallableKind, Expr, ExprForm, Primary, Suffix};
 
 use crate::graph::{DeclView, Graph};
 use crate::identity::DeclarationKind;
@@ -130,6 +132,10 @@ fn constant(
     let suffixes = postfix.suffixes();
     match postfix.primary() {
         Some(Primary::Literal(_)) => suffixes.is_empty(),
+        // A lambda abstraction is a value: its body is not looked into.
+        Some(Primary::Callable(callable)) => {
+            suffixes.is_empty() && callable.kind() == CallableKind::Fn
+        }
         Some(Primary::Tuple(items) | Primary::List(items)) => {
             suffixes.is_empty()
                 && items
@@ -176,13 +182,15 @@ fn constant(
             };
             let kind = graph.decls.get(index).map(|decl| decl.kind());
             match call {
-                None => {
-                    let value = kind == Some(DeclarationKind::Value);
-                    if value {
+                None => match kind {
+                    Some(DeclarationKind::Value) => {
                         names.push(index);
+                        true
                     }
-                    value
-                }
+                    // A `fn` named as a value; a `proc` is not constant.
+                    Some(DeclarationKind::Fn) => true,
+                    _ => false,
+                },
                 Some(arguments) => {
                     matches!(kind, Some(DeclarationKind::Type | DeclarationKind::Case))
                         && arguments.iter().all(|argument| {

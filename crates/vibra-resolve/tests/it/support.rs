@@ -141,6 +141,43 @@ pub(crate) fn resolve_modules(modules: &[(&str, &str)]) -> Resolution {
     ))
 }
 
+/// One unit for [`resolve_units`]: its name, its kind, its package (name,
+/// version) when that is another package's, and its modules, each a module
+/// path and its text.
+pub(crate) type UnitFixture<'a> = (
+    &'a str,
+    UnitKind,
+    Option<(&'a str, &'a str)>,
+    &'a [(&'a str, &'a str)],
+);
+
+/// Resolves the units `units` of the package `hello`; module `@u.a.b` is
+/// `src/u/a/b.vib`.
+pub(crate) fn resolve_units(units: &[UnitFixture<'_>]) -> Resolution {
+    resolve(&ResolveInput::new(
+        PackageId::new("hello", "0.1.0"),
+        units
+            .iter()
+            .map(|(name, kind, package, modules)| {
+                let modules = modules
+                    .iter()
+                    .map(|(path, text)| {
+                        SourceModule::new(*path, source_id(path), text.as_bytes())
+                    })
+                    .collect();
+                let unit = SourceUnit::new(*name, *kind, modules);
+                match package {
+                    Some((name, version)) => {
+                        unit.with_package(PackageId::new(*name, *version))
+                    }
+                    None => unit,
+                }
+            })
+            .collect(),
+        embedded(),
+    ))
+}
+
 /// Resolves one module `@app.main`.
 pub(crate) fn resolve_main(text: &str) -> Resolution {
     resolve_modules(&[("@app.main", text)])

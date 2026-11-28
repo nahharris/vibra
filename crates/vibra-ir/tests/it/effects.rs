@@ -688,7 +688,10 @@ fn atk_ir_grant_constant() {
     );
 }
 
-/// 06 What has no encoding: "a plan … have no value encoding".
+/// 06 What has no encoding: "a plan … have no value encoding", so no value
+/// sits at a plan type; a constant whose type merely mentions one holds no
+/// plan, as the empty list at `List(Intent(...))` does (02 Constant
+/// expressions: `Option.none()` is constant at `Option(Proc(...))`).
 #[test]
 fn a_plan_constant() {
     let plan = Type::Intent(Box::new(vibra_ir::IntentType {
@@ -696,7 +699,7 @@ fn a_plan_constant() {
         effects: Row::empty(),
     }));
     assert!(Constant::new(plan.clone(), Value::Void).is_err());
-    assert!(Constant::new(Type::list(plan), Value::List(Vec::new())).is_err());
+    assert!(Constant::new(Type::list(plan), Value::List(Vec::new())).is_ok());
 }
 
 /// 03 Capability values: a grant "is no dict key", because it implements no

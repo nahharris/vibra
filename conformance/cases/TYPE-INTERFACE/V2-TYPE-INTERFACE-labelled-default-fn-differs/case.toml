@@ -1,0 +1,19 @@
+id = "V2-TYPE-INTERFACE-labelled-default-fn-differs"
+rule = "V2-TYPE-INTERFACE-labelled-default-fn-differs"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#constant-expressions-and-constant-patterns: two function defaults differ when their checked forms differ, so an implementation member whose anonymous fn default has another body than the contract member's is @type.mismatch at the default, related to the contract's default"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.mismatch"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 332, end = 396 }
+related = [{ source = "src/app/main.vib", span = { start = 126, end = 190 } }]

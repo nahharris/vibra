@@ -28,7 +28,7 @@ use super::{
     BodyChecker, CallState, CallableScope, Out, Reference, Target, unify,
     unify_expected,
 };
-use crate::check::callables::mark_tail;
+use crate::check::callables::{mark_tail, substitute_with};
 use crate::check::declare::{BoundData, BoundGoal, GoalHead, key_diagnostic};
 use crate::check::effects;
 use crate::check::interfaces::same_head;
@@ -1730,7 +1730,7 @@ impl<'a> BodyChecker<'_, 'a> {
         let callable = &callable;
         let call =
             self.contract_target(dispatch, &|ty| closed(ty, assignment), span, span)?;
-        let defaults = self.member_defaults(dispatch, callable)?;
+        let defaults = self.member_defaults(dispatch, callable, &call)?;
         let slot_types = callable.slot_types();
         let read = |this: &Self, slot: usize| {
             let value_type = slot_types.get(slot)?.clone();
@@ -1780,12 +1780,15 @@ impl<'a> BodyChecker<'_, 'a> {
     /// The contract's labelled defaults of the member `dispatch`, at the
     /// label types of `callable`, its type where it is named as a value.
     /// They are checked as the contract is, in the interface's module, and
-    /// their faults are reported there.
+    /// their faults are reported there. A default that holds a function
+    /// value is closed under the substitution of `call`, the member's
+    /// receiver, arguments, and choices.
     fn member_defaults(
         &self,
         dispatch: &Dispatch,
         callable: &FnType,
-    ) -> Option<Vec<(String, Constant)>> {
+        call: &ContractCall,
+    ) -> Option<Vec<(String, Node)>> {
         if callable.labels.is_empty() {
             return Some(Vec::new());
         }
@@ -1818,15 +1821,33 @@ impl<'a> BodyChecker<'_, 'a> {
             &view.labelled(),
             scope,
         );
+        let mut binders = call.arguments.clone();
+        binders.extend(call.member_arguments.iter().cloned());
+        let substitution = Substitution {
+            binders: &binders,
+            self_type: Some(&call.receiver),
+            associated: Some(&call.choices),
+        };
         callable
             .labels
             .entries()
             .iter()
             .map(|(name, label)| {
-                let (_, value) = found.iter().find(|(known, _)| known == name)?;
-                Constant::new(label.at_never(), value.value().clone())
-                    .ok()
-                    .map(|constant| (name.clone(), constant))
+                let (_, default) = found.iter().find(|(known, _)| known == name)?;
+                let default = match &default.expr {
+                    IrExpr::Literal(constant) => {
+                        let constant =
+                            Constant::new(label.at_never(), constant.value().clone())
+                                .ok()?;
+                        Node::new(IrExpr::Literal(constant), default.origin.clone())
+                    }
+                    _ => {
+                        let mut default = default.clone();
+                        substitute_with(&mut default, &substitution);
+                        default
+                    }
+                };
+                Some((name.clone(), default))
             })
             .collect()
     }

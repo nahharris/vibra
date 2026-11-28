@@ -74,8 +74,8 @@ pub(crate) struct ClosureContract {
     pub(crate) names: Vec<String>,
     /// The result name.
     pub(crate) result_name: String,
-    /// The constant default of each labelled parameter.
-    pub(crate) defaults: Vec<(String, Constant)>,
+    /// The default of each labelled parameter, in its checked form.
+    pub(crate) defaults: Vec<(String, Node)>,
     /// Its guards.
     pub(crate) guards: Guards,
 }
@@ -210,9 +210,9 @@ pub(crate) struct ContractGuard {
     /// The name of each argument slot.
     pub(crate) names: Vec<String>,
     pub(crate) result_name: String,
-    /// The constant default of each labelled parameter, which a call that
-    /// does not write the label passes.
-    pub(crate) defaults: Vec<(String, Constant)>,
+    /// The default of each labelled parameter, in its checked form, which a
+    /// call that does not write the label passes.
+    pub(crate) defaults: Vec<(String, Node)>,
     pub(crate) guards: Guards,
 }
 

@@ -1,0 +1,18 @@
+id = "V2-PROJECT-own-library-sibling"
+rule = "V2-PROJECT-own-library-sibling"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "04-programs-and-packages.md#packages-units-and-targets: a library target cannot name another library target of its own package; the import is @module.unknownPath"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@module.unknownPath"
+level = "@error"
+source = "src/punctuation/marks.vib"
+span = { start = 4, end = 18 }

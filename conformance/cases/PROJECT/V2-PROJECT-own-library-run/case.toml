@@ -1,0 +1,13 @@
+id = "V2-PROJECT-own-library-run"
+rule = "V2-PROJECT-own-library-run"
+profile = "interpreterV2"
+operation = "workspaceRun"
+description = "04-programs-and-packages.md#packages-units-and-targets: a module of a binary target imports a public function of a library target of its own package, and the program runs with it"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+targetRun = "target-run.vibon"

@@ -1,0 +1,20 @@
+fn main returns r: I32 do return 1i32 endfn
+
+interface Pad
+  fn pad
+    takes {value: Self}
+    labelled {f: Fn({I32} I32) be fn takes {x: I32} returns r: I32 do return I32.add(x 1i32) endfn}
+    returns r: I32
+  endfn
+endinterface
+type Cell of U8
+  impl Pad
+    fn pad
+      takes {value: Self}
+      labelled {f: Fn({I32} I32) be fn takes {x: I32} returns r: I32 do return I32.add(x 2i32) endfn}
+      returns r: I32
+      do
+        return f(0i32)
+    endfn
+  endimpl
+endtype

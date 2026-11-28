@@ -1,0 +1,13 @@
+let inc: Fn({I32} I32) be fn takes {x: I32} returns r: I32 do return I32.add(x 1i32) endfn endlet
+
+fn f
+  takes {g: Fn({I32} I32)}
+  returns r: I32
+  do
+    match g
+      case inc
+        return 1i32
+      case _
+        return 0i32
+    endmatch
+endfn

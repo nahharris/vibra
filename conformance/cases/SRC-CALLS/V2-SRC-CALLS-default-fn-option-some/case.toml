@@ -1,0 +1,12 @@
+id = "V2-SRC-CALLS-default-fn-option-some"
+rule = "V2-SRC-CALLS-default-fn-option-some"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#constant-expressions-and-constant-patterns: a construction whose operand is an anonymous fn is a constant expression, so Option.some of a function is a labelled default at Option(Fn(...))"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

@@ -102,8 +102,10 @@ pub struct CheckedFunction {
     /// Its signature record. A default body of an interface member has the
     /// member's record.
     pub signature: SignatureRecord,
-    /// The constant default of each labelled parameter that has one.
-    pub defaults: Vec<(String, Constant)>,
+    /// The default of each labelled parameter, in its checked form: one
+    /// literal when it holds no function value, else the constant expression
+    /// as checked (`crate::expr::Checker::check_defaults`).
+    pub defaults: Vec<(String, Node)>,
     /// What it runs.
     pub body: FunctionBody,
     /// `requires C else V`, when the function has one.
@@ -903,16 +905,20 @@ impl CheckedModuleSet {
             });
         }
         let mut checker = Checker::new(*tables, scope, function.slot_count);
-        checker.check_defaults(labels, &function.defaults)?;
         checker.evidence = Evidence {
             binders: signature.binders(),
             self_interface,
         };
+        let mut gathered = Gathered::default();
+        // A default sees no parameter: the defaults that hold a function
+        // value are checked before any slot is bound.
+        for (default, expected) in checker.check_defaults(labels, &function.defaults)? {
+            expect(&expected, &checker.check_gathering(default, &mut gathered)?)?;
+        }
         checker.result = Some(result.clone());
         for (slot, ty) in slot_types.into_iter().enumerate() {
             checker.bind(slot, ty)?;
         }
-        let mut gathered = Gathered::default();
         match &function.body {
             FunctionBody::Expr(body) => {
                 expect(&result, &checker.check_gathering(body, &mut gathered)?)?;

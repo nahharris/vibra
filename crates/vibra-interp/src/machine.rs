@@ -254,12 +254,29 @@ pub(crate) enum Kont<'a> {
     Await {
         caller: Invocation,
     },
+    /// A call whose labelled defaults that hold a function value are being
+    /// built, one at a time, in a frame of the callee's environment.
+    Defaults(Box<DefaultFill<'a>>),
+}
+
+/// A call waiting for the defaults it did not write and the callee does not
+/// hold as literals: the resolved callee, the arguments so far, and the slot
+/// and the checked form of each default still to build, last first.
+#[derive(Debug)]
+pub(crate) struct DefaultFill<'a> {
+    resolved: Resolved<'a>,
+    args: Vec<Val<'a>>,
+    pending: Vec<(usize, &'a Node)>,
+    rebox: Option<(Type, Type)>,
+    tail: bool,
+    origin: &'a SourceOrigin,
 }
 
 impl<'a> Kont<'a> {
     fn for_each_value(&self, visit: &mut impl FnMut(&Val<'a>)) {
         match self {
             Self::Operands { done, .. } => done.iter().for_each(visit),
+            Self::Defaults(fill) => fill.args.iter().for_each(visit),
             Self::Ensures { candidate, .. } => visit(candidate),
             Self::Invariant { value, .. } => visit(value),
             Self::Fold {
@@ -554,6 +571,42 @@ impl<'a> Machine<'a> {
         self.admit(checks, false, Then::Ret(value))
     }
 
+    /// The checks of the constants the labelled defaults `defaults` hold
+    /// outside any closure body: a literal default, and the literals of a
+    /// construction around a function value.
+    fn default_checks(
+        &mut self,
+        defaults: &'a [(String, Node)],
+        checks: &mut Vec<Check<'a>>,
+    ) -> Result<(), Halt> {
+        let mut pending: Vec<&'a Node> =
+            defaults.iter().map(|(_, node)| node).collect();
+        while let Some(node) = pending.pop() {
+            match &node.expr {
+                Expr::Literal(constant) => self.constant_checks(constant, checks)?,
+                Expr::WidenAtom(inner) => pending.push(inner),
+                Expr::Construct { construction, .. } => {
+                    pending.extend(match construction {
+                        Construction::Tuple(nodes) | Construction::List(nodes) => {
+                            nodes.iter().collect::<Vec<_>>()
+                        }
+                        Construction::Record(fields)
+                        | Construction::Case { fields, .. } => {
+                            fields.iter().map(|(_, node)| node).collect()
+                        }
+                        Construction::Wrapper(inner) => vec![&**inner],
+                        Construction::Dict(entries) => entries
+                            .iter()
+                            .flat_map(|(key, value)| [key, value])
+                            .collect(),
+                    })
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
     /// Runs `step` once the constants a call can reach without evaluating a
     /// node are admitted: the defaults of every function and the
     /// consequence of every invariant.
@@ -561,9 +614,7 @@ impl<'a> Machine<'a> {
         let set = self.set;
         let mut checks = Vec::new();
         for function in set.functions() {
-            for (_, default) in &function.defaults {
-                self.constant_checks(default, &mut checks)?;
-            }
+            self.default_checks(&function.defaults, &mut checks)?;
         }
         for definition in set.types().types().values() {
             if let Some(consequence) = definition
@@ -1003,9 +1054,7 @@ impl<'a> Machine<'a> {
                 })));
                 self.allocated(&value)?;
                 let mut checks = Vec::new();
-                for (_, default) in &body.defaults {
-                    self.constant_checks(default, &mut checks)?;
-                }
+                self.default_checks(&body.defaults, &mut checks)?;
                 self.admit(checks, false, Then::Ret(value))
             }
             Work::Lookup { collection, .. } => {
@@ -1149,6 +1198,8 @@ impl<'a> Machine<'a> {
         let positional = arguments.positional.len();
         let mut args: Vec<Val<'a>> = values.by_ref().take(positional).collect();
         let written: Vec<Val<'a>> = values.collect();
+        // The argument slot and the form of each default to build.
+        let mut pending: Vec<(usize, &'a Node)> = Vec::new();
         let mut rebox = None;
         let resolved = match (target, callee) {
             (
@@ -1244,7 +1295,18 @@ impl<'a> Machine<'a> {
                     Halt::Invalid("a labelled argument out of range".to_owned())
                 })?;
                 let value = if matches!(node.expr, Expr::Default(_)) {
-                    self.default_of(&resolved.target, label)?
+                    match &self.default_of(&resolved.target, label)?.expr {
+                        Expr::Literal(constant) => self.constant(constant)?,
+                        // A default that holds a function value is built
+                        // once the arguments written are in hand.
+                        _ => {
+                            pending.push((
+                                args.len(),
+                                self.default_of(&resolved.target, label)?,
+                            ));
+                            Val::void()
+                        }
+                    }
                 } else {
                     labelled
                         .get_mut(index)
@@ -1256,6 +1318,51 @@ impl<'a> Machine<'a> {
                 args.push(value);
             }
         }
+        // The first default to build is evaluated first: popped first.
+        pending.reverse();
+        self.fill_defaults(Box::new(DefaultFill {
+            resolved,
+            args,
+            pending,
+            rebox,
+            tail,
+            origin,
+        }))
+    }
+
+    /// Builds the next labelled default of `fill` in a frame of the callee's
+    /// environment, which a default of a generic callable needs, or makes
+    /// the call once every default is built.
+    fn fill_defaults(&mut self, fill: Box<DefaultFill<'a>>) -> Result<Step<'a>, Halt> {
+        let Some((_, default)) = fill.pending.last() else {
+            let fill = *fill;
+            return self.make_call(
+                fill.resolved,
+                fill.args,
+                fill.rebox,
+                fill.tail,
+                fill.origin,
+            );
+        };
+        let default: &'a Node = default;
+        let env = Rc::clone(&fill.resolved.env);
+        let frame = self.new_frame(0, env, &fill.args)?;
+        self.frame_bytes = self.frame_bytes.saturating_add(frame_cost(&frame));
+        self.frames.push(frame);
+        self.konts.push(Kont::Defaults(fill));
+        self.check_memory()?;
+        Ok(Step::Eval(default))
+    }
+
+    /// Makes the call of `resolved` with its arguments assembled.
+    fn make_call(
+        &mut self,
+        resolved: Resolved<'a>,
+        args: Vec<Val<'a>>,
+        rebox: Option<(Type, Type)>,
+        tail: bool,
+        origin: &'a SourceOrigin,
+    ) -> Result<Step<'a>, Halt> {
         if self.builds_plan(&resolved.target)? {
             return self.build_plan(resolved, args, rebox);
         }
@@ -1289,13 +1396,9 @@ impl<'a> Machine<'a> {
         }
     }
 
-    /// The value of the default of `label` that the resolved callee, a
-    /// function or a closure value, carries.
-    fn default_of(
-        &mut self,
-        target: &Target<'a>,
-        label: &str,
-    ) -> Result<Val<'a>, Halt> {
+    /// The checked form of the default of `label` that the resolved callee,
+    /// a function or a closure value, carries.
+    fn default_of(&self, target: &Target<'a>, label: &str) -> Result<&'a Node, Halt> {
         let defaults = match target {
             Target::Function(index) => self.function(*index)?.defaults.as_slice(),
             Target::Closure(closure) => closure.body.defaults.as_slice(),
@@ -1305,13 +1408,12 @@ impl<'a> Machine<'a> {
                 ));
             }
         };
-        let constant = defaults
+        defaults
             .iter()
-            .find_map(|(name, constant)| (name == label).then_some(constant))
+            .find_map(|(name, default)| (name == label).then_some(default))
             .ok_or_else(|| {
                 Halt::Invalid(format!("the callee has no default for `{label}`"))
-            })?;
-        self.constant(constant)
+            })
     }
 
     /// Whether the call being made may replace the current activation: no
@@ -2080,6 +2182,19 @@ impl<'a> Machine<'a> {
             Kont::Await { caller } => {
                 self.invocation = caller;
                 Step::Ret(value)
+            }
+            Kont::Defaults(mut fill) => {
+                self.pop_frame()?;
+                let Some((slot, _)) = fill.pending.pop() else {
+                    return invalid("a default built for no argument");
+                };
+                match fill.args.get_mut(slot) {
+                    Some(argument) => *argument = value,
+                    None => {
+                        return invalid("a default built for an argument out of range");
+                    }
+                }
+                return self.fill_defaults(fill);
             }
         })
     }

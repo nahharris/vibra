@@ -308,6 +308,37 @@ fn a_constant_module_value_is_a_constant_pattern() {
     assert_eq!(visible, Some(vec!["x".to_owned()]));
 }
 
+/// A module value whose initializer is an anonymous `fn` or the name of a
+/// `fn` is constant, so its name in pattern position is a constant pattern,
+/// which the checker then refuses as a pattern form; one whose initializer
+/// is an anonymous `proc` is not constant.
+#[test]
+fn a_module_value_holding_a_function_is_constant() {
+    let anonymous = "let inc: Fn({I32} I32) be fn takes {x: I32} returns r: I32 do return x endfn endlet\nfn f takes {g: Fn({I32} I32)} returns r: I32 do match g case inc return 1i32 case _ return 0i32 endmatch endfn\n";
+    let resolution = resolve_main(anonymous);
+    assert_clean(&resolution);
+    assert!(has_reference(
+        &resolution,
+        inside(anonymous, "case inc", "inc"),
+        &main_id("", K::Value, "inc"),
+    ));
+    let named = "fn id takes {x: I32} returns r: I32 do return x endfn\nlet inc: Fn({I32} I32) be id endlet\nfn f takes {g: Fn({I32} I32)} returns r: I32 do match g case inc return 1i32 case _ return 0i32 endmatch endfn\n";
+    let resolution = resolve_main(named);
+    assert_clean(&resolution);
+    assert!(has_reference(
+        &resolution,
+        inside(named, "case inc", "inc"),
+        &main_id("", K::Value, "inc"),
+    ));
+    let procedure = "let one: Proc({} I32) be proc returns r: I32 do return 1i32 endproc endlet\nfn f takes {g: Proc({} I32)} returns r: I32 do match g case one return 1i32 case _ return 0i32 endmatch endfn\n";
+    assert_one(
+        &resolve_main(procedure),
+        C::NameRedeclaration,
+        tail(procedure, "case one", 3),
+        &[span_of(procedure, "one", 0)],
+    );
+}
+
 #[test]
 fn true_and_false_are_constant_patterns() {
     let text = "fn f takes {b: Bool} returns r: I32 do match b case true return 1i32 case false return 0i32 endmatch endfn\n";

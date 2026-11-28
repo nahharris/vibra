@@ -715,17 +715,14 @@ fn stepping() -> Type {
     })
 }
 
-fn step_default() -> Vec<(String, Constant)> {
-    vec![(
-        "step".to_owned(),
-        Constant::new(Type::I32, Value::I32(5)).unwrap(),
-    )]
+fn step_default() -> Vec<(String, Node)> {
+    vec![("step".to_owned(), literal(Type::I32, Value::I32(5)))]
 }
 
 /// A closure of `stepping()` with `defaults`, called through its value with
 /// the label unwritten.
 fn closure_call(
-    defaults: Vec<(String, Constant)>,
+    defaults: Vec<(String, Node)>,
 ) -> Result<Arc<CheckedModuleSet>, IrError> {
     let stepper = node(Expr::Closure {
         closure: Arc::new(vibra_ir::ClosureBody {
@@ -762,7 +759,7 @@ fn v9_a_closure_carries_a_default_for_each_label() {
 
 #[test]
 fn v9_a_function_carries_a_default_for_each_label() {
-    let set = |defaults: Vec<(String, Constant)>| {
+    let set = |defaults: Vec<(String, Node)>| {
         let record = SignatureRecord::new(Vec::new(), stepping()).unwrap();
         let mut parts = library_parts();
         parts.functions = vec![CheckedFunction {
@@ -776,6 +773,149 @@ fn v9_a_function_carries_a_default_for_each_label() {
         set(Vec::new()),
         Err(IrError::InvalidExpression(_))
     ));
+}
+
+// -- A default that holds a function value --------------------------------------
+
+/// `Fn({I32} I32)`.
+fn unary() -> Type {
+    Type::function(FnType {
+        parameters: vec![Type::I32],
+        labels: NamedTypes::default(),
+        result: Type::I32,
+    })
+}
+
+/// An anonymous callable of type `value_type` whose body is `body`, with the
+/// captures `captures`.
+fn anonymous(value_type: Type, body: Node, captures: Vec<Node>) -> Node {
+    let capture_types = vec![Type::I32; captures.len()];
+    node(Expr::Closure {
+        closure: Arc::new(vibra_ir::ClosureBody {
+            value_type,
+            slot_count: 1,
+            captures: capture_types,
+            defaults: Vec::new(),
+            body,
+            entry_guard: None,
+            exit_guard: None,
+        }),
+        captures,
+    })
+}
+
+/// `apply(v: I32, f: Fn({I32} I32) be default) -> I32`, calling `f(v)`, in a
+/// set with the unary function `inc` at index 1 beside it.
+fn applying(default: Node) -> Result<Arc<CheckedModuleSet>, IrError> {
+    let record = SignatureRecord::new(
+        Vec::new(),
+        Type::function(FnType {
+            parameters: vec![Type::I32],
+            labels: named(vec![("f", unary())]),
+            result: Type::I32,
+        }),
+    )
+    .unwrap();
+    let body = node(Expr::Call {
+        target: CallTarget::Value(Box::new(variable(1, unary()))),
+        arguments: Arguments {
+            positional: vec![variable(0, Type::I32)],
+            labelled: Vec::new(),
+        },
+    });
+    let mut apply = function("apply", record, body, 2);
+    apply.defaults = vec![("f".to_owned(), default)];
+    let inc = function(
+        "inc",
+        SignatureRecord::new(Vec::new(), unary()).unwrap(),
+        variable(0, Type::I32),
+        1,
+    );
+    let mut parts = library_parts();
+    parts.functions.push(apply);
+    parts.functions.push(inc);
+    CheckedModuleSet::try_new(parts)
+}
+
+/// A default that holds a function value keeps its checked form: an
+/// anonymous `fn` that captures nothing, a module `fn` as a value, and a
+/// construction of either are accepted at the label's type.
+#[test]
+fn a_default_may_hold_a_function_value() {
+    let identity = || anonymous(unary(), variable(0, Type::I32), Vec::new());
+    assert!(applying(identity()).is_ok());
+    let inc = node(Expr::Function {
+        function: 1,
+        type_arguments: Vec::new(),
+    });
+    assert!(applying(inc).is_ok());
+    let wrong_type = anonymous(
+        Type::function(FnType {
+            parameters: vec![Type::U8],
+            labels: NamedTypes::default(),
+            result: Type::U8,
+        }),
+        variable(0, Type::U8),
+        Vec::new(),
+    );
+    assert!(matches!(
+        applying(wrong_type),
+        Err(IrError::TypeMismatch { .. })
+    ));
+}
+
+/// A default is decided by form: a procedure, a closure that captures a
+/// local, and a call are no constant expressions.
+#[test]
+fn a_default_is_a_constant_expression_in_form() {
+    let procedure = anonymous(
+        Type::Proc(Box::new(vibra_ir::ProcType {
+            parameters: vec![Type::I32],
+            labels: NamedTypes::default(),
+            result: Type::I32,
+            effects: vibra_ir::Row::default(),
+        })),
+        variable(0, Type::I32),
+        Vec::new(),
+    );
+    assert!(matches!(
+        applying(procedure),
+        Err(IrError::InvalidExpression(_))
+    ));
+    let capturing = anonymous(unary(), variable(0, Type::I32), vec![int(1)]);
+    assert!(matches!(
+        applying(capturing),
+        Err(IrError::InvalidExpression(_))
+    ));
+    let call = node(Expr::Call {
+        target: CallTarget::Direct {
+            function: 1,
+            type_arguments: Vec::new(),
+        },
+        arguments: Arguments {
+            positional: vec![int(1)],
+            labelled: Vec::new(),
+        },
+    });
+    assert!(matches!(applying(call), Err(IrError::InvalidExpression(_))));
+}
+
+/// Two defaults that hold a function value are the same when their checked
+/// forms are, wherever each was written.
+#[test]
+fn two_function_defaults_are_the_same_by_form() {
+    let at = |start: usize, body: Node| {
+        let mut closure = anonymous(unary(), body, Vec::new());
+        closure.origin = vibra_ir::SourceOrigin::new(
+            "other.vib",
+            vibra_diagnostics::ByteSpan::new(start, start + 1),
+        );
+        closure
+    };
+    let identity = || variable(0, Type::I32);
+    assert!(at(0, identity()).same_form(&at(40, identity())));
+    assert!(!at(0, identity()).same_form(&at(0, int(1))));
+    assert!(literal(Type::I32, Value::I32(1)).same_form(&int(1)));
 }
 
 // -- V12: a closure's guards ----------------------------------------------------
@@ -1089,7 +1229,7 @@ fn padded(default: Constant) -> Result<Arc<CheckedModuleSet>, IrError> {
     )
     .unwrap();
     let mut pad = function("pad", record, int(1), 1);
-    pad.defaults = vec![("tail".to_owned(), default)];
+    pad.defaults = vec![("tail".to_owned(), node(Expr::Literal(default)))];
     let mut parts = library_parts();
     parts.functions.push(pad);
     CheckedModuleSet::try_new(parts)

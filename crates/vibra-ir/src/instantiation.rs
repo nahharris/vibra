@@ -22,7 +22,9 @@
 use crate::conformance::{Evidence, GOAL_LIMIT, select_implementation};
 use crate::expr::{CallTarget, ContractCall, Expr, Node, Tables};
 use crate::external::CompilerIntrinsic;
-use crate::{Binder, FunctionBody, Implementation, IrError, Type, TypeId};
+use crate::{
+    Binder, CheckedFunction, FunctionBody, Implementation, IrError, Type, TypeId,
+};
 
 /// One instantiation: the function it is in, the function it names, and one
 /// type for each leading binder of that function.
@@ -179,6 +181,25 @@ impl<'a> Collector<'a> {
 
     /// Every instantiation in the expression under `root`, its closures'
     /// bodies included.
+    /// Walks every node of `function`: its labelled defaults, its body, and
+    /// its guards.
+    fn function(&mut self, function: &CheckedFunction) {
+        for (_, default) in &function.defaults {
+            self.body(default);
+        }
+        if let FunctionBody::Expr(body) = &function.body {
+            self.body(body);
+        }
+        let guards = function
+            .entry_guard
+            .iter()
+            .chain(function.exit_guard.iter().map(|exit| &exit.guard));
+        for guard in guards {
+            self.body(&guard.predicate);
+            self.body(&guard.consequence);
+        }
+    }
+
     fn body(&mut self, root: &Node) {
         let mut pending = vec![&root.expr];
         while let Some(expr) = pending.pop() {
@@ -294,17 +315,7 @@ pub(crate) fn check_instantiations(tables: &Tables<'_>) -> Result<(), IrError> {
             continue;
         }
         collector.caller = index;
-        if let FunctionBody::Expr(body) = &function.body {
-            collector.body(body);
-        }
-        let guards = function
-            .entry_guard
-            .iter()
-            .chain(function.exit_guard.iter().map(|exit| &exit.guard));
-        for guard in guards {
-            collector.body(&guard.predicate);
-            collector.body(&guard.consequence);
-        }
+        collector.function(function);
     }
     let binders_of = |function: usize| {
         functions
@@ -381,17 +392,7 @@ pub(crate) fn check_built_dicts(
     };
     for (index, function) in tables.functions.iter().enumerate() {
         collector.caller = index;
-        if let FunctionBody::Expr(body) = &function.body {
-            collector.body(body);
-        }
-        let guards = function
-            .entry_guard
-            .iter()
-            .chain(function.exit_guard.iter().map(|exit| &exit.guard));
-        for guard in guards {
-            collector.body(&guard.predicate);
-            collector.body(&guard.consequence);
-        }
+        collector.function(function);
     }
     for initializer in globals {
         collector.body(initializer);

@@ -1,0 +1,18 @@
+id = "V2-TYPE-NAMES-function-constant-pattern"
+rule = "V2-TYPE-NAMES-function-constant-pattern"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#constant-expressions-and-constant-patterns: a constant module value that holds a function has no pattern form, so its name in pattern position is @pattern.invalidConstant"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@pattern.invalidConstant"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 176, end = 179 }

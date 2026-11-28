@@ -732,3 +732,38 @@ fn a_chain_of_a_thousand_packages_loads_on_a_small_stack() {
         .expect("no overflow");
     assert_eq!(units.expect("captured"), LENGTH + 2);
 }
+
+/// 04 "Packages, units, and targets" and 05 `check`: a binary target names
+/// the library targets of its own package, and checking the program alone
+/// covers what it imports, so a fault in its own library is reported there,
+/// as a fault in a dependency is. A library module the program does not
+/// import is outside that check.
+#[test]
+fn checking_a_program_reports_a_fault_of_its_own_library() {
+    let document = "{format: @project.v2 package: {name: \"hello\" version: \"0.1.0\"} targets: [{name: @greeting kind: @lib root: \"src/greeting\"} {name: @hello kind: @bin root: \"src/hello\" entry: @hello.main.main effects: [@std.io.StdoutText] grants: [@out: {provider: @host.io.stdout resource: {kind: @processStream} after: []}]}] dependencies: [:]}";
+    let main = "use @std.io.StdoutText enduse\n\nuse @std.process.ExitCode enduse\n\nuse @greeting.text enduse\n\nproc main\n  takes {out: StdoutText}\n  returns code: ExitCode\n  performs {StdoutText}\n  do\n    let _ be await StdoutText.write(out text.hello()) endlet\n    return ExitCode(0u8)\nendproc\n";
+    let faulty = "fn hello\n  returns text: Str\n  visibility @public\n  do\n    return 1i32\nendfn\n";
+    let tree = TempDir::project(
+        "own-library-fault",
+        document,
+        &[
+            ("src/hello/main.vib", main),
+            ("src/greeting/text.vib", faulty),
+            ("src/greeting/unused.vib", faulty),
+        ],
+    );
+    let snapshot = capture(tree.path()).expect("captured");
+    let program = check_snapshot(&snapshot, Some("@hello"));
+    let sources = program
+        .diagnostics()
+        .iter()
+        .filter(|diagnostic| diagnostic.code() == DiagnosticCode::TypeMismatch)
+        .map(Diagnostic::source_id)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        sources,
+        [Some("src/greeting/text.vib")],
+        "{:?}",
+        program.diagnostics()
+    );
+}

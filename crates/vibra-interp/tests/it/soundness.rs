@@ -185,7 +185,9 @@ fn v4_a_default_breaking_its_invariant_is_rejected() {
     let with_default = |value: i32| CheckedFunction {
         defaults: vec![(
             "p".to_owned(),
-            Constant::new(positive(), wrapped(value)).unwrap(),
+            node(Expr::Literal(
+                Constant::new(positive(), wrapped(value)).unwrap(),
+            )),
         )],
         ..function(
             "take",

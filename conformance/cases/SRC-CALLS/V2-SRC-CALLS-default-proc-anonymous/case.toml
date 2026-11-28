@@ -1,0 +1,18 @@
+id = "V2-SRC-CALLS-default-proc-anonymous"
+rule = "V2-SRC-CALLS-default-proc-anonymous"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#constant-expressions-and-constant-patterns: an anonymous proc is not a constant expression, so it is no labelled default and is @type.notConstant"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.notConstant"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 36, end = 78 }

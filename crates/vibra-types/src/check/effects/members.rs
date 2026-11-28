@@ -318,7 +318,7 @@ pub(crate) fn type_arguments(
 pub(crate) fn host_function(
     data: &FnData<'_>,
     record: SignatureRecord,
-    defaults: Vec<(String, vibra_ir::Constant)>,
+    defaults: Vec<(String, vibra_ir::Node)>,
     origin: SourceOrigin,
 ) -> Option<CheckedFunction> {
     if data.contract.is_none() || data.view.external()?.tag()?.text() != "@host" {

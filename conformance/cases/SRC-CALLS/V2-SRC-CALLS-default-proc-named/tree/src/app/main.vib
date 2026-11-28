@@ -1,0 +1,2 @@
+proc one returns r: I32 do return 1i32 endproc
+fn run labelled {p: Proc({} I32) be one} returns r: I32 do return 0i32 endfn

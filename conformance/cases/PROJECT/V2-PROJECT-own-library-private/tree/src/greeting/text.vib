@@ -1,0 +1,12 @@
+fn hello
+  returns text: Str
+  visibility @public
+  do
+    return "hello\n"
+endfn
+
+fn secret
+  returns text: Str
+  do
+    return "secret\n"
+endfn

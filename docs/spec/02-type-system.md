@@ -1158,13 +1158,21 @@ assumes coverage.
 
 ### Constant expressions and constant patterns
 
-A **constant expression** is a literal, an atom, or `void`; a construction,
-tuple, record, list, or dict whose operands are all constant expressions and
-whose type has no `where … else`; or the name of a module value whose
-initializer is a constant expression. A function call is never a constant
-expression, so the property is decidable without evaluation. Neither is a
-dict whose canonical key order uses a declared type's own `Ordered`
-implementation, since ordering its entries would run that implementation.
+A **constant expression** is a literal, an atom, or `void`; an anonymous
+`fn`, or the name of a declared `fn` where the language admits that name as
+a value; a construction, tuple, record, list, or dict whose operands are all
+constant expressions and whose type has no `where … else`; or the name of a
+module value whose initializer is a constant expression. A function call is
+never a constant expression, so the property is decidable without
+evaluation. Neither is a dict whose canonical key order uses a declared
+type's own `Ordered` implementation, since ordering its entries would run
+that implementation. An anonymous `fn` is a value whatever its body does,
+so deciding that it is constant never looks inside the body, which is
+checked as any body is; an anonymous `proc`, the name of a declared `proc`
+as a value, and an application that builds a plan are not constant
+expressions, since a constant is a pure value and a procedure value or a
+plan stands for effects still to be performed. A constructor is not a
+function value and is no constant expression on its own.
 
 A name in pattern position that resolves to a constant module value is a
 constant pattern: it means the pattern of that value and binds nothing.
@@ -1174,22 +1182,31 @@ expanded value. The pattern of a string, character, integer, or atom is its
 literal; that of a tuple, record, or list is the tuple, record, or list
 pattern of its components' patterns; and that of a construction of a case
 or a declared type is the constructor pattern of its fields' patterns. A
-float, `void`, or a dict has no pattern form, so a constant whose value is
-or holds one is `@pattern.invalidConstant` at the pattern.
+float, `void`, a dict, or a function has no pattern form, so a constant
+whose value is or holds one is `@pattern.invalidConstant` at the pattern.
 
 Labelled defaults are constant expressions. Two defaults are the same when
-they denote the same value. The value of a constant dict is the value its
-literal evaluates to: its entries in canonical key order, where a later
-duplicate key replaces the earlier value.
+they denote the same value. Two function values are the same when their
+checked forms are identical: the same declared `fn`, or two anonymous `fn`s
+with the same text up to layout and comments in which every name resolves to
+the same declaration; no renaming of binders is attempted. A default that
+names a module value holding a function is the same as another default that
+names that module value, and differs from the function's text written in
+its place. The value of a constant dict is the value its literal evaluates
+to: its entries in canonical key order, where a later duplicate key replaces
+the earlier value.
+A default sees no parameter, so an anonymous `fn` written as one captures
+no local; it may name module-level declarations as any body may.
 
 A default is checked at its label's type with the callable's type parameters
 in it, and in a member of an interface with `Self` and the interface's
 associated types in it, so a default whose type mentions one is valid
 exactly when it checks at that type for every instantiation, as `[]` at
-`List(T)` or `List(Item)` and `Option.none()` at `Option(T)` or
-`Option(Self)` do. Such a value holds nothing of that type, and at each
-instantiation of the callable, an anonymous one included, the default is
-that value at the instantiated label type. A default that holds a value
+`List(T)` or `List(Item)`, `Option.none()` at `Option(T)` or
+`Option(Self)`, and the identity `fn takes {x: T} returns r: T do return x
+endfn` at `Fn({T} T)` do. Such a value holds nothing of that type, and at
+each instantiation of the callable, an anonymous one included, the default
+is that value at the instantiated label type. A default that holds a value
 where such a type is required, such as `[1i32]` at `List(T)`, is
 `@type.mismatch` at that value. A guard's consequence is checked with no
 expected type, so a constant consequence never has an open type.

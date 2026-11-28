@@ -1,0 +1,12 @@
+id = "V2-SRC-CALLS-default-fn-option-none"
+rule = "V2-SRC-CALLS-default-fn-option-none"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#constant-expressions-and-constant-patterns: Option.none() is a construction with constant operands, so it is a labelled default at Option(Fn(...)), and a written label supplies a function"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

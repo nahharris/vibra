@@ -1,0 +1,9 @@
+fn main returns r: I32 do return run() endfn
+fn run labelled {p: Option(Proc({} I32)) be Option.none()} returns r: I32 do
+  match p
+    case Option.some(value: _)
+      return 1i32
+    case Option.none()
+      return 0i32
+  endmatch
+endfn
