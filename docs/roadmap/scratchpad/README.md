@@ -14,6 +14,7 @@ illustrative.
 | [Concurrency and distribution](concurrency/README.md) | Isolated processes, supervision, simulation, parallelism, and clusters |
 | [Interactive applications](interactive-apps/README.md) | Terminal, browser, and desktop UIs, accessibility, and graphics |
 | [Execution targets](execution-targets/README.md) | Nexus follow-ons, earlier WebAssembly alternatives, compiler strategies, and backend parity |
+| [Aurum](aurum/README.md) | A non-von-Neumann rewrite fabric as a third executor: which Vibra features it can run, how the compiler reports the rest, what an operating system, a shell, and an interface for it could be, and the literature behind the idea |
 | [Agent tooling](agent-tooling/README.md) | Live debugging, codebase extensions, and type-constrained decoding for source generation |
 | [Blue sky](blue-sky/README.md) | An unconstrained rethink: programs as ledgers of claims, execution as a journal, authoring as refinement, with [paradigm field notes](blue-sky/paradigms.md), a [syntax note](blue-sky/syntax.md), a [tooling note](blue-sky/tooling.md), and a [draft specification](blue-sky/spec/README.md) of the resulting language |
 

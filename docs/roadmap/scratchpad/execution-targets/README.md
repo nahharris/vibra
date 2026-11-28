@@ -3,7 +3,9 @@
 The [Nexus proposal](nexus.md) describes the planned native direction and
 its follow-on research. The sections below preserve earlier WebAssembly
 alternatives and backend-independent compiler research. The
-[v0.0.3 roadmap](../../v0.0.3/README.md) owns the native cutover.
+[v0.0.3 roadmap](../../v0.0.3/README.md) owns the native cutover. The
+[Aurum notes](../aurum/README.md) study a target that is not a von Neumann
+machine.
 
 ## Summary
 
