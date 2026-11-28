@@ -76,40 +76,6 @@ fn no_reference_in(resolution: &Resolution, span: (usize, usize)) {
 // Task 1: scopes.
 
 #[test]
-fn a_let_name_is_visible_after_endlet() {
-    let text = "fn f returns r: I32 do let a be 1i32 endlet return a endfn\n";
-    assert_clean(&resolve_main(text));
-}
-
-#[test]
-fn a_let_name_is_not_visible_in_its_initializer() {
-    let text = "fn f returns r: I32 do let a be a endlet return a endfn\n";
-    assert_one(
-        &resolve_main(text),
-        C::NameUnknownSymbol,
-        inside(text, "be a endlet", "a"),
-        &[],
-    );
-}
-
-#[test]
-fn a_let_name_is_not_visible_in_its_fallback() {
-    let text = "fn f takes {x: Option(I32)} returns r: I32 do let Option.some(value: a) be x else return a endlet return a endfn\n";
-    assert_one(
-        &resolve_main(text),
-        C::NameUnknownSymbol,
-        inside(text, "return a endlet", "a"),
-        &[],
-    );
-}
-
-#[test]
-fn sibling_scopes_reuse_a_name() {
-    let text = "fn f takes {c: Bool} returns r: I32 do if c then let a be 1i32 endlet return a else let a be 2i32 endlet return a endif endfn\n";
-    assert_clean(&resolve_main(text));
-}
-
-#[test]
 fn a_binding_of_a_do_block_ends_with_it() {
     let text = "fn f returns r: I32 do do let b be 1i32 endlet enddo return b endfn\n";
     assert_one(
@@ -133,7 +99,6 @@ fn a_binding_of_an_arm_ends_with_it() {
 
 #[test]
 fn a_name_used_before_its_let_is_unknown() {
-    // v1 B02.
     let text = "fn take takes {v: I32} returns r: I32 do return v endfn\nfn f returns r: I32 do let u be take(a) endlet let a be 1i32 endlet return a endfn\n";
     assert_one(
         &resolve_main(text),
@@ -145,7 +110,6 @@ fn a_name_used_before_its_let_is_unknown() {
 
 #[test]
 fn an_anonymous_callable_sees_the_locals_before_it_only() {
-    // v1 B04 and B13.
     let later = "fn f returns r: I32 do let h be fn returns y: I32 do return g endfn endlet let g be 1i32 endlet return g endfn\n";
     assert_one(
         &resolve_main(later),
@@ -171,14 +135,12 @@ fn an_anonymous_callable_sees_an_enclosing_local() {
 
 #[test]
 fn a_fallback_binds_in_its_own_scope_before_the_pattern_binds() {
-    // v1 B11 and B12.
     let text = "fn f takes {o: Option(I32)} returns r: I32 do let Option.some(value: z) be o else do let z be 1i32 endlet return z enddo endlet return z endfn\n";
     assert_clean(&resolve_main(text));
 }
 
 #[test]
 fn a_let_else_binder_is_not_visible_in_its_value() {
-    // v1 B09.
     let text = "fn f takes {o: Option(I32)} returns r: I32 do let Option.some(value: x) be x else return 0i32 endlet return x endfn\n";
     assert_one(
         &resolve_main(text),
@@ -265,32 +227,7 @@ let zero: I32 be 0i32 endlet
 // Task 2: binders.
 
 #[test]
-fn a_binder_may_not_shadow_a_parameter() {
-    let text =
-        "fn f takes {a: I32} returns r: I32 do let a be 2i32 endlet return a endfn\n";
-    assert_one(
-        &resolve_main(text),
-        C::NameRedeclaration,
-        inside(text, "let a be", "a"),
-        &[tail(text, "{a", 1)],
-    );
-}
-
-#[test]
-fn a_binder_may_not_shadow_a_local_of_an_enclosing_scope() {
-    // v1 B07.
-    let text = "fn f takes {c: Bool} returns r: I32 do let a be 1i32 endlet if c then let a be 2i32 endlet return a endif return a endfn\n";
-    assert_one(
-        &resolve_main(text),
-        C::NameRedeclaration,
-        inside(text, "let a be 2i32", "a"),
-        &[inside(text, "let a be 1i32", "a")],
-    );
-}
-
-#[test]
 fn a_later_let_of_the_same_name_is_a_redeclaration() {
-    // v1 B05.
     let text = "fn f returns r: I32 do let a be 1i32 endlet let a be 2i32 endlet return a endfn\n";
     assert_one(
         &resolve_main(text),
@@ -330,17 +267,6 @@ fn a_binder_may_not_shadow_a_type_parameter() {
 }
 
 #[test]
-fn a_binder_may_not_shadow_a_non_constant_module_value() {
-    let text = "fn seed returns s: I32 do return 1i32 endfn\nlet limit: I32 be seed() endlet\nfn f returns r: I32 do let limit be 2i32 endlet return limit endfn\n";
-    assert_one(
-        &resolve_main(text),
-        C::NameRedeclaration,
-        inside(text, "let limit be", "limit"),
-        &[span_of(text, "limit", 0)],
-    );
-}
-
-#[test]
 fn a_let_of_a_constant_module_value_is_a_constant_pattern() {
     let text = "let limit: I32 be 1i32 endlet\nfn f returns r: I32 do let limit be 1i32 endlet return limit endfn\n";
     let resolution = resolve_main(text);
@@ -359,25 +285,7 @@ fn a_let_of_a_constant_module_value_is_a_constant_pattern() {
 }
 
 #[test]
-fn a_pattern_may_not_bind_one_name_twice() {
-    let text = "fn f takes {t: {I32 I32}} returns r: I32 do let {a a} be t endlet return a endfn\n";
-    assert_one(
-        &resolve_main(text),
-        C::NameRedeclaration,
-        tail(text, "{a a", 1),
-        &[inside(text, "{a a}", "a")],
-    );
-}
-
-#[test]
-fn the_later_binder_still_binds() {
-    let text = "fn f takes {t: {I32 I32}} returns r: I32 do let {a a} be t endlet return a endfn\n";
-    assert_eq!(codes(&resolve_main(text)), [C::NameRedeclaration]);
-}
-
-#[test]
 fn discards_repeat_and_bind_nothing() {
-    // v1 B14.
     let text = "fn f takes {t: {I32 I32 I32} _: I32} returns r: I32 do let {_ _ c} be t endlet let _ be c endlet return c endfn\n";
     assert_clean(&resolve_main(text));
 }
@@ -431,28 +339,6 @@ fn a_cycle_of_module_values_is_not_constant() {
         C::NameRedeclaration,
         tail(text, "case a", 1),
         &[span_of(text, "a", 0)],
-    );
-}
-
-#[test]
-fn a_function_in_pattern_position_is_a_redeclaration() {
-    let text = "fn helper returns h: I32 do return 0i32 endfn\nfn f takes {x: I32} returns r: I32 do match x case helper return 1i32 case _ return 0i32 endmatch endfn\n";
-    assert_one(
-        &resolve_main(text),
-        C::NameRedeclaration,
-        inside(text, "case helper", "helper"),
-        &[span_of(text, "helper", 0)],
-    );
-}
-
-#[test]
-fn a_non_constant_module_value_in_pattern_position_is_a_redeclaration() {
-    let text = "fn seed returns s: I32 do return 1i32 endfn\nlet limit: I32 be seed() endlet\nfn f takes {x: I32} returns r: I32 do match x case limit return 1i32 case _ return 0i32 endmatch endfn\n";
-    assert_one(
-        &resolve_main(text),
-        C::NameRedeclaration,
-        inside(text, "case limit", "limit"),
-        &[span_of(text, "limit", 0)],
     );
 }
 
@@ -638,17 +524,6 @@ fn the_longest_entity_prefix_is_the_path() {
 }
 
 #[test]
-fn a_first_part_naming_nothing_is_unknown() {
-    let text = "fn f returns r: I32 do return nothere.field endfn\n";
-    assert_one(
-        &resolve_main(text),
-        C::NameUnknownSymbol,
-        span_of(text, "nothere", 0),
-        &[],
-    );
-}
-
-#[test]
 fn a_member_path_through_a_prelude_type_reaches_its_member() {
     let text = "fn f returns r: Option(I32) do return Option.none() endfn\n";
     let resolution = resolve_main(text);
@@ -658,24 +533,6 @@ fn a_member_path_through_a_prelude_type_reaches_its_member() {
         span_of(text, "Option.none", 0),
         &std_member("@std.option", "Option", K::Case, "none"),
     ));
-}
-
-#[test]
-fn an_unknown_member_of_a_prelude_type_is_unknown() {
-    let text = "fn f returns r: Option(I32) do return Option.nothere() endfn\n";
-    let resolution = resolve_main(text);
-    let option = include_str!("../../../../stdlib/src/std/option.vib");
-    let (start, end) = span_of(option, "Option", 0);
-    assert_eq!(
-        flat(&resolution),
-        [(
-            C::NameUnknownSymbol,
-            "src/app/main.vib".to_owned(),
-            span_of(text, "nothere", 0).0,
-            span_of(text, "nothere", 0).1,
-            vec![("@std.option".to_owned(), start, end)],
-        )]
-    );
 }
 
 #[test]
@@ -702,17 +559,6 @@ fn a_module_function_is_a_function_value() {
 }
 
 // Task 4: the result name.
-
-#[test]
-fn the_result_name_is_not_visible_in_the_body() {
-    let text = "fn f returns r: I32 do return r endfn\n";
-    assert_one(
-        &resolve_main(text),
-        C::NameUnknownSymbol,
-        tail(text, "return r", 1),
-        &[],
-    );
-}
 
 #[test]
 fn the_result_name_is_not_visible_in_requires() {

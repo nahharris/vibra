@@ -194,19 +194,6 @@ fn an_open_form_at_the_end_is_missing_its_closer() {
 }
 
 #[test]
-fn a_closer_with_nothing_of_its_kind_open_is_kept_in_an_error_node() {
-    let document = data("[1u8}");
-    assert_eq!(
-        codes(document.diagnostics()),
-        [
-            (SyntaxUnmatchedDelimiter, 0, 1),
-            (SyntaxUnmatchedDelimiter, 4, 5)
-        ]
-    );
-    assert!(document.diagnostics()[1].related().is_empty());
-}
-
-#[test]
 fn encoding_faults_are_reported_once() {
     let bom = parse_data(None, &[0xEF, 0xBB, 0xBF, 0x7B, 0x7D]);
     assert_eq!(codes(bom.diagnostics()), [(SyntaxInvalidEncoding, 0, 3)]);

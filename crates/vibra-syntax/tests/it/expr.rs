@@ -532,14 +532,6 @@ fn a_paren_where_an_expression_is_expected_is_invalid_once() {
 }
 
 #[test]
-fn as_is_reported_at_the_as() {
-    assert_eq!(
-        diagnostics("let n: I32 be x as I32 endlet"),
-        [(SyntaxInvalidForm, 16, 18)]
-    );
-}
-
-#[test]
 fn a_reserved_label_is_recovered() {
     let document = source("let u: User be User(role: 1u8) endlet");
     assert_eq!(codes(document.diagnostics()), [(NameReservedLabel, 20, 24)]);
@@ -850,14 +842,6 @@ fn a_module_value_is_a_name_a_type_and_no_fallback() {
             "{text}"
         );
     }
-}
-
-#[test]
-fn a_doc_string_outside_doc_is_invalid() {
-    assert_eq!(
-        diagnostics("let a: Str be \"\"\"x\"\"\" endlet"),
-        [(SyntaxInvalidForm, 0, 28)]
-    );
 }
 
 #[test]

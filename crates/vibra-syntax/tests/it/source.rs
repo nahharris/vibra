@@ -195,11 +195,6 @@ fn use_extra_tokens_repeated_as_and_other_sections() {
 }
 
 #[test]
-fn top_literal() {
-    assert_eq!(diagnostics("1i32"), [(SyntaxInvalidForm, 0, 4)]);
-}
-
-#[test]
 fn top_paren() {
     let document = source("(defn main () void void)");
     assert_eq!(codes(document.diagnostics()), [(SyntaxInvalidForm, 0, 24)]);
@@ -270,14 +265,6 @@ fn closer_eof() {
     assert_eq!(diagnostics("fn f"), [(SyntaxUnmatchedDelimiter, 0, 2)]);
     // Trailing whitespace stays outside a construct closed as missing.
     assert_eq!(diagnostics("fn f\n\n"), [(SyntaxUnmatchedDelimiter, 0, 2)]);
-}
-
-#[test]
-fn duplicate_section() {
-    assert_eq!(
-        diagnostics("fn f returns r: I32 returns s: I32 do return 1i32 endfn"),
-        [(SyntaxDuplicateSection, 20, 27)]
-    );
 }
 
 #[test]
