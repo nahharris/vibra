@@ -64,9 +64,7 @@ impl ProfileHandler for InterpretHandler {
         let source_id = case.manifest().inputs.source.as_deref().ok_or_else(|| {
             HandlerError::new("an interpret case declares one source")
         })?;
-        let source = case
-            .read_file(source_id)
-            .map_err(|error| HandlerError::new(error.to_string()))?;
+        let source = case.read_file(source_id)?;
         let outcome = interpret(source_id, &source, INTERPRET_BUDGET);
         let check = &outcome.check;
         let mut observation = CaseObservation::new(check_verdict(check.diagnostics()));

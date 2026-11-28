@@ -303,14 +303,6 @@ impl RuleIndex {
         Ok(index)
     }
 
-    /// Reads and decodes one rules file, named by its path in errors.
-    pub fn from_path(path: impl AsRef<Path>) -> Result<Self, RulesError> {
-        let path = path.as_ref();
-        let mut index = Self::default();
-        index.add_path(path, &path.display().to_string())?;
-        Ok(index)
-    }
-
     /// Reads the rules file at `path` and adds its rows, naming it `file`.
     fn add_path(&mut self, path: &Path, file: &str) -> Result<(), RulesError> {
         let text = std::fs::read_to_string(path).map_err(|source| RulesError::Io {

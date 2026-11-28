@@ -14,13 +14,10 @@
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 use vibra_interp::MemoryBudget;
-use vibra_workspace::{
-    HostWorld, SourceSnapshot, SuiteResult, TestOutcome, discover_project_at,
-    run_tests_in,
-};
+use vibra_workspace::{SuiteResult, TestOutcome, run_tests_in};
 
 use crate::corpus::Case;
-use crate::manifest::{Verdict, decode_host_world};
+use crate::manifest::Verdict;
 use crate::profile::{
     CaseObservation, ConformanceOperation, HandlerError, ProfileHandler,
 };
@@ -37,33 +34,12 @@ impl ProfileHandler for WorkspaceTestHandler {
     }
 
     fn run(&self, case: &Case) -> Result<CaseObservation, HandlerError> {
-        let tree = case
-            .tree_directory()
-            .map_err(|error| HandlerError::new(error.to_string()))?
-            .ok_or_else(|| {
-                HandlerError::new("a workspaceTest case declares one tree")
-            })?;
-        let snapshot =
-            match discover_project_at(&tree).and_then(SourceSnapshot::capture) {
-                Ok(snapshot) => snapshot,
-                Err(diagnostics) => {
-                    let mut observation = CaseObservation::new(Verdict::Refuted);
-                    observation.diagnostics = diagnostics;
-                    return Ok(observation);
-                }
-            };
-        let world = match case.manifest().inputs.host_world.as_deref() {
-            Some(source_id) => {
-                let bytes = case
-                    .read_bytes(source_id)
-                    .map_err(|error| HandlerError::new(error.to_string()))?;
-                decode_host_world(source_id, &bytes)
-                    .map_err(|error| HandlerError::new(error.to_string()))?
-            }
-            None => HostWorld::default(),
+        let snapshot = match case.snapshot()? {
+            Ok(snapshot) => snapshot,
+            Err(diagnostics) => return Ok(CaseObservation::refuted(diagnostics)),
         };
-        let run = run_tests_in(&snapshot, None, &world, MemoryBudget::DEFAULT)
-            .map_err(|error| HandlerError::new(error.to_string()))?;
+        let run =
+            run_tests_in(&snapshot, None, &case.host_world()?, MemoryBudget::DEFAULT)?;
         let mut observation = CaseObservation::new(verdict(run.result()));
         observation.diagnostics = run.diagnostics().to_vec();
         observation

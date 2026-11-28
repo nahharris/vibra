@@ -1,6 +1,5 @@
-//! The rules rows of the step 01 test matrix of M2: the rule index is
-//! `rules.tsv` and every `rules/*.tsv` of a conformance root, and a rule
-//! identity is a row of exactly one file.
+//! The rule index is `rules.tsv` and every `rules/*.tsv` of a conformance
+//! root, and a rule identity is a row of exactly one file.
 
 use std::path::PathBuf;
 

@@ -7,12 +7,14 @@
 //! observations for the cases it can run.
 
 use std::fmt;
+use std::path::PathBuf;
 use std::str::FromStr;
 
 use vibra_diagnostics::{Diagnostic, DiagnosticCode};
+use vibra_workspace::{HostWorld, SourceSnapshot, discover_project_at};
 
-use crate::corpus::Case;
-use crate::manifest::Verdict;
+use crate::corpus::{Case, CorpusError};
+use crate::manifest::{ManifestError, Verdict, decode_host_world};
 
 /// A versioned statement of what a tool supports.
 ///
@@ -221,16 +223,6 @@ impl ConformanceOperation {
             Self::Format | Self::Query => ConformanceProfile::ToolingV2,
         }
     }
-
-    /// Whether this operation executes a program: the operation half of an
-    /// executable case ("Differential execution").
-    #[must_use]
-    pub const fn executes_programs(self) -> bool {
-        matches!(
-            self,
-            Self::Interpret | Self::WorkspaceRun | Self::WorkspaceTest
-        )
-    }
 }
 
 impl fmt::Display for ConformanceOperation {
@@ -354,6 +346,66 @@ impl fmt::Display for HandlerError {
 }
 
 impl std::error::Error for HandlerError {}
+
+/// A step of a handler that fails is a handler failure explained by that
+/// step's error.
+macro_rules! handler_failures {
+    ($($error:ty),* $(,)?) => {
+        $(impl From<$error> for HandlerError {
+            fn from(error: $error) -> Self {
+                Self::new(error.to_string())
+            }
+        })*
+    };
+}
+
+handler_failures!(
+    CorpusError,
+    ManifestError,
+    vibra_types::StdlibError,
+    vibra_workspace::InvalidPath,
+    vibra_workspace::InvalidSelection,
+);
+
+impl Case {
+    /// The canonical directory of the case's one tree.
+    pub(crate) fn tree(&self) -> Result<PathBuf, HandlerError> {
+        self.tree_directory()?.ok_or_else(|| {
+            HandlerError::new(format!(
+                "a {} case declares one tree",
+                self.manifest().operation
+            ))
+        })
+    }
+
+    /// The case's tree, discovered as a project root that searches no
+    /// ancestor and captured; `Err` holds the diagnostics that stopped it.
+    pub(crate) fn snapshot(
+        &self,
+    ) -> Result<Result<SourceSnapshot, Vec<Diagnostic>>, HandlerError> {
+        Ok(discover_project_at(&self.tree()?).and_then(SourceSnapshot::capture))
+    }
+
+    /// A fresh copy of the case's `hostWorld`, or the default world when it
+    /// declares none.
+    pub(crate) fn host_world(&self) -> Result<HostWorld, HandlerError> {
+        match self.manifest().inputs.host_world.as_deref() {
+            Some(source_id) => {
+                Ok(decode_host_world(source_id, &self.read_bytes(source_id)?)?)
+            }
+            None => Ok(HostWorld::default()),
+        }
+    }
+}
+
+impl CaseObservation {
+    /// A refuted observation of `diagnostics`.
+    pub(crate) fn refuted(diagnostics: Vec<Diagnostic>) -> Self {
+        let mut observation = Self::new(Verdict::Refuted);
+        observation.diagnostics = diagnostics;
+        observation
+    }
+}
 
 /// The interface an implementation uses to plug into the runner.
 pub trait ProfileHandler: Send + Sync {

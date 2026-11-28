@@ -6,7 +6,6 @@
 //! `conformance/rules.tsv` and the files of `conformance/rules/`, lies in the
 //! conformance root, the parent of the corpus root.
 
-use std::collections::BTreeSet;
 use std::fmt;
 use std::path::{Component, Path, PathBuf};
 
@@ -24,28 +23,6 @@ pub fn workspace_root() -> PathBuf {
 #[must_use]
 pub fn corpus_root() -> PathBuf {
     workspace_root().join("conformance/cases")
-}
-
-/// One input document of a case, as exact bytes.
-///
-/// The path is the case-relative source identity used by diagnostics and
-/// snapshots. The bytes are not decoded: an encoding error is the reader's to
-/// report.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CaseInputDocument {
-    /// The case-relative document identity.
-    pub source_id: String,
-    /// The exact bytes on disk.
-    pub bytes: Vec<u8>,
-}
-
-/// One file acquired from a declared tree input.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CaseTreeFile {
-    /// The case-relative, slash-separated source identity.
-    pub source_id: String,
-    /// The exact bytes on disk.
-    pub bytes: Vec<u8>,
 }
 
 /// A loaded case and its directory.
@@ -94,23 +71,6 @@ impl Case {
             .map_err(|source| CorpusError::Io { path, source })
     }
 
-    /// Every declared document input, in the order source, project, data.
-    pub fn input_documents(&self) -> Result<Vec<CaseInputDocument>, CorpusError> {
-        let inputs = &self.manifest.inputs;
-        inputs
-            .source
-            .iter()
-            .chain(&inputs.project)
-            .chain(&inputs.data)
-            .map(|source_id| {
-                Ok(CaseInputDocument {
-                    source_id: source_id.clone(),
-                    bytes: self.read_bytes(source_id)?,
-                })
-            })
-            .collect()
-    }
-
     /// The canonical directory of the declared tree input, after checking
     /// that it is a regular directory inside this case directory and not a
     /// link; `None` when the case declares no tree.
@@ -123,29 +83,6 @@ impl Case {
                 resolve_directory(&self.directory, relative, &self.manifest.id)
             })
             .transpose()
-    }
-
-    /// Acquires every regular file under the declared tree input, in stable
-    /// path order. Link targets must stay inside both the tree and the case
-    /// directory; canonical directory identities suppress aliases and cycles.
-    pub fn tree_files(&self) -> Result<Vec<CaseTreeFile>, CorpusError> {
-        let Some(relative) = self.manifest.inputs.tree.as_deref() else {
-            return Ok(Vec::new());
-        };
-        let tree = resolve_directory(&self.directory, relative, &self.manifest.id)?;
-        let case_root = canonical(&self.directory)?;
-        let mut files = Vec::new();
-        let mut visited = BTreeSet::new();
-        collect_tree_files(&tree, &case_root, &tree, &mut visited, &mut files)?;
-        files.sort_by(|left, right| left.0.cmp(&right.0));
-        files
-            .into_iter()
-            .map(|(source_id, path)| {
-                let bytes = std::fs::read(&path)
-                    .map_err(|source| CorpusError::Io { path, source })?;
-                Ok(CaseTreeFile { source_id, bytes })
-            })
-            .collect()
     }
 }
 
@@ -564,50 +501,4 @@ fn resolve_directory(
         });
     }
     Ok(tree)
-}
-
-fn collect_tree_files(
-    directory: &Path,
-    case_root: &Path,
-    tree_root: &Path,
-    visited: &mut BTreeSet<PathBuf>,
-    files: &mut Vec<(String, PathBuf)>,
-) -> Result<(), CorpusError> {
-    let resolved = canonical(directory)?;
-    if !resolved.starts_with(case_root) || !resolved.starts_with(tree_root) {
-        return Err(CorpusError::InvalidCase {
-            path: directory.to_path_buf(),
-            message: "a tree entry resolves outside the confined tree".to_owned(),
-        });
-    }
-    if !visited.insert(resolved) {
-        return Ok(());
-    }
-    for path in sorted_entries(directory)? {
-        let target = canonical(&path)?;
-        if !target.starts_with(case_root) || !target.starts_with(tree_root) {
-            return Err(CorpusError::InvalidCase {
-                path,
-                message: "a tree entry resolves outside its confined tree".to_owned(),
-            });
-        }
-        if target.is_dir() {
-            collect_tree_files(&path, case_root, tree_root, visited, files)?;
-        } else if target.is_file() {
-            files.push((relative_id(case_root, &path), target));
-        }
-    }
-    Ok(())
-}
-
-fn relative_id(root: &Path, path: &Path) -> String {
-    path.strip_prefix(root)
-        .unwrap_or(path)
-        .components()
-        .filter_map(|component| match component {
-            Component::Normal(value) => value.to_str(),
-            _ => None,
-        })
-        .collect::<Vec<_>>()
-        .join("/")
 }

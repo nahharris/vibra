@@ -9,6 +9,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use vibra_diagnostics::DiagnosticCode;
+use vibra_syntax::DataValue;
 
 use crate::corpus::{Case, Corpus};
 use crate::manifest::{CaseExpectations, Verdict};
@@ -401,14 +402,14 @@ fn matches(
         else {
             return Err(format!("the handler produced no {key} observation"));
         };
-        if key == "targetRun" {
-            crate::workspace_run::compare_target_run(path, &snapshot, actual)?;
-            continue;
-        }
-        let same = if key == "formatted" {
-            actual.as_bytes() == snapshot.as_slice()
-        } else {
-            same_document(path, &snapshot, actual)?
+        let same = match key {
+            "formatted" => actual.as_bytes() == snapshot.as_slice(),
+            "targetRun" => same_document(
+                path,
+                &without_failure_messages(&snapshot),
+                &String::from_utf8_lossy(&without_failure_messages(actual.as_bytes())),
+            )?,
+            _ => same_document(path, &snapshot, actual)?,
         };
         if !same {
             return Err(format!("{key} snapshot mismatch (`{path}`)"));
@@ -442,4 +443,55 @@ fn same_document(path: &str, snapshot: &[u8], actual: &str) -> Result<bool, Stri
         ));
     };
     Ok(expected.decoded_eq(observed))
+}
+
+/// A `@targetRun.v2` document with the `message` of every `failure` record
+/// written as `""`: a startup failure is compared by its code and its
+/// fields, and its message is text for a person, as a diagnostic's is. A
+/// document that does not decode is returned as it is.
+fn without_failure_messages(document: &[u8]) -> Vec<u8> {
+    let parsed = vibra_syntax::parse_data(None, document);
+    let Some(root) = parsed.value() else {
+        return document.to_vec();
+    };
+    let mut messages = Vec::new();
+    let mut pending = vec![root];
+    while let Some(node) = pending.pop() {
+        match node.value() {
+            DataValue::Record(fields) => {
+                for field in fields {
+                    if field.name() == "failure"
+                        && let DataValue::Record(failure) = field.value().value()
+                    {
+                        messages.extend(
+                            failure
+                                .iter()
+                                .filter(|field| field.name() == "message")
+                                .map(|field| field.value().span()),
+                        );
+                    }
+                    pending.push(field.value());
+                }
+            }
+            DataValue::List(items) | DataValue::Tuple(items) => pending.extend(items),
+            DataValue::Dict(entries) => {
+                pending.extend(
+                    entries
+                        .iter()
+                        .flat_map(|entry| [entry.key(), entry.value()]),
+                );
+            }
+            _ => {}
+        }
+    }
+    messages.sort_by_key(|span| span.start());
+    let mut written = Vec::with_capacity(document.len());
+    let mut at = 0;
+    for span in messages {
+        written.extend_from_slice(document.get(at..span.start()).unwrap_or_default());
+        written.extend_from_slice(b"\"\"");
+        at = span.end();
+    }
+    written.extend_from_slice(document.get(at..).unwrap_or_default());
+    written
 }

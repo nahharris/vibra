@@ -1,5 +1,5 @@
-//! The runner rows of the step 02 test matrix, through the binary, and the
-//! comparison through test handlers.
+//! The corpus runner through its binary, and its comparison through test
+//! handlers.
 
 use std::path::Path;
 use std::process::{Command, Output};
@@ -38,12 +38,12 @@ fn one_reader_case(manifest_extra: &str) -> std::path::PathBuf {
 }
 
 #[test]
-fn the_binary_takes_only_root_and_rejects_a_write_option() {
-    let output = conformance(&["--write-native-parity".as_ref(), "out.tsv".as_ref()]);
+fn the_binary_takes_only_root_and_rejects_an_unknown_option() {
+    let output = conformance(&["--unknown-option".as_ref(), "value".as_ref()]);
     assert_eq!(output.status.code(), Some(1));
     let stderr = text(&output.stderr);
     assert!(
-        stderr.contains("unknown option `--write-native-parity`"),
+        stderr.contains("unknown option `--unknown-option`"),
         "{stderr}"
     );
     let output = conformance(&["positional".as_ref()]);

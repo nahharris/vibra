@@ -2,13 +2,13 @@
 //!
 //! `vibra_host::broker::Context::test_root` is public: the API of
 //! `vibra-host` is the trusted embedding boundary, and checked source cannot
-//! reach it (ruling F5a on the review of grants). Among the crates of the
-//! workspace, the code that calls it outside tests is the test runner, which
-//! gives each test its world, and the conformance runner beside it. A call
-//! anywhere else would let a target's path issue a `TestWorld`, which
-//! `docs/spec/06-runtime.md`, "Host world", gives only to a test.
+//! reach it. Among the crates of the workspace, the code that calls it
+//! outside tests is the test runner, which gives each test its world, and
+//! the conformance runner beside it. A call anywhere else would let a
+//! target's path issue a `TestWorld`, which `docs/spec/06-runtime.md`,
+//! "Host world", gives only to a test.
 
-use crate::support::{rust_sources, workspace_root};
+use crate::support::{outside_test_modules, rust_sources, workspace_root};
 
 /// The sources that may call `test_root`, by their paths below the
 /// workspace root: one file, or every file below a directory ending in `/`.
@@ -30,46 +30,18 @@ fn allowed(path: &str) -> bool {
 }
 
 /// The lines of `source`, numbered from one, that call `test_root`: outside
-/// comments and outside a `#[cfg(test)] mod` block, which is test code.
+/// comments and outside a `#[cfg(test)]` module, which is test code.
 fn calls(source: &str) -> Vec<usize> {
-    let lines = source.lines().collect::<Vec<_>>();
-    let mut found = Vec::new();
-    let mut index = 0;
-    while let Some(line) = lines.get(index) {
-        let trimmed = line.trim_start();
-        if trimmed.starts_with("#[cfg(test)]")
-            && lines
-                .get(index + 1)
-                .is_some_and(|next| next.trim_start().starts_with("mod "))
-        {
-            // Skip the module: through `mod name;` or its block.
-            let mut depth: i64 = 0;
-            let mut opened = false;
-            index += 1;
-            while let Some(text) = lines.get(index) {
-                let code = text.split("//").next().unwrap_or(text);
-                depth += i64::try_from(code.matches('{').count()).unwrap_or(0);
-                depth -= i64::try_from(code.matches('}').count()).unwrap_or(0);
-                opened |= code.contains('{');
-                index += 1;
-                if (opened && depth <= 0) || (!opened && code.trim_end().ends_with(';'))
-                {
-                    break;
-                }
-            }
-            continue;
-        }
-        let code = line.split("//").next().unwrap_or(line);
-        if !trimmed.starts_with("//")
-            && (code.contains(".test_root(") || code.contains("::test_root("))
-        {
-            found.push(index + 1);
-        }
-        index += 1;
-    }
-    found
+    outside_test_modules(source)
+        .into_iter()
+        .filter(|(_, line)| {
+            let code = line.split("//").next().unwrap_or(line);
+            !line.trim_start().starts_with("//")
+                && (code.contains(".test_root(") || code.contains("::test_root("))
+        })
+        .map(|(number, _)| number)
+        .collect()
 }
-
 /// The calls of `test_root` outside the allowed sources, over `files` given
 /// as `(path below the workspace root, source)`.
 fn unexpected(files: &[(String, String)]) -> Vec<String> {
