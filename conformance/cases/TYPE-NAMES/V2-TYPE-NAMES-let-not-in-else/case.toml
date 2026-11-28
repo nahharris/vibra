@@ -2,7 +2,7 @@ id = "V2-TYPE-NAMES-let-not-in-else"
 rule = "V2-TYPE-NAMES-let-not-in-else"
 profile = "staticV2"
 operation = "resolve"
-description = "01-source-language.md#bodies-and-statements: a let's names are not visible in its fallback; the use is @name.unknownSymbol"
+description = "01-source-language.md#let: a let's names are not visible in its fallback; the use is @name.unknownSymbol"
 
 [inputs]
 tree = "tree"

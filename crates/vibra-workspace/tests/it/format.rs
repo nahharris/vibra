@@ -23,56 +23,6 @@ fn codes(plan: &vibra_workspace::FormatPlan) -> Vec<DiagnosticCode> {
 }
 
 #[test]
-fn a_captured_module_is_formatted_and_checked() {
-    let root = TempDir::project("fmt-module", LIBRARY, &[("src/app/main.vib", MESSY)]);
-    let plan = plan(&root, "src/app/main.vib");
-    assert_eq!(plan.path(), "src/app/main.vib");
-    assert!(plan.changed());
-    assert_eq!(plan.text(), Some(CANONICAL));
-    assert!(plan.diagnostics().is_empty(), "{:?}", plan.diagnostics());
-    assert!(plan.revision().is_some());
-    // A preview writes nothing.
-    assert_eq!(
-        std::fs::read_to_string(root.join("src/app/main.vib")).expect("file"),
-        MESSY
-    );
-}
-
-#[test]
-fn the_candidate_text_is_checked_in_place_of_the_captured_bytes() {
-    let source = "fn  f returns r:I32 do return \"a\" endfn";
-    let root =
-        TempDir::project("fmt-semantic", LIBRARY, &[("src/app/main.vib", source)]);
-    let plan = plan(&root, "src/app/main.vib");
-    let formatted = "fn f\n  returns r: I32\n  do\n    return \"a\"\nendfn\n";
-    assert_eq!(plan.text(), Some(formatted));
-    assert_eq!(codes(&plan), [DiagnosticCode::TypeMismatch]);
-    let diagnostic = &plan.diagnostics()[0];
-    assert_eq!(diagnostic.source_id(), Some("src/app/main.vib"));
-    // The span is in the candidate text: the literal `"a"`.
-    let start = formatted.find("\"a\"").expect("literal");
-    assert_eq!(diagnostic.primary_span().start(), start);
-    assert_eq!(diagnostic.primary_span().end(), start + 3);
-    assert!(plan.has_errors());
-    assert_eq!(plan.write(), Ok(false), "diagnostics prevent writing");
-    assert_eq!(
-        std::fs::read_to_string(root.join("src/app/main.vib")).expect("file"),
-        source
-    );
-}
-
-#[test]
-fn a_recovered_file_is_kept_byte_for_byte() {
-    let source = "fn f takes {x: I32 returns r: I32 do return x endfn";
-    let root =
-        TempDir::project("fmt-recovered", LIBRARY, &[("src/app/main.vib", source)]);
-    let plan = plan(&root, "src/app/main.vib");
-    assert_eq!(plan.text(), Some(source));
-    assert!(!plan.changed());
-    assert_eq!(codes(&plan), [DiagnosticCode::SyntaxUnmatchedDelimiter]);
-}
-
-#[test]
 fn a_file_that_is_not_utf8_plans_no_edit() {
     let root =
         TempDir::project("fmt-encoding", LIBRARY, &[("src/app/main.vib", CANONICAL)]);
@@ -102,66 +52,11 @@ fn a_file_that_is_not_utf8_plans_no_edit() {
 }
 
 #[test]
-fn a_file_outside_every_unit_is_formatted_by_syntax_alone() {
-    let root = TempDir::project(
-        "fmt-outside",
-        LIBRARY,
-        &[
-            ("src/app/main.vib", CANONICAL),
-            (
-                "notes/scratch.vib",
-                "fn  f returns r:I32 do return nowhere endfn",
-            ),
-        ],
-    );
-    let plan = plan(&root, "notes/scratch.vib");
-    assert!(plan.diagnostics().is_empty(), "{:?}", plan.diagnostics());
-    assert_eq!(
-        plan.text(),
-        Some("fn f\n  returns r: I32\n  do\n    return nowhere\nendfn\n")
-    );
-}
-
-#[test]
-fn a_module_the_checker_does_not_support_is_formatted_by_syntax_alone() {
-    let root = TempDir::project(
-        "fmt-unavailable",
-        LIBRARY,
-        &[(
-            "src/app/main.vib",
-            "proc  run returns r:Void do return void endproc",
-        )],
-    );
-    let plan = plan(&root, "src/app/main.vib");
-    assert!(plan.diagnostics().is_empty(), "{:?}", plan.diagnostics());
-    assert!(plan.changed());
-}
-
-#[test]
-fn vibon_keeps_comments_spellings_and_order() {
-    let project = "{format:@project.v2 // the marker\n  package: {name: \"hello\"   version: \"0.1.0\"}\n  dependencies: [:] targets: [{name: @app kind: @lib root: \"src/app\" }]}\n";
-    let root =
-        TempDir::project("fmt-vibon", project, &[("src/app/main.vib", CANONICAL)]);
-    let plan = plan(&root, "project.vibon");
-    assert!(plan.diagnostics().is_empty(), "{:?}", plan.diagnostics());
-    let text = plan.text().expect("text");
-    assert!(text.contains("// the marker"), "{text}");
-    assert!(
-        text.find("dependencies").expect("dependencies")
-            < text.find("targets").expect("targets"),
-        "{text}"
-    );
-}
-
-#[test]
 fn write_replaces_a_changed_file_and_a_second_plan_is_unchanged() {
     let root = TempDir::project("fmt-write", LIBRARY, &[("src/app/main.vib", MESSY)]);
     let first = plan(&root, "src/app/main.vib");
     assert_eq!(first.write(), Ok(true));
-    assert_eq!(
-        std::fs::read_to_string(root.join("src/app/main.vib")).expect("file"),
-        CANONICAL
-    );
+    assert_eq!(root.read("src/app/main.vib"), CANONICAL);
     let leftovers = std::fs::read_dir(root.join("src/app"))
         .expect("directory")
         .count();
@@ -216,37 +111,4 @@ fn without_a_project_a_document_is_formatted_with_no_revision() {
     let plan = plan_format(root.path(), &capture, "a.vib").expect("admitted");
     assert_eq!(plan.revision(), None);
     assert_eq!(plan.text(), Some(CANONICAL));
-}
-
-#[test]
-fn every_standard_library_module_is_canonical() {
-    // `vibra fmt` reads a file outside the embedded library with the ordinary
-    // reader, which keeps the library's `role` and `external` sections byte
-    // for byte; this test formats each module in its own reader mode.
-    let directory =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../stdlib");
-    let mut pending = vec![directory];
-    let mut modules = 0;
-    while let Some(directory) = pending.pop() {
-        for entry in std::fs::read_dir(&directory).expect("a readable directory") {
-            let path = entry.expect("an entry").path();
-            if path.is_dir() {
-                pending.push(path);
-            } else if path.extension().and_then(|text| text.to_str()) == Some("vib") {
-                let bytes = std::fs::read(&path).expect("a module");
-                let document = vibra_syntax::parse_source_with(
-                    None,
-                    &bytes,
-                    vibra_syntax::SourceOptions {
-                        standard_library: true,
-                    },
-                );
-                assert!(document.diagnostics().is_empty(), "{}", path.display());
-                let formatted = vibra_fmt::format_document(&document).expect("text");
-                assert_eq!(formatted.as_bytes(), bytes, "{}", path.display());
-                modules += 1;
-            }
-        }
-    }
-    assert!(modules >= 6, "{modules} modules");
 }

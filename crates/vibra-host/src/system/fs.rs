@@ -406,7 +406,7 @@ mod tests {
             map_error(ScopeError::Unsupported, Progress::NONE),
             Answer::NotSubmitted("unsupported")
         ));
-        // F6 of the drivers review: a refused allocation is memory
+        // A refused allocation is memory
         // exhaustion, with the progress the call made.
         assert!(matches!(
             map_error(

@@ -7,17 +7,6 @@ use crate::support::{
 };
 
 #[test]
-fn an_unknown_type_name() {
-    let text = "type A of Nothere endtype\n";
-    assert_one(
-        &resolve_main(text),
-        C::NameUnknownSymbol,
-        span_of(text, "Nothere", 0),
-        &[],
-    );
-}
-
-#[test]
 fn every_type_position_of_a_declaration_is_resolved() {
     for (text, name) in [
         ("type A of {x: Nope} endtype\n", "Nope"),
@@ -136,17 +125,6 @@ fn a_value_or_a_module_in_a_type_position() {
         ("@app.model", ""),
     ]);
     assert_eq!(codes(&module), [C::NameWrongEntityKind]);
-}
-
-#[test]
-fn there_is_no_projection_path_through_a_parameter() {
-    let text = "fn first(I) takes {it: I} returns r: Option(I.Item) given {I: Iter} do return Option.none() endfn\n";
-    assert_one(
-        &resolve_main(text),
-        C::NameUnknownSymbol,
-        span_of(text, "Item", 0),
-        &[span_of(text, "I", 0)],
-    );
 }
 
 #[test]

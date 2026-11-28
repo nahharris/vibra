@@ -1,7 +1,7 @@
 //! The trap row. No trap follows from user data in checked source (06
 //! "Traps"), and `vibra run` gives the engine no driver to fault, so the row
 //! takes a real run of the hello program under a world and gives it the
-//! ending of step 29's driver fault: the trap `@runtime.invalidHostValue` at
+//! ending of a driver fault: the trap `@runtime.invalidHostValue` at
 //! the program's `await`, no application code, and no program result. What
 //! it checks is the command's side of the ending: the result, the exit
 //! status, the trap record, and the envelope.
@@ -9,9 +9,9 @@
 use std::fs;
 
 use serde_json::{Value, json};
-use vibra_diagnostics::{Diagnostic, DiagnosticCode};
+use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 use vibra_workspace::run::TrapRecord as Ending;
-use vibra_workspace::{HostWorld, Trap};
+use vibra_workspace::{Discovery, HostWorld, Trap, WorkspaceCapture};
 
 use super::*;
 use crate::render::emit;
@@ -29,7 +29,7 @@ const MAIN: &str = "use @std.io.StdoutText enduse\n\nuse @std.process.ExitCode e
 
 const AWAIT: &str = "await StdoutText.write(out \"hello\\n\")";
 
-/// F4 of the drivers review: 05 "logs to standard error". A release the
+/// 05 "logs to standard error": a release the
 /// driver reported as failed is one line on the command's standard error, in
 /// either format, and changes neither the result nor the exit status.
 #[test]

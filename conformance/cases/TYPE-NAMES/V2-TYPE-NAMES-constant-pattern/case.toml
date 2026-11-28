@@ -2,7 +2,7 @@ id = "V2-TYPE-NAMES-constant-pattern"
 rule = "V2-TYPE-NAMES-constant-pattern"
 profile = "staticV2"
 operation = "resolve"
-description = "01-source-language.md#patterns: a bare name resolving to a module value whose initializer is constant is a constant pattern; it binds nothing and is a reference to the value"
+description = "02-type-system.md#constant-expressions-and-constant-patterns: a bare name resolving to a module value whose initializer is constant is a constant pattern; it binds nothing and is a reference to the value"
 
 [inputs]
 tree = "tree"

@@ -22,8 +22,6 @@
 //! the marks, separated by tabs, the types in source spelling. The marks are
 //! `@total` for a total row and empty otherwise.
 
-use std::fmt::Write as _;
-
 use super::vectors::{self, Vector};
 use crate::{IrError, Library, LibraryTypes, Type};
 
@@ -565,32 +563,6 @@ pub struct IntrinsicRow {
     pub total: bool,
 }
 
-impl IntrinsicRow {
-    /// The row's line in `registry/compiler-2.0.txt`: the symbol, the
-    /// generics, each with its bound as `T: Encodable`, the parameters as an input vector, the result, and the
-    /// marks (`@total` or nothing), separated by tabs.
-    #[must_use]
-    pub fn snapshot_line(&self) -> String {
-        let parameters = self
-            .parameters
-            .iter()
-            .map(|parameter| parameter.spelling(self.generics))
-            .collect::<Vec<_>>()
-            .join(" ");
-        let mut line = String::new();
-        let _ = write!(
-            line,
-            "{}\t{}\t{{{}}}\t{}\t{}",
-            self.symbol,
-            spell_generics(self.generics, self.bounds),
-            parameters,
-            self.result.spelling(self.generics),
-            if self.total { "@total" } else { "" }
-        );
-        line
-    }
-}
-
 /// The generics of a row in source spelling, each bounded one as
 /// `T: Encodable`, separated by spaces.
 #[must_use]
@@ -1038,11 +1010,4 @@ impl CompilerIntrinsic {
         all.sort_by_cached_key(|intrinsic| intrinsic.symbol());
         all
     }
-}
-
-/// Whether `symbol` is an assertion row: one of the three rows whose owner
-/// is `assert`. It is the registry's one question about them.
-#[must_use]
-pub fn is_assertion(symbol: &str) -> bool {
-    CompilerIntrinsic::from_symbol(symbol).is_some_and(|intrinsic| !intrinsic.is_pure())
 }

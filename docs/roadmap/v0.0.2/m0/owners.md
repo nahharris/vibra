@@ -42,7 +42,7 @@ Source chapter, "Lexical structure".
 | `digit` | 03 | `V2-SRC-READER-tree-list`, `V2-SRC-READER-numeric-suffix`, `V2-SRC-READER-name-invalid` | `@syntax.invalidNumericLiteral`, `@syntax.invalidName` | tree |
 | `atom` | 03 / 17 | `V2-SRC-DECL-use-plain`, `V2-SRC-READER-vibon-literals`, `V2-TYPE-CONTROL-match-atom-singleton`, `V2-TYPE-CONTROL-match-atom-open`, `V2-TYPE-INTERFACE-widen-atom` | `@syntax.invalidName`, `@pattern.nonExhaustive` | tree, `@value.v2` |
 | `atom-part` | 03 | `V2-SRC-DECL-use-plain`, `V2-SRC-READER-name-invalid` | `@syntax.invalidName` | tree |
-| `discard` | 03 / 11 | `V2-SRC-EXPR-patterns`, `V2-TYPE-NAMES-discard-repeats`, `V2-TYPE-CONTROL-discard-fallible` | `@type.unhandledFallible` | tree, `@resolved.v2` |
+| `discard` | 03 / 11 | `V2-SRC-EXPR-patterns`, `V2-TYPE-NAMES-discard-repeats`, `V2-TYPE-CONTROL-discard-fallible`, `V2-TYPE-CONTROL-unhandled-fallible` | `@type.unhandledFallible` | tree, `@resolved.v2` |
 | `void` | 03 / 15 | `V2-SRC-EXPR-literals`, `V2-SRC-READER-vibon-literals`, `V2-SRC-EXPR-pattern-void`, `V2-TYPE-CONTROL-if-statement-void` | `@type.mismatch` | tree, `@value.v2` |
 | `integer` | 03 / 15 | `V2-SRC-READER-tree-list`, `V2-SRC-READER-numeric-suffix`, `V2-TYPE-INFER-literal-suffix`, `V2-TYPE-INFER-literal-expected`, `V2-TYPE-INFER-literal-ambiguous`, `V2-TYPE-INFER-out-of-range` | `@syntax.invalidNumericLiteral`, `@type.numericOutOfRange`, `@type.ambiguousInference` | tree, `@value.v2` |
 | `float` | 03 / 15 | `V2-SRC-EXPR-literals`, `V2-SRC-READER-numeric-suffix`, `V2-TYPE-INFER-float-rounds-to-infinity`, `V2-SRC-EXPR-pattern-float` | `@syntax.invalidNumericLiteral`, `@type.numericOutOfRange`, `@syntax.invalidForm` | tree, `@value.v2` |
@@ -173,7 +173,7 @@ identities are those of `conformance/rules.tsv`.
 | Guard form or rule | Step | Cases | Diagnostics | Schema |
 | --- | --- | --- | --- | --- |
 | Certified fragment (predicates) | 21 | `V2-CONTRACT-requires-not-bool`, `V2-CONTRACT-requires-unsupported`, `V2-CONTRACT-requires-uncertified-fn`, `V2-CONTRACT-requires-certified-fn`, `V2-CONTRACT-requires-recursive-fn`, `V2-CONTRACT-where-not-predicate`, `V2-CONTRACT-where-named-fn` | `@contract.invalidPredicate`, `@contract.unsupportedPredicate` | `@types.v2` |
-| Bare `requires` | 22 | `V2-CONTRACT-bare-requires-unproved`, `V2-CONTRACT-rule1-constant-true`, `V2-CONTRACT-rule1-constant-refuted`, `V2-CONTRACT-unproved-notes` | `@contract.unproved`, `@contract.refuted` | `@types.v2` |
+| Bare `requires` | 22 | `V2-CONTRACT-bare-requires-unproved`, `V2-CONTRACT-rule1-constant-true`, `V2-CONTRACT-rule1-constant-refuted` | `@contract.unproved`, `@contract.refuted` | `@types.v2` |
 | Bare `ensures` | 22 | `V2-CONTRACT-ensures-refuted`, `V2-CONTRACT-ensures-every-return`, `V2-CONTRACT-ensures-through-try` | `@contract.unproved`, `@contract.refuted` | `@types.v2` |
 | Bare `where` | 22 | `V2-CONTRACT-where-bare-construction`, `V2-CONTRACT-where-bare-unproved`, `V2-CONTRACT-where-bare-branch` | `@contract.unproved`, `@contract.refuted` | `@types.v2` |
 | `requires … else` | 21 | `V2-CONTRACT-requires-else-true`, `V2-CONTRACT-requires-else-false`, `V2-CONTRACT-requires-else-skips-ensures`, `V2-CONTRACT-requires-else-wrong-type`, `V2-CONTRACT-folded-guard-evaluates-operands` | `@contract.invalidConsequence` | `@types.v2`, `@value.v2` |
@@ -183,7 +183,7 @@ identities are those of `conformance/rules.tsv`.
 | Guards and callable types | 18 / 22 | `V2-CONTRACT-obligation-lost`, `V2-CONTRACT-obligation-kept-by-type`, `V2-CONTRACT-else-converts-freely` | `@contract.obligationLost` | `@types.v2` |
 | Guards of contract members | 07 / 21, 22 | `V2-SRC-DECL-impl-member-guard`, `V2-CONTRACT-member-guard-contract`, `V2-CONTRACT-member-else-copied`, `V2-CONTRACT-member-ensures-established` | `@syntax.invalidSection`, `@contract.unproved` | `@types.v2`, `@value.v2` |
 | No run-time check for a bare guard | 22 / 29 | `V2-CONTRACT-no-runtime-check` | none | lowered IR (host test) |
-| Obligation records | 21 | `V2-CONTRACT-obligations-snapshot` | none | `@types.v2` |
+| Obligation records | 21 | `V2-CONTRACT-rule3-if-true-branch` | none | `@types.v2` |
 | `GUARD-1` constants | 22 | `V2-CONTRACT-rule1-constant-true`, `V2-CONTRACT-rule1-constant-refuted` | `@contract.refuted` | `@types.v2` |
 | `GUARD-2` type invariant | 22 | `V2-CONTRACT-rule2-invariant`, `V2-CONTRACT-rule2-wrong-invariant` | `@contract.unproved` | `@types.v2` |
 | `GUARD-3` dominating branch | 22 | `V2-CONTRACT-rule3-if-true-branch`, `V2-CONTRACT-rule3-if-false-branch`, `V2-CONTRACT-rule3-negation`, `V2-CONTRACT-rule3-outside-branch`, `V2-CONTRACT-rule3-match-fact` | `@contract.unproved` | `@types.v2` |

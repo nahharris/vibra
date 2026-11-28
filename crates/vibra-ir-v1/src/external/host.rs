@@ -10,11 +10,7 @@
 //!
 //! The registry is versioned `1.N`. Adding a row is the minor `1.N+1`; changing
 //! an existing row's symbol, signature, owner, or event shape, an error enum
-//! included, requires `vibra_v2`. A checked-in snapshot of the table
-//! (`host-registry.snapshot` beside this crate's manifest) and
-//! [`snapshot_violations`] hold that rule as a host test.
-
-use std::collections::BTreeMap;
+//! included, requires `vibra_v2`.
 
 /// The registry minor that Milestone 4 ships: the greatest `since` of any row.
 pub const HOST_REGISTRY_MINOR: u32 = 0;
@@ -42,21 +38,6 @@ pub enum HostType {
 }
 
 impl HostType {
-    /// The language type, for a type the language names without a declaration;
-    /// `None` for `path`, `fs-metadata`, and `(array T)`, which a module
-    /// declares or builds from other types.
-    #[must_use]
-    pub fn primitive(self) -> Option<crate::Type> {
-        match self {
-            Self::Void => Some(crate::Type::Void),
-            Self::Str => Some(crate::Type::Str),
-            Self::Bytes => Some(crate::Type::Bytes),
-            Self::I64 => Some(crate::Type::I64),
-            Self::U64 => Some(crate::Type::U64),
-            Self::Path | Self::FsMetadata | Self::Array(_) => None,
-        }
-    }
-
     /// The type as the standard library writes it in the declaring module.
     #[must_use]
     pub fn spelling(self) -> String {
@@ -89,10 +70,6 @@ pub enum HostErrorType {
 }
 
 impl HostErrorType {
-    /// Every error enum, in the order of the registry's modules.
-    pub const ALL: [Self; 5] =
-        [Self::Io, Self::Fs, Self::Env, Self::Time, Self::Random];
-
     /// The enum's spelling in its module, such as `io-error`.
     #[must_use]
     pub const fn name(self) -> &'static str {
@@ -383,118 +360,4 @@ pub fn derived_registry_minor<'a>(
         minor = minor.max(host_row(symbol)?.since);
     }
     Some(minor)
-}
-
-/// The registry as the text of the checked-in snapshot.
-#[must_use]
-pub fn registry_snapshot() -> String {
-    let minor = HOST_ROWS.iter().map(|row| row.since).max().unwrap_or(0);
-    let mut text = format!("registry vibra_v1 1.{minor}\n");
-    for error in HostErrorType::ALL {
-        text.push_str(&format!(
-            "enum {}: {}\n",
-            error.name(),
-            error.variants().join(" ")
-        ));
-        if error == HostErrorType::Fs {
-            text.push_str(&format!("enum fs-kind: {}\n", FS_KIND_VARIANTS.join(" ")));
-            text.push_str("record fs-metadata: kind fs-kind, size u64\n");
-        }
-    }
-    for row in &HOST_ROWS {
-        text.push_str(&format!(
-            "row {} | {} | {} | {} | since {}\n",
-            row.symbol,
-            row.operation,
-            row.owner,
-            row.signature(),
-            row.since
-        ));
-    }
-    text
-}
-
-/// One parsed snapshot line: a key and the whole normalized line.
-fn snapshot_entries(
-    text: &str,
-) -> Result<(u32, BTreeMap<String, String>), Vec<String>> {
-    let mut minor = None;
-    let mut entries = BTreeMap::new();
-    let mut problems = Vec::new();
-    for line in text.lines().map(str::trim).filter(|line| !line.is_empty()) {
-        let mut words = line.split_whitespace();
-        match (words.next(), words.next(), words.next()) {
-            (Some("registry"), Some("vibra_v1"), Some(version)) => {
-                match version
-                    .strip_prefix("1.")
-                    .and_then(|n| n.parse::<u32>().ok())
-                {
-                    Some(number) => minor = Some(number),
-                    None => problems
-                        .push(format!("unparsable registry version `{version}`")),
-                }
-            }
-            (Some("enum" | "record"), Some(name), _) => {
-                entries.insert(
-                    format!("type {}", name.trim_end_matches(':')),
-                    line.to_owned(),
-                );
-            }
-            (Some("row"), Some(symbol), _) => {
-                entries.insert(format!("row {symbol}"), line.to_owned());
-            }
-            _ => problems.push(format!("unparsable snapshot line `{line}`")),
-        }
-    }
-    if !problems.is_empty() {
-        return Err(problems);
-    }
-    minor.map(|minor| (minor, entries)).ok_or_else(|| {
-        vec!["the snapshot has no `registry vibra_v1 1.N` line".to_owned()]
-    })
-}
-
-fn row_since(line: &str) -> Option<u32> {
-    line.rsplit_once("since ")?.1.trim().parse().ok()
-}
-
-/// Every way `current` breaks the versioning rule against the `recorded`
-/// snapshot. A changed or removed entry (a row, an error enum, `fs-kind`, or
-/// `fs-metadata`) requires `vibra_v2`; an added row needs a `since` greater
-/// than the recorded minor. Entries that are added without a row of their own
-/// never violate the rule. An empty answer means `current` is `recorded`, or a
-/// legitimate next minor of it.
-#[must_use]
-pub fn snapshot_violations(recorded: &str, current: &str) -> Vec<String> {
-    let (recorded_minor, recorded) = match snapshot_entries(recorded) {
-        Ok(parsed) => parsed,
-        Err(problems) => return problems,
-    };
-    let (_, current) = match snapshot_entries(current) {
-        Ok(parsed) => parsed,
-        Err(problems) => return problems,
-    };
-    let mut violations = Vec::new();
-    for (key, line) in &recorded {
-        match current.get(key) {
-            None => violations.push(format!("{key} was removed; this needs vibra_v2")),
-            Some(now) if now != line => violations.push(format!(
-                "{key} changed from `{line}` to `{now}`; this needs vibra_v2"
-            )),
-            Some(_) => {}
-        }
-    }
-    for (key, line) in &current {
-        if recorded.contains_key(key) || !key.starts_with("row ") {
-            continue;
-        }
-        match row_since(line) {
-            Some(since) if since > recorded_minor => {}
-            _ => violations.push(format!(
-                "{key} was added with a `since` that is not greater than the recorded \
-                 minor 1.{recorded_minor}"
-            )),
-        }
-    }
-    violations
 }

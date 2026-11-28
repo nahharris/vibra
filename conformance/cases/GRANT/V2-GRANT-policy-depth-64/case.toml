@@ -2,7 +2,7 @@ id = "V2-GRANT-policy-depth-64"
 rule = "V2-GRANT-policy-depth-64"
 profile = "staticV2"
 operation = "workspaceCheck"
-description = "03-effects.md#the-wire-form: a recipe policy of depth 64 is accepted (Q9)"
+description = "03-effects.md#the-wire-form: a recipe policy of depth 64 is accepted"
 
 [inputs]
 tree = "tree"

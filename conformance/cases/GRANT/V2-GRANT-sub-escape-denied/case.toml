@@ -1,10 +1,10 @@
-# Q7: sub rebases, so the request is sub/a.txt. Under the other reading it is
+# Sub rebases, so the request is sub/a.txt. Under the other reading it is
 # Err(denied) with no event.
 id = "V2-GRANT-sub-escape-denied"
 rule = "V2-GRANT-sub-escape-denied"
 profile = "interpreterV2"
 operation = "workspaceTest"
-description = "06-runtime.md#closed-operation-semantics: a read of a.txt through sub(r [\"sub\"]) asks for sub/a.txt, which does not exist: Err(notFound) (Q7)"
+description = "06-runtime.md#closed-operation-semantics: a read of a.txt through sub(r [\"sub\"]) asks for sub/a.txt, which does not exist: Err(notFound)"
 
 [inputs]
 tree = "tree"

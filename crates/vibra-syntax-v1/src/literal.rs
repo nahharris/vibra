@@ -346,13 +346,6 @@ pub fn classify(text: &str) -> LiteralClassification {
     }
 }
 
-/// Alias for [`classify`] when the caller is working specifically with
-/// literal syntax.
-#[must_use]
-pub fn classify_literal(text: &str) -> LiteralClassification {
-    classify(text)
-}
-
 /// Renders one decoded character using the canonical Step 5 spelling.
 #[must_use]
 pub fn canonical_character_spelling(value: char) -> String {
@@ -372,31 +365,6 @@ pub fn canonical_character_spelling(value: char) -> String {
             spelling
         }
     }
-}
-
-/// Renders one decoded string using the canonical spelling of
-/// `docs/spec/04-programs-and-packages.md`: double quoted, `\"`, `\\`, `\n`,
-/// `\r`, and `\t` escaped, any other C0 control or DEL as `\u{hex}` in
-/// lowercase digits without a leading zero, and every other scalar literal.
-#[must_use]
-pub fn canonical_string_spelling(value: &str) -> String {
-    let mut output = String::with_capacity(value.len() + 2);
-    output.push('"');
-    for character in value.chars() {
-        match character {
-            '\\' => output.push_str("\\\\"),
-            '"' => output.push_str("\\\""),
-            '\n' => output.push_str("\\n"),
-            '\r' => output.push_str("\\r"),
-            '\t' => output.push_str("\\t"),
-            control if control <= '\u{1f}' || control == '\u{7f}' => {
-                output.push_str(&format!("\\u{{{:x}}}", u32::from(control)));
-            }
-            character => output.push(character),
-        }
-    }
-    output.push('"');
-    output
 }
 
 fn classify_string(text: &str) -> LiteralClassification {

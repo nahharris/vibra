@@ -1,10 +1,10 @@
-# Q10: an empty input reserves zero and succeeds at a zero budget. Were the
+# An empty input reserves zero and succeeds at a zero budget. Were the
 # count reserved instead, the read would be Err(limitExceeded) with no event.
 id = "V2-GRANT-limit-stdin-zero"
 rule = "V2-GRANT-limit-stdin-zero"
 profile = "interpreterV2"
 operation = "workspaceTest"
-description = "06-runtime.md#closed-operation-semantics: an empty stdin reserves zero bytes, so a bound of zero reads it: Ok of no bytes (Q10)"
+description = "06-runtime.md#closed-operation-semantics: an empty stdin reserves zero bytes, so a bound of zero reads it: Ok of no bytes"
 
 [inputs]
 tree = "tree"

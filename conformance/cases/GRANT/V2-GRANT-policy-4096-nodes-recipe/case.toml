@@ -2,7 +2,7 @@ id = "V2-GRANT-policy-4096-nodes-recipe"
 rule = "V2-GRANT-policy-4096-nodes-recipe"
 profile = "staticV2"
 operation = "workspaceCheck"
-description = "03-effects.md#the-wire-form: a recipe policy counted at 4,096 nodes and entries is accepted (Q9)"
+description = "03-effects.md#the-wire-form: a recipe policy counted at 4,096 nodes and entries is accepted"
 
 [inputs]
 tree = "tree"

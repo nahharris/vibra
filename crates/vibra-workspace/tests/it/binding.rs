@@ -4,11 +4,21 @@
 
 use vibra_diagnostics::{ByteSpan, DiagnosticCode, Level};
 use vibra_host::recipe::{BindingPlan, Provider, Resource};
-use vibra_workspace::binding::plan_of;
+use vibra_workspace::entry::EntryFacts;
 use vibra_workspace::{WorkspaceCheck, check_snapshot};
 
-use crate::project::BINARY;
+use crate::project::{BINARY, at};
 use crate::support::{TempDir, capture};
+
+/// The validated binding plan of the checked binary target `target`, when
+/// its entry, its admission ceiling, and its recipes all check.
+fn plan_of<'c>(check: &'c WorkspaceCheck, target: &str) -> Option<&'c BindingPlan> {
+    check
+        .entries()
+        .iter()
+        .find(|facts| facts.target() == target)
+        .map(EntryFacts::plan)
+}
 
 /// The chapter's `main`, under the root of [`BINARY`].
 const MAIN: &str = "use @std.env.EnvReadArgs enduse\n\n\
@@ -35,11 +45,6 @@ fn project_faults(check: &WorkspaceCheck) -> Vec<(DiagnosticCode, ByteSpan)> {
         .filter(|diagnostic| diagnostic.source_id() == Some("project.vibon"))
         .map(|diagnostic| (diagnostic.code(), diagnostic.primary_span()))
         .collect()
-}
-
-fn at(text: &str, needle: &str) -> ByteSpan {
-    let start = text.find(needle).expect("the needle occurs");
-    ByteSpan::new(start, start + needle.len())
 }
 
 fn names(plan: &BindingPlan) -> Vec<&str> {

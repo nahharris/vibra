@@ -28,12 +28,6 @@ impl NameKind {
             Self::Discard => "discard",
         }
     }
-
-    /// Whether this category creates no lexical identity.
-    #[must_use]
-    pub const fn is_discard(self) -> bool {
-        matches!(self, Self::Discard)
-    }
 }
 
 /// One valid name with its exact spelling and dot-separated value.
@@ -69,18 +63,6 @@ impl Name {
     pub const fn kind(&self) -> NameKind {
         self.kind
     }
-
-    /// Alias for [`Self::kind`] for callers that describe categories directly.
-    #[must_use]
-    pub const fn category(&self) -> NameKind {
-        self.kind
-    }
-
-    /// Whether this name is one of `-`, `@-`, or `-:`.
-    #[must_use]
-    pub const fn is_discard(&self) -> bool {
-        self.kind.is_discard()
-    }
 }
 
 /// The result of classifying a nonliteral leaf as a Step 6 name.
@@ -90,17 +72,6 @@ pub enum NameClassification {
     Name(Name),
     /// The leaf is not a valid name spelling.
     Invalid,
-}
-
-impl NameClassification {
-    /// The valid name, if classification succeeded.
-    #[must_use]
-    pub fn as_name(&self) -> Option<&Name> {
-        match self {
-            Self::Name(name) => Some(name),
-            Self::Invalid => None,
-        }
-    }
 }
 
 /// Classifies one nonliteral leaf using the shared name grammar.

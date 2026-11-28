@@ -1,10 +1,10 @@
-# Q8: an empty actions list is valid. Were it invalid, restrict would return
+# An empty actions list is valid. Were it invalid, restrict would return
 # Err(ScopeError.invalidPolicy) and the test would fail at assert.true(false).
 id = "V2-GRANT-restrict-empty-actions"
 rule = "V2-GRANT-restrict-empty-actions"
 profile = "interpreterV2"
 operation = "workspaceTest"
-description = "03-effects.md#meaning: an empty actions list is valid and permits nothing: restrict is Result.ok and a read is Err(denied) (Q8)"
+description = "03-effects.md#meaning: an empty actions list is valid and permits nothing: restrict is Result.ok and a read is Err(denied)"
 
 [inputs]
 tree = "tree"

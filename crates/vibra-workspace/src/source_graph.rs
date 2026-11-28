@@ -17,7 +17,7 @@
 use std::fmt::Write as _;
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
-use vibra_syntax::canonical_string;
+use vibra_syntax::{canonical_string, span_record};
 
 use crate::project::{Availability, DependencyKind};
 use crate::snapshot::{SourceSnapshot, UnitKind};
@@ -208,11 +208,9 @@ impl SourceGraph {
 
             let _ = write!(
                 out,
-                " status: {} span: {{sourceId: {} start: {}u64 end: {}u64}}}}",
+                " status: {} span: {}}}",
                 dependency.status(),
-                canonical_string(&dependency.source_id),
-                dependency.span.start(),
-                dependency.span.end()
+                span_record(&dependency.source_id, dependency.span)
             );
         }
         out.push_str("]}");

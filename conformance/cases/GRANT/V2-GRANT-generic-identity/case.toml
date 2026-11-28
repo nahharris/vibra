@@ -1,4 +1,4 @@
-# F7 of the review of grants. An unbounded type parameter permits no observation
+# An unbounded type parameter permits no observation
 # of its value, so passing a grant through one only moves it.
 id = "V2-GRANT-generic-identity"
 rule = "V2-GRANT-generic-identity"

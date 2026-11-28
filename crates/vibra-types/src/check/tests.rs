@@ -1,9 +1,14 @@
 //! Unit tests of the checker. Expectations come from the type chapter.
 
-use vibra_diagnostics::{ByteSpan, DiagnosticCode};
-use vibra_interp::MemoryBudget;
+use std::sync::Arc;
 
-use super::{check_source, interpret};
+use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode, Level};
+use vibra_interp::MemoryBudget;
+use vibra_ir::CheckedModuleSet;
+use vibra_resolve::{PackageId, ResolveInput, SourceModule, SourceUnit, UnitKind};
+
+use super::{CheckResult, check_source, check_workspace, interpret};
+use crate::stdlib::load_stdlib;
 
 mod bodies;
 mod bounds;
@@ -39,11 +44,134 @@ fn value(ty: &str, text: &str) -> String {
 
 /// The code and span of every diagnostic of `source`.
 fn faults(source: &str) -> Vec<(DiagnosticCode, ByteSpan)> {
-    check_source(SOURCE, source)
+    faults_of(&check_source(SOURCE, source))
+}
+
+/// The code and span of every diagnostic of `result`.
+fn faults_of(result: &CheckResult) -> Vec<(DiagnosticCode, ByteSpan)> {
+    result
         .diagnostics()
         .iter()
         .map(|diagnostic| (diagnostic.code(), diagnostic.primary_span()))
         .collect()
+}
+
+/// A diagnostic by its code, level, primary span, and related spans with
+/// their messages.
+type Seen = (DiagnosticCode, Level, ByteSpan, Vec<(ByteSpan, String)>);
+
+/// Each diagnostic of `diagnostics`.
+fn seen(diagnostics: &[Diagnostic]) -> Vec<Seen> {
+    diagnostics
+        .iter()
+        .map(|diagnostic| {
+            (
+                diagnostic.code(),
+                diagnostic.level(),
+                diagnostic.primary_span(),
+                diagnostic
+                    .related()
+                    .iter()
+                    .map(|related| (related.span, related.message.clone()))
+                    .collect(),
+            )
+        })
+        .collect()
+}
+
+/// Each diagnostic of `source`.
+fn seen_in(source: &str) -> Vec<Seen> {
+    seen(check_source(SOURCE, source).diagnostics())
+}
+
+/// The module set of `source`, which MUST have no diagnostic.
+fn accepted(source: &str) -> Result<Arc<CheckedModuleSet>, String> {
+    let result = check_source(SOURCE, source);
+    if !result.diagnostics().is_empty() {
+        return Err(format!("{source}\n{:#?}", result.diagnostics()));
+    }
+    result
+        .module_set()
+        .map(Arc::clone)
+        .ok_or_else(|| format!("no module set for {source}"))
+}
+
+/// A module of a workspace: its path and its source.
+type Module<'a> = (&'a str, &'a str);
+
+/// The input of the package `hello` with the units `units`, each its name,
+/// its kind, and its modules. A module of `@tests` is read from `tests/`,
+/// and a module of another unit from the unit's directory in `src/`.
+fn input(units: &[(&str, UnitKind, &[Module<'_>])]) -> Result<ResolveInput, String> {
+    let stdlib = load_stdlib().map_err(|error| error.to_string())?;
+    let units = units
+        .iter()
+        .map(|(name, kind, modules)| {
+            let root = match kind {
+                UnitKind::Tests => "tests".to_owned(),
+                _ => format!("src/{}", name.trim_start_matches('@')),
+            };
+            let modules = modules
+                .iter()
+                .map(|(path, source)| {
+                    let file = path
+                        .strip_prefix(name)
+                        .unwrap_or(path)
+                        .trim_start_matches('.')
+                        .replace('.', "/");
+                    SourceModule::new(
+                        *path,
+                        format!("{root}/{file}.vib"),
+                        source.as_bytes().to_vec(),
+                    )
+                })
+                .collect();
+            SourceUnit::new(*name, *kind, modules)
+        })
+        .collect();
+    Ok(ResolveInput::new(
+        PackageId::new("hello", "0.1.0"),
+        units,
+        stdlib.overlay().embedded_unit(),
+    ))
+}
+
+/// Checks the library unit `@app` of the modules `app` beside the test unit
+/// `@tests` of the modules `tests`, covering `units`.
+fn workspace(
+    app: &[Module<'_>],
+    tests: &[Module<'_>],
+    units: &[&str],
+) -> Result<CheckResult, String> {
+    let input = input(&[
+        ("@app", UnitKind::Lib, app),
+        ("@tests", UnitKind::Tests, tests),
+    ])?;
+    let units = units
+        .iter()
+        .map(|unit| (*unit).to_owned())
+        .collect::<Vec<_>>();
+    Ok(check_workspace(&input, &units))
+}
+
+/// The interfaces `Log`, `Clock`, and `Shown`, a type that implements the
+/// first two, and a `proc` that performs `Log`.
+const L: &str = "interface Log\n  proc append\n    takes {log: Self entry: Str}\n    \
+                 returns done: Void\n  endproc\nendinterface\n\n\
+                 interface Clock\n  proc now takes {clock: Self} returns at: I64 endproc\n\
+                 endinterface\n\n\
+                 interface Shown\n  fn show takes {value: Self} returns text: Str endfn\n\
+                 endinterface\n\n\
+                 type Memory of {lines: List(Str)}\n  impl Log\n    proc append takes \
+                 {log: Self entry: Str} returns done: Void do\n      return void\n    \
+                 endproc\n  endimpl\n  impl Clock\n    proc now takes {clock: Self} \
+                 returns at: I64 do return 0i64 endproc\n  endimpl\nendtype\n\n\
+                 proc note takes {m: Memory} returns done: Void performs {Log} do\n  \
+                 return await Log.append(m \"x\")\nendproc\n";
+
+/// `L` and then `rest`.
+fn with_l(rest: &str) -> String {
+    format!("{L}{rest}\n")
 }
 
 /// The span of the `nth` occurrence of `needle` in `source`.
@@ -79,18 +207,6 @@ fn the_standard_library_checks_clean() {
 }
 
 #[test]
-fn literal_suffix_and_expected_type() {
-    assert_eq!(
-        run("fn main returns r: U8 do return 7u8 endfn\n").as_deref(),
-        Ok(value("u8", "7u8").as_str())
-    );
-    assert_eq!(
-        run("fn main returns r: I64 do return -5 endfn\n").as_deref(),
-        Ok(value("i64", "-5i64").as_str())
-    );
-}
-
-#[test]
 fn ambiguous_literal_has_one_note() {
     let source = "fn main returns r: I32 do let a be 1 endlet return a endfn\n";
     let result = check_source(SOURCE, source);
@@ -102,153 +218,6 @@ fn ambiguous_literal_has_one_note() {
     assert_eq!(diagnostic.code(), DiagnosticCode::TypeAmbiguousInference);
     assert_eq!(diagnostic.primary_span(), at(source, "1", 0));
     assert_eq!(diagnostic.notes().len(), 1);
-}
-
-#[test]
-fn out_of_range_literals() {
-    let source = "fn main returns r: U8 do return -1u8 endfn\n";
-    assert_eq!(
-        faults(source),
-        [(DiagnosticCode::TypeNumericOutOfRange, at(source, "-1u8", 0))]
-    );
-    let source = "fn main returns r: F32 do return 1e39f32 endfn\n";
-    assert_eq!(
-        faults(source),
-        [(
-            DiagnosticCode::TypeNumericOutOfRange,
-            at(source, "1e39f32", 0)
-        )]
-    );
-}
-
-#[test]
-fn no_promotion() {
-    let source =
-        "fn add takes {a: I32 b: I64} returns r: I64 do return I64.add(a b) endfn\n";
-    assert_eq!(
-        faults(source),
-        [(DiagnosticCode::TypeArgumentMismatch, at(source, "a", 4))]
-    );
-}
-
-#[test]
-fn function_values_and_callee_expressions() {
-    let source = "fn inc takes {x: I32} returns r: I32 do return I32.add(x 1i32) endfn\n\
-                  fn apply takes {f: Fn({I32} I32) v: I32} returns r: I32 do return f(v) endfn\n\
-                  fn main returns r: I32 do return apply(inc 41i32) endfn\n";
-    assert_eq!(run(source).as_deref(), Ok(value("i32", "42i32").as_str()));
-    let source = "fn main returns r: I32 do return pick(true)(1i32) endfn\n\
-                  fn inc takes {x: I32} returns r: I32 do return I32.add(x 1i32) endfn\n\
-                  fn dec takes {x: I32} returns r: I32 do return I32.sub(x 1i32) endfn\n\
-                  fn pick takes {b: Bool} returns f: Fn({I32} I32) do \
-                  if b then return inc else return dec endif endfn\n";
-    assert_eq!(run(source).as_deref(), Ok(value("i32", "2i32").as_str()));
-}
-
-#[test]
-fn control_flow_values() {
-    let source = "fn main returns r: I32 do return f(false) endfn\n\
-                  fn f takes {b: Bool} returns r: I32 do if b then return 1i32 endif return 2i32 endfn\n";
-    assert_eq!(run(source).as_deref(), Ok(value("i32", "2i32").as_str()));
-    let source = "fn main returns r: I32 do return f(false) endfn\n\
-                  fn f takes {b: Bool} returns r: I32 do \
-                  return match b case true 1i32 case false 2i32 endmatch endfn\n";
-    assert_eq!(run(source).as_deref(), Ok(value("i32", "2i32").as_str()));
-    let source = "fn main returns r: I32 do \
-                  let a be do let x be 1i32 endlet I32.add(x x) enddo endlet return a endfn\n";
-    assert_eq!(run(source).as_deref(), Ok(value("i32", "2i32").as_str()));
-    let source = "fn main returns r: Void do let v be do let x be 1i32 endlet enddo endlet return v endfn\n";
-    assert_eq!(run(source).as_deref(), Ok(value("void", "void").as_str()));
-    let source = "let a: U8 be b endlet\nlet b: U8 be 1u8 endlet\n\
-                  fn main returns r: U8 do return a endfn\n";
-    assert_eq!(run(source).as_deref(), Ok(value("u8", "1u8").as_str()));
-}
-
-#[test]
-fn control_flow_faults() {
-    let source =
-        "fn f takes {b: Bool} returns r: I32 do if b then return 1i32 endif endfn\n";
-    assert_eq!(
-        faults(source).first().map(|fault| fault.0),
-        Some(DiagnosticCode::TypeMissingReturn)
-    );
-    let source = "fn f returns r: I32 do return 1i32 return 2i32 endfn\n";
-    assert_eq!(
-        faults(source),
-        [(
-            DiagnosticCode::TypeUnreachableCode,
-            at(source, "return 2i32", 0)
-        )]
-    );
-    let source = "fn f returns r: I32 do let a be return 1i32 endlet return a endfn\n";
-    assert_eq!(
-        faults(source),
-        [(
-            DiagnosticCode::TypeUnreachableCode,
-            at(source, "return 1i32", 0)
-        )]
-    );
-    let source = "fn f takes {b: Bool} returns r: I32 do let a be if b then 1i32 endif endlet return a endfn\n";
-    assert_eq!(
-        faults(source),
-        [(
-            DiagnosticCode::TypeMismatch,
-            at(source, "if b then 1i32 endif", 0)
-        )]
-    );
-    let source = "fn f returns r: I32 do return \"x\" endfn\n";
-    assert_eq!(
-        faults(source),
-        [(DiagnosticCode::TypeMismatch, at(source, "\"x\"", 0))]
-    );
-    let source =
-        "let a: U8 be helper() endlet\nfn helper returns r: U8 do return a endfn\n";
-    assert_eq!(
-        faults(source),
-        [(
-            DiagnosticCode::TypeInitializerCycle,
-            at(source, "let a: U8 be helper() endlet", 0)
-        )]
-    );
-    let source = "let a: U8 be return 1u8 endlet\n";
-    assert_eq!(
-        faults(source),
-        [(
-            DiagnosticCode::TypeInvalidReturn,
-            at(source, "return 1u8", 0)
-        )]
-    );
-    let source = "fn f returns r: I32 do let n be 1i32 endlet return n(2i32) endfn\n";
-    assert_eq!(
-        faults(source),
-        [(
-            DiagnosticCode::TypeNotApplicable,
-            ByteSpan::new(at(source, "n(", 0).start(), at(source, "n(", 0).start() + 1)
-        )]
-    );
-}
-
-#[test]
-fn coverage() {
-    let source = "fn f takes {o: Ordering} returns r: I32 do \
-                  return match o case Ordering.less() 1i32 case Ordering.equal() 2i32 endmatch endfn\n";
-    let result = check_source(SOURCE, source);
-    let diagnostics = result.diagnostics();
-    assert_eq!(diagnostics.len(), 1, "{diagnostics:#?}");
-    let Some(diagnostic) = diagnostics.first() else {
-        return;
-    };
-    assert_eq!(diagnostic.code(), DiagnosticCode::PatternNonExhaustive);
-    assert_eq!(diagnostic.notes(), ["Ordering.greater()"]);
-    let source = "fn f takes {o: Ordering} returns r: I32 do \
-                  return match o case _ 0i32 case Ordering.less() 1i32 endmatch endfn\n";
-    assert_eq!(
-        faults(source),
-        [(
-            DiagnosticCode::PatternUnreachableArm,
-            at(source, "Ordering.less()", 0)
-        )]
-    );
 }
 
 #[test]
@@ -340,22 +309,6 @@ fn products_lower_operands_in_written_order() {
     assert!(body.contains("fields: [(\"b\", "), "{body}");
 }
 
-/// The step 15 row: the operands of a tuple of calls are lowered in
-/// written order, and the value lists them in that order.
-#[test]
-fn tuple_of_calls_runs_in_written_order() {
-    let source = "fn main returns r: {I32 I32} do return {first() second()} endfn\n\
-                  fn first returns r: I32 do return 1i32 endfn\n\
-                  fn second returns r: I32 do return 2i32 endfn\n";
-    assert_eq!(
-        run(source).as_deref(),
-        Ok(
-            "{format: @value.v2 typeInfo: {kind: @tuple arguments: [@i32 @i32]} \
-            value: {kind: @tuple values: [1i32 2i32]}}"
-        )
-    );
-}
-
 /// A constructor binds labels exactly when its shape has field names
 /// (`docs/spec/02-type-system.md`, "Application").
 #[test]
@@ -384,18 +337,6 @@ fn constructor_labels_follow_the_shape() {
                 at(source, "b: \"x\"", 0)
             ),
         ]
-    );
-}
-
-/// A literal argument that does not fit its slot is an argument mismatch,
-/// like any other argument.
-#[test]
-fn literal_argument_is_an_argument_mismatch() {
-    let source = "fn inc takes {x: I32} returns r: I32 do return x endfn\n\
-                  fn f returns r: I32 do return inc(\"x\") endfn\n";
-    assert_eq!(
-        faults(source),
-        [(DiagnosticCode::TypeArgumentMismatch, at(source, "\"x\"", 0))]
     );
 }
 

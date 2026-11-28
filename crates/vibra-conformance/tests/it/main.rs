@@ -12,17 +12,15 @@ mod support;
 
 mod ambient_reads;
 mod architecture_boundary;
+mod coverage;
 mod deep_nesting;
 mod diagnostic_registry;
 mod effect_rows;
 mod encoding_readback;
-mod exit_evidence;
 mod host_testing_feature;
 mod interpret;
-mod m2_coverage;
 mod manifest;
 mod name_profile;
-mod owner_coverage;
 mod rules_directory;
 mod runner;
 mod spec_examples;

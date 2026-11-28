@@ -261,14 +261,6 @@ impl CaseManifest {
     pub fn prefix(&self) -> &str {
         parse_identity(&self.rule).map_or("", |parts| parts.prefix)
     }
-
-    /// Whether this is an executable case: an accepted case whose operation
-    /// executes a program ("Differential execution").
-    #[must_use]
-    pub fn is_executable(&self) -> bool {
-        self.operation.executes_programs()
-            && self.expectations.verdict == Verdict::Accepted
-    }
 }
 
 impl FromStr for CaseManifest {

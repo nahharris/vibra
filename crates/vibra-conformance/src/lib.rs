@@ -43,10 +43,7 @@ mod workspace_check;
 mod workspace_run;
 mod workspace_test;
 
-pub use corpus::{
-    Case, CaseInputDocument, CaseTreeFile, Corpus, CorpusError, corpus_root,
-    workspace_root,
-};
+pub use corpus::{Case, Corpus, CorpusError, corpus_root, workspace_root};
 pub use format::FormatHandler;
 pub use interpret::{INTERPRET_BUDGET, InterpretHandler};
 pub use manifest::{
@@ -67,5 +64,5 @@ pub use rules::{
 pub use runner::{CaseReport, CaseStatus, ConformanceRunner, ProfileCounts, RunReport};
 pub use standard::{DispatchResult, ProfileDispatcher, standard_dispatcher};
 pub use workspace_check::WorkspaceCheckHandler;
-pub use workspace_run::{WorkspaceRunHandler, compare_target_run};
+pub use workspace_run::WorkspaceRunHandler;
 pub use workspace_test::WorkspaceTestHandler;

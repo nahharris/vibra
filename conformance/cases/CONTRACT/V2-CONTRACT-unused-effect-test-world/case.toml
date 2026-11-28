@@ -2,7 +2,7 @@ id = "V2-CONTRACT-unused-effect-test-world"
 rule = "V2-CONTRACT-unused-effect-test-world"
 profile = "staticV2"
 operation = "workspaceCheck"
-description = "07-diagnostics-and-conformance.md#contract-effect-and-authority-diagnostics: no target can perform TestWorld: an effects entry naming it is @contract.unusedEffect (Q20)"
+description = "07-diagnostics-and-conformance.md#contract-effect-and-authority-diagnostics: no target can perform TestWorld: an effects entry naming it is @contract.unusedEffect"
 
 [inputs]
 tree = "tree"

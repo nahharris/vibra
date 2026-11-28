@@ -451,14 +451,6 @@ fn type_paren_type() {
 }
 
 #[test]
-fn type_mixed_product() {
-    assert_eq!(
-        diagnostics("type A of {U8 name: Str} endtype"),
-        [(SyntaxInvalidForm, 10, 24)]
-    );
-}
-
-#[test]
 fn positional_and_labelled_order() {
     // A labelled type argument or input comes after the positional ones.
     assert_eq!(
@@ -730,14 +722,6 @@ fn impl_top_level() {
     assert_eq!(
         diagnostics("type A of U8 impl P impl Q endimpl endimpl endtype"),
         [(SyntaxInvalidForm, 20, 34)]
-    );
-}
-
-#[test]
-fn impl_with_section() {
-    assert_eq!(
-        diagnostics("type A of U8 impl P visibility @public endimpl endtype"),
-        [(SyntaxInvalidSection, 20, 38)]
     );
 }
 

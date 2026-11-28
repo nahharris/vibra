@@ -24,70 +24,30 @@ mod plans;
 mod soundness;
 mod tests_and_dispatch;
 
+// The hand-built IR the tests of `vibra-ir` build on; this crate uses some of
+// it.
+#[allow(dead_code)]
+#[path = "../../../vibra-ir/tests/it/fixtures.rs"]
+mod fixtures;
+
+pub(crate) use fixtures::*;
+
 use std::sync::Arc;
 
 use vibra_diagnostics::ByteSpan;
 use vibra_interp::{Evaluation, Limits, MemoryBudget, evaluate};
 use vibra_ir::external::{CompilerIntrinsic, IntegerOp, IntegerType};
 use vibra_ir::{
-    Arguments, CallTarget, Case, CheckedFunction, CheckedGlobal, CheckedModuleSet,
-    CheckedProgram, ClosureBody, Constant, Construction, Expr, FnType, FunctionBody,
-    Implementation, ImplementationRecord, InterfaceDefinition, InterfaceKey,
-    InterfaceMember, Library, LibraryTypes, ModuleSetParts, NamedTypes, Node,
-    SignatureRecord, SourceOrigin, Type, TypeBody, TypeDefinition, TypeId, Value,
-    Visibility,
+    CallTarget, CheckedFunction, CheckedGlobal, CheckedModuleSet, CheckedProgram,
+    ClosureBody, Constant, Construction, Expr, FnType, Implementation,
+    ImplementationRecord, InterfaceDefinition, InterfaceKey, InterfaceMember, Library,
+    LibraryTypes, ModuleSetParts, NamedTypes, Node, SignatureRecord, SourceOrigin,
+    Type, TypeDefinition, Value,
 };
-
-/// The chapter's placeholder identity.
-pub const SEED: &str =
-    "sha256:213e3a01ef10d7c10032616f8ab0da9a97fb729b9f98d723f4beb3158a25e2ad";
-
-pub fn id(path: &str) -> TypeId {
-    TypeId::new(path, SEED).unwrap()
-}
-
-pub fn origin() -> SourceOrigin {
-    SourceOrigin::new("test.vibra", ByteSpan::new(0, 0))
-}
 
 /// An origin that a test can recognize: `test.vibra` at `start..end`.
 pub fn origin_at(start: usize, end: usize) -> SourceOrigin {
     SourceOrigin::new("test.vibra", ByteSpan::new(start, end))
-}
-
-pub fn node(expr: Expr) -> Node {
-    Node::new(expr, origin())
-}
-
-/// The canonical path of each library declaration in the fixtures.
-pub fn path(library: Library) -> &'static str {
-    match library {
-        Library::Bool => "std.bool.Bool",
-        Library::Str => "std.str.Str",
-        Library::Bytes => "std.bytes.Bytes",
-        Library::Option => "std.option.Option",
-        Library::Result => "std.result.Result",
-        Library::Dict => "std.dict.Dict",
-        Library::Iter => "std.iter.Iter",
-        Library::Equatable => "std.equatable.Equatable",
-        Library::Ordered => "std.ordered.Ordered",
-        Library::Encodable => "std.encodable.Encodable",
-        Library::Ordering => "std.ordering.Ordering",
-        Library::ArithmeticError => "std.number.ArithmeticError",
-        Library::ConversionError => "std.number.ConversionError",
-    }
-}
-
-pub fn library_type(library: Library, arguments: Vec<Type>) -> Type {
-    Type::Declared(id(path(library)), arguments)
-}
-
-pub fn bool_type() -> Type {
-    library_type(Library::Bool, Vec::new())
-}
-
-pub fn str_type() -> Type {
-    library_type(Library::Str, Vec::new())
 }
 
 pub fn bytes_type() -> Type {
@@ -96,10 +56,6 @@ pub fn bytes_type() -> Type {
 
 pub fn ordering_type() -> Type {
     library_type(Library::Ordering, Vec::new())
-}
-
-pub fn option(value: Type) -> Type {
-    library_type(Library::Option, vec![value])
 }
 
 pub fn result(value: Type, error: Type) -> Type {
@@ -112,97 +68,7 @@ pub fn dict(key: Type, value: Type) -> Type {
 
 /// Every library binding but `@equatable`, `@iter`, and `@encodable`.
 pub fn library() -> LibraryTypes {
-    Library::ALL
-        .into_iter()
-        .filter(|library| {
-            !matches!(
-                library,
-                Library::Equatable | Library::Iter | Library::Encodable
-            )
-        })
-        .fold(LibraryTypes::new(), |bindings, library| {
-            bindings.with(library, id(path(library)))
-        })
-}
-
-fn variant(library: Library, parameters: &[&str], cases: Vec<Case>) -> TypeDefinition {
-    TypeDefinition::new(
-        id(path(library)),
-        parameters
-            .iter()
-            .map(|name| vibra_ir::Binder::new(*name, None).unwrap())
-            .collect(),
-        TypeBody::Variant(cases),
-        None,
-        Visibility::Public,
-    )
-    .unwrap()
-}
-
-fn plain(names: &[&str]) -> Vec<Case> {
-    names
-        .iter()
-        .map(|name| Case::new(*name, Vec::new()))
-        .collect()
-}
-
-fn wrapper(
-    library: Library,
-    parameters: &[&str],
-    representation: Type,
-) -> TypeDefinition {
-    TypeDefinition::new(
-        id(path(library)),
-        parameters
-            .iter()
-            .map(|name| vibra_ir::Binder::new(*name, None).unwrap())
-            .collect(),
-        TypeBody::Wrapper(representation),
-        None,
-        Visibility::Private,
-    )
-    .unwrap()
-}
-
-/// The definitions of the library types.
-pub fn library_definitions() -> Vec<TypeDefinition> {
-    vec![
-        variant(Library::Bool, &[], plain(&["false", "true"])),
-        variant(
-            Library::Option,
-            &["T"],
-            vec![
-                Case::new("none", Vec::new()),
-                Case::new("some", vec![("value".to_owned(), Type::Binder(0))]),
-            ],
-        ),
-        variant(
-            Library::Result,
-            &["T", "E"],
-            vec![
-                Case::new("ok", vec![("value".to_owned(), Type::Binder(0))]),
-                Case::new("err", vec![("error".to_owned(), Type::Binder(1))]),
-            ],
-        ),
-        variant(Library::Ordering, &[], plain(&["less", "equal", "greater"])),
-        variant(
-            Library::ArithmeticError,
-            &[],
-            plain(&["overflow", "divisionByZero", "invalidShift"]),
-        ),
-        variant(
-            Library::ConversionError,
-            &[],
-            plain(&["outOfRange", "invalidFormat", "unrepresentable"]),
-        ),
-        wrapper(Library::Str, &[], Type::list(Type::Char)),
-        wrapper(Library::Bytes, &[], Type::list(Type::U8)),
-        wrapper(
-            Library::Dict,
-            &["K", "V"],
-            Type::list(Type::Tuple(vec![Type::Binder(0), Type::Binder(1)])),
-        ),
-    ]
+    library_without(&[Library::Equatable, Library::Iter, Library::Encodable])
 }
 
 /// `Ordered`, with its member `compare: Fn({Self Self} Ordering)`.
@@ -228,42 +94,6 @@ pub fn ordered_interface() -> InterfaceDefinition {
         }],
     )
     .unwrap()
-}
-
-/// A plain signature with no binders.
-pub fn signature(parameters: Vec<Type>, result: Type) -> SignatureRecord {
-    SignatureRecord::new(Vec::new(), Type::function(FnType::new(parameters, result)))
-        .unwrap()
-}
-
-/// A function with an expression body.
-pub fn function(
-    name: &str,
-    signature: SignatureRecord,
-    body: Node,
-    slot_count: usize,
-) -> CheckedFunction {
-    CheckedFunction {
-        context: vibra_ir::BodyContext::Pure,
-        name: name.to_owned(),
-        signature,
-        defaults: Vec::new(),
-        body: FunctionBody::Expr(Box::new(body)),
-        entry_guard: None,
-        exit_guard: None,
-        slot_count,
-        origin: origin(),
-    }
-}
-
-pub fn global(name: &str, value_type: Type, initializer: Node) -> CheckedGlobal {
-    CheckedGlobal {
-        name: name.to_owned(),
-        value_type,
-        initializer,
-        slot_count: 0,
-        origin: origin(),
-    }
 }
 
 /// The parts every set starts from: the library types, `Ordered`, and its
@@ -345,10 +175,6 @@ pub fn lit(value_type: Type, value: Value) -> Node {
     node(Expr::Literal(Constant::new(value_type, value).unwrap()))
 }
 
-pub fn int(value: i32) -> Node {
-    lit(Type::I32, Value::I32(value))
-}
-
 pub fn u64_lit(value: u64) -> Node {
     lit(Type::U64, Value::U64(value))
 }
@@ -359,10 +185,6 @@ pub fn text(value: &str) -> Node {
 
 pub fn boolean(value: bool) -> Node {
     lit(bool_type(), Value::bool(value))
-}
-
-pub fn void() -> Node {
-    lit(Type::Void, Value::Void)
 }
 
 pub fn var(slot: usize, value_type: Type) -> Node {
@@ -397,25 +219,11 @@ pub fn integer(integer: IntegerType, op: IntegerOp, arguments: Vec<Node>) -> Nod
     row(CompilerIntrinsic::Integer(integer, op), arguments)
 }
 
-pub fn positional(positional: Vec<Node>) -> Arguments {
-    Arguments {
-        positional,
-        labelled: Vec::new(),
-    }
-}
-
 pub fn direct(function: usize) -> CallTarget {
     CallTarget::Direct {
         function,
         type_arguments: Vec::new(),
     }
-}
-
-pub fn call(function: usize, arguments: Vec<Node>) -> Node {
-    node(Expr::Call {
-        target: direct(function),
-        arguments: positional(arguments),
-    })
 }
 
 pub fn tail(target: CallTarget, arguments: Vec<Node>) -> Node {
@@ -438,6 +246,20 @@ pub fn if_else(condition: Node, then_branch: Node, else_branch: Node) -> Node {
         then_branch: Box::new(then_branch),
         else_branch: Some(Box::new(else_branch)),
     })
+}
+
+pub fn await_(plan: Node) -> Node {
+    node(Expr::Await {
+        plan: Box::new(plan),
+    })
+}
+
+pub fn ret(value: Node) -> Node {
+    node(Expr::Return(Box::new(value)))
+}
+
+pub fn seq(statements: Vec<Node>) -> Node {
+    node(Expr::Sequence(statements))
 }
 
 pub fn let_in(slot: usize, value: Node, body: Node) -> Node {
@@ -504,13 +326,22 @@ pub fn closure(
     })
 }
 
-pub fn fn_type(parameters: Vec<Type>, result: Type) -> Type {
-    Type::function(FnType::new(parameters, result))
-}
-
 /// `left == right` on `U64`.
 pub fn u64_equal(left: Node, right: Node) -> Node {
     integer(IntegerType::U64, IntegerOp::Equal, vec![left, right])
+}
+
+/// `left - right` on `I32`.
+pub fn i32_sub(left: Node, right: Node) -> Node {
+    integer(IntegerType::I32, IntegerOp::Sub, vec![left, right])
+}
+
+/// An assertion, which traps outside a test, written at `start..start + 1`
+/// so that the trap names which operand ran.
+pub fn trap_at(start: usize) -> Node {
+    let mut trap = row(CompilerIntrinsic::AssertTrue, vec![boolean(true)]);
+    trap.origin = origin_at(start, start + 1);
+    trap
 }
 
 /// `left - right` on `U64`, saturating.

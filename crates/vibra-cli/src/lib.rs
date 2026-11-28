@@ -91,17 +91,11 @@ pub fn run<W: Write, E: Write>(
 fn on_command_stack(invocation: &Invocation) -> Response {
     let format = invocation.globals.format;
     let name = invocation.line.name();
-    #[cfg(test)]
-    let hook = test::carry_hook();
     let ended = std::thread::scope(|scope| {
         std::thread::Builder::new()
             .name("vibra-command".to_owned())
             .stack_size(COMMAND_STACK)
-            .spawn_scoped(scope, move || {
-                #[cfg(test)]
-                hook();
-                execute(invocation)
-            })
+            .spawn_scoped(scope, move || execute(invocation))
             .map(|handle| handle.join())
     });
     match ended {

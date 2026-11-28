@@ -8,82 +8,15 @@ use vibra_ir::external::{CompilerIntrinsic, IntegerOp, IntegerType};
 use vibra_ir::{
     Arguments, Binder, CallTarget, CheckedFunction, CheckedGlobal, CheckedModuleSet,
     CheckedProgram, ClosureBody, Constant, Construction, ContractCall, Expr, FnType,
-    FunctionBody, Implementation, ImplementationRecord, InterfaceKey, Invariant,
-    IrError, Library, ModuleSetParts, Node, SignatureRecord, Type, TypeBody,
-    TypeDefinition, Value, Visibility,
+    Implementation, ImplementationRecord, InterfaceKey, Invariant, IrError, Library,
+    ModuleSetParts, Node, SignatureRecord, Type, TypeBody, TypeDefinition, Value,
+    Visibility,
 };
 
 use crate::{
-    bool_type, id, library_parts, library_type, named, node, option, origin, path,
-    str_type,
+    bool_type, call, function, global, id, int, library_parts, library_type, named,
+    node, option, origin, path, positional, signature, str_type, variable, void,
 };
-
-fn signature(parameters: Vec<Type>, result: Type) -> SignatureRecord {
-    SignatureRecord::new(Vec::new(), Type::function(FnType::new(parameters, result)))
-        .unwrap()
-}
-
-fn function(
-    name: &str,
-    signature: SignatureRecord,
-    body: Node,
-    slot_count: usize,
-) -> CheckedFunction {
-    CheckedFunction {
-        context: vibra_ir::BodyContext::Pure,
-        name: name.to_owned(),
-        signature,
-        defaults: Vec::new(),
-        body: FunctionBody::Expr(Box::new(body)),
-        entry_guard: None,
-        exit_guard: None,
-        slot_count,
-        origin: origin(),
-    }
-}
-
-fn global(name: &str, value_type: Type, initializer: Node) -> CheckedGlobal {
-    CheckedGlobal {
-        name: name.to_owned(),
-        value_type,
-        initializer,
-        slot_count: 0,
-        origin: origin(),
-    }
-}
-
-fn int(value: i32) -> Node {
-    node(Expr::Literal(
-        Constant::new(Type::I32, Value::I32(value)).unwrap(),
-    ))
-}
-
-fn void() -> Node {
-    node(Expr::Literal(
-        Constant::new(Type::Void, Value::Void).unwrap(),
-    ))
-}
-
-fn variable(slot: usize, value_type: Type) -> Node {
-    node(Expr::Variable { slot, value_type })
-}
-
-fn positional(positional: Vec<Node>) -> Arguments {
-    Arguments {
-        positional,
-        labelled: Vec::new(),
-    }
-}
-
-fn call(function: usize, arguments: Vec<Node>) -> Node {
-    node(Expr::Call {
-        target: CallTarget::Direct {
-            function,
-            type_arguments: Vec::new(),
-        },
-        arguments: positional(arguments),
-    })
-}
 
 fn main_function() -> CheckedFunction {
     function("main", signature(Vec::new(), Type::Void), void(), 0)

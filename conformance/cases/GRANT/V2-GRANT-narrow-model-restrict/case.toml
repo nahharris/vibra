@@ -1,10 +1,10 @@
-# Q1: the model's own restrict runs; it keeps no policy. Were the broker to
+# The model's own restrict runs; it keeps no policy. Were the broker to
 # apply the policy to any value, the read of b.bin would be Err(denied).
 id = "V2-GRANT-narrow-model-restrict"
 rule = "V2-GRANT-narrow-model-restrict"
 profile = "interpreterV2"
 operation = "workspaceTest"
-description = "03-effects.md#narrowing: DirReadText.restrict on a Memory runs the model's restrict: Result.ok, and a read of b.bin is Ok(\"M\"), no event (Q1)"
+description = "03-effects.md#narrowing: DirReadText.restrict on a Memory runs the model's restrict: Result.ok, and a read of b.bin is Ok(\"M\"), no event"
 
 [inputs]
 tree = "tree"

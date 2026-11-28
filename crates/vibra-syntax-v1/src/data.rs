@@ -4,7 +4,7 @@
 //! resolution. It validates only the closed VIBON value grammar and retains
 //! each decoded node's source span and original bytes.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 use vibra_diagnostics_v1::{ByteSpan, Diagnostic, DiagnosticCode};
 
@@ -501,12 +501,6 @@ fn meaningful_children(node: &CstNode, list: bool) -> Vec<&CstNode> {
         .collect()
 }
 
-/// Canonical text for a decoded value, without the document trailing newline.
-#[must_use]
-pub fn canonical_data(node: &DataNode) -> String {
-    canonical_node(node)
-}
-
 enum CanonicalTask<'source> {
     Node(&'source DataNode),
     Field(&'source str, &'source DataNode),
@@ -605,48 +599,4 @@ fn schedule_container<'source, I>(
         }
     }
     tasks.push(CanonicalTask::Owned(format!("({head} ")));
-}
-
-/// The role declared for an atom slot by a typed data adapter.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum AtomRole {
-    /// Keep the atom as a value; never resolve it.
-    Value,
-    /// Treat the atom as a reference of a schema-declared kind later.
-    Reference,
-}
-
-/// A small typed adapter contract layered over generic data.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct TypedDataSchema {
-    field_order: Vec<String>,
-    atom_roles: BTreeMap<String, AtomRole>,
-}
-
-impl TypedDataSchema {
-    /// Creates a schema with an explicit record field order.
-    #[must_use]
-    pub fn new(field_order: impl IntoIterator<Item = impl Into<String>>) -> Self {
-        Self {
-            field_order: field_order.into_iter().map(Into::into).collect(),
-            atom_roles: BTreeMap::new(),
-        }
-    }
-
-    /// Declares the role of an atom-bearing field without resolving it.
-    pub fn set_atom_role(&mut self, field: impl Into<String>, role: AtomRole) {
-        self.atom_roles.insert(field.into(), role);
-    }
-
-    /// The explicit record field order.
-    #[must_use]
-    pub fn field_order(&self) -> &[String] {
-        &self.field_order
-    }
-
-    /// The declared atom role for a field, if any.
-    #[must_use]
-    pub fn atom_role(&self, field: &str) -> Option<AtomRole> {
-        self.atom_roles.get(field).copied()
-    }
 }

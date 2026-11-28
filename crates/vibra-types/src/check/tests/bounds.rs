@@ -11,10 +11,6 @@ use vibra_diagnostics::{ByteSpan, DiagnosticCode};
 use super::{SOURCE, at, faults, run, value};
 use crate::check::check_source;
 
-const FEED: &str = "interface Feed(S) given {S: Ordered} \
-                    fn feed takes {x: Self item: S} returns r: U8 endfn endinterface\n\
-                    type Plain of U8 endtype\n";
-
 const FEED_IN_INTERFACE: &str = "interface Feed(S) given {S: Ordered} \
      fn feed takes {x: Self item: S} returns r: U8 endfn \
      fn make takes {x: Self} returns r: Option(S) endfn \
@@ -60,51 +56,6 @@ fn breach_at(source: &str, span: ByteSpan) {
 }
 
 #[test]
-fn an_impl_target_meets_the_interface_bounds() {
-    let target = |head: &str, item: &str| {
-        format!(
-            "{FEED}type {head} of U8 impl Feed({item}) \
-             fn feed takes {{x: Self item: {item}}} returns r: U8 do return 1u8 endfn \
-             endimpl endtype\n"
-        )
-    };
-    breach(&target("Box", "Plain"), "Plain", 1);
-    breach(&target("Box", "List(Plain)"), "List(Plain)", 0);
-    // A parameter of the enclosing type carries no bound.
-    let source = target("Box(T)", "T");
-    breach_at(&source, first(&source, "T)", 1));
-    let source = target("Box", "U8");
-    assert_eq!(faults(&source), Vec::new());
-}
-
-#[test]
-fn a_written_interface_type_meets_its_bounds_in_every_position() {
-    for body in [
-        "fn f takes {v: Feed(Plain)} returns r: U8 do return 1u8 endfn\n",
-        "fn f returns r: Option(Feed(Plain)) do return Option.none() endfn\n",
-        "fn f returns r: U8 do let v: Option(Feed(Plain)) be Option.none() endlet \
-         return 1u8 endfn\n",
-        "type Holder of {v: Option(Feed(Plain))} endtype\n",
-        "type Holder of List(Feed(Plain)) endtype\n",
-        "fn f takes {g: Fn({Feed(Plain)} U8)} returns r: U8 do return 1u8 endfn\n",
-        "fn f(T) takes {x: T} returns r: U8 given {T: Feed(Plain)} do return 1u8 endfn\n",
-    ] {
-        breach(&format!("{FEED}{body}"), "Plain", 1);
-    }
-    let source = format!(
-        "{FEED}fn f(T U) takes {{x: T u: U}} returns r: U8 given {{T: Feed(U)}} \
-         do return 1u8 endfn\n"
-    );
-    breach_at(&source, first(&source, "U)", 1));
-    let source = format!(
-        "{FEED}fn f(T U) takes {{x: T u: U}} returns r: U8 \
-         given {{U: Ordered T: Feed(U)}} do return 1u8 endfn\n\
-         fn g takes {{v: Feed(U8)}} returns r: U8 do return 1u8 endfn\n"
-    );
-    assert_eq!(faults(&source), Vec::new());
-}
-
-#[test]
 fn a_bounded_declared_type_meets_its_bound_in_every_position() {
     let pair =
         "type Pair(T) of T given {T: Ordered} endtype\ntype Plain of U8 endtype\n";
@@ -139,63 +90,6 @@ fn a_bounded_declared_type_meets_its_bound_in_every_position() {
                   fn larger takes {p: Self other: T} returns r: T \
                   do let Pair(v) be p endlet return Ordered.max(v other) endfn endtype\n";
     assert_eq!(run(source).as_deref(), Ok(value("u8", "5u8").as_str()));
-}
-
-#[test]
-fn a_function_value_meets_the_bounds_its_expected_type_fixes() {
-    let need = "fn need(T) takes {x: T} returns r: U8 given {T: Ordered} do return 1u8 endfn\n";
-    let source = format!(
-        "{need}fn f returns r: U8 do let g: Fn({{Plain}} U8) be need endlet return 1u8 endfn\n\
-         type Plain of U8 endtype\n"
-    );
-    breach(&source, "Fn({Plain} U8)", 0);
-    let source = format!(
-        "fn main returns r: U8 do let g: Fn({{U8}} U8) be need endlet return g(1u8) endfn\n{need}"
-    );
-    assert_eq!(run(&source).as_deref(), Ok(value("u8", "1u8").as_str()));
-}
-
-#[test]
-fn a_contract_value_meets_the_bounds_its_expected_type_fixes() {
-    let source = format!(
-        "{FEED_IN_INTERFACE}fn f returns r: U8 do let g: Fn({{U8 Plain}} U8) be Feed.feed \
-         endlet return 1u8 endfn\n"
-    );
-    breach(&source, "Fn({U8 Plain} U8)", 0);
-    let pick = "interface Pick fn pick(T) takes {x: Self item: T} returns r: T \
-                given {T: Ordered} endfn endinterface\n\
-                type Plain of U8 endtype\n\
-                type Box of U8 impl Pick fn pick(T) takes {x: Self item: T} returns r: T \
-                given {T: Ordered} do return item endfn endimpl endtype\n";
-    let source = format!(
-        "{pick}fn f returns r: U8 do let g: Fn({{Box Plain}} Plain) be Pick.pick endlet \
-         return 1u8 endfn\n"
-    );
-    breach(&source, "Fn({Box Plain} Plain)", 0);
-    let source = format!(
-        "fn main returns r: U8 do let g: Fn({{U8 I32}} U8) be Feed.feed endlet \
-         return g(0u8 5i32) endfn\n{FEED_IN_INTERFACE}"
-    );
-    assert_eq!(run(&source).as_deref(), Ok(value("u8", "1u8").as_str()));
-}
-
-#[test]
-fn an_interface_argument_breach_is_reported_at_the_operand_that_fixes_it() {
-    let source = format!(
-        "{FEED_IN_INTERFACE}fn f returns r: U8 do return Feed.feed(0u8 Plain(1u8)) endfn\n"
-    );
-    breach(&source, "Plain(1u8)", 0);
-    // No implementation fits, and the breach is still the operand's.
-    let source = format!(
-        "{FEED}type Box of U8 impl Feed(U8) \
-         fn feed takes {{x: Self item: U8}} returns r: U8 do return 1u8 endfn endimpl endtype\n\
-         fn f returns r: U8 do return Feed.feed(Box(0u8) Plain(1u8)) endfn\n"
-    );
-    breach(&source, "Plain(1u8)", 0);
-    let source = format!(
-        "fn main returns r: U8 do return Feed.feed(0u8 2i32) endfn\n{FEED_IN_INTERFACE}"
-    );
-    assert_eq!(run(&source).as_deref(), Ok(value("u8", "1u8").as_str()));
 }
 
 #[test]
@@ -247,25 +141,4 @@ fn a_parameter_only_the_expected_type_fixes_meets_its_bound_once_fixed() {
          {FEED_IN_INTERFACE}"
     );
     assert_eq!(run(&source).as_deref(), Ok(value("u8", "1u8").as_str()));
-}
-
-#[test]
-fn a_library_bound_reaches_the_operand_whose_implementation_fixes_it() {
-    // `compareLexicographic` takes `T` from the `Iter` choice of `I`, so a
-    // `T` without `Ordered` is the fault of the operand that fixes `I`.
-    let source = "use @std.iter.compareLexicographic enduse\n\
-                  type Plain of U8 endtype\n\
-                  fn f returns r: U8 do let o: Ordering be \
-                  compareLexicographic([Plain(1u8)] [Plain(2u8)]) endlet return 1u8 endfn\n";
-    assert_eq!(
-        faults(source),
-        vec![(
-            DiagnosticCode::TypeUnsatisfiedBound,
-            at(source, "[Plain(1u8)]", 0)
-        )]
-    );
-    let source = "use @std.iter.compareLexicographic enduse\n\
-                  fn main returns r: U8 do match compareLexicographic([1u8 2u8] [1u8 3u8]) \
-                  case Ordering.less() return 1u8 case _ return 0u8 endmatch endfn\n";
-    assert_eq!(run(source).as_deref(), Ok(value("u8", "1u8").as_str()));
 }

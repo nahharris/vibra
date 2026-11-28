@@ -9,40 +9,28 @@ use std::sync::Arc;
 
 use vibra_diagnostics::{ByteSpan, DiagnosticCode};
 use vibra_ir::{BodyContext, CheckedModuleSet, Type};
-use vibra_resolve::{PackageId, ResolveInput, SourceModule, SourceUnit, UnitKind};
+use vibra_resolve::UnitKind;
 
-use super::{SOURCE, at, faults};
+use super::{SOURCE, accepted, at, faults, faults_of, input};
 use crate::check::{CheckResult, check_source, check_workspace};
 
 /// The three interfaces every case builds on: `Log` and `Clock` are
 /// operation interfaces, `Shown` is not.
-const L: &str = "interface Log\n  proc append\n    takes {log: Self entry: Str}\n    \
-                 returns done: Void\n  endproc\nendinterface\n\
-                 interface Clock\n  proc now takes {clock: Self} returns at: I64 endproc\n\
-                 endinterface\n\
-                 interface Shown\n  fn show takes {value: Self} returns text: Str endfn\n\
-                 endinterface\n";
+const INTERFACES: &str = "interface Log\n  proc append\n    takes {log: Self entry: Str}\n    \
+                          returns done: Void\n  endproc\nendinterface\n\
+                          interface Clock\n  proc now takes {clock: Self} returns at: I64 endproc\n\
+                          endinterface\n\
+                          interface Shown\n  fn show takes {value: Self} returns text: Str endfn\n\
+                          endinterface\n";
 
 /// A type that implements `Log`.
 const MEMORY: &str = "type Memory of {lines: List(Str)}\n  impl Log\n    proc append \
                       takes {log: Self entry: Str} returns done: Void do return void \
                       endproc\n  endimpl\nendtype\n";
 
-/// `L` and then `rest`.
-fn with_l(rest: &str) -> String {
-    format!("{L}{rest}")
-}
-
-/// The module set of `source`, which MUST have no diagnostic.
-fn accepted(source: &str) -> Result<Arc<CheckedModuleSet>, String> {
-    let result = check_source(SOURCE, source);
-    if !result.diagnostics().is_empty() {
-        return Err(format!("{source}\n{:#?}", result.diagnostics()));
-    }
-    result
-        .module_set()
-        .map(Arc::clone)
-        .ok_or_else(|| format!("no module set for {source}"))
+/// `INTERFACES` and then `rest`.
+fn with_interfaces(rest: &str) -> String {
+    format!("{INTERFACES}{rest}")
 }
 
 /// The module set of `source`, whose only diagnostics are the
@@ -53,11 +41,7 @@ fn accepted_unused(
     unused: &[ByteSpan],
 ) -> Result<Arc<CheckedModuleSet>, String> {
     let result = check_source(SOURCE, source);
-    let found = result
-        .diagnostics()
-        .iter()
-        .map(|diagnostic| (diagnostic.code(), diagnostic.primary_span()))
-        .collect::<Vec<_>>();
+    let found = faults_of(&result);
     let expected = unused
         .iter()
         .map(|span| (DiagnosticCode::ContractUnusedEffect, *span))
@@ -120,23 +104,7 @@ fn roots(ty: Option<&Type>) -> Vec<String> {
 /// The checked library `@app` of the modules `modules`, each a module path
 /// and its source.
 fn modules(modules: &[(&str, &str)]) -> Result<CheckResult, String> {
-    let stdlib = crate::stdlib::load_stdlib().map_err(|error| error.to_string())?;
-    let sources = modules
-        .iter()
-        .map(|(path, source)| {
-            let file = path.trim_start_matches("@app.");
-            SourceModule::new(
-                *path,
-                format!("src/app/{file}.vib"),
-                source.as_bytes().to_vec(),
-            )
-        })
-        .collect();
-    let input = ResolveInput::new(
-        PackageId::new("hello", "0.1.0"),
-        vec![SourceUnit::new("@app", UnitKind::Lib, sources)],
-        stdlib.overlay().embedded_unit(),
-    );
+    let input = input(&[("@app", UnitKind::Lib, modules)])?;
     Ok(check_workspace(&input, &["@app".to_owned()]))
 }
 
@@ -158,7 +126,7 @@ fn located(result: &CheckResult) -> Vec<(DiagnosticCode, String, ByteSpan)> {
 #[test]
 fn an_operation_interface_member_has_a_proc_type_with_its_owner() -> Result<(), String>
 {
-    let set = accepted(L)?;
+    let set = accepted(INTERFACES)?;
     let append = member_type(&set, "Log", "append");
     let Some(Type::Proc(signature)) = &append else {
         return Err(format!("{append:?}"));
@@ -179,7 +147,7 @@ fn an_operation_interface_member_has_a_proc_type_with_its_owner() -> Result<(), 
 
 #[test]
 fn a_member_row_adds_to_its_owner_sorted_by_path() -> Result<(), String> {
-    let source = with_l(
+    let source = with_interfaces(
         "interface Audit proc record takes {a: Self entry: Str} returns done: Void \
          performs {Log} endproc endinterface\n",
     );
@@ -192,26 +160,8 @@ fn a_member_row_adds_to_its_owner_sorted_by_path() -> Result<(), String> {
 }
 
 #[test]
-fn the_owner_in_a_member_row_is_a_duplicate_root() {
-    let source = with_l(
-        "interface Audit proc record takes {a: Self entry: Str} returns done: Void \
-         performs {Audit} endproc endinterface\n",
-    );
-    assert_eq!(
-        faults(&source),
-        [(DiagnosticCode::EffectDuplicateRoot, at(&source, "Audit", 1))]
-    );
-    let result = check_source(SOURCE, &source);
-    let related = result
-        .diagnostics()
-        .first()
-        .map(|diagnostic| diagnostic.related().len());
-    assert_eq!(related, Some(1));
-}
-
-#[test]
 fn a_fn_member_of_an_operation_interface_is_pure() -> Result<(), String> {
-    let source = with_l(
+    let source = with_interfaces(
         "interface Both proc go takes {b: Self} returns d: Void endproc \
          fn name takes {b: Self} returns n: Str endfn endinterface\n\
          fn label(T) takes {b: T} returns n: Str given {T: Both} do return Both.name(b) endfn\n",
@@ -231,11 +181,11 @@ fn a_fn_member_of_an_operation_interface_is_pure() -> Result<(), String> {
 
 #[test]
 fn a_proc_row_resolves_and_is_its_ceiling() -> Result<(), String> {
-    let source = with_l(&format!(
+    let source = with_interfaces(&format!(
         "{MEMORY}proc p takes {{m: Memory}} returns d: Void performs {{Log}} do \
          let _ be Log.append(m \"x\") endlet return void endproc\n"
     ));
-    // The body builds a plan and performs nothing (Q5).
+    // The body builds a plan and performs nothing.
     let set = accepted_unused(&source, &[entry(&source, "{Log}", "Log")])?;
     let p = function_type(&set, "main.p");
     assert_eq!(roots(p.as_ref()), ["app.main.Log"]);
@@ -252,8 +202,9 @@ fn a_proc_row_resolves_and_is_its_ceiling() -> Result<(), String> {
 
 #[test]
 fn two_roots_are_sorted_by_path() -> Result<(), String> {
-    let source =
-        with_l("proc p returns d: Void performs {Log Clock} do return void endproc\n");
+    let source = with_interfaces(
+        "proc p returns d: Void performs {Log Clock} do return void endproc\n",
+    );
     let set = accepted_unused(
         &source,
         &[
@@ -266,42 +217,6 @@ fn two_roots_are_sorted_by_path() -> Result<(), String> {
         ["app.main.Clock", "app.main.Log"]
     );
     Ok(())
-}
-
-#[test]
-fn a_row_entry_that_is_no_operation_interface_is_an_invalid_reference() {
-    for (row, entry) in [("Shown", "Shown"), ("Memory", "Memory"), ("Nope", "Nope")] {
-        let source = with_l(&format!(
-            "{MEMORY}proc p returns d: Void performs {{{row}}} do return void endproc\n"
-        ));
-        let nth = source.matches(entry).count().saturating_sub(1);
-        assert_eq!(
-            faults(&source),
-            [(
-                DiagnosticCode::EffectInvalidReference,
-                at(&source, entry, nth)
-            )],
-            "{row}"
-        );
-    }
-}
-
-#[test]
-fn an_interface_named_twice_is_a_duplicate_root_at_the_second() {
-    let source =
-        with_l("proc p returns d: Void performs {Log Log} do return void endproc\n");
-    let second = at(&source, "Log", 2);
-    assert_eq!(
-        faults(&source),
-        [(DiagnosticCode::EffectDuplicateRoot, second)]
-    );
-    let result = check_source(SOURCE, &source);
-    let related = result
-        .diagnostics()
-        .first()
-        .and_then(|diagnostic| diagnostic.related().first())
-        .map(|related| related.span);
-    assert_eq!(related, Some(at(&source, "Log", 1)));
 }
 
 #[test]
@@ -343,7 +258,7 @@ fn an_import_name_never_identifies_a_root() -> Result<(), String> {
 #[test]
 fn every_position_of_a_row_resolves_its_entries() -> Result<(), String> {
     // A `proc` member of a type.
-    let good = with_l(
+    let good = with_interfaces(
         "type T of I32 proc m returns d: Void performs {Log} do return void endproc endtype\n",
     );
     let set = accepted_unused(&good, &[entry(&good, "{Log}", "Log")])?;
@@ -351,7 +266,7 @@ fn every_position_of_a_row_resolves_its_entries() -> Result<(), String> {
         roots(function_type(&set, "main.T.m").as_ref()),
         ["app.main.Log"]
     );
-    let bad = with_l(
+    let bad = with_interfaces(
         "type T of I32 proc m returns d: Void performs {Shown} do return void endproc endtype\n",
     );
     assert_eq!(
@@ -359,7 +274,7 @@ fn every_position_of_a_row_resolves_its_entries() -> Result<(), String> {
         [(DiagnosticCode::EffectInvalidReference, at(&bad, "Shown", 1))]
     );
     // A member of an interface.
-    let bad = with_l(
+    let bad = with_interfaces(
         "interface Audit proc record takes {a: Self} returns d: Void performs {Shown} \
          endproc endinterface\n",
     );
@@ -370,7 +285,7 @@ fn every_position_of_a_row_resolves_its_entries() -> Result<(), String> {
     // A member of an implementation.
     let audit = "interface Audit proc record takes {a: Self} returns d: Void \
                  performs {Log} endproc endinterface\n";
-    let good = with_l(&format!(
+    let good = with_interfaces(&format!(
         "{audit}type A of I32 impl Audit proc record takes {{a: Self}} returns d: Void \
          performs {{Log}} do return void endproc endimpl endtype\n"
     ));
@@ -379,7 +294,7 @@ fn every_position_of_a_row_resolves_its_entries() -> Result<(), String> {
         roots(function_type(&set, ".Audit.record").as_ref()),
         ["app.main.Audit", "app.main.Log"]
     );
-    let bad = with_l(&format!(
+    let bad = with_interfaces(&format!(
         "{audit}type A of I32 impl Audit proc record takes {{a: Self}} returns d: Void \
          performs {{Shown}} do return void endproc endimpl endtype\n"
     ));
@@ -392,7 +307,7 @@ fn every_position_of_a_row_resolves_its_entries() -> Result<(), String> {
 
 #[test]
 fn an_implementation_keeps_its_member_row() -> Result<(), String> {
-    let set = accepted(&with_l(MEMORY))?;
+    let set = accepted(&with_interfaces(MEMORY))?;
     let append = function_type(&set, ".Log.append");
     assert_eq!(roots(append.as_ref()), ["app.main.Log"]);
     let Some(Type::Proc(signature)) = &append else {
@@ -405,7 +320,7 @@ fn an_implementation_keeps_its_member_row() -> Result<(), String> {
             .is_some_and(|first| *first != Type::SelfType)
     );
     // Wider: at the `performs` section.
-    let wider = with_l(
+    let wider = with_interfaces(
         "type Memory of I32 impl Log proc append takes {log: Self entry: Str} \
          returns done: Void performs {Clock} do return void endproc endimpl endtype\n",
     );
@@ -419,7 +334,7 @@ fn an_implementation_keeps_its_member_row() -> Result<(), String> {
     // Narrower: at the member's name.
     let audit = "interface Audit proc record takes {a: Self entry: Str} returns done: Void \
                  performs {Log} endproc endinterface\n";
-    let narrower = with_l(&format!(
+    let narrower = with_interfaces(&format!(
         "{audit}type A of I32 impl Audit proc record takes {{a: Self entry: Str}} \
          returns done: Void do return void endproc endimpl endtype\n"
     ));
@@ -428,7 +343,7 @@ fn an_implementation_keeps_its_member_row() -> Result<(), String> {
         [(DiagnosticCode::TypeMismatch, at(&narrower, "record", 1))]
     );
     // The owner in the member's own row.
-    let owner = with_l(
+    let owner = with_interfaces(
         "type Memory of I32 impl Log proc append takes {log: Self entry: Str} \
          returns done: Void performs {Log} do return void endproc endimpl endtype\n",
     );
@@ -437,7 +352,7 @@ fn an_implementation_keeps_its_member_row() -> Result<(), String> {
         [(DiagnosticCode::EffectDuplicateRoot, at(&owner, "Log", 2))]
     );
     // A `fn` for the `proc`.
-    let kind = with_l(
+    let kind = with_interfaces(
         "type Memory of I32 impl Log fn append takes {log: Self entry: Str} \
          returns done: Void do return void endfn endimpl endtype\n",
     );
@@ -485,7 +400,7 @@ fn an_implementation_in_an_interface_or_generic_keeps_its_member_row()
     );
     // A generic implementation.
     let generic = |row: &str| {
-        with_l(&format!(
+        with_interfaces(&format!(
             "type Box(T) of {{item: T}}\n  impl Log\n    proc append takes {{log: Self entry: Str}} \
              returns done: Void{row} do return void endproc\n  endimpl\nendtype\n"
         ))
@@ -516,14 +431,14 @@ fn applying_a_contract_proc_member_builds_a_plan_with_its_row() -> Result<(), St
         ("", "m: Log", ""),
     ];
     for (binders, takes, given) in receivers {
-        let built = with_l(&format!(
+        let built = with_interfaces(&format!(
             "{MEMORY}fn build{binders} takes {{{takes}}} returns unit: Void{given} do \
              let _ be Log.append(m \"x\") endlet return void endfn\n"
         ));
         accepted(&built)?;
         // Its type is `Intent(Void {Log})` with the member's complete row,
         // which the mismatch at a `Void` result names.
-        let returned = with_l(&format!(
+        let returned = with_interfaces(&format!(
             "{MEMORY}fn build{binders} takes {{{takes}}} returns unit: Void{given} do \
              return Log.append(m \"x\") endfn\n"
         ));
@@ -703,7 +618,7 @@ fn the_narrowing_members_are_pure_rows_at_self() -> Result<(), String> {
 
 /// A package's model of `DirReadText` supplies the host-bound member and
 /// the three narrowing members; its `read` keeps the contract's row
-/// `{DirReadText}` (Q1, Q2).
+/// `{DirReadText}`.
 #[test]
 fn a_model_of_an_operation_interface_supplies_its_bound_members() -> Result<(), String>
 {

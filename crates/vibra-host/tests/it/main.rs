@@ -10,12 +10,12 @@
 )]
 
 mod broker;
-mod dual;
 mod fs;
 mod policy;
 mod recipe;
 mod scripted;
 mod startup;
+mod support;
 mod system;
 mod test_world;
 mod trace;

@@ -1031,19 +1031,6 @@ impl CheckedModuleSet {
     pub const fn flow(&self) -> &Flow {
         &self.flow
     }
-
-    /// The function named `name`, if exactly one has it.
-    #[must_use]
-    pub fn function_named(&self, name: &str) -> Option<usize> {
-        let mut found = self
-            .functions
-            .iter()
-            .enumerate()
-            .filter(|(_, function)| function.name == name)
-            .map(|(index, _)| index);
-        let first = found.next()?;
-        found.next().is_none().then_some(first)
-    }
 }
 
 impl Flow {

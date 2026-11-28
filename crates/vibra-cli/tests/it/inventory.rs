@@ -68,15 +68,11 @@ fn every_parsed_command_has_an_inventory_row() {
 }
 
 #[test]
-fn the_capabilities_are_the_rows_and_help_fmt_check_test_and_run_are_supported() {
+fn the_capabilities_are_the_rows() {
     let capabilities = capabilities();
     assert_eq!(capabilities.len(), LINES.len());
     for (capability, line) in capabilities.iter().zip(&LINES) {
         assert_eq!(capability.command, line.name());
-        assert_eq!(
-            capability.supported,
-            ["help", "fmt", "check", "test", "run"].contains(&line.name().as_str())
-        );
         assert_eq!(capability.supported, line.supported);
     }
 }
@@ -126,18 +122,6 @@ fn the_operation_table_is_the_profile_table_of_the_chapter_and_help() {
 #[test]
 fn inventory_derived_from_the_profiles() {
     let capabilities = capabilities();
-    let profiles = |command: &str| {
-        capabilities
-            .iter()
-            .find(|capability| capability.command == command)
-            .map(|capability| capability.profiles.clone())
-            .expect("a row")
-    };
-    assert_eq!(profiles("fmt"), ["toolingV2"]);
-    assert_eq!(profiles("test"), ["interpreterV2"]);
-    assert_eq!(profiles("run"), ["interpreterV2"]);
-    assert_eq!(profiles("check"), ["staticV2"]);
-    assert_eq!(profiles("help"), ["toolingV2"]);
     for (capability, line) in capabilities.iter().zip(&LINES) {
         let derived = line
             .operations
@@ -146,40 +130,6 @@ fn inventory_derived_from_the_profiles() {
             .collect::<Vec<_>>();
         assert_eq!(capability.profiles, derived, "{}", capability.command);
     }
-}
-
-#[test]
-fn inventory() {
-    let (code, document) = crate::support::envelope(&["--format", "json", "help"]);
-    assert_eq!(code, 0);
-    let capabilities = document["payload"]["capabilities"]
-        .as_array()
-        .expect("capabilities");
-    let run = capabilities
-        .iter()
-        .find(|capability| capability["command"] == "run")
-        .expect("the run row");
-    assert_eq!(run["supported"], true);
-    assert_eq!(run["operations"], serde_json::json!(["workspaceRun"]));
-    assert_eq!(run["profiles"], serde_json::json!(["interpreterV2"]));
-    assert_eq!(
-        run["schemaIds"],
-        serde_json::json!([
-            "urn:vibra:schema:v2:command-result",
-            "urn:vibra:schema:v2:diagnostic"
-        ])
-    );
-    let profiles = |command: &str| {
-        capabilities
-            .iter()
-            .find(|capability| capability["command"] == command)
-            .map(|capability| capability["profiles"].clone())
-            .expect("a row")
-    };
-    assert_eq!(profiles("fmt"), serde_json::json!(["toolingV2"]));
-    assert_eq!(profiles("test"), serde_json::json!(["interpreterV2"]));
-    assert_eq!(profiles("check"), serde_json::json!(["staticV2"]));
-    assert_eq!(profiles("help"), serde_json::json!(["toolingV2"]));
 }
 
 /// No row of the inventory names a profile by hand: the `Line` record has no

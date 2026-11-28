@@ -10,7 +10,7 @@ use vibra_ir::{
     ModuleSetParts, NamedTypes, Node, SignatureRecord, Type, TypeId, Value,
 };
 
-use crate::{id, library_parts, node, origin};
+use crate::{id, library_parts, node, origin, void};
 
 fn binder() -> Type {
     Type::Binder(0)
@@ -65,12 +65,6 @@ fn call(function: usize, at: Type) -> Node {
             type_arguments: vec![at],
         },
     })
-}
-
-fn void() -> Node {
-    node(Expr::Literal(
-        Constant::new(Type::Void, Value::Void).unwrap(),
-    ))
 }
 
 fn set(functions: Vec<CheckedFunction>) -> Result<(), IrError> {

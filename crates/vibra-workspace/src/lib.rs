@@ -48,6 +48,8 @@ mod semantic;
 mod snapshot;
 mod source_graph;
 mod test_runner;
+#[cfg(test)]
+mod test_tree;
 
 pub use discovery::{DiscoveredProject, discover_project, discover_project_at};
 pub use format_plan::{
@@ -57,7 +59,8 @@ pub use library::library_source;
 pub use nesting::{COMMAND_STACK, SOURCE_NESTING, nesting_fault, source_nesting_limit};
 pub use project::{
     Availability, Dependency, DependencyKind, PROJECT_FILE_NAME, PROJECT_FORMAT,
-    Package, Project, Recipe, Target, TargetKind, decode_project, project_schema,
+    Package, Project, Recipe, Target, TargetKind, decode_project, is_target_atom,
+    project_schema,
 };
 pub use resolve::resolve_input;
 pub use revision::{
@@ -74,7 +77,7 @@ pub use test_runner::{
 };
 // The types the runner's outcomes are made of, so that a consumer of
 // `run_tests` reads them without depending on the interpreter or the IR.
-pub use vibra_interp::{FailureKind, MemoryBudget, TestAssertionFailure};
+pub use vibra_interp::{FailureKind, LimitProfile, MemoryBudget, TestAssertionFailure};
 // The host world a test runs in and the trace it records, so that a
 // consumer of `run_tests_in` builds the one and reads the other without
 // depending on the host.

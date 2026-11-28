@@ -9,9 +9,9 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use vibra_host::SplitMix64;
-use vibra_host::broker::{Context, Counters, RootGrant};
+use vibra_host::broker::{Context, RootGrant};
 use vibra_host::driver::{Completion, Measured, Progress, ResourceId};
-use vibra_host::policy::{self, Policy};
+use vibra_host::policy::Policy;
 use vibra_host::recipe::{LeafName, Limits};
 use vibra_host::trace::GrantOrigin;
 use vibra_ir::Value;
@@ -22,24 +22,14 @@ use vibra_ir::authority::{
 use vibra_ir::external::host::{HostInterface, HostOp};
 
 use crate::scripted::{Event, Scripted, Step, Tweak};
+use crate::support::{
+    ANY_NAME, VOID, counters, err, granted, names, on_small_stack, policy, text,
+    variant,
+};
 use crate::trace::header;
 
 const NOTES: ResourceId = ResourceId(1);
 const OTHER: ResourceId = ResourceId(2);
-
-fn names(names: &[&str]) -> Vec<String> {
-    names.iter().map(|name| (*name).to_owned()).collect()
-}
-
-fn policy(expression: &str) -> Policy {
-    policy::decode(
-        format!(
-            "{{format: @scopePolicy.v1 family: @filesystem expression: {expression}}}"
-        )
-        .as_bytes(),
-    )
-    .expect("a policy")
-}
 
 fn file_rule(prefix: &str, actions: &str, test: &str) -> Policy {
     policy(&format!(
@@ -47,8 +37,6 @@ fn file_rule(prefix: &str, actions: &str, test: &str) -> Policy {
          names: {test}}}"
     ))
 }
-
-const ANY_NAME: &str = "{kind: @anyName}";
 
 fn p0() -> Policy {
     file_rule("", "@read @replace @create", ANY_NAME)
@@ -176,29 +164,15 @@ fn stdin(
     run(cx, op, grant, &[HostArgument::Count(max)])
 }
 
-fn err(op: HostOp, case: &str) -> HostReply {
-    HostReply::Err(HostErrorCase::new(op.row().error, case).expect("a case"))
-}
-
-fn text(value: &str) -> HostReply {
-    HostReply::Ok(HostOk::Text(value.to_owned()))
-}
-
 fn bytes(value: &str) -> HostReply {
     HostReply::Ok(HostOk::Bytes(value.as_bytes().to_vec()))
 }
-
-const VOID: HostReply = HostReply::Ok(HostOk::Void);
 
 fn completed(reply: HostReply, input: Measured, output: Measured) -> Completion {
     Completion::Completed {
         reply,
         progress: Progress { input, output },
     }
-}
-
-fn counters(cx: &Context<'_>, grant: GrantToken) -> Counters {
-    cx.counters_for_tests(grant).expect("counters")
 }
 
 /// Invocations, input bytes, and output bytes charged.
@@ -216,16 +190,6 @@ fn invalid(result: Result<(HostReply, bool), HostFault>) -> bool {
 }
 
 // Source policy values, as the interpreter encodes an `FsPolicy`.
-
-fn variant(case: &str, fields: Vec<(&str, Value)>) -> Value {
-    Value::Variant {
-        case: case.to_owned(),
-        fields: fields
-            .into_iter()
-            .map(|(name, value)| (name.to_owned(), value))
-            .collect(),
-    }
-}
 
 fn unit(case: &str) -> Value {
     variant(case, Vec::new())
@@ -277,13 +241,6 @@ fn limit(cx: &mut Context<'_>, grant: GrantToken, limits: GrantLimits) -> GrantT
         cx.narrow(NarrowRequest::Limit { grant, limits })
             .expect("a valid limit"),
     )
-}
-
-fn granted(narrowed: Narrowed) -> GrantToken {
-    match narrowed {
-        Narrowed::Grant(token) => token,
-        Narrowed::Refused(refusal) => panic!("refused: {refusal:?}"),
-    }
 }
 
 fn invocations(bound: Option<u64>) -> GrantLimits {
@@ -1811,26 +1768,20 @@ fn atk_reserved_names_in_any_case_through_the_broker() {
 
 #[test]
 fn deep_ancestry() {
-    let worker = std::thread::Builder::new()
-        .stack_size(256 * 1024)
-        .spawn(|| {
-            let script = Scripted::new();
-            script.file(&["a.txt"], "deep");
-            let mut driver = script.clone();
-            let mut cx = Context::new(&mut driver, header());
-            let mut grant = root(&mut cx, HostInterface::DirReadText);
-            for _ in 0..10_000 {
-                grant = limit(&mut cx, grant, invocations(Some(3)));
-            }
-            let reply = read(&mut cx, grant, &["a.txt"]);
-            drop(cx);
-            reply
-        })
-        .expect("a thread");
-    assert_eq!(
-        worker.join().expect("no overflow"),
-        Ok((text("deep"), true))
-    );
+    let reply = on_small_stack(|| {
+        let script = Scripted::new();
+        script.file(&["a.txt"], "deep");
+        let mut driver = script.clone();
+        let mut cx = Context::new(&mut driver, header());
+        let mut grant = root(&mut cx, HostInterface::DirReadText);
+        for _ in 0..10_000 {
+            grant = limit(&mut cx, grant, invocations(Some(3)));
+        }
+        let reply = read(&mut cx, grant, &["a.txt"]);
+        drop(cx);
+        reply
+    });
+    assert_eq!(reply, Ok((text("deep"), true)));
 }
 
 #[test]

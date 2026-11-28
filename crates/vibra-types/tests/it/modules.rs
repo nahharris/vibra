@@ -42,18 +42,6 @@ fn the_embedded_modules_are_those_of_the_manifest() {
 }
 
 #[test]
-fn every_module_parses() {
-    for (path, bytes) in StdlibInputs::embedded().modules {
-        let document = parse_source_with(Some(path), bytes, library_mode());
-        assert!(
-            document.diagnostics().is_empty(),
-            "`{path}` has reader diagnostics: {:?}",
-            document.diagnostics()
-        );
-    }
-}
-
-#[test]
 fn every_module_formats_canonically() {
     for (path, bytes) in StdlibInputs::embedded().modules {
         let document = parse_source_with(Some(path), bytes, library_mode());

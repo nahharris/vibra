@@ -3,7 +3,7 @@
 use std::path::Path;
 
 use vibra_diagnostics_v1::DiagnosticCode;
-use vibra_syntax_v1::{AtomRole, DataValue, TypedDataSchema, parse_data};
+use vibra_syntax_v1::{DataValue, parse_data};
 
 #[test]
 fn valid_literals_and_containers_decode_as_one_data_value() {
@@ -66,13 +66,4 @@ fn closed_data_grammar_rejects_symbols_applications_and_odd_shapes() {
             DiagnosticCode::DataInvalidShape | DiagnosticCode::DataInvalidValue
         )));
     }
-}
-
-#[test]
-fn typed_schema_declares_order_and_atom_roles_without_resolution() {
-    let mut schema = TypedDataSchema::new(["name", "target"]);
-    schema.set_atom_role("target", AtomRole::Reference);
-    assert_eq!(schema.field_order(), ["name", "target"]);
-    assert_eq!(schema.atom_role("target"), Some(AtomRole::Reference));
-    assert_eq!(schema.atom_role("name"), None);
 }

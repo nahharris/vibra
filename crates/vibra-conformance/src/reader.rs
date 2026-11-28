@@ -37,8 +37,7 @@ impl ProfileHandler for ReaderV2Handler {
                 ));
             }
         };
-        let document = load(source_id, mode, || case.read_bytes(source_id))
-            .map_err(|error| HandlerError::new(error.to_string()))?;
+        let document = load(source_id, mode, || case.read_bytes(source_id))?;
         let formatted = format_document(&document);
         if let Some(output) = &formatted {
             let reparsed = parse(mode, Some(source_id), output.as_bytes());

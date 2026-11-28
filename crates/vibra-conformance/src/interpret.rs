@@ -9,7 +9,7 @@
 //! establishes no result: its verdict is `unknown`, and it observes the
 //! event and its diagnostic.
 
-use vibra_diagnostics::{Diagnostic, DiagnosticCode};
+use vibra_diagnostics::{Diagnostic, DiagnosticCode, only_unavailable};
 use vibra_interp::MemoryBudget;
 use vibra_types::interpret;
 
@@ -28,18 +28,15 @@ pub const INTERPRET_BUDGET: MemoryBudget = MemoryBudget::DEFAULT;
 /// `docs/spec/05-tooling.md`, "Versioned envelope and results", makes the
 /// status `unknown`; `refuted` for any other error; `accepted` otherwise.
 pub(crate) fn check_verdict(diagnostics: &[Diagnostic]) -> Verdict {
-    let errors = diagnostics
+    let mut errors = diagnostics
         .iter()
         .filter(|diagnostic| diagnostic.is_error())
-        .collect::<Vec<_>>();
-    if errors.is_empty() {
+        .peekable();
+    if errors.peek().is_none() {
         Verdict::Accepted
-    } else if errors
-        .iter()
-        .all(|diagnostic| diagnostic.code() == DiagnosticCode::ToolUnavailable)
-    {
+    } else if only_unavailable(diagnostics) {
         Verdict::Unsupported
-    } else if errors.iter().any(|diagnostic| {
+    } else if errors.any(|diagnostic| {
         matches!(
             diagnostic.code(),
             DiagnosticCode::ContractUnproved | DiagnosticCode::ToolLimitExceeded
@@ -64,9 +61,7 @@ impl ProfileHandler for InterpretHandler {
         let source_id = case.manifest().inputs.source.as_deref().ok_or_else(|| {
             HandlerError::new("an interpret case declares one source")
         })?;
-        let source = case
-            .read_file(source_id)
-            .map_err(|error| HandlerError::new(error.to_string()))?;
+        let source = case.read_file(source_id)?;
         let outcome = interpret(source_id, &source, INTERPRET_BUDGET);
         let check = &outcome.check;
         let mut observation = CaseObservation::new(check_verdict(check.diagnostics()));

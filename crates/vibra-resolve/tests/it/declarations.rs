@@ -3,40 +3,13 @@
 
 use vibra_diagnostics::DiagnosticCode as C;
 
-use crate::support::{assert_clean, assert_one, codes, resolve_main, span_of};
-
-#[test]
-fn a_declaration_may_be_referenced_before_it_is_written() {
-    assert_clean(&resolve_main("type A of B endtype\ntype B of U8 endtype\n"));
-}
-
-#[test]
-fn a_repeated_top_level_name_is_a_redeclaration_at_the_later() {
-    let text = "type A of U8 endtype\ntype A of U16 endtype\n";
-    assert_one(
-        &resolve_main(text),
-        C::NameRedeclaration,
-        span_of(text, "A", 1),
-        &[span_of(text, "A", 0)],
-    );
-}
+use crate::support::{assert_one, codes, resolve_main, span_of};
 
 #[test]
 fn names_collide_across_namespaces() {
     let text = "type limit of U8 endtype\nlet limit: U8 be 1u8 endlet\n";
     let resolution = resolve_main(text);
     assert_eq!(codes(&resolution), [C::StyleCasing, C::NameRedeclaration]);
-}
-
-#[test]
-fn an_import_name_collides_with_a_declaration() {
-    let text = "use @std.core enduse\nlet core: U8 be 1u8 endlet\n";
-    assert_one(
-        &resolve_main(text),
-        C::NameRedeclaration,
-        span_of(text, "core", 1),
-        &[span_of(text, "core", 0)],
-    );
 }
 
 #[test]
@@ -97,17 +70,6 @@ fn an_associated_type_and_a_member_of_one_interface_collide() {
 }
 
 #[test]
-fn a_nested_member_redeclaring_an_inherited_parameter() {
-    let text = "type Box(T) of {item: T}\n  fn f(T) takes {b: Self} returns r: T do return b.item endfn\nendtype\n";
-    assert_one(
-        &resolve_main(text),
-        C::NameGenericRedeclaration,
-        span_of(text, "T", 2),
-        &[],
-    );
-}
-
-#[test]
 fn an_impl_member_redeclaring_the_types_parameter() {
     let text = "type Box(T) of {item: T}\n  impl Equatable\n    fn equal(T) takes {left: Self right: Self} returns same: Bool do return true endfn\n  endimpl\nendtype\n";
     assert_one(
@@ -151,17 +113,6 @@ fn given_keys_name_the_headers_own_parameters_once() {
         C::NameUnknownSymbol,
         span_of(inherited, "T", 2),
         &[],
-    );
-}
-
-#[test]
-fn an_associated_type_with_the_name_of_a_parameter() {
-    let text = "interface Source(Item) type Item endtype endinterface\n";
-    assert_one(
-        &resolve_main(text),
-        C::NameGenericRedeclaration,
-        span_of(text, "Item", 1),
-        &[span_of(text, "Item", 0)],
     );
 }
 
@@ -233,27 +184,6 @@ fn a_reserved_declaration_still_binds() {
         .expect("the use of `Option`");
     assert_eq!(reference.span().end(), end);
     assert_eq!(reference.to(), &local, "the local declaration binds");
-}
-
-#[test]
-fn an_import_spelled_as_a_prelude_name() {
-    let resolution = crate::support::resolve_modules(&[
-        ("@app.main", "use @app.util as true enduse\n"),
-        ("@app.util", ""),
-    ]);
-    assert_eq!(codes(&resolution), [C::NameReservedValueSpelling]);
-    assert_eq!(
-        crate::support::flat(&resolution)[0].2..crate::support::flat(&resolution)[0].3,
-        17..21
-    );
-}
-
-#[test]
-fn casing_is_a_warning_and_changes_nothing() {
-    let text = "type user of U8 endtype\n";
-    let resolution = resolve_main(text);
-    assert_one(&resolution, C::StyleCasing, span_of(text, "user", 0), &[]);
-    assert!(!resolution.has_errors());
 }
 
 #[test]

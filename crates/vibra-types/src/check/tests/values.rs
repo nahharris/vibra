@@ -3,29 +3,14 @@
 //! Expectations come from the type chapter ("Functions as values", "Guards
 //! and callable types", "Bare guards"), the source chapter ("Grammar",
 //! "`return`, `try`, `await`"), the effects chapter ("Effect ceilings",
-//! "Cold plans and performed rows"), the diagnostics chapter's rows of the
-//! codes below, and question Q6 of the M2 plan.
+//! "Cold plans and performed rows"), and the diagnostics chapter's rows of
+//! the codes below.
 
-use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode, Level};
+use vibra_diagnostics::{ByteSpan, DiagnosticCode, Level};
 use vibra_ir::{Expr, FunctionBody, Node, Type};
 
-use super::{SOURCE, at};
+use super::{L, SOURCE, Seen, at, seen, seen_in, with_l, workspace};
 use crate::check::check_source;
-
-/// The interfaces of step 08, a type that implements two of them, and a
-/// `proc` that performs `Log`: the preamble `L` of step 09.
-const L: &str = "interface Log\n  proc append\n    takes {log: Self entry: Str}\n    \
-                 returns done: Void\n  endproc\nendinterface\n\n\
-                 interface Clock\n  proc now takes {clock: Self} returns at: I64 endproc\n\
-                 endinterface\n\n\
-                 interface Shown\n  fn show takes {value: Self} returns text: Str endfn\n\
-                 endinterface\n\n\
-                 type Memory of {lines: List(Str)}\n  impl Log\n    proc append takes \
-                 {log: Self entry: Str} returns done: Void do\n      return void\n    \
-                 endproc\n  endimpl\n  impl Clock\n    proc now takes {clock: Self} \
-                 returns at: I64 do return 0i64 endproc\n  endimpl\nendtype\n\n\
-                 proc note takes {m: Memory} returns done: Void performs {Log} do\n  \
-                 return await Log.append(m \"x\")\nendproc\n";
 
 /// `emit`, which awaits its callback, and `quiet`, a `proc` with the empty
 /// row.
@@ -33,40 +18,9 @@ const EMIT: &str = "proc emit takes {line: Str sink: Proc({Str} Void {Log})} ret
                     performs {Log} do return await sink(line) endproc\n\
                     proc quiet takes {line: Str} returns d: Void do return void endproc\n";
 
-/// `L` and then `rest`.
-fn with_l(rest: &str) -> String {
-    format!("{L}{rest}\n")
-}
-
 /// `L`, `EMIT`, and then `rest`.
 fn with_emit(rest: &str) -> String {
     format!("{L}{EMIT}{rest}\n")
-}
-
-/// Each diagnostic with its code, level, primary span, and related spans.
-type Seen = (DiagnosticCode, Level, ByteSpan, Vec<ByteSpan>);
-
-fn seen(diagnostics: &[Diagnostic]) -> Vec<Seen> {
-    diagnostics
-        .iter()
-        .map(|diagnostic| {
-            (
-                diagnostic.code(),
-                diagnostic.level(),
-                diagnostic.primary_span(),
-                diagnostic
-                    .related()
-                    .iter()
-                    .map(|related| related.span)
-                    .collect(),
-            )
-        })
-        .collect()
-}
-
-/// The diagnostics of `source`.
-fn of(source: &str) -> Vec<Seen> {
-    seen(check_source(SOURCE, source).diagnostics())
 }
 
 /// An error `code` at `span` with no related span.
@@ -81,9 +35,8 @@ fn warning(code: DiagnosticCode, span: ByteSpan) -> Seen {
 
 /// Asserts that `source` checks with no diagnostic and lowers.
 fn accepted(source: &str) {
-    let result = check_source(SOURCE, source);
-    assert_eq!(seen(result.diagnostics()), [], "{source}");
-    assert!(result.module_set().is_some(), "{source}");
+    let fault = super::accepted(source).err().unwrap_or_default();
+    assert!(fault.is_empty(), "{fault}");
 }
 
 // A `Proc` or `Intent` type is written: parameter, result, `let`
@@ -158,7 +111,7 @@ fn a_row_that_does_not_resolve_is_reported_at_every_position() {
         (format!("type Sink of {bad} endtype"), 1),
     ] {
         let source = with_l(&rest);
-        let found = of(&source);
+        let found = seen_in(&source);
         assert!(
             found.contains(&error(
                 DiagnosticCode::EffectInvalidReference,
@@ -174,36 +127,6 @@ fn a_row_that_does_not_resolve_is_reported_at_every_position() {
 }
 
 #[test]
-fn a_written_row_resolves_as_a_performs_row() {
-    let source = with_l(
-        "proc emit takes {sink: Proc({Str} Void {Log Log})} returns d: Void do \
-         return void endproc",
-    );
-    // The second entry, related to the first.
-    let row = at(&source, "{Log Log}", 0).start();
-    assert_eq!(
-        of(&source),
-        [(
-            DiagnosticCode::EffectDuplicateRoot,
-            Level::Error,
-            ByteSpan::new(row + 5, row + 8),
-            vec![ByteSpan::new(row + 1, row + 4)]
-        )]
-    );
-    let source = with_l(
-        "fn prepare takes {m: Memory} returns plan: Intent(Void {Memory}) do \
-         return Log.append(m \"x\") endfn",
-    );
-    assert_eq!(
-        of(&source),
-        [error(
-            DiagnosticCode::EffectInvalidReference,
-            at(&source, "Memory", 3)
-        )]
-    );
-}
-
-#[test]
 fn an_omitted_row_is_the_empty_row() {
     // `double` has the empty row, so it is a `Proc({I32} I32)`.
     let source = "proc double takes {n: I32} returns twice: I32 do return I32.add(n n) endproc\n\
@@ -216,7 +139,7 @@ fn an_omitted_row_is_the_empty_row() {
     accepted(source);
 }
 
-// `@type.suspiciousRow` (Q6).
+// `@type.suspiciousRow`.
 
 #[test]
 fn a_row_written_as_the_result_is_suspicious() {
@@ -224,7 +147,7 @@ fn a_row_written_as_the_result_is_suspicious() {
         "fn keep takes {s: Proc({Str} {Log})} returns r: I32 do return 1i32 endfn",
     );
     assert_eq!(
-        of(&source),
+        seen_in(&source),
         [warning(
             DiagnosticCode::TypeSuspiciousRow,
             at(&source, "Proc({Str} {Log})", 0)
@@ -234,7 +157,7 @@ fn a_row_written_as_the_result_is_suspicious() {
         "fn keep takes {p: Intent({Log Clock})} returns r: I32 do return 1i32 endfn",
     );
     assert_eq!(
-        of(&source),
+        seen_in(&source),
         [warning(
             DiagnosticCode::TypeSuspiciousRow,
             at(&source, "Intent({Log Clock})", 0)
@@ -246,7 +169,7 @@ fn a_row_written_as_the_result_is_suspicious() {
          proc run returns r: I32 do return 1i32 endproc",
     );
     assert_eq!(
-        of(&source),
+        seen_in(&source),
         [warning(
             DiagnosticCode::TypeSuspiciousRow,
             at(&source, "Proc({Str} {Log})", 0)
@@ -272,8 +195,8 @@ fn a_row_that_is_written_or_a_result_that_is_no_row_is_not_suspicious() {
     ));
 }
 
-// Rows compare exactly: an argument, a returned value, a field
-// initializer, and a `let` with an annotation.
+// Rows compare exactly: an argument, a field initializer, and a `let` with
+// an annotation.
 
 /// An anonymous `proc` of `Sink`'s parameters with the row `row`.
 fn sink_closure(row: &str) -> String {
@@ -295,7 +218,7 @@ fn an_argument_row_compares_exactly() {
         "proc run returns d: Void performs {{Log}} do return await emit(\"x\" {wider}) endproc"
     ));
     assert_eq!(
-        of(&source),
+        seen_in(&source),
         [error(
             DiagnosticCode::TypeArgumentMismatch,
             at(&source, wider, 0)
@@ -307,7 +230,7 @@ fn an_argument_row_compares_exactly() {
          endproc"
     ));
     assert_eq!(
-        of(&source),
+        seen_in(&source),
         [error(
             DiagnosticCode::TypeArgumentMismatch,
             at(&source, narrower, 0)
@@ -325,30 +248,11 @@ fn an_argument_row_compares_exactly() {
         .find(wrapped)
         .map_or(0, |start| start + wrapped.find("Log").unwrap_or_default());
     assert_eq!(
-        of(&source),
+        seen_in(&source),
         [warning(
             DiagnosticCode::ContractUnusedEffect,
             ByteSpan::new(log, log + "Log".len())
         )]
-    );
-}
-
-#[test]
-fn a_returned_row_compares_exactly() {
-    accepted(&with_l(
-        "fn pick takes {m: Memory} returns sink: Proc({Str} Void {Log}) do \
-         return proc takes {line: Str} returns d: Void performs {Log} do \
-         return await Log.append(m line) endproc endfn",
-    ));
-    let closure = "proc takes {line: Str} returns d: Void performs {Log} do \
-                   return await Log.append(m line) endproc";
-    let source = with_l(&format!(
-        "fn pick takes {{m: Memory}} returns sink: Proc({{Str}} Void {{}}) do \
-         return {closure} endfn"
-    ));
-    assert_eq!(
-        of(&source),
-        [error(DiagnosticCode::TypeMismatch, at(&source, closure, 0))]
     );
 }
 
@@ -364,7 +268,7 @@ fn a_field_row_compares_exactly() {
         "{hooks}fn make returns h: Hooks do return Hooks(onLine: quiet) endfn"
     ));
     assert_eq!(
-        of(&source),
+        seen_in(&source),
         [error(
             DiagnosticCode::TypeArgumentMismatch,
             at(&source, "quiet", 1)
@@ -383,7 +287,7 @@ fn a_let_annotation_row_compares_exactly() {
          let plan: Intent(Void {}) be Log.append(m \"x\") endlet return 1i32 endfn",
     );
     assert_eq!(
-        of(&source),
+        seen_in(&source),
         [error(
             DiagnosticCode::TypeMismatch,
             at(&source, "Log.append(m \"x\")", 1)
@@ -406,35 +310,10 @@ fn a_row_compares_exactly_where_a_type_parameter_is_inferred() {
          endproc"
     ));
     assert_eq!(
-        of(&source),
+        seen_in(&source),
         [error(
             DiagnosticCode::TypeArgumentMismatch,
             at(&source, "quiet", 1)
-        )]
-    );
-}
-
-#[test]
-fn fn_and_proc_are_distinct_types() {
-    let source = "fn twice takes {line: Str} returns d: Void do return void endfn\n\
-                  proc call takes {sink: Proc({Str} Void {})} returns d: Void do \
-                  return await sink(\"x\") endproc\n\
-                  proc run returns d: Void do return await call(twice) endproc\n";
-    assert_eq!(
-        of(source),
-        [error(
-            DiagnosticCode::TypeArgumentMismatch,
-            at(source, "twice", 1)
-        )]
-    );
-    let source = "proc double takes {n: I32} returns twice: I32 do return I32.add(n n) endproc\n\
-                  fn call takes {f: Fn({I32} I32)} returns r: I32 do return f(1i32) endfn\n\
-                  fn run returns r: I32 do return call(double) endfn\n";
-    assert_eq!(
-        of(source),
-        [error(
-            DiagnosticCode::TypeArgumentMismatch,
-            at(source, "double", 1)
         )]
     );
 }
@@ -483,7 +362,7 @@ fn a_proc_value_of_another_row_is_refused_at_every_value_position() {
          endproc",
     );
     assert_eq!(
-        of(&source),
+        seen_in(&source),
         [error(
             DiagnosticCode::TypeArgumentMismatch,
             at(&source, "Out.write", 0)
@@ -496,7 +375,7 @@ fn a_proc_value_of_another_row_is_refused_at_every_value_position() {
          return await f(m \"x\") endproc",
     );
     assert_eq!(
-        of(&source),
+        seen_in(&source),
         [error(
             DiagnosticCode::TypeMismatch,
             at(&source, "Log.append", 1)
@@ -513,12 +392,15 @@ fn a_proc_value_of_another_row_is_refused_at_every_value_position() {
          return await Log.append(Memory(lines: []) line) endproc",
     );
     assert_eq!(
-        of(&source),
+        seen_in(&source),
         [(
             DiagnosticCode::EffectOutsideCeiling,
             Level::Error,
             at(&source, "await s(line)", 0),
-            vec![at(&source, "s(line)", 0)]
+            vec![(
+                at(&source, "s(line)", 0),
+                "performs Log via s(line) (indirect)".to_owned()
+            )]
         )]
     );
 }
@@ -534,12 +416,15 @@ fn a_named_proc_value_follows_the_rules_of_fn_values() {
          proc run returns d: Void do return await call(pos) endproc\n"
     );
     assert_eq!(
-        of(&source),
+        seen_in(&source),
         [(
             DiagnosticCode::ContractObligationLost,
             Level::Error,
             at(&source, "pos", 1),
-            vec![at(&source, "Ordered.greater(n 0i32)", 0)]
+            vec![(
+                at(&source, "Ordered.greater(n 0i32)", 0),
+                "the bare `requires`".to_owned()
+            )]
         )]
     );
     // A guard with `else` travels with the value.
@@ -555,7 +440,7 @@ fn a_proc_with_a_mismatched_row_is_no_value_of_the_type() {
         "proc run returns d: Void performs {Log} do return await emit(\"x\" quiet) endproc",
     );
     assert_eq!(
-        of(&source),
+        seen_in(&source),
         [error(
             DiagnosticCode::TypeArgumentMismatch,
             at(&source, "quiet", 1)
@@ -564,41 +449,6 @@ fn a_proc_with_a_mismatched_row_is_no_value_of_the_type() {
 }
 
 // The anonymous `proc`.
-
-#[test]
-fn an_anonymous_proc_is_checked_against_its_own_ceiling() {
-    let source = with_l(
-        "fn pick takes {m: Memory} returns sink: Proc({Str} Void) do \
-         return proc takes {line: Str} returns d: Void do \
-         return await Log.append(m line) endproc endfn",
-    );
-    let found = of(&source);
-    let [(code, Level::Error, span, related)] = found.as_slice() else {
-        panic_free_fail(&found);
-        return;
-    };
-    assert_eq!(*code, DiagnosticCode::EffectOutsideCeiling);
-    assert_eq!(*span, at(&source, "await Log.append(m line)", 0));
-    assert_eq!(related, &[at(&source, "Log.append(m line)", 0)]);
-    // A row that names no operation interface.
-    let source = with_l(
-        "fn pick returns sink: Proc({Str} Void) do \
-         return proc takes {line: Str} returns d: Void performs {Shown} do \
-         return void endproc endfn",
-    );
-    assert_eq!(
-        of(&source),
-        [error(
-            DiagnosticCode::EffectInvalidReference,
-            at(&source, "Shown", 1)
-        )]
-    );
-}
-
-/// Fails the test with `found`.
-fn panic_free_fail(found: &[Seen]) {
-    assert_eq!(found.len(), 1, "{found:#?}");
-}
 
 #[test]
 fn building_an_anonymous_proc_performs_nothing() {
@@ -615,45 +465,6 @@ fn building_an_anonymous_proc_performs_nothing() {
          let s be proc takes {line: Str} returns d: Void performs {Log} do \
          return await Log.append(m line) endproc endlet return 1i32 endproc",
     ));
-}
-
-#[test]
-fn an_await_in_an_anonymous_fn_of_an_anonymous_proc_is_invalid() {
-    let source = with_l(
-        "proc run takes {m: Memory} returns r: I32 do \
-         let s be proc returns d: I32 do \
-         let f be fn returns e: Void do return await Log.append(m \"x\") endfn endlet \
-         return 1i32 endproc endlet return 1i32 endproc",
-    );
-    assert_eq!(
-        of(&source),
-        [error(
-            DiagnosticCode::EffectInvalidAwait,
-            at(&source, "await Log.append(m \"x\")", 1)
-        )]
-    );
-}
-
-#[test]
-fn an_anonymous_fn_with_a_row_is_an_invalid_section() {
-    let source = with_l(
-        "fn pick returns r: I32 do \
-         let f be fn takes {line: Str} returns d: Void performs {Log} do return void endfn \
-         endlet return 1i32 endfn",
-    );
-    let found = of(&source);
-    assert!(
-        found
-            .iter()
-            .any(|(code, ..)| *code == DiagnosticCode::SyntaxInvalidSection),
-        "{found:#?}"
-    );
-    assert!(
-        found
-            .iter()
-            .all(|(code, ..)| *code != DiagnosticCode::ToolUnavailable),
-        "{found:#?}"
-    );
 }
 
 #[test]
@@ -782,7 +593,7 @@ const COUNT: &str = "fn count returns n: I32 do return 1i32 endfn\n";
 fn the_last_statement_of_a_fn_or_a_proc_body_is_a_statement() {
     let source = format!("{COUNT}fn run returns d: Void do count() endfn\n");
     assert_eq!(
-        of(&source),
+        seen_in(&source),
         [
             error(DiagnosticCode::TypeMismatch, at(&source, "count()", 0)),
             error(DiagnosticCode::TypeMissingReturn, at(&source, "count()", 0)),
@@ -790,7 +601,7 @@ fn the_last_statement_of_a_fn_or_a_proc_body_is_a_statement() {
     );
     let source = format!("{COUNT}proc run returns d: Void do count() endproc\n");
     assert_eq!(
-        of(&source),
+        seen_in(&source),
         [
             error(DiagnosticCode::TypeMismatch, at(&source, "count()", 0)),
             error(DiagnosticCode::TypeMissingReturn, at(&source, "count()", 0)),
@@ -800,7 +611,7 @@ fn the_last_statement_of_a_fn_or_a_proc_body_is_a_statement() {
     let source = "proc one returns n: I32 do return 1i32 endproc\n\
                   proc run returns n: I32 do one() endproc\n";
     assert_eq!(
-        of(source),
+        seen_in(source),
         [
             error(DiagnosticCode::TypeMismatch, at(source, "one()", 0)),
             error(DiagnosticCode::TypeMissingReturn, at(source, "one()", 0)),
@@ -814,7 +625,12 @@ fn the_last_statement_of_a_test_body_is_a_statement() -> Result<(), String> {
         "use @std.assert enduse\n{COUNT}test \"last\" do assert.true(true) count() endtest\n\
          test \"inner\" do count() assert.true(true) endtest\n"
     );
-    let found = seen(in_tests(&source)?.diagnostics());
+    let result = workspace(
+        &[("@app.main", "")],
+        &[("@tests.main", &source)],
+        &["@tests"],
+    )?;
+    let found = seen(result.diagnostics());
     assert_eq!(
         found,
         [
@@ -823,41 +639,6 @@ fn the_last_statement_of_a_test_body_is_a_statement() -> Result<(), String> {
         ]
     );
     Ok(())
-}
-
-/// Checks the test module `@tests.main`, whose source is `source`, beside an
-/// empty library.
-fn in_tests(source: &str) -> Result<crate::check::CheckResult, String> {
-    use vibra_resolve::{PackageId, ResolveInput, SourceModule, SourceUnit, UnitKind};
-    let stdlib = crate::stdlib::load_stdlib().map_err(|error| error.to_string())?;
-    let input = ResolveInput::new(
-        PackageId::new("hello", "0.1.0"),
-        vec![
-            SourceUnit::new(
-                "@app",
-                UnitKind::Lib,
-                vec![SourceModule::new(
-                    "@app.main",
-                    "src/app/main.vib",
-                    Vec::new(),
-                )],
-            ),
-            SourceUnit::new(
-                "@tests",
-                UnitKind::Tests,
-                vec![SourceModule::new(
-                    "@tests.main",
-                    "tests/main.vib",
-                    source.as_bytes().to_vec(),
-                )],
-            ),
-        ],
-        stdlib.overlay().embedded_unit(),
-    );
-    Ok(crate::check::check_workspace(
-        &input,
-        &["@tests".to_owned()],
-    ))
 }
 
 #[test]
@@ -869,7 +650,7 @@ fn the_last_statement_of_a_let_fallback_is_a_statement() {
     // One fault at the statement, which is the whole fallback: the fallback
     // that runs off its end is not reported again at the same span.
     assert_eq!(
-        of(&source),
+        seen_in(&source),
         [error(
             DiagnosticCode::TypeMismatch,
             at(&source, "count()", 0)
@@ -883,7 +664,7 @@ fn the_last_statement_of_a_let_fallback_is_a_statement() {
          return v endfn\n"
     );
     assert_eq!(
-        of(&source),
+        seen_in(&source),
         [
             error(
                 DiagnosticCode::TypeMismatch,

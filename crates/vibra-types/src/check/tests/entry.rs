@@ -8,13 +8,12 @@
 //! re-exports do not exist).
 
 use vibra_diagnostics::{ByteSpan, DiagnosticCode};
-use vibra_resolve::{PackageId, ResolveInput, SourceModule, SourceUnit, UnitKind};
+use vibra_resolve::{ResolveInput, UnitKind};
 
 use super::at;
 use crate::check::{
     CheckResult, DataReference, GrantShape, TargetEntry, check_targets, check_workspace,
 };
-use crate::stdlib::load_stdlib;
 
 /// The project file the references are written in.
 const PROJECT: &str = "project.vibon";
@@ -27,20 +26,7 @@ const IMPORTS: &str = "use @std.env.EnvReadArgs enduse\n\nuse @std.fs.DirReadTex
 /// The input of a binary unit `@app` whose one module `@app.main` holds
 /// `source`.
 fn input(source: &str) -> Result<ResolveInput, String> {
-    let stdlib = load_stdlib().map_err(|error| error.to_string())?;
-    Ok(ResolveInput::new(
-        PackageId::new("hello", "0.1.0"),
-        vec![SourceUnit::new(
-            "@app",
-            UnitKind::Bin,
-            vec![SourceModule::new(
-                "@app.main",
-                "src/app/main.vib",
-                source.as_bytes().to_vec(),
-            )],
-        )],
-        stdlib.overlay().embedded_unit(),
-    ))
+    super::input(&[("@app", UnitKind::Bin, &[("@app.main", source)])])
 }
 
 /// The check of `source` with one target whose `entry` is `entry` and whose

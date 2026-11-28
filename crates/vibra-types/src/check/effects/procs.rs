@@ -260,7 +260,7 @@ pub(crate) fn marks_tail(result: &Type) -> bool {
 /// a test itself, which runs in a procedure context the test runner owns:
 /// the expression is neither in a guard or a labelled default, where
 /// nothing leaves the callable, nor in an anonymous callable. In any other
-/// position the `await` is reported and its operand is not checked (Q4).
+/// position the `await` is reported and its operand is not checked.
 pub(crate) fn await_expr<'a>(
     checker: &mut BodyChecker<'_, 'a>,
     operand: Expr<'a>,
@@ -290,7 +290,7 @@ pub(crate) fn await_expr<'a>(
 /// `input`: a plan yields its result, and the `await` is recorded with the
 /// plan's type and the call it runs ([`super::analysis::hop`]), a plan
 /// value when the operand has no lowered node; any other operand is
-/// `@effect.invalidAwait` at the `await`, never `@type.mismatch` (Q4).
+/// `@effect.invalidAwait` at the `await`, never `@type.mismatch`.
 pub(crate) fn finish_await<'a>(
     checker: &mut BodyChecker<'_, 'a>,
     span: ByteSpan,

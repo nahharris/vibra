@@ -14,31 +14,18 @@
 
 use std::collections::BTreeMap;
 
-use vibra_diagnostics::{Diagnostic, DiagnosticCode, LineIndex};
+use vibra_diagnostics::{Diagnostic, DiagnosticCode, LineIndex, only_unavailable};
 use vibra_schema::{
     CheckPayload, CommandOutcome, ObligationKind, ObligationRecord, Payload,
     SpanDocument, Status,
 };
 use vibra_workspace::{
-    Discovery, Obligation, PROJECT_FILE_NAME, WorkspaceCapture, check_snapshot,
+    Discovery, Obligation, WorkspaceCapture, check_snapshot, is_target_atom,
 };
 
 use crate::args::Invocation;
 use crate::refusal;
 use crate::render::{Response, reach, status_for};
-
-/// Whether `text` is an atom of one identifier part, such as `@app`: the
-/// spelling of a target name.
-pub(crate) fn is_target_atom(text: &str) -> bool {
-    let Some(name) = text.strip_prefix('@') else {
-        return false;
-    };
-    let mut characters = name.chars();
-    characters
-        .next()
-        .is_some_and(|first| first.is_ascii_alphabetic())
-        && characters.all(|character| character.is_ascii_alphanumeric())
-}
 
 /// The result and status of a check.
 ///
@@ -54,19 +41,12 @@ pub fn outcome(
     obligations: &[ObligationRecord],
     limit_reached: bool,
 ) -> (CommandOutcome, Status) {
-    let errors = diagnostics
-        .iter()
-        .filter(|diagnostic| diagnostic.is_error())
-        .collect::<Vec<_>>();
-    let result = if errors.is_empty() {
-        CommandOutcome::Ok
-    } else if errors
-        .iter()
-        .all(|diagnostic| diagnostic.code() == DiagnosticCode::ToolUnavailable)
-    {
+    let result = if only_unavailable(diagnostics) {
         CommandOutcome::Unavailable
-    } else {
+    } else if diagnostics.iter().any(Diagnostic::is_error) {
         CommandOutcome::Diagnostics
+    } else {
+        CommandOutcome::Ok
     };
     let has = |status: Status| obligations.iter().any(|record| record.status == status);
     let status = if result == CommandOutcome::Unavailable {
@@ -141,9 +121,16 @@ fn records(
         .collect()
 }
 
-/// The response to a well-formed `check` line.
-#[must_use]
-pub fn run(invocation: &Invocation) -> Response {
+/// The target the first operand of `invocation` names, if it has one, and
+/// the capture of the workspace.
+///
+/// # Errors
+///
+/// The refusal of an operand that is not a target atom, or of a target the
+/// captured project does not declare.
+pub(crate) fn captured_target(
+    invocation: &Invocation,
+) -> Result<(Option<String>, WorkspaceCapture), Box<Response>> {
     let format = invocation.globals.format;
     let name = invocation.line.name();
     let target = match invocation.operands.first() {
@@ -151,14 +138,14 @@ pub fn run(invocation: &Invocation) -> Response {
         Some(operand) => match operand.to_str().filter(|text| is_target_atom(text)) {
             Some(text) => Some(text.to_owned()),
             None => {
-                return refusal(
+                return Err(Box::new(refusal(
                     format,
                     name,
                     &format!(
                         "`{}` is not a target: a target is an atom such as `@app`",
                         operand.to_string_lossy()
                     ),
-                );
+                )));
             }
         },
     };
@@ -171,35 +158,35 @@ pub fn run(invocation: &Invocation) -> Response {
             .iter()
             .any(|declared| declared.name() == target)
     {
-        return refusal(format, name, &format!("`{target}` names no local target"));
+        return Err(Box::new(refusal(
+            format,
+            name,
+            &format!("`{target}` names no local target"),
+        )));
     }
+    Ok((target, capture))
+}
+
+/// The response to a well-formed `check` line.
+#[must_use]
+pub fn run(invocation: &Invocation) -> Response {
+    let (target, capture) = match captured_target(invocation) {
+        Ok(captured) => captured,
+        Err(refused) => return *refused,
+    };
     let mut response =
-        Response::new(format, name, CommandOutcome::Ok, Payload::Empty {});
-    response.workspace_revision = capture.revision().map(str::to_owned);
-    if let Some(project) = capture.project() {
-        response.sources.insert(
-            PROJECT_FILE_NAME.to_owned(),
-            String::from_utf8_lossy(project.bytes()).into_owned(),
-        );
-    }
+        Response::captured(invocation.globals.format, invocation.line.name(), &capture);
     let Some(snapshot) = capture.snapshot() else {
         checked(&mut response, capture.diagnostics().to_vec(), Vec::new());
         reach(&mut response, capture.limits_reached());
         return response;
     };
-    for module in snapshot.modules() {
-        response.sources.insert(
-            module.source_id().to_owned(),
-            String::from_utf8_lossy(module.bytes()).into_owned(),
-        );
-    }
     let check = check_snapshot(snapshot, target.as_deref());
     let obligations = check
         .check()
         .map(|result| records(result.obligations(), &response.sources))
         .unwrap_or_default();
     checked(&mut response, check.diagnostics().to_vec(), obligations);
-    reach(&mut response, capture.limits_reached());
     reach(&mut response, check.limits_reached().to_vec());
     if response.result == CommandOutcome::Ok {
         response.notice = Some("check passed".to_owned());
@@ -279,16 +266,5 @@ mod tests {
             ),
             (CommandOutcome::Diagnostics, Status::Refuted)
         );
-    }
-
-    #[test]
-    fn a_target_is_an_atom_of_one_part() {
-        assert!(is_target_atom("@app"));
-        assert!(is_target_atom("@myApp2"));
-        assert!(!is_target_atom("app"));
-        assert!(!is_target_atom("src/app"));
-        assert!(!is_target_atom("@app.main"));
-        assert!(!is_target_atom("@"));
-        assert!(!is_target_atom("@2app"));
     }
 }

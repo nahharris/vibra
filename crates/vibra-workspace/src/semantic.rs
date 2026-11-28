@@ -8,11 +8,10 @@
 //! checked with its unit ([`crate::entry`]), and its recipes against the
 //! entry's leaves ([`crate::binding`]).
 
-use vibra_diagnostics::{Diagnostic, DiagnosticCode, Level};
+use vibra_diagnostics::{Diagnostic, Level};
 use vibra_types::{CheckResult, check_targets};
 
 use crate::entry::{EntryFacts, check_target, target_entry};
-use crate::nesting::SOURCE_NESTING;
 use crate::project::{Target, TargetKind};
 use crate::resolve::resolve_input;
 use crate::snapshot::{SourceSnapshot, UnitKind};
@@ -45,12 +44,7 @@ impl WorkspaceCheck {
     /// Whether every error is `@tool.unavailable`.
     #[must_use]
     pub fn only_unavailable(&self) -> bool {
-        self.has_errors()
-            && self
-                .diagnostics
-                .iter()
-                .filter(|diagnostic| diagnostic.level() == Level::Error)
-                .all(|diagnostic| diagnostic.code() == DiagnosticCode::ToolUnavailable)
+        vibra_diagnostics::only_unavailable(&self.diagnostics)
     }
 
     /// The check of the covered units, when the standard library loaded.
@@ -97,7 +91,7 @@ pub fn check_snapshot(
             diagnostics: snapshot.limit_faults().to_vec(),
             check: None,
             entries: Vec::new(),
-            limits: vec![SOURCE_NESTING.to_owned()],
+            limits: snapshot.limits_reached(),
         };
     }
     let project = snapshot.project().project();
@@ -136,7 +130,7 @@ pub fn check_snapshot(
                 diagnostics,
                 check: None,
                 entries: Vec::new(),
-                limits: Vec::new(),
+                limits: snapshot.limits_reached(),
             };
         }
     };
@@ -158,11 +152,13 @@ pub fn check_snapshot(
         )
     });
     diagnostics.extend(check.diagnostics().iter().cloned());
-    let limits = check
-        .limits_reached()
-        .iter()
-        .map(|limit| (*limit).to_owned())
-        .collect();
+    let mut limits = snapshot.limits_reached();
+    limits.extend(
+        check
+            .limits_reached()
+            .iter()
+            .map(|limit| (*limit).to_owned()),
+    );
     WorkspaceCheck {
         diagnostics,
         check: Some(check),

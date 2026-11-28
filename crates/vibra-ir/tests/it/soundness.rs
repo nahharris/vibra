@@ -7,67 +7,19 @@ use std::sync::Arc;
 use vibra_ir::external::CompilerIntrinsic;
 use vibra_ir::{
     Arguments, Binder, Bound, CallTarget, CheckedFunction, CheckedGlobal,
-    CheckedModuleSet, Constant, Construction, ContractCall, Expr, FnType, FunctionBody,
+    CheckedModuleSet, Constant, Construction, ContractCall, Expr, FnType,
     Implementation, ImplementationRecord, InterfaceDefinition, InterfaceKey,
     InterfaceMember, IrError, Library, ModuleSetParts, NamedTypes, Node,
     SignatureRecord, Type, TypeBody, TypeDefinition, TypeId, Value, Visibility,
 };
 
 use crate::{
-    id, library, library_parts, library_type, named, node, option, origin, path,
+    function, global, id, int, library, library_parts, library_type, named, node,
+    on_small_stack, option, origin, path, positional, signature, variable, void,
 };
-
-fn signature(parameters: Vec<Type>, result: Type) -> SignatureRecord {
-    SignatureRecord::new(Vec::new(), Type::function(FnType::new(parameters, result)))
-        .unwrap()
-}
-
-fn function(
-    name: &str,
-    signature: SignatureRecord,
-    body: Node,
-    slot_count: usize,
-) -> CheckedFunction {
-    CheckedFunction {
-        context: vibra_ir::BodyContext::Pure,
-        name: name.to_owned(),
-        signature,
-        defaults: Vec::new(),
-        body: FunctionBody::Expr(Box::new(body)),
-        entry_guard: None,
-        exit_guard: None,
-        slot_count,
-        origin: origin(),
-    }
-}
-
-fn global(name: &str, value_type: Type, initializer: Node) -> CheckedGlobal {
-    CheckedGlobal {
-        name: name.to_owned(),
-        value_type,
-        initializer,
-        slot_count: 0,
-        origin: origin(),
-    }
-}
 
 fn literal(value_type: Type, value: Value) -> Node {
     node(Expr::Literal(Constant::new(value_type, value).unwrap()))
-}
-
-fn int(value: i32) -> Node {
-    literal(Type::I32, Value::I32(value))
-}
-
-fn variable(slot: usize, value_type: Type) -> Node {
-    node(Expr::Variable { slot, value_type })
-}
-
-fn positional(positional: Vec<Node>) -> Arguments {
-    Arguments {
-        positional,
-        labelled: Vec::new(),
-    }
 }
 
 fn iter_id() -> TypeId {
@@ -902,20 +854,6 @@ fn v12_a_closure_guard_is_checked_in_its_activation() {
 
 /// A depth far beyond what host recursion on a small stack survives.
 const DEEP: usize = 100_000;
-
-/// Runs `work` on a thread whose stack is 256 KiB.
-fn on_small_stack<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> T {
-    std::thread::Builder::new()
-        .stack_size(256 * 1024)
-        .spawn(work)
-        .expect("a thread")
-        .join()
-        .expect("the thread finished")
-}
-
-fn void() -> Node {
-    literal(Type::Void, Value::Void)
-}
 
 /// `depth` closures of `Fn({} Void)`, each the first statement of the
 /// body of the one around it.

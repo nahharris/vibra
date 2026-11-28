@@ -10,6 +10,7 @@
 use vibra_ir::{Type, Value};
 use vibra_syntax::{
     CstNode, FloatSuffix, IntegerSuffix, SyntaxKind, decode_character, decode_string,
+    split_number,
 };
 
 /// What a literal is, before its type is fixed.
@@ -75,26 +76,6 @@ pub(crate) fn read(node: &CstNode, text: &str) -> Option<Literal> {
         SyntaxKind::ReservedWord if token == "void" => Some(Literal::Void),
         _ => None,
     }
-}
-
-/// Splits a numeric token into its body and its suffix.
-fn split_number(token: &str) -> (&str, &str) {
-    let bytes = token.as_bytes();
-    let mut at = usize::from(bytes.first() == Some(&b'-'));
-    while bytes
-        .get(at)
-        .is_some_and(|byte| byte.is_ascii_digit() || matches!(byte, b'.' | b'+' | b'-'))
-        || (matches!(bytes.get(at), Some(b'e' | b'E'))
-            && bytes.get(at + 1).is_some_and(|next| {
-                next.is_ascii_digit() || matches!(next, b'+' | b'-')
-            }))
-    {
-        at += 1;
-    }
-    (
-        token.get(..at).unwrap_or(token),
-        token.get(at..).unwrap_or_default(),
-    )
 }
 
 const fn integer_type(suffix: IntegerSuffix) -> Type {

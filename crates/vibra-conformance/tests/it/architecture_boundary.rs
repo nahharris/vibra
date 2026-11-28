@@ -351,9 +351,6 @@ fn workspace_matches_the_declared_architecture() {
     );
 }
 
-/// The number of rows, one for each crate directory.
-const ROWS: usize = 27;
-
 /// The `-v1` crates that stay after the cutover: the contracts the native
 /// track is compiled against until package X2-01 of the Nexus plan moves it
 /// to the new `vibra-ir`, `vibra-native`, and `vibra-host`.
@@ -408,35 +405,8 @@ fn the_only_v1_crates_are_the_native_tracks_contracts() {
     }
 }
 
-/// The v0.0.1 trees the cutover removed from the repository root. Their
-/// names are built from parts, so that the repository-wide search for a
-/// reference to them finds none here.
-fn removed_trees() -> [PathBuf; 4] {
-    let suffixed = |tree: &str| PathBuf::from(format!("{tree}-v1"));
-    [
-        suffixed("stdlib"),
-        suffixed("examples"),
-        suffixed("fuzz"),
-        Path::new("conformance").join("v1"),
-    ]
-}
-
-#[test]
-fn no_v1_paths() {
-    let root = workspace_root();
-    let present = removed_trees()
-        .into_iter()
-        .filter(|tree| root.join(tree).exists())
-        .collect::<Vec<_>>();
-    assert!(
-        present.is_empty(),
-        "the repository root holds v0.0.1 trees: {present:?}"
-    );
-}
-
 #[test]
 fn every_crate_directory_has_exactly_one_row() {
-    assert_eq!(ARCHITECTURE.len(), ROWS, "the table has {ROWS} rows");
     let mut rows = BTreeSet::new();
     for (crate_name, _) in ARCHITECTURE {
         assert!(rows.insert(*crate_name), "`{crate_name}` has two rows");

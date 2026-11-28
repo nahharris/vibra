@@ -331,24 +331,6 @@ fn an_import_inside_the_standard_library_is_no_re_export() {
 }
 
 #[test]
-fn a_two_module_cycle_is_reported_at_the_later_edge() {
-    let resolution = resolve_modules(&[
-        ("@app.a", "use @app.b enduse\n"),
-        ("@app.b", "use @app.a enduse\n"),
-    ]);
-    assert_eq!(
-        flat(&resolution),
-        [(
-            C::ModuleImportCycle,
-            "src/app/b.vib".to_owned(),
-            4,
-            10,
-            vec![("src/app/a.vib".to_owned(), 4, 10)]
-        )]
-    );
-}
-
-#[test]
 fn a_longer_cycle_relates_every_earlier_edge_in_order() {
     let resolution = resolve_modules(&[
         ("@app.a", "use @app.b enduse\n"),

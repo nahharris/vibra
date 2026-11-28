@@ -62,13 +62,8 @@ fn unit_module_path(spelling: &str) -> Option<&'static str> {
 
 /// `sha256:` and 64 lower-case hexadecimal digits.
 fn digest_spelling(spelling: &str) -> Option<&'static str> {
-    let fits = spelling.strip_prefix("sha256:").is_some_and(|digits| {
-        digits.len() == 64
-            && digits
-                .bytes()
-                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-    });
-    (!fits).then_some("a digest is `sha256:` and 64 lower-case hexadecimal digits")
+    (!vibra_ir::is_identity(spelling))
+        .then_some("a digest is `sha256:` and 64 lower-case hexadecimal digits")
 }
 
 /// A string or an atom of the manifest and where it was written.

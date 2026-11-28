@@ -1,10 +1,10 @@
-# Q11: a limit's own counter starts at zero. Were it to inherit the parent's
+# A limit's own counter starts at zero. Were it to inherit the parent's
 # use, the read through c would be Err(limitExceeded) at once.
 id = "V2-GRANT-limit-child-after-use"
 rule = "V2-GRANT-limit-child-after-use"
 profile = "interpreterV2"
 operation = "workspaceTest"
-description = "07-diagnostics-and-conformance.md#required-coverage: a child made after its parent was used starts its own counter at zero and never resets: Ok, Ok, then Err(limitExceeded) (Q11)"
+description = "07-diagnostics-and-conformance.md#required-coverage: a child made after its parent was used starts its own counter at zero and never resets: Ok, Ok, then Err(limitExceeded)"
 
 [inputs]
 tree = "tree"

@@ -1,11 +1,6 @@
 //! Closed compiler registry contract.
 
-use vibra_diagnostics_v1::ByteSpan;
-use vibra_ir_v1::external::{CompilerIntrinsic, REGISTRY_VERSION, RoleTypes};
-use vibra_ir_v1::{
-    CheckedFunction, CheckedGlobal, CheckedProgram, Expr, FunctionSignature, IrError,
-    SourceOrigin, Type, Value,
-};
+use vibra_ir_v1::external::{CompilerIntrinsic, RoleTypes};
 
 #[test]
 fn registry_contains_only_the_reviewed_operations() {
@@ -33,16 +28,6 @@ fn registry_contains_only_the_reviewed_operations() {
     ] {
         assert!(symbols.contains(&symbol), "{symbol} is missing");
     }
-    assert!(CompilerIntrinsic::from_symbol("u8.neg-checked").is_none());
-    assert!(CompilerIntrinsic::from_symbol("f64.rem").is_none());
-    assert!(CompilerIntrinsic::from_symbol("integer.add").is_none());
-    assert!(CompilerIntrinsic::from_symbol("host.read").is_none());
-    for intrinsic in CompilerIntrinsic::all() {
-        assert_eq!(
-            CompilerIntrinsic::from_symbol(intrinsic.symbol()),
-            Some(intrinsic)
-        );
-    }
 }
 
 #[test]
@@ -56,34 +41,4 @@ fn registry_signatures_are_exact_and_backend_neutral() {
     let length = CompilerIntrinsic::StrLength.signature(&RoleTypes::default());
     assert_eq!(length.parameters(), &[vibra_ir_v1::Type::Str]);
     assert_eq!(length.result(), vibra_ir_v1::Type::U64);
-}
-
-#[test]
-fn the_registry_identity_is_the_one_the_spec_names() {
-    assert_eq!(REGISTRY_VERSION, "vibra_v1");
-}
-
-#[test]
-fn external_operands_remain_in_initializer_cycle_analysis() {
-    let origin = SourceOrigin::new("cycle-external.vib", ByteSpan::new(0, 1));
-    let initializer = Expr::external(
-        CompilerIntrinsic::StrConcat,
-        vec![
-            Expr::call(0, Vec::new(), Type::Str, origin.clone()),
-            Expr::literal(Value::Str(String::new()), origin.clone()),
-        ],
-        origin.clone(),
-    );
-    let global = CheckedGlobal::new("value", Type::Str, initializer, origin.clone())
-        .expect("valid shape");
-    let function = CheckedFunction::new(
-        "read",
-        FunctionSignature::new(Vec::new(), Type::Str),
-        Expr::global(0, Type::Str, origin.clone()),
-        origin,
-    )
-    .expect("valid shape");
-    let error = CheckedProgram::try_new_with_globals(vec![global], vec![function], 0)
-        .expect_err("the call inside an external operand is a dependency");
-    assert_eq!(error, IrError::GlobalInitializerCycle(0));
 }

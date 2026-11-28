@@ -2,7 +2,7 @@ id = "V2-PROJECT-test-takes-renamed"
 rule = "V2-PROJECT-test-takes-renamed"
 profile = "interpreterV2"
 operation = "workspaceTest"
-description = "01-lexical-and-syntax.md#declarations: the one parameter of a test may have any name"
+description = "01-source-language.md#test: the one parameter of a test may have any name"
 
 [inputs]
 tree = "tree"

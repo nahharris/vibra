@@ -29,7 +29,7 @@
 //!   additive `performs` of a default member that the body does not perform
 //!   is the warning `@contract.unusedEffect` at its entry. It is never
 //!   reported for an `impl` member, whose contract fixes its row, nor for the
-//!   owner of a member, which is not written (Q5), nor for a body whose
+//!   owner of a member, which is not written, nor for a body whose
 //!   declaration has an error other than that body's own
 //!   `@effect.outsideCeiling`. The faults of an anonymous `proc` join the
 //!   declaration that holds it.

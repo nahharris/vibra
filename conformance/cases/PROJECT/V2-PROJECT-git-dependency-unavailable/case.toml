@@ -2,7 +2,7 @@ id = "V2-PROJECT-git-dependency-unavailable"
 rule = "V2-PROJECT-git-dependency-unavailable"
 profile = "staticV2"
 operation = "workspaceCheck"
-description = "04-programs-and-packages.md#dependencies-and-lock: a @git dependency is @tool.unavailable at its entry and no lock is read (Q23)"
+description = "04-programs-and-packages.md#dependencies-and-lock: a @git dependency is @tool.unavailable at its entry and no lock is read"
 
 [inputs]
 tree = "tree"

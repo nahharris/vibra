@@ -23,16 +23,6 @@ pub struct EffectRoot {
 }
 
 impl EffectRoot {
-    /// Creates a root from its canonical declaration identity and its atom
-    /// path without the leading `@`.
-    #[must_use]
-    pub fn new(id: impl Into<String>, path: impl Into<String>) -> Self {
-        Self {
-            path: path.into(),
-            id: id.into(),
-        }
-    }
-
     /// The canonical declaration identity, which includes the package.
     #[must_use]
     pub fn id(&self) -> &str {
@@ -80,15 +70,6 @@ impl EffectRow {
         }
     }
 
-    /// A row of `roots`, sorted by canonical identity and duplicate-free.
-    #[must_use]
-    pub fn new(roots: impl IntoIterator<Item = EffectRoot>) -> Self {
-        let mut roots = roots.into_iter().collect::<Vec<_>>();
-        roots.sort();
-        roots.dedup();
-        Self { roots, tail: None }
-    }
-
     /// The roots in canonical order.
     #[must_use]
     pub fn roots(&self) -> &[EffectRoot] {
@@ -120,31 +101,6 @@ impl EffectRow {
         self.roots.iter().all(|root| other.contains(root))
     }
 
-    /// The roots of this row that `other` lacks, in canonical order.
-    #[must_use]
-    pub fn difference(&self, other: &Self) -> Vec<EffectRoot> {
-        self.roots
-            .iter()
-            .filter(|root| !other.contains(root))
-            .cloned()
-            .collect()
-    }
-
-    /// The union of two rows.
-    #[must_use]
-    pub fn union(&self, other: &Self) -> Self {
-        Self::new(self.roots.iter().chain(&other.roots).cloned())
-    }
-
-    /// This row with `root` added.
-    #[must_use]
-    pub fn with_root(mut self, root: EffectRoot) -> Self {
-        if let Err(position) = self.roots.binary_search(&root) {
-            self.roots.insert(position, root);
-        }
-        self
-    }
-
     /// The canonical VIBON text `(record roots: (array @root...))`.
     #[must_use]
     pub fn canonical_vibon(&self) -> String {
@@ -171,63 +127,5 @@ impl fmt::Display for EffectRow {
             write!(formatter, "{root}")?;
         }
         formatter.write_str(")")
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn root(package: &str, path: &str) -> EffectRoot {
-        EffectRoot::new(format!("@{package}@1.0.0/{path}"), path)
-    }
-
-    #[test]
-    fn a_row_is_sorted_by_path_bytes_and_duplicate_free() {
-        let row = EffectRow::new([
-            root("a", "std.io.stdout"),
-            root("a", "app.audit.record"),
-            root("a", "std.io.stdout"),
-            root("a", "std.fs.write"),
-        ]);
-        let paths = row.roots().iter().map(EffectRoot::path).collect::<Vec<_>>();
-        assert_eq!(paths, ["app.audit.record", "std.fs.write", "std.io.stdout"]);
-    }
-
-    #[test]
-    fn textually_equal_roots_of_different_packages_are_different_roots() {
-        let row = EffectRow::new([
-            root("one", "app.log.write"),
-            root("two", "app.log.write"),
-        ]);
-        assert_eq!(row.roots().len(), 2);
-        assert!(
-            !EffectRow::new([root("one", "app.log.write")])
-                .is_subset(&EffectRow::new([root("two", "app.log.write")]))
-        );
-    }
-
-    #[test]
-    fn containment_is_a_plain_subset_test() {
-        let owner = EffectRow::new([root("a", "app.audit")]);
-        let both = EffectRow::new([root("a", "app.audit"), root("a", "std.fs.write")]);
-        assert!(owner.is_subset(&both));
-        assert!(!both.is_subset(&owner));
-        assert_eq!(both.difference(&owner), vec![root("a", "std.fs.write")]);
-    }
-
-    #[test]
-    fn a_row_is_a_record_in_vibon() {
-        assert_eq!(
-            EffectRow::empty().canonical_vibon(),
-            "(record roots: (array))"
-        );
-        let row =
-            EffectRow::new([root("a", "std.io.stdout"), root("a", "std.fs.write")]);
-        assert_eq!(
-            row.canonical_vibon(),
-            "(record roots: (array @std.fs.write @std.io.stdout))"
-        );
-        assert!(row.tail().is_none());
     }
 }

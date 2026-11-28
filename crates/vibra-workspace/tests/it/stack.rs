@@ -28,7 +28,7 @@ use vibra_workspace::{
 use crate::support::TempDir;
 
 /// The project of every shape: one binary target over `src/app`.
-const PROJECT: &str = "{format: @project.v2 package: {name: \"probe\" version: \"0.1.0\"} targets: [{name: @app kind: @bin root: \"src/app\" entry: @app.main.main effects: [] grants: [:]}] dependencies: [:]}";
+pub(crate) const PROJECT: &str = "{format: @project.v2 package: {name: \"probe\" version: \"0.1.0\"} targets: [{name: @app kind: @bin root: \"src/app\" entry: @app.main.main effects: [] grants: [:]}] dependencies: [:]}";
 
 /// The test that reads the value.
 const TEST: &str =

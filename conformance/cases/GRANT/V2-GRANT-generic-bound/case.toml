@@ -1,4 +1,4 @@
-# F7 of the review of grants: every observation a generic can make of a value
+# Every observation a generic can make of a value
 # goes through a bound, and no bound but Any admits a grant.
 id = "V2-GRANT-generic-bound"
 rule = "V2-GRANT-generic-bound"

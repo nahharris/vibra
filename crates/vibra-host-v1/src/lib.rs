@@ -15,7 +15,7 @@
 //!   [`HostCall`] it is the one place a host operation reads its arguments and
 //!   builds its result, so the operations are written once.
 //! - [`AuditEvent`] is the event of the audit trace, built by one function from
-//!   the canonical encodings, and its VIBON and JSON codecs.
+//!   the canonical encodings, and its VIBON text.
 //!
 //! # Position in the architecture
 //!
@@ -36,9 +36,7 @@ mod random;
 mod system;
 mod world;
 
-pub use event::{
-    AuditEvent, HostEvent, OpaqueEvent, TRACE_FORMAT, decode_trace, trace_to_vibon,
-};
+pub use event::{AuditEvent, HostEvent, OpaqueEvent, TRACE_FORMAT, trace_to_vibon};
 pub use operation::{
     HostCall, HostEnum, HostOk, HostRecord, HostReply, HostValues, MemoryExhausted,
     OperationError, ReadError, build_reply, perform,

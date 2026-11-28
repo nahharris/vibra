@@ -931,6 +931,16 @@ impl<'a> Program<'a> {
             })
     }
 
+    /// The program index of the interface bound to `library`.
+    pub(crate) fn library_interface(&self, library: Library) -> Option<usize> {
+        self.library
+            .iter()
+            .find_map(|(binding, entity)| match entity {
+                Entity::Interface(index) if *binding == library => Some(*index),
+                _ => None,
+            })
+    }
+
     /// The library declaration the type `id` plays, if any.
     pub(crate) fn library_of(&self, id: &TypeId) -> Option<Library> {
         self.library

@@ -2,7 +2,7 @@ id = "V2-CONTRACT-unused-effect-target"
 rule = "V2-CONTRACT-unused-effect-target"
 profile = "staticV2"
 operation = "workspaceCheck"
-description = "07-diagnostics-and-conformance.md#contract-effect-and-authority-diagnostics: an effects entry that neither the entry nor a startup step performs is the warning @contract.unusedEffect at that entry"
+description = "03-effects.md#target-admission: an effects entry that neither the entry nor a startup step performs is the warning @contract.unusedEffect at that entry"
 
 [inputs]
 tree = "tree"

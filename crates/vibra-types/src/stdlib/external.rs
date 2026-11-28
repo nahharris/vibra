@@ -372,11 +372,10 @@ fn check_grant(
 ) {
     let declaration_span = callable.construct().span();
     let directories_only = row != CompilerIntrinsic::GrantLimit;
-    let owner = site.interface.as_deref().and_then(|path| {
-        HostInterface::ALL
-            .into_iter()
-            .find(|interface| interface.owner().path() == path)
-    });
+    let owner = site
+        .interface
+        .as_deref()
+        .and_then(HostInterface::by_owner_path);
     let owned = owner.is_some_and(|interface| {
         !directories_only || interface.module() == DIRECTORY_MODULE
     });

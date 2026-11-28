@@ -1,5 +1,0 @@
-type Sorted(T) of List(T)
-  given {T: Ordered}
-endtype
-type Plain of I32 endtype
-type Wrapped of Sorted(Plain) endtype

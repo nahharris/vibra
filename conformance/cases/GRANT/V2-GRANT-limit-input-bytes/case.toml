@@ -1,11 +1,11 @@
-# Q29: a read refused for its size at the gate is not traced. Were it a
+# A read refused for its size at the gate is not traced. Were it a
 # completed call, the trace would hold a second event with the result
 # Err(limitExceeded).
 id = "V2-GRANT-limit-input-bytes"
 rule = "V2-GRANT-limit-input-bytes"
 profile = "interpreterV2"
 operation = "workspaceTest"
-description = "03-effects.md#limits: a grant limited to one input byte reads the one-byte a.txt, then the next read's size is refused: Err(limitExceeded), with no event (Q29)"
+description = "03-effects.md#limits: a grant limited to one input byte reads the one-byte a.txt, then the next read's size is refused: Err(limitExceeded), with no event"
 
 [inputs]
 tree = "tree"

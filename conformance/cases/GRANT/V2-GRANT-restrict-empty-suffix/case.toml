@@ -1,10 +1,10 @@
-# Q8: invalidPolicy is exactly an empty suffix. Were an empty suffix valid,
+# InvalidPolicy is exactly an empty suffix. Were an empty suffix valid,
 # restrict would return Result.ok and the test would fail at assert.true(false).
 id = "V2-GRANT-restrict-empty-suffix"
 rule = "V2-GRANT-restrict-empty-suffix"
 profile = "interpreterV2"
 operation = "workspaceTest"
-description = "03-effects.md#filesystem-policies: an empty suffix is invalid: restrict returns Err(ScopeError.invalidPolicy) (Q8)"
+description = "03-effects.md#filesystem-policies: an empty suffix is invalid: restrict returns Err(ScopeError.invalidPolicy)"
 
 [inputs]
 tree = "tree"

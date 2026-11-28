@@ -33,7 +33,8 @@ pub(crate) fn is_atom_path(text: &str) -> bool {
 
 /// Whether `text` is a declaration identity: `sha256:` and 64 lower-case
 /// hexadecimal digits.
-fn is_identity(text: &str) -> bool {
+#[must_use]
+pub fn is_identity(text: &str) -> bool {
     text.strip_prefix("sha256:").is_some_and(|digits| {
         digits.len() == 64
             && digits
@@ -493,25 +494,6 @@ impl Type {
     /// checked IR rejects a deeper one before any such recursion.
     pub const MAX_DEPTH: usize = 64;
 
-    /// The compiler-owned scalar types, in the order of the chapter's wire
-    /// atoms.
-    pub const SCALARS: [Self; 14] = [
-        Self::I8,
-        Self::I16,
-        Self::I32,
-        Self::I64,
-        Self::U8,
-        Self::U16,
-        Self::U32,
-        Self::U64,
-        Self::F32,
-        Self::F64,
-        Self::Char,
-        Self::Atom,
-        Self::Void,
-        Self::Never,
-    ];
-
     /// A structural record type of `fields`.
     ///
     /// # Errors
@@ -591,14 +573,6 @@ impl Type {
     #[must_use]
     pub fn is_closed(&self) -> bool {
         self.validate(OpenScope::Closed).is_ok()
-    }
-
-    /// Whether an association slot occurs in this type.
-    #[must_use]
-    pub fn mentions_associated(&self) -> bool {
-        let mut found = false;
-        self.visit(&mut |ty| found |= matches!(ty, Self::Associated(_)));
-        found
     }
 
     /// Whether any open form occurs in this type.

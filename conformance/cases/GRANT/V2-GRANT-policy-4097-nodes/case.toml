@@ -2,7 +2,7 @@ id = "V2-GRANT-policy-4097-nodes"
 rule = "V2-GRANT-policy-4097-nodes"
 profile = "staticV2"
 operation = "workspaceCheck"
-description = "07-diagnostics-and-conformance.md#contract-effect-and-authority-diagnostics: a recipe policy counted at 4,097 nodes and entries is @grant.policyTooComplex at the policy (Q9)"
+description = "07-diagnostics-and-conformance.md#contract-effect-and-authority-diagnostics: a recipe policy counted at 4,097 nodes and entries is @grant.policyTooComplex at the policy"
 
 [inputs]
 tree = "tree"

@@ -43,7 +43,7 @@ use vibra_syntax::{is_reserved_word, parse_source};
 
 use crate::dependencies::{Dependencies, name_faults};
 use crate::discovery::DiscoveredProject;
-use crate::nesting::nesting_fault;
+use crate::nesting::{SOURCE_NESTING, nesting_fault};
 use crate::project::{PROJECT_FILE_NAME, Package, TargetKind};
 use crate::revision::{RevisionKind, RevisionRecord, embedded_toolchain_record};
 
@@ -246,6 +246,18 @@ impl SourceSnapshot {
     #[must_use]
     pub fn limit_faults(&self) -> &[Diagnostic] {
         &self.limit_faults
+    }
+
+    /// The limits the capture reached, by the name `limits.reached` gives
+    /// them: `sourceNesting` when a module is nested past the source nesting
+    /// limit, the only limit the snapshot measures.
+    #[must_use]
+    pub fn limits_reached(&self) -> Vec<String> {
+        if self.limit_faults.is_empty() {
+            Vec::new()
+        } else {
+            vec![SOURCE_NESTING.to_owned()]
+        }
     }
 
     /// The discovered project.

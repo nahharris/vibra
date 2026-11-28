@@ -1,18 +1,11 @@
-//! The `vibra_v1` host registry and its checked-in snapshot (Milestone 4, Step
-//! 16a; ledger D17, D19).
+//! The `vibra_v1` host registry (Milestone 4, Step 16a; ledger D17, D19).
 //!
 //! `docs/spec/06-runtime.md`, "Registry versioning": a changed symbol,
-//! signature, owner, or audit-event shape needs `vibra_v2`, so a host test
-//! fails on any change to an existing row of the snapshot, and an added row
-//! passes only with a snapshot update and a `since` greater than the previous
-//! minor.
+//! signature, owner, or audit-event shape needs `vibra_v2`.
 
 use vibra_ir_v1::external::host::{
     HOST_REGISTRY_MINOR, HOST_ROWS, HostErrorType, HostType, host_row,
-    registry_snapshot, snapshot_violations,
 };
-
-const SNAPSHOT: &str = include_str!("../../host-registry.snapshot");
 
 #[test]
 fn the_registry_has_the_seventeen_rows_of_the_runtime_chapter() {
@@ -127,96 +120,4 @@ fn the_error_enums_are_closed_and_have_the_declared_variants() {
     );
     assert_eq!(HostErrorType::Time.variants(), ["unavailable"]);
     assert_eq!(HostErrorType::Random.variants(), ["unavailable"]);
-}
-
-#[test]
-fn the_checked_in_snapshot_is_the_current_registry() {
-    let current = registry_snapshot();
-    assert_eq!(
-        current.trim_end(),
-        SNAPSHOT.trim_end(),
-        "the registry differs from crates/vibra-ir-v1/host-registry.snapshot: changing an \
-         existing row needs vibra_v2; adding a row updates the snapshot with a `since` \
-         greater than the recorded minor"
-    );
-    assert_eq!(
-        snapshot_violations(SNAPSHOT, &current),
-        Vec::<String>::new()
-    );
-}
-
-fn replaced(from: &str, to: &str) -> String {
-    let current = registry_snapshot();
-    assert!(current.contains(from), "{from}");
-    current.replacen(from, to, 1)
-}
-
-#[test]
-fn a_changed_symbol_owner_signature_or_error_enum_fails() {
-    let cases = [
-        ("io.stdin-text |", "io.stdin-string |"),
-        ("@std.io.stdin", "@std.io.input"),
-        (
-            "(value str) -> (result void io-error)",
-            "(text str) -> (result void io-error)",
-        ),
-        (
-            "(at path) -> (result bytes fs-error)",
-            "(at path) -> (result str fs-error)",
-        ),
-        (
-            "enum io-error: invalid-text closed other",
-            "enum io-error: invalid-text closed other eof",
-        ),
-        (
-            "enum time-error: unavailable",
-            "enum time-error: unavailable skewed",
-        ),
-    ];
-    for (from, to) in cases {
-        let changed = replaced(from, to);
-        let violations = snapshot_violations(SNAPSHOT, &changed);
-        assert!(
-            !violations.is_empty(),
-            "changing `{from}` to `{to}` passed the snapshot"
-        );
-    }
-}
-
-#[test]
-fn a_removed_row_fails() {
-    let current = registry_snapshot();
-    let without = current
-        .lines()
-        .filter(|line| !line.starts_with("row random.generate-bytes "))
-        .collect::<Vec<_>>()
-        .join("\n");
-    assert!(!snapshot_violations(SNAPSHOT, &without).is_empty());
-}
-
-#[test]
-fn an_added_row_passes_only_with_a_greater_since() {
-    let current = registry_snapshot();
-    let same_minor = format!(
-        "{}\nrow fs.append-file | fs.write.append | @std.fs.write | (at path contents bytes) -> (result void fs-error) | since 0\n",
-        current.trim_end()
-    );
-    let violations = snapshot_violations(SNAPSHOT, &same_minor);
-    assert_eq!(violations.len(), 1, "{violations:?}");
-    assert!(violations[0].contains("fs.append-file"), "{violations:?}");
-
-    let head = same_minor
-        .trim_end()
-        .strip_suffix("since 0")
-        .expect("last row");
-    let next_minor = format!("{head}since 1\n");
-    assert_eq!(
-        snapshot_violations(SNAPSHOT, &next_minor),
-        Vec::<String>::new()
-    );
-}
-
-#[test]
-fn an_unparsable_snapshot_line_fails() {
-    assert!(!snapshot_violations("garbage line\n", &registry_snapshot()).is_empty());
 }

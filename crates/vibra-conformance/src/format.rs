@@ -40,13 +40,9 @@ impl ProfileHandler for FormatHandler {
             .strip_prefix(tree)
             .and_then(|rest| rest.strip_prefix('/'))
             .ok_or_else(|| HandlerError::new("the document is beneath the tree"))?;
-        let directory = case
-            .tree_directory()
-            .map_err(|error| HandlerError::new(error.to_string()))?
-            .ok_or_else(|| HandlerError::new("a format case declares one tree"))?;
+        let directory = case.tree()?;
         let capture = WorkspaceCapture::capture(&directory, Discovery::Exact);
-        let plan = plan_format(&directory, &capture, path)
-            .map_err(|error| HandlerError::new(error.to_string()))?;
+        let plan = plan_format(&directory, &capture, path)?;
         let mut observation = CaseObservation::new(if plan.has_errors() {
             Verdict::Refuted
         } else {

@@ -44,11 +44,12 @@ pub use document::{
     Document, DocumentMode, load, parse, parse_data, parse_source, parse_source_with,
 };
 pub use lexer::{
-    Lexed, RESERVED_WORDS, Token, TokenKind, check_encoding, is_reserved_word, lex,
+    Lexed, RESERVED_WORDS, Token, TokenKind, check_encoding, is_identifier,
+    is_reserved_word, lex,
 };
 pub use literal::{
     FloatSuffix, IntegerSuffix, canonical_character, canonical_string,
-    decode_character, decode_string,
+    decode_character, decode_string, span_record, split_number,
 };
 pub use nesting::{Nesting, nesting};
 pub use schema::{

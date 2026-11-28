@@ -39,18 +39,6 @@ pub struct RelatedSpan {
     pub message: String,
 }
 
-impl RelatedSpan {
-    /// A related span with its explanation.
-    #[must_use]
-    pub fn new(span: ByteSpan, message: impl Into<String>) -> Self {
-        Self {
-            source_id: None,
-            span,
-            message: message.into(),
-        }
-    }
-}
-
 /// The revision of a document a fix was computed against.
 ///
 /// Opaque to this crate. The workspace produces it, and the edit engine
@@ -60,12 +48,6 @@ impl RelatedSpan {
 pub struct DocumentRevision(String);
 
 impl DocumentRevision {
-    /// A revision identifier.
-    #[must_use]
-    pub fn new(identifier: impl Into<String>) -> Self {
-        Self(identifier.into())
-    }
-
     /// The identifier as written.
     #[must_use]
     pub fn as_str(&self) -> &str {
@@ -90,35 +72,6 @@ pub struct Fix {
 }
 
 impl Fix {
-    /// A fix that is safe to apply without review.
-    #[must_use]
-    pub fn safe(
-        description: impl Into<String>,
-        expected_revision: DocumentRevision,
-    ) -> Self {
-        Self {
-            description: description.into(),
-            is_safe: true,
-            expected_revision,
-        }
-    }
-
-    /// A fix that changes meaning or needs review before it is applied.
-    ///
-    /// V1 has no command that applies one. It exists so a fix can be offered
-    /// and described without `vibra edit fix` treating it as applicable.
-    #[must_use]
-    pub fn unsafe_to_apply(
-        description: impl Into<String>,
-        expected_revision: DocumentRevision,
-    ) -> Self {
-        Self {
-            description: description.into(),
-            is_safe: false,
-            expected_revision,
-        }
-    }
-
     /// What the fix does.
     #[must_use]
     pub fn description(&self) -> &str {
@@ -176,17 +129,6 @@ impl Diagnostic {
         }
     }
 
-    /// The same diagnostic under another code.
-    ///
-    /// A checker may learn only after emitting a diagnostic which of two
-    /// registered conditions it describes, such as a type disagreement that
-    /// turns out to be an operand binding to a parameter.
-    #[must_use]
-    pub fn with_code(mut self, code: DiagnosticCode) -> Self {
-        self.code = code;
-        self
-    }
-
     /// Attaches the source identity that owns this diagnostic.
     ///
     /// Related spans created before this call inherit the same identity when
@@ -202,45 +144,6 @@ impl Diagnostic {
                 related.source_id = Some(source_id.clone());
             }
         }
-        self
-    }
-
-    /// Adds a related span.
-    #[must_use]
-    pub fn with_related(mut self, span: ByteSpan, message: impl Into<String>) -> Self {
-        let mut related = RelatedSpan::new(span, message);
-        related.source_id = self.source_id.clone();
-        self.related.push(related);
-        self
-    }
-
-    /// Adds a related span owned by an explicitly named source document.
-    #[must_use]
-    pub fn with_related_source(
-        mut self,
-        source_id: impl Into<String>,
-        span: ByteSpan,
-        message: impl Into<String>,
-    ) -> Self {
-        self.related.push(RelatedSpan {
-            source_id: Some(source_id.into()),
-            span,
-            message: message.into(),
-        });
-        self
-    }
-
-    /// Adds a note.
-    #[must_use]
-    pub fn with_note(mut self, note: impl Into<String>) -> Self {
-        self.notes.push(note.into());
-        self
-    }
-
-    /// Adds a fix.
-    #[must_use]
-    pub fn with_fix(mut self, fix: Fix) -> Self {
-        self.fixes.push(fix);
         self
     }
 
@@ -291,17 +194,11 @@ impl Diagnostic {
     pub fn fixes(&self) -> &[Fix] {
         &self.fixes
     }
-
-    /// Whether this diagnostic rejects the construct it reports.
-    #[must_use]
-    pub fn is_error(&self) -> bool {
-        self.level() == Level::Error
-    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Diagnostic, DocumentRevision, Fix};
+    use super::Diagnostic;
     use crate::{ByteSpan, DiagnosticCode, FixCapability, Level};
 
     #[test]
@@ -330,7 +227,6 @@ mod tests {
             "`while` was retired",
         );
         assert_eq!(error.level(), Level::Error);
-        assert!(error.is_error());
 
         let warning = Diagnostic::new(
             DiagnosticCode::StyleArgumentOrder,
@@ -338,60 +234,10 @@ mod tests {
             "labelled operand precedes a fixed one",
         );
         assert_eq!(warning.level(), Level::Warning);
-        assert!(!warning.is_error());
     }
 
     #[test]
-    fn related_spans_and_notes_accumulate_in_order() {
-        let diagnostic = Diagnostic::new(
-            DiagnosticCode::NameMemberCollision,
-            ByteSpan::new(10, 14),
-            "two members share a name",
-        )
-        .with_related(ByteSpan::new(2, 6), "first declared here")
-        .with_related(ByteSpan::new(20, 24), "and again here")
-        .with_note("member names are flat within one owner");
-
-        assert_eq!(diagnostic.related().len(), 2);
-        assert_eq!(diagnostic.related()[0].span, ByteSpan::new(2, 6));
-        assert_eq!(diagnostic.related()[0].message, "first declared here");
-        assert_eq!(diagnostic.related()[1].span, ByteSpan::new(20, 24));
-        assert_eq!(
-            diagnostic.notes(),
-            ["member names are flat within one owner"]
-        );
-    }
-
-    #[test]
-    fn a_safe_fix_records_its_expected_revision() {
-        let revision = DocumentRevision::new("sha256:abc");
-        let diagnostic = Diagnostic::new(
-            DiagnosticCode::StyleArgumentOrder,
-            ByteSpan::new(0, 8),
-            "operands are in a noncanonical order",
-        )
-        .with_fix(Fix::safe("reorder operands canonically", revision.clone()));
-
-        let fix = &diagnostic.fixes()[0];
-        assert!(fix.is_safe());
-        assert_eq!(fix.description(), "reorder operands canonically");
-        assert_eq!(fix.expected_revision(), &revision);
-        assert_eq!(revision.as_str(), "sha256:abc");
-    }
-
-    #[test]
-    fn a_fix_can_declare_itself_unsafe_to_apply() {
-        let fix = Fix::unsafe_to_apply(
-            "rewrite the call",
-            DocumentRevision::new("sha256:def"),
-        );
-        assert!(!fix.is_safe());
-    }
-
-    #[test]
-    fn only_a_code_registered_as_fixable_is_given_a_fix() {
-        // The invariant the emitting code must respect: a diagnostic offers a
-        // fix only where the registry says the compiler can produce one.
+    fn only_style_argument_order_is_registered_as_safely_fixable() {
         let fixable: Vec<DiagnosticCode> = DiagnosticCode::ALL
             .iter()
             .copied()
@@ -399,14 +245,7 @@ mod tests {
             .collect();
 
         assert_eq!(fixable, [DiagnosticCode::StyleArgumentOrder]);
-
-        for code in fixable {
-            let diagnostic = Diagnostic::new(code, ByteSpan::empty_at(0), "message")
-                .with_fix(Fix::safe("fix", DocumentRevision::new("sha256:0")));
-            assert_eq!(diagnostic.fixes().len(), 1);
-        }
     }
-
     #[test]
     fn diagnostics_compare_by_value() {
         let build = || {
@@ -415,7 +254,6 @@ mod tests {
                 ByteSpan::new(1, 2),
                 "not applicable",
             )
-            .with_note("only closed categories are applicable")
         };
         assert_eq!(build(), build());
         assert_ne!(
@@ -425,35 +263,6 @@ mod tests {
                 ByteSpan::new(1, 3),
                 "not applicable",
             )
-        );
-    }
-
-    #[test]
-    fn a_source_identity_is_carried_to_the_primary_and_related_spans() {
-        let diagnostic = Diagnostic::new(
-            DiagnosticCode::NameUnknownSymbol,
-            ByteSpan::new(2, 3),
-            "unknown symbol",
-        )
-        .with_related(ByteSpan::new(8, 9), "declaration")
-        .with_source_id("src/one.vib");
-
-        assert_eq!(diagnostic.source_id(), Some("src/one.vib"));
-        assert_eq!(
-            diagnostic.related()[0].source_id.as_deref(),
-            Some("src/one.vib")
-        );
-
-        let cross_document = Diagnostic::new(
-            DiagnosticCode::NameUnknownSymbol,
-            ByteSpan::new(2, 3),
-            "unknown symbol",
-        )
-        .with_source_id("src/one.vib")
-        .with_related_source("src/two.vib", ByteSpan::new(8, 9), "declaration");
-        assert_eq!(
-            cross_document.related()[0].source_id.as_deref(),
-            Some("src/two.vib")
         );
     }
 }

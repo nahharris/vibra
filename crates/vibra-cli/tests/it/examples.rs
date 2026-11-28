@@ -4,9 +4,9 @@
 
 use std::path::{Path, PathBuf};
 
-use serde_json::{Value, json};
+use serde_json::json;
 
-use crate::support::{LIBRARY, TempDir, envelope_in};
+use crate::support::{LIBRARY, TempDir, codes, envelope_in, files};
 
 fn example(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -23,34 +23,6 @@ fn checks_and_tests(directory: &Path) {
     let (code, tests) = envelope_in(directory, &["--format", "json", "test"]);
     assert_eq!(code, 0, "{tests}");
     assert_eq!(tests["status"], "passed");
-}
-
-/// Every file under `directory`, as a path relative to it with `/`.
-fn files(directory: &Path) -> Vec<String> {
-    let mut found = Vec::new();
-    let mut pending = vec![directory.to_path_buf()];
-    while let Some(next) = pending.pop() {
-        for entry in std::fs::read_dir(&next).expect("an example directory reads") {
-            let path = entry.expect("a directory entry").path();
-            if path.is_dir() {
-                pending.push(path);
-            } else {
-                let relative = path.strip_prefix(directory).expect("under the example");
-                found.push(relative.to_string_lossy().replace('\\', "/"));
-            }
-        }
-    }
-    found.sort();
-    found
-}
-
-fn codes(document: &Value) -> Vec<String> {
-    document["diagnostics"]
-        .as_array()
-        .expect("diagnostics")
-        .iter()
-        .map(|diagnostic| diagnostic["code"].as_str().expect("code").to_owned())
-        .collect()
 }
 
 #[test]

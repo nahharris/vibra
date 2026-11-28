@@ -10,7 +10,6 @@ publish.workspace = true
 
 [dependencies]
 getrandom.workspace = true
-serde_json.workspace = true
 vibra-diagnostics-v1.workspace = true
 vibra-ir-v1.workspace = true
 vibra-syntax-v1.workspace = true

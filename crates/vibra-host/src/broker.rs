@@ -155,12 +155,6 @@ impl Lineage {
     pub const fn generation(&self) -> u32 {
         self.generation
     }
-
-    /// Whether the resource is still held.
-    #[must_use]
-    pub const fn is_live(&self) -> bool {
-        self.live
-    }
 }
 
 /// One counter: a bound, what was charged, and what is reserved by the call

@@ -21,10 +21,7 @@ use vibra_workspace::{
     MemoryBudget, SourceSnapshot, decode_world, discover_project_at,
 };
 
-use crate::support::{TempDir, single_document};
-
-/// The built `vibra`.
-const VIBRA: &str = env!("CARGO_BIN_EXE_vibra");
+use crate::support::{TempDir, VIBRA, files, single_document};
 
 /// The variable the `@metrics` recipe reads.
 const METRICS: &str = "GATE_METRICS";
@@ -44,25 +41,6 @@ fn gate() -> PathBuf {
 fn world_case() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../conformance/cases/GRANT/V2-GRANT-release-optional-absent")
-}
-
-/// Every file under `directory`, as a path relative to it with `/`.
-fn files(directory: &Path) -> Vec<String> {
-    let mut found = Vec::new();
-    let mut pending = vec![directory.to_path_buf()];
-    while let Some(next) = pending.pop() {
-        for entry in fs::read_dir(&next).expect("a readable directory") {
-            let path = entry.expect("a directory entry").path();
-            if path.is_dir() {
-                pending.push(path);
-            } else {
-                let relative = path.strip_prefix(directory).expect("beneath it");
-                found.push(relative.to_string_lossy().replace('\\', "/"));
-            }
-        }
-    }
-    found.sort();
-    found
 }
 
 /// A copy of `examples/gate/` with each `(file, old, new)` edit applied;

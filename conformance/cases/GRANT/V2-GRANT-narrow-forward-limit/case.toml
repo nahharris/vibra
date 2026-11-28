@@ -1,11 +1,11 @@
-# Q1: Forward's own limit runs and forwards to the grant it holds, which counts
+# Forward's own limit runs and forwards to the grant it holds, which counts
 # the reads. Were limit to return a value that is not a sealed grant unchanged,
 # the second read would be Ok("A") with a second event and no limits.
 id = "V2-GRANT-narrow-forward-limit"
 rule = "V2-GRANT-narrow-forward-limit"
 profile = "interpreterV2"
 operation = "workspaceTest"
-description = "03-effects.md#narrowing: DirReadText.limit on a Forward over dir.readText forwards to the grant: Ok(\"A\"), then Err(limitExceeded); one event with limits {invocations: 1u64} (Q1)"
+description = "03-effects.md#narrowing: DirReadText.limit on a Forward over dir.readText forwards to the grant: Ok(\"A\"), then Err(limitExceeded); one event with limits {invocations: 1u64}"
 
 [inputs]
 tree = "tree"

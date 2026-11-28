@@ -40,10 +40,11 @@ use vibra_ir::{
     CheckedModuleSet, CheckedProgram, SourceOrigin, Trap, Type, encode_type,
 };
 use vibra_syntax::source::Declaration;
-use vibra_syntax::{canonical_string, decode_string, parse_source};
+use vibra_syntax::{
+    canonical_string, decode_string, is_identifier, parse_source, span_record,
+};
 use vibra_types::{CheckResult, check_workspace, load_stdlib};
 
-use crate::nesting::SOURCE_NESTING;
 use crate::resolve::resolve_input_of;
 use crate::revision::workspace_revision;
 use crate::snapshot::{SourceFile, SourceSnapshot, UnitKind};
@@ -112,14 +113,6 @@ impl fmt::Display for TestSelector {
             canonical_string(&self.name)
         )
     }
-}
-
-fn is_identifier(text: &str) -> bool {
-    let mut chars = text.chars();
-    chars
-        .next()
-        .is_some_and(|first| first.is_ascii_alphabetic())
-        && chars.all(|next| next.is_ascii_alphanumeric())
 }
 
 /// A selection that is invalid input: it has no diagnostics.
@@ -310,27 +303,6 @@ impl TestRun {
         &self.diagnostics
     }
 
-    /// The number of selected tests.
-    #[must_use]
-    pub fn selected(&self) -> usize {
-        self.items.len()
-    }
-
-    /// The number of `@test.passed` items.
-    #[must_use]
-    pub fn passed(&self) -> usize {
-        self.items
-            .iter()
-            .filter(|item| item.outcome == TestOutcome::Passed)
-            .count()
-    }
-
-    /// The selected tests that did not pass.
-    #[must_use]
-    pub fn failed(&self) -> usize {
-        self.selected() - self.passed()
-    }
-
     /// The limits checking the run reached, by the name `limits.reached`
     /// gives them, in the order first reached: `sourceNesting` when a module
     /// is nested past the source nesting limit, and those of the check of
@@ -374,7 +346,12 @@ impl TestRun {
             TestOutcome::Trap { trap, origin } => {
                 let origin = origin
                     .as_ref()
-                    .map(|origin| format!(" origin: {}", span_record(origin)))
+                    .map(|origin| {
+                        format!(
+                            " origin: {}",
+                            span_record(origin.source_id(), origin.span())
+                        )
+                    })
                     .unwrap_or_default();
                 fields.push(format!(
                     "trap: {{trapCode: {}{origin}}}",
@@ -403,7 +380,10 @@ fn failure_record(failure: &TestAssertionFailure) -> String {
     if let Some(actual) = &failure.actual {
         fields.push(format!("actual: {}", canonical_string(actual)));
     }
-    fields.push(format!("primarySpan: {}", span_record(&failure.origin)));
+    fields.push(format!(
+        "primarySpan: {}",
+        span_record(failure.origin.source_id(), failure.origin.span())
+    ));
     if let FailureKind::Observation { code, .. } = &failure.kind {
         let type_info = observation_type(failure)
             .map(|encoded| format!(" typeInfo: {encoded}"))
@@ -425,16 +405,6 @@ pub fn observation_type(failure: &TestAssertionFailure) -> Option<String> {
         FailureKind::Observation { type_info, .. } => encode_type(type_info).ok(),
         FailureKind::Assertion => None,
     }
-}
-
-fn span_record(origin: &SourceOrigin) -> String {
-    let span = origin.span();
-    format!(
-        "{{sourceId: {} start: {}u64 end: {}u64}}",
-        canonical_string(origin.source_id()),
-        span.start(),
-        span.end()
-    )
 }
 
 /// One discovered test.
@@ -477,7 +447,7 @@ pub fn run_tests_in(
             items: Vec::new(),
             diagnostics: snapshot.limit_faults().to_vec(),
             revision,
-            limits: vec![SOURCE_NESTING.to_owned()],
+            limits: snapshot.limits_reached(),
         });
     }
     let modules = test_modules(snapshot, selector)?;
@@ -514,7 +484,7 @@ pub fn run_tests_in(
             items: Vec::new(),
             diagnostics: parse_errors,
             revision,
-            limits: Vec::new(),
+            limits: snapshot.limits_reached(),
         });
     }
     if let Some(selector) = selector {
@@ -534,7 +504,7 @@ pub fn run_tests_in(
                 items: Vec::new(),
                 diagnostics: vec![error.diagnostic().clone()],
                 revision,
-                limits: Vec::new(),
+                limits: snapshot.limits_reached(),
             });
         }
     };
@@ -550,11 +520,13 @@ pub fn run_tests_in(
         }
         Err(defect) => (None, vec![*defect]),
     };
-    let limits = check
-        .iter()
-        .flat_map(|check| check.limits_reached().iter())
-        .map(|limit| (*limit).to_owned())
-        .collect();
+    let mut limits = snapshot.limits_reached();
+    limits.extend(
+        check
+            .iter()
+            .flat_map(|check| check.limits_reached().iter())
+            .map(|limit| (*limit).to_owned()),
+    );
     let check = check.filter(|check| !check.has_errors() || check.only_unavailable());
     let invalid = check.is_none();
     let items = discovered
@@ -897,8 +869,6 @@ mod tests;
 #[cfg(test)]
 mod isolation {
     use std::cell::Cell;
-    use std::fs;
-    use std::path::PathBuf;
     use std::sync::Arc;
 
     use vibra_host::broker::Context;
@@ -916,8 +886,7 @@ mod isolation {
     use vibra_types::load_stdlib;
 
     use super::{TestOutcome, check_selection, run_tests, test_modules};
-    use crate::discovery::discover_project_at;
-    use crate::snapshot::SourceSnapshot;
+    use crate::test_tree::Tree;
 
     thread_local! {
         /// The selected test, by index, and its host call, counted from one,
@@ -1022,39 +991,13 @@ mod isolation {
                                let _ be await main.emit(out) endlet\n\
                                endtest\n";
 
-    /// A project tree in its own temporary directory, removed on drop.
-    struct Tree(PathBuf);
-
-    impl Tree {
-        fn new(prefix: &str, tests: &str) -> Result<Self, String> {
-            let root =
-                std::env::temp_dir().join(format!("{prefix}-{}", std::process::id()));
-            let _ = fs::remove_dir_all(&root);
-            let write = |relative: &str, text: &str| {
-                let path = root.join(relative);
-                if let Some(parent) = path.parent() {
-                    fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-                }
-                fs::write(path, text).map_err(|error| error.to_string())
-            };
-            write("project.vibon", PROJECT)?;
-            write("src/app/main.vib", MAIN)?;
-            write("tests/run.vib", tests)?;
-            Ok(Self(root))
-        }
-
-        fn snapshot(&self) -> Result<SourceSnapshot, String> {
-            let root = fs::canonicalize(&self.0).map_err(|error| error.to_string())?;
-            let project =
-                discover_project_at(&root).map_err(|faults| format!("{faults:?}"))?;
-            SourceSnapshot::capture(project).map_err(|faults| format!("{faults:?}"))
-        }
-    }
-
-    impl Drop for Tree {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
-        }
+    /// The project of `PROJECT` and `MAIN` with the tests `tests`.
+    fn tree(tests: &str) -> Result<Tree, String> {
+        Tree::new(&[
+            ("project.vibon", PROJECT),
+            ("src/app/main.vib", MAIN),
+            ("tests/run.vib", tests),
+        ])
     }
 
     /// The host events of `trace`.
@@ -1077,7 +1020,7 @@ mod isolation {
             .collect()
     }
 
-    /// F7 of the review of grants: a defect trap ends only its own test,
+    /// A defect trap ends only its own test,
     /// after host calls, and the next test runs in a fresh world. The first
     /// test writes `a` to its standard output and then meets a driver fault
     /// on its second write: `@runtime.invalidHostValue` (06 "Driver
@@ -1088,7 +1031,7 @@ mod isolation {
     /// passes (04 "Test worlds and grants": each test has its own world).
     #[test]
     fn a_defect_trap_after_host_calls_ends_only_its_own_test() -> Result<(), String> {
-        let tree = Tree::new("vibra-runner-defect-isolation", TESTS)?;
+        let tree = tree(TESTS)?;
         let snapshot = tree.snapshot()?;
         let control = run_tests(&snapshot, None, MemoryBudget::DEFAULT)
             .map_err(|error| error.to_string())?;
@@ -1179,7 +1122,7 @@ mod isolation {
         }
     }
 
-    /// F7 of the review of grants: `run_entry` with a token its context
+    /// `run_entry` with a token its context
     /// never issued, and with a token another context issued. The entry
     /// `emit(grant: StdoutText)` writes `x` through its grant; the broker
     /// validates the token at use (06 "Host calls", step 1), so each run is
@@ -1188,7 +1131,7 @@ mod isolation {
     /// writes `x` and appends one event.
     #[test]
     fn run_entry_with_a_token_the_context_never_issued() -> Result<(), String> {
-        let tree = Tree::new("vibra-runner-entry-tokens", ENTRY_TESTS)?;
+        let tree = tree(ENTRY_TESTS)?;
         let snapshot = tree.snapshot()?;
         let modules =
             test_modules(&snapshot, None).map_err(|error| error.to_string())?;

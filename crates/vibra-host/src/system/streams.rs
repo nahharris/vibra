@@ -466,7 +466,7 @@ impl Reader {
         };
         let text = action.op == HostOp::IoStdinText;
         // A text count below the longest scalar is refused before the stream
-        // is touched (Q30).
+        // is touched.
         if text && max < LONGEST_SCALAR {
             return Answer::NotSubmitted("unsupported");
         }
@@ -557,8 +557,7 @@ mod tests {
     }
 
     /// 06 "Standard input": a pipe has no known size, whether it is empty or
-    /// holds bytes; only a regular file reports what remains (F1 of the
-    /// drivers review, probe 26).
+    /// holds bytes; only a regular file reports what remains.
     #[test]
     fn a_pipe_has_no_known_size() {
         let (reader, mut writer) = io::pipe().expect("a pipe");

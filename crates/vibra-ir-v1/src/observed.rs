@@ -9,7 +9,7 @@
 //! only by memory. Encoding and releasing one therefore walk an explicit
 //! worklist and use bounded host stack.
 
-use crate::{Type, TypeId, Value, canonical_type, vocabulary};
+use crate::{Type, TypeId, Value, canonical_type};
 
 /// A function-free value with a canonical encoding.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -69,15 +69,6 @@ enum Piece<'a> {
 }
 
 impl ObservedValue {
-    /// Whether this is the `err` variant of a `result`, which is how a run
-    /// classifies an entry's value: an entry signature is `void` or
-    /// `(result void e)`, so the only enum an entry returns is a `result`,
-    /// and an `err` of it is a program failure whatever the error holds.
-    #[must_use]
-    pub fn is_err_variant(&self) -> bool {
-        matches!(self, Self::Enum { variant, .. } if variant == vocabulary::ERR)
-    }
-
     /// The canonical value encoding.
     #[must_use]
     pub fn canonical_vibon(&self) -> String {
@@ -175,16 +166,6 @@ impl ObservedValue {
                 }
             }
         }
-    }
-
-    /// A typed result observation, `(record type: T value: v)`.
-    #[must_use]
-    pub fn canonical_observation(&self, value_type: &Type) -> String {
-        format!(
-            "(record type: {} value: {})\n",
-            canonical_type(value_type),
-            self.canonical_vibon()
-        )
     }
 
     /// The primitive value, when this is one.

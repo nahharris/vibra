@@ -11,7 +11,7 @@
 //!   resolved. An omitted row is the empty row, never an unknown one.
 //! - A written `Proc` or `Intent` type whose row is omitted and whose result
 //!   operand is a tuple of at least one component, every one an operation
-//!   interface, is the warning `@type.suspiciousRow` at the type (Q6). A
+//!   interface, is the warning `@type.suspiciousRow` at the type. A
 //!   `returns` type is never reported. The warning is kept once per written
 //!   type, however often the type is read.
 //! - An anonymous `proc` is a closure of the type `Proc({…} R {Row})` with
@@ -112,7 +112,7 @@ pub(crate) fn written_type(
 
 /// Keeps `@type.suspiciousRow` for the type written in `module` at `span`,
 /// whose row is omitted, when its result `result` is a tuple of at least
-/// one component, every one an operation interface (Q6).
+/// one component, every one an operation interface.
 fn suspicious(program: &Program<'_>, module: usize, span: ByteSpan, result: &Type) {
     let Type::Tuple(components) = result else {
         return;

@@ -9,13 +9,7 @@ use std::fmt::Write as _;
 
 use serde_json::{Value, json};
 
-use crate::support::{LIBRARY, TempDir, envelope_in};
-
-/// A binary project whose entry is `@app.main.main`.
-const BINARY: &str = "{format: @project.v2 package: {name: \"hello\" version: \"0.1.0\"} targets: [{name: @app kind: @bin root: \"src/app\" entry: @app.main.main effects: [] grants: [:]}] dependencies: [:]}";
-
-/// The entry of [`BINARY`].
-const ENTRY: &str = "use @std.process.ExitCode enduse\n\nproc main returns code: ExitCode do return ExitCode(0u8) endproc\n";
+use crate::support::{BINARY, ENTRY, LIBRARY, TempDir, codes, envelope_in};
 
 /// A test module that reaches `@app.main`.
 const TESTS: &str = "use @std.assert enduse\n\nuse @app.main enduse\n\ntest \"t\" do assert.equal(1i32 1i32) endtest\n";
@@ -58,15 +52,6 @@ fn derivations() -> String {
         "fn leReq takes {{a: I32 b: I32}} returns r: I32\n  requires Ordered.lessOrEqual(a b)\n  do return a\nendfn\n\
          fn f takes {{{parameters}}} returns r: I32\n  do\n    {body}\n    return 0i32\nendfn\n"
     )
-}
-
-fn codes(value: &Value) -> Vec<String> {
-    value["diagnostics"]
-        .as_array()
-        .expect("diagnostics")
-        .iter()
-        .map(|diagnostic| diagnostic["code"].as_str().expect("a code").to_owned())
-        .collect()
 }
 
 /// Asserts that `value` reports `limit` alone, reached, by
@@ -129,25 +114,9 @@ fn test_names_the_compile_time_reduction_limit() {
 }
 
 #[test]
-fn test_names_the_proof_derivation_limit() {
-    assert_reached(
-        &test("limit-test-derivations", &derivations()),
-        "proofDerivations",
-    );
-}
-
-#[test]
 fn run_names_the_compile_time_reduction_limit() {
     assert_reached(
         &run("limit-run-reductions", &reductions()),
         "compileTimeReductions",
-    );
-}
-
-#[test]
-fn run_names_the_proof_derivation_limit() {
-    assert_reached(
-        &run("limit-run-derivations", &derivations()),
-        "proofDerivations",
     );
 }

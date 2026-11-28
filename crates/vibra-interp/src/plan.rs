@@ -252,8 +252,8 @@ mod tests {
     }
 
     /// Row "a host body without a context": the checked IR reaches a
-    /// host-bound member only through the dispatch on a sealed grant, which
-    /// is step 20's, so the member is entered here as that dispatch enters
+    /// host-bound member only through the dispatch on a sealed grant, so the
+    /// member is entered here as that dispatch enters
     /// it, in the machine `run_test` builds. With no host context it is
     /// `@tool.unavailable`.
     #[test]

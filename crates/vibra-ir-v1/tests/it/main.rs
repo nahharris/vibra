@@ -5,10 +5,6 @@
 
 #![allow(clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
 
-mod contract_members;
-mod effects;
 mod externals;
-mod generics;
 mod host_registry_snapshot;
 mod nominal_types;
-mod support;

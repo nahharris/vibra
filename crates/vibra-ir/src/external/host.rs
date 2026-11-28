@@ -18,7 +18,7 @@
 //! tables has `since` 0 and delivery `@once`.
 //!
 //! Both tables are frozen in `registry/host-2.0.txt` beside this crate's
-//! manifest, written by [`registry_snapshot`]; [`snapshot_violations`] holds
+//! manifest; the crate's tests write the snapshot from the tables and hold
 //! the versioning rule against it. The snapshot is one line per entry, its
 //! fields separated by tabs:
 //!
@@ -33,8 +33,6 @@
 //! A signature is the type of the bound member in source spelling, with the
 //! owner's type first: `Proc({StdinText U64} Result(Str IoError)
 //! {StdinText})`.
-
-use std::collections::BTreeMap;
 
 /// The major version of the host registry.
 pub const HOST_REGISTRY_MAJOR: u32 = 2;
@@ -202,6 +200,15 @@ impl HostInterface {
             module: self.module(),
             name: self.name(),
         }
+    }
+
+    /// The interface whose owner has the path `path`, such as
+    /// `@std.io.StdinText`.
+    #[must_use]
+    pub fn by_owner_path(path: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|interface| interface.owner().path() == path)
     }
 
     /// The name of the interface's host-bound member, such as `read`.
@@ -847,158 +854,4 @@ pub fn host_row(symbol: &str) -> Option<&'static HostRow> {
 #[must_use]
 pub fn test_world_row(symbol: &str) -> Option<&'static TestWorldRow> {
     TEST_WORLD_ROWS.iter().find(|row| row.symbol == symbol)
-}
-
-/// The `since` of the row of either table with the wire symbol `symbol`.
-fn row_since_of(symbol: &str) -> Option<u32> {
-    host_row(symbol)
-        .map(|row| row.since)
-        .or_else(|| test_world_row(symbol).map(|row| row.since))
-}
-
-/// The derived registry minor of a set of symbols of either table: the
-/// greatest `since` among them, and `0` when the set is empty. A symbol that
-/// is a row of neither table has no minor, so the answer is `None`.
-#[must_use]
-pub fn derived_registry_minor<'a>(
-    symbols: impl IntoIterator<Item = &'a str>,
-) -> Option<u32> {
-    let mut minor = 0;
-    for symbol in symbols {
-        minor = minor.max(row_since_of(symbol)?);
-    }
-    Some(minor)
-}
-
-/// Both tables and their types as the text of `registry/host-2.0.txt`.
-#[must_use]
-pub fn registry_snapshot() -> String {
-    let minor = HOST_ROWS
-        .iter()
-        .map(|row| row.since)
-        .chain(TEST_WORLD_ROWS.iter().map(|row| row.since))
-        .max()
-        .unwrap_or(0);
-    let mut lines = vec![format!("registry host {HOST_REGISTRY_MAJOR}.{minor}")];
-    for row in &HOST_ROWS {
-        lines.push(format!(
-            "row\t{}\t{}\t{}\t{}\t{}",
-            row.symbol,
-            row.owner.owner().path(),
-            row.signature(),
-            row.since,
-            row.delivery.atom()
-        ));
-    }
-    for row in &TEST_WORLD_ROWS {
-        lines.push(format!(
-            "testWorld\t{}\t{}\t{}\t{}\t{}",
-            row.symbol,
-            row.owner().path(),
-            row.signature(),
-            row.since,
-            row.delivery.atom()
-        ));
-    }
-    for error in HostErrorType::ALL {
-        lines.push(format!(
-            "type\t{}\t{}\t{}",
-            error.name(),
-            error.module(),
-            error.cases().join(" ")
-        ));
-    }
-    lines.push(format!(
-        "type\tFsKind\t@std.fs\t{}",
-        FS_KIND_CASES.join(" ")
-    ));
-    lines.push(format!(
-        "type\tFsMetadata\t@std.fs\t{{{}}}",
-        labelled(FS_METADATA_FIELDS)
-    ));
-    lines.into_iter().map(|line| line + "\n").collect()
-}
-
-/// The parsed snapshot: its minor, and each entry keyed by its kind and
-/// name, with its whole line.
-fn snapshot_entries(
-    text: &str,
-) -> Result<(u32, BTreeMap<String, String>), Vec<String>> {
-    let mut minor = None;
-    let mut entries = BTreeMap::new();
-    let mut problems = Vec::new();
-    for line in text.lines().filter(|line| !line.trim().is_empty()) {
-        let mut fields = line.split('\t');
-        match (fields.next(), fields.next()) {
-            (Some(header), None) if header.starts_with("registry ") => {
-                match header
-                    .strip_prefix("registry host 2.")
-                    .and_then(|number| number.parse::<u32>().ok())
-                {
-                    Some(number) => minor = Some(number),
-                    None => {
-                        problems.push(format!("unparsable registry line `{header}`"))
-                    }
-                }
-            }
-            (Some(kind @ ("row" | "testWorld" | "type")), Some(name)) => {
-                entries.insert(format!("{kind} {name}"), line.to_owned());
-            }
-            _ => problems.push(format!("unparsable snapshot line `{line}`")),
-        }
-    }
-    if !problems.is_empty() {
-        return Err(problems);
-    }
-    minor
-        .map(|minor| (minor, entries))
-        .ok_or_else(|| vec!["the snapshot has no `registry host 2.N` line".to_owned()])
-}
-
-/// The `since` field of a `row` or `testWorld` line.
-fn row_since(line: &str) -> Option<u32> {
-    line.split('\t').nth(4)?.parse().ok()
-}
-
-/// Every way `current` breaks the versioning rule against the `recorded`
-/// snapshot. A changed or removed entry (a host row, a test-world row, or a
-/// type) needs a new major. An added row of either table needs a `since`
-/// greater than the recorded minor. An added type never violates the rule by
-/// itself. An empty answer means `current` is `recorded`, or a legitimate
-/// next minor of it.
-#[must_use]
-pub fn snapshot_violations(recorded: &str, current: &str) -> Vec<String> {
-    let (recorded_minor, recorded) = match snapshot_entries(recorded) {
-        Ok(parsed) => parsed,
-        Err(problems) => return problems,
-    };
-    let (_, current) = match snapshot_entries(current) {
-        Ok(parsed) => parsed,
-        Err(problems) => return problems,
-    };
-    let mut violations = Vec::new();
-    for (key, line) in &recorded {
-        match current.get(key) {
-            None => {
-                violations.push(format!("{key} was removed; this needs a new major"))
-            }
-            Some(now) if now != line => violations.push(format!(
-                "{key} changed from `{line}` to `{now}`; this needs a new major"
-            )),
-            Some(_) => {}
-        }
-    }
-    for (key, line) in &current {
-        if recorded.contains_key(key) || key.starts_with("type ") {
-            continue;
-        }
-        match row_since(line) {
-            Some(since) if since > recorded_minor => {}
-            _ => violations.push(format!(
-                "{key} was added with a `since` that is not greater than the recorded \
-                 minor {HOST_REGISTRY_MAJOR}.{recorded_minor}"
-            )),
-        }
-    }
-    violations
 }

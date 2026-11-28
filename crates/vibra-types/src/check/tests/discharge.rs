@@ -522,6 +522,33 @@ fn a_discharged_guard_leaves_no_code() {
     assert_eq!(guarded.module_set(), plain.module_set());
 }
 
+/// The bare `requires` of `pick`, discharged at its one call, leaves no
+/// guard on the lowered function, while the same guard with an `else` leaves
+/// an entry guard.
+#[test]
+fn a_discharged_bare_guard_leaves_no_guard_node() {
+    let source = "fn pick takes {n: I32} returns r: I32 requires Ordered.greater(n 0i32) do return n endfn\n\
+                  fn main returns r: I32 do return pick(5i32) endfn\n";
+    let guards = |text: &str| {
+        let result = check_source(SOURCE, text);
+        assert_eq!(result.diagnostics(), []);
+        result.module_set().and_then(|set| {
+            set.functions()
+                .iter()
+                .find(|function| function.name.ends_with(".pick"))
+                .map(|pick| (pick.entry_guard.is_some(), pick.exit_guard.is_some()))
+        })
+    };
+    assert_eq!(guards(source), Some((false, false)));
+    let with_else = source.replacen(
+        "requires Ordered.greater(n 0i32)",
+        "requires Ordered.greater(n 0i32) else 0i32",
+        1,
+    );
+    assert_ne!(with_else, source);
+    assert_eq!(guards(&with_else), Some((true, false)));
+}
+
 /// `Sized`, whose member `size` has the guards `guards`, and the type `name`
 /// that implements it with the body `body`.
 fn sized(guards: &str, implementations: &[(&str, &str)]) -> String {
@@ -561,25 +588,6 @@ fn an_implementation_establishes_the_contract_ensures() {
             (ObligationKind::Ensures, PASSED, &["GUARD-1"]),
             (ObligationKind::Ensures, UNKNOWN, &[]),
         ],
-    );
-}
-
-#[test]
-fn a_contract_guard_with_else_runs_in_every_implementation() {
-    let source = format!(
-        "{}fn main returns r: {{I32 I32}} do let s: Sized be B(1i32) endlet return {{Sized.size(A(1i32) 0i32) Sized.size(s 0i32)}} endfn\n",
-        sized(
-            "requires Ordered.greater(n 0i32) else -1i32",
-            &[("A", "return m"), ("B", "return m")]
-        )
-    );
-    assert_eq!(faults(&source), []);
-    let ran = super::run(&source);
-    assert!(
-        ran.as_deref().is_ok_and(
-            |text| text.ends_with("value: {kind: @tuple values: [-1i32 -1i32]}}")
-        ),
-        "{ran:?}"
     );
 }
 

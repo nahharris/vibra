@@ -2,7 +2,7 @@ id = "V2-EFFECT-entry-outside-ceiling"
 rule = "V2-EFFECT-entry-outside-ceiling"
 profile = "staticV2"
 operation = "workspaceCheck"
-description = "07-diagnostics-and-conformance.md#contract-effect-and-authority-diagnostics: an entry row outside the target's effects is @effect.outsideCeiling at the effects field, related to the performs entry"
+description = "03-effects.md#target-admission: an entry row outside the target's effects is @effect.outsideCeiling at the effects field, related to the performs entry"
 
 [inputs]
 tree = "tree"

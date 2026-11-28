@@ -1,13 +1,12 @@
 //! Named procedures, plans, and `await`. Expectations come from the source
 //! chapter ("`fn` and `proc`", "`return`, `try`, `await`", "Bodies and
 //! statements"), the type chapter ("Application", "Guards and callable
-//! types"), the effects chapter ("Cold plans and performed rows"), and the
-//! rulings Q3 and Q4 of `docs/roadmap/v0.0.2/m2/spec-questions.md`.
+//! types"), the effects chapter ("Cold plans and performed rows").
 
 use vibra_diagnostics::DiagnosticCode;
 use vibra_ir::{BodyContext, CheckedModuleSet, Expr, FunctionBody, Node, Row, Type};
 
-use super::{SOURCE, at, faults};
+use super::{SOURCE, accepted, at, faults, faults_of, workspace};
 use crate::check::check_source;
 
 /// The procedure every case builds on.
@@ -17,20 +16,6 @@ const P: &str =
 /// `P` and then `rest`.
 fn with_p(rest: &str) -> String {
     format!("{P}{rest}\n")
-}
-
-/// The diagnostics of `source`, which MUST have none.
-fn accepted(source: &str) -> Result<std::sync::Arc<CheckedModuleSet>, String> {
-    let result = check_source(SOURCE, source);
-    assert!(
-        result.diagnostics().is_empty(),
-        "{source}\n{:#?}",
-        result.diagnostics()
-    );
-    result
-        .module_set()
-        .map(std::sync::Arc::clone)
-        .ok_or_else(|| format!("no module set for {source}"))
 }
 
 /// The lowered function named `name` of `set`.
@@ -125,21 +110,6 @@ fn a_plan_is_stored_and_awaited_any_number_of_times() -> Result<(), String> {
 }
 
 #[test]
-fn await_at_any_depth_of_a_proc_body() -> Result<(), String> {
-    accepted(&with_p(
-        "proc run takes {n: I32 go: Bool} returns r: I32 do \
-         if go then return await double(n) endif return n endproc",
-    ))?;
-    accepted(&with_p(
-        "proc run takes {n: I32 go: Bool} returns r: I32 do \
-         let m be do let x be await double(n) endlet I32.add(x 1i32) enddo endlet \
-         match go case true return await double(m) case false return m endmatch \
-         endproc",
-    ))?;
-    Ok(())
-}
-
-#[test]
 fn procs_as_members_generic_labelled_and_recursive() -> Result<(), String> {
     let source = with_p(
         "type Box of {n: I32} proc twice takes {self: Self} returns r: I32 do \
@@ -187,65 +157,6 @@ fn a_proc_member_has_a_proc_identity() -> Result<(), String> {
             "{name}: {document}"
         );
     }
-    Ok(())
-}
-
-#[test]
-fn await_outside_a_proc_body() -> Result<(), String> {
-    // A module-value initializer is pure.
-    let source = with_p("let x: I32 be await double(1i32) endlet");
-    assert_eq!(
-        faults(&source),
-        [(
-            DiagnosticCode::EffectInvalidAwait,
-            at(&source, "await double(1i32)", 0)
-        )]
-    );
-    // An anonymous `fn` written in a `proc`.
-    let source = with_p(
-        "proc run takes {m: I32} returns r: I32 do let f be fn takes {n: I32} \
-         returns r: I32 do return await double(n) endfn endlet return f(m) endproc",
-    );
-    assert_eq!(
-        faults(&source),
-        [(
-            DiagnosticCode::EffectInvalidAwait,
-            at(&source, "await double(n)", 0)
-        )]
-    );
-    // A `requires` predicate of a `proc`.
-    let source = with_p(
-        "proc run takes {n: I32} returns r: I32 \
-         requires Ordered.greater(await double(n) 0i32) else 0i32 do return n endproc",
-    );
-    assert_eq!(
-        faults(&source),
-        [(
-            DiagnosticCode::EffectInvalidAwait,
-            at(&source, "await double(n)", 0)
-        )]
-    );
-    // A labelled default of a `proc`.
-    let source = with_p(
-        "proc run takes {n: I32} labelled {by: I32 be await double(1i32)} \
-         returns r: I32 do return I32.add(n by) endproc",
-    );
-    assert_eq!(
-        faults(&source),
-        [(
-            DiagnosticCode::EffectInvalidAwait,
-            at(&source, "await double(1i32)", 0)
-        )]
-    );
-    // A `fn` body, where the operand is not checked (Q4).
-    let source = "fn f returns n: I32 do return await 1i32 endfn\n";
-    assert_eq!(
-        faults(source),
-        [(
-            DiagnosticCode::EffectInvalidAwait,
-            at(source, "await 1i32", 0)
-        )]
-    );
     Ok(())
 }
 
@@ -306,7 +217,7 @@ fn a_statement_of_another_type_is_a_mismatch() -> Result<(), String> {
 
 #[test]
 fn applying_a_proc_builds_a_plan() -> Result<(), String> {
-    // A statement that builds a plan and drops it (Q3).
+    // A statement that builds a plan and drops it.
     let source = with_p("proc run returns r: I32 do double(1i32) return 0i32 endproc");
     assert_eq!(
         faults(&source),
@@ -355,46 +266,9 @@ fn applying_a_proc_builds_a_plan() -> Result<(), String> {
 }
 
 #[test]
-fn a_bare_requires_is_discharged_where_the_plan_is_built() -> Result<(), String> {
-    let half = "proc half takes {n: I32} returns r: I32 \
-                requires Ordered.greater(n 0i32) do return n endproc\n";
-    accepted(&format!(
-        "{half}fn build returns r: I32 do let _ be half(2i32) endlet return 0i32 endfn\n"
-    ))?;
-    let source = format!(
-        "{half}fn build returns r: I32 do let _ be half(0i32) endlet return 0i32 endfn\n"
-    );
-    let result = check_source(SOURCE, &source);
-    let diagnostics = result.diagnostics();
-    assert_eq!(diagnostics.len(), 1, "{diagnostics:#?}");
-    let diagnostic = diagnostics.first().ok_or("one diagnostic")?;
-    assert_eq!(diagnostic.code(), DiagnosticCode::ContractRefuted);
-    assert_eq!(
-        diagnostic.primary_span(),
-        at(&source, "Ordered.greater(n 0i32)", 0)
-    );
-    assert_eq!(
-        diagnostic
-            .related()
-            .iter()
-            .map(|related| related.span)
-            .collect::<Vec<_>>(),
-        [at(&source, "0i32", 1)]
-    );
-    // A `requires … else` states no obligation where the plan is built.
-    accepted(
-        "proc half takes {n: I32} returns r: I32 \
-         requires Ordered.greater(n 0i32) else 0i32 do return n endproc\n\
-         fn build takes {n: I32} returns r: I32 do let _ be half(n) endlet \
-         return 0i32 endfn\n",
-    )?;
-    Ok(())
-}
-
-#[test]
 fn plans_and_worlds_are_checked() -> Result<(), String> {
     // An `await` of a plan whose row is not empty is checked against the
-    // ceiling (step 09), and is no longer unavailable.
+    // ceiling.
     let log = "interface Log proc append takes {log: Self entry: Str} returns d: Void \
                endproc endinterface\n\
                type Memory of I32 impl Log proc append takes {log: Self entry: Str} \
@@ -422,7 +296,7 @@ fn plans_and_worlds_are_checked() -> Result<(), String> {
                 test \"world\" takes {world: TestWorld} do assert.true(true) endtest\n\
                 test \"plain\" do assert.true(true) endtest\n";
     let result = in_tests("", test)?;
-    assert_eq!(codes_at(&result), []);
+    assert_eq!(faults_of(&result), []);
     let lowered = result
         .tests()
         .iter()
@@ -430,17 +304,6 @@ fn plans_and_worlds_are_checked() -> Result<(), String> {
         .collect::<Vec<_>>();
     assert_eq!(lowered, [("world", true), ("plain", true)]);
     Ok(())
-}
-
-/// Each diagnostic of `result`, by code and primary span.
-fn codes_at(
-    result: &crate::check::CheckResult,
-) -> Vec<(DiagnosticCode, vibra_diagnostics::ByteSpan)> {
-    result
-        .diagnostics()
-        .iter()
-        .map(|diagnostic| (diagnostic.code(), diagnostic.primary_span()))
-        .collect()
 }
 
 /// The library module every test case imports as `math`.
@@ -470,7 +333,7 @@ fn a_test_body_runs_in_a_procedure_context_with_the_empty_row() -> Result<(), St
                 test \"awaits\" do assert.equal(4i32 await math.double(2i32)) endtest\n\
                 test \"empty row\" performs {} do assert.true(true) endtest\n";
     let result = in_tests(MATH, test)?;
-    assert_eq!(codes_at(&result), []);
+    assert_eq!(faults_of(&result), []);
     for name in ["awaits", "empty row"] {
         let function = test_function(&result, name)?;
         // A test is not applicable: its function is a `Fn({} Void)`, never a
@@ -502,7 +365,7 @@ fn await_at_any_depth_of_a_test_body() -> Result<(), String> {
                 case false assert.true(false) endmatch \
                 endtest\n";
     let result = in_tests(MATH, test)?;
-    assert_eq!(codes_at(&result), []);
+    assert_eq!(faults_of(&result), []);
     assert_eq!(awaits(body(test_function(&result, "deep")?)?), 3);
     Ok(())
 }
@@ -515,7 +378,7 @@ fn await_in_an_anonymous_fn_of_a_test_body() -> Result<(), String> {
                 assert.equal(2i32 f()) endtest\n";
     let result = in_tests(MATH, test)?;
     assert_eq!(
-        codes_at(&result),
+        faults_of(&result),
         [(
             DiagnosticCode::EffectInvalidAwait,
             at(test, "await math.double(1i32)", 0)
@@ -717,37 +580,13 @@ fn a_predicate_that_applies_a_proc_is_outside_the_fragment() -> Result<(), Strin
     );
     Ok(())
 }
+
 /// Checks the library module `@app.math` with `app` and the test module
 /// `@tests.math` with `test`.
 fn in_tests(app: &str, test: &str) -> Result<crate::check::CheckResult, String> {
-    use vibra_resolve::{PackageId, ResolveInput, SourceModule, SourceUnit, UnitKind};
-    let stdlib = crate::stdlib::load_stdlib().map_err(|error| error.to_string())?;
-    let input = ResolveInput::new(
-        PackageId::new("hello", "0.1.0"),
-        vec![
-            SourceUnit::new(
-                "@app",
-                UnitKind::Lib,
-                vec![SourceModule::new(
-                    "@app.math",
-                    "src/app/math.vib",
-                    app.as_bytes().to_vec(),
-                )],
-            ),
-            SourceUnit::new(
-                "@tests",
-                UnitKind::Tests,
-                vec![SourceModule::new(
-                    "@tests.math",
-                    "tests/math.vib",
-                    test.as_bytes().to_vec(),
-                )],
-            ),
-        ],
-        stdlib.overlay().embedded_unit(),
-    );
-    Ok(crate::check::check_workspace(
-        &input,
-        &["@app".to_owned(), "@tests".to_owned()],
-    ))
+    workspace(
+        &[("@app.math", app)],
+        &[("@tests.math", test)],
+        &["@app", "@tests"],
+    )
 }

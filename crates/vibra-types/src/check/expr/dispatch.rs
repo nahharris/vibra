@@ -430,7 +430,7 @@ impl<'a> BodyChecker<'_, 'a> {
     ) -> (Found, Vec<Goal>) {
         let program = self.program;
         let none = (Found::None, Vec::new());
-        if program.prelude_interface("Encodable") == Some(interface)
+        if program.library_interface(Library::Encodable) == Some(interface)
             && arguments.is_empty()
             && !matches!(
                 receiver,
@@ -586,9 +586,9 @@ impl<'a> BodyChecker<'_, 'a> {
             };
             return (Found::One(evidence), goals);
         }
-        let structural = ["Equatable", "Ordered"]
+        let structural = [Library::Equatable, Library::Ordered]
             .into_iter()
-            .any(|name| program.prelude_interface(name) == Some(interface));
+            .any(|library| program.library_interface(library) == Some(interface));
         let shaped = matches!(
             receiver,
             Type::Atom | Type::AtomSingleton(_) | Type::Tuple(_) | Type::Record(_)
@@ -1391,7 +1391,7 @@ impl<'a> BodyChecker<'_, 'a> {
     /// Whether `key`, a type that mentions a type parameter, does not
     /// implement `Ordered` under the bounds in scope.
     pub(in crate::check) fn open_key_fault(&self, key: &Type) -> bool {
-        let Some(ordered) = self.program.prelude_interface("Ordered") else {
+        let Some(ordered) = self.program.library_interface(Library::Ordered) else {
             return true;
         };
         !matches!(self.evidence(key, ordered, &[]), Found::One(_))

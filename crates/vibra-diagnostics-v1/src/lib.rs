@@ -35,12 +35,10 @@
 )]
 
 mod diagnostic;
-mod line_index;
 mod registry;
 mod span;
 
 pub use diagnostic::{Diagnostic, DocumentRevision, Fix, RelatedSpan};
-pub use line_index::{LineIndex, Position};
 pub use registry::{
     DiagnosticCode, Domain, FixCapability, Level, UnknownDiagnosticCode,
 };

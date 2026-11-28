@@ -2,7 +2,7 @@ id = "V2-SRC-DECL-test-two-params"
 rule = "V2-SRC-DECL-test-two-params"
 profile = "readerV2"
 operation = "reader"
-description = "01-source-language.md#test: a test takes exactly one bare-name parameter; two is an invalid form at the takes section (Q15)"
+description = "01-source-language.md#test: a test takes exactly one bare-name parameter; two is an invalid form at the takes section"
 
 [inputs]
 source = "input.vib"

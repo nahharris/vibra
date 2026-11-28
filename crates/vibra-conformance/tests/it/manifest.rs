@@ -1,11 +1,14 @@
-//! The manifest rows of the step 02 test matrix, and the corpus layout and
-//! rule-status rows that need a corpus on disk.
+//! Case manifests, and the corpus layout, rule statuses and snapshot
+//! comparisons that need a corpus on disk.
+
+use std::path::Path;
 
 use crate::support::{reader_case, rules, scratch_directory, write};
 
 use vibra_conformance::{
-    CaseManifest, ConformanceOperation, ConformanceProfile, Corpus, CorpusError,
-    RuleIndex, Verdict, parse_identity,
+    CaseManifest, CaseStatus, ConformanceOperation, ConformanceProfile,
+    ConformanceRunner, Corpus, CorpusError, RuleIndex, Verdict, corpus_root,
+    parse_identity, standard_dispatcher,
 };
 
 /// A reader manifest with `profile` and `operation` substituted.
@@ -474,9 +477,11 @@ fn a_case_under_its_prefix_directory_loads() {
     let corpus = Corpus::discover(&root).expect("the corpus loads");
     assert_eq!(corpus.len(), 1);
     let case = &corpus.cases()[0];
-    let documents = case.input_documents().expect("the input reads");
-    assert_eq!(documents[0].source_id, "input.vibon");
-    assert_eq!(documents[0].bytes, b"{}");
+    assert_eq!(case.manifest().id, id);
+    assert_eq!(
+        case.read_bytes("input.vibon").expect("the input reads"),
+        b"{}"
+    );
 }
 
 #[test]
@@ -592,11 +597,6 @@ fn the_committed_rule_index_has_its_header_and_decodes() {
     RuleIndex::parse(&text).expect("it decodes");
 }
 
-/// The repository root, two levels above this crate.
-fn repository() -> std::path::PathBuf {
-    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
-}
-
 /// 06 "Host world": the shipped launcher has no user-selectable world, and
 /// conformance never launches on the process.
 #[test]
@@ -619,38 +619,73 @@ fn the_handler_constructs_no_system_launch() {
     assert!(searched > 0);
 }
 
-/// 07 "Persistent observations": the hello run against its hand-written
-/// observation matches, and one changed byte of stdout is a mismatch that
-/// names `stdout`.
+/// 07 "Persistent observations": a `targetRun` snapshot is compared as a
+/// decoded value whose startup failures are compared without their message.
+/// The hello run and the refused run match their hand-written observations,
+/// the refused one with another message, and one changed byte of the hello
+/// run's stdout is a mismatch.
 #[test]
-fn the_target_run_observation_is_compared_field_by_field() {
-    use vibra_workspace::run::{Launch, run_target};
-    use vibra_workspace::{
-        HostWorld, MemoryBudget, SourceSnapshot, discover_project_at,
+fn the_target_run_observation_is_compared_without_failure_messages() {
+    fn copy(from: &Path, to: &Path) {
+        std::fs::create_dir_all(to).expect("create a case directory");
+        for entry in std::fs::read_dir(from).expect("a case directory reads") {
+            let path = entry.expect("a directory entry").path();
+            let target = to.join(path.file_name().expect("a file name"));
+            if path.is_dir() {
+                copy(&path, &target);
+            } else {
+                std::fs::copy(&path, &target).expect("copy a case file");
+            }
+        }
+    }
+    let ids = ["V2-RUNTIME-run-hello", "V2-RUNTIME-run-required-refused"];
+    let committed = Corpus::discover(corpus_root()).expect("the corpus loads");
+    let base = scratch_directory("target-run");
+    let mut rows = Vec::new();
+    for id in ids {
+        let case = committed
+            .cases()
+            .iter()
+            .find(|case| case.manifest().id == id)
+            .expect("the case is in the corpus");
+        rows.push(case.manifest().rule.clone());
+        copy(case.directory(), &base.join("cases/RUNTIME").join(id));
+    }
+    let rows: Vec<(&str, &str)> =
+        rows.iter().map(|rule| (rule.as_str(), "active")).collect();
+    write(&base, "rules.tsv", &rules(&rows));
+    let edit = |id: &str, from: &str, to: &str| {
+        let path = base.join("cases/RUNTIME").join(id).join("target-run.vibon");
+        let text = std::fs::read_to_string(&path).expect("the observation reads");
+        let changed = text.replacen(from, to, 1);
+        assert_ne!(changed, text, "{id} writes `{from}`");
+        std::fs::write(&path, changed).expect("write the observation");
     };
-
-    let case = repository().join("conformance/cases/RUNTIME/V2-RUNTIME-run-hello");
-    let snapshot = discover_project_at(case.join("tree"))
-        .and_then(SourceSnapshot::capture)
-        .expect("the tree captures");
-    let world = HostWorld::default();
-    let observed = run_target(
-        &snapshot,
-        None,
-        Launch::World(&world),
-        MemoryBudget::DEFAULT,
-    )
-    .document();
-    let path = "target-run.vibon";
-    let expected = std::fs::read_to_string(case.join(path)).expect("the observation");
-    assert_eq!(
-        vibra_conformance::compare_target_run(path, expected.as_bytes(), &observed),
-        Ok(())
+    let statuses = || {
+        let corpus = Corpus::discover(base.join("cases")).expect("the copy loads");
+        ConformanceRunner::new(standard_dispatcher())
+            .run(&corpus)
+            .cases()
+            .iter()
+            .map(|case| (case.case_id.clone(), case.status.clone()))
+            .collect::<Vec<_>>()
+    };
+    edit(
+        "V2-RUNTIME-run-required-refused",
+        "message: \"the directory /missing is absent\"",
+        "message: \"another text for a person\"",
     );
-    let changed = expected.replacen("values: [104u8", "values: [105u8", 1);
-    assert_ne!(changed, expected);
-    let mismatch =
-        vibra_conformance::compare_target_run(path, changed.as_bytes(), &observed)
-            .expect_err("a mismatch");
-    assert!(mismatch.contains("`stdout`"), "{mismatch}");
+    for (id, status) in statuses() {
+        assert_eq!(status, CaseStatus::Passed, "{id}");
+    }
+    edit("V2-RUNTIME-run-hello", "values: [104u8", "values: [105u8");
+    let statuses = statuses();
+    assert!(
+        statuses
+            .iter()
+            .any(|(id, status)| id == "V2-RUNTIME-run-hello"
+                && matches!(status, CaseStatus::Failed { reason }
+                if reason.contains("targetRun snapshot mismatch"))),
+        "{statuses:?}"
+    );
 }

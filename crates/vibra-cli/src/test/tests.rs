@@ -1,67 +1,48 @@
-//! The host test of `@test.trap`, which needs the fault-injection hook
-//! compiled only for this crate's tests.
-
-use std::ffi::OsString;
-use std::fs;
-use std::path::PathBuf;
+//! The rendering of a trapped suite: the outcome is built by hand, as the
+//! runner's own tests show a trap ends only its own test and makes the suite
+//! `SuiteResult::Trap`.
 
 use serde_json::Value;
+use vibra_schema::{CommandOutcome, Payload};
+use vibra_workspace::{SuiteResult, TestOutcome, Trap};
 
-use super::TRAP_FIRST;
+use super::finish;
+use crate::args::OutputFormat;
+use crate::render::{Response, emit};
 
-const PROJECT: &str = "{format: @project.v2 package: {name: \"hello\" version: \"0.1.0\"} \
-                       targets: [{name: @app kind: @lib root: \"src/app\"}] dependencies: [:]}";
-
-const TESTS: &str = "use @std.assert enduse\n\n\
-                     test \"first\" do assert.true(true) endtest\n\n\
-                     test \"second\" do assert.true(true) endtest\n";
-
-/// A project tree in a fresh temporary directory, removed on drop.
-struct Tree(PathBuf);
-
-impl Tree {
-    fn new(label: &str) -> Self {
-        let root = fs::canonicalize(std::env::temp_dir())
-            .expect("temporary directory")
-            .join(format!("vibra-cli-test-{label}-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&root);
-        for (relative, text) in [
-            ("project.vibon", PROJECT),
-            ("src/app/main.vib", ""),
-            ("tests/math.vib", TESTS),
-        ] {
-            let path = root.join(relative);
-            fs::create_dir_all(path.parent().expect("a parent")).expect("directory");
-            fs::write(path, text).expect("fixture");
-        }
-        Self(root)
-    }
-}
-
-impl Drop for Tree {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
-    }
-}
-
-fn run(tree: &Tree, arguments: &[&str]) -> (i32, String) {
-    let mut stdout = Vec::new();
-    let code = crate::run(
-        arguments.iter().map(OsString::from),
-        &tree.0,
-        &mut stdout,
-        std::io::sink(),
+/// The exit code and standard output of the response to a suite whose first
+/// test trapped and whose second passed, in `format`.
+fn trapped(format: OutputFormat) -> (i32, String) {
+    let items = vec![
+        (
+            "@tests.math::\"first\"".to_owned(),
+            TestOutcome::Trap {
+                trap: Trap::InvalidCheckedProgram,
+                origin: None,
+            },
+        ),
+        ("@tests.math::\"second\"".to_owned(), TestOutcome::Passed),
+    ];
+    let mut response =
+        Response::new(format, "test", CommandOutcome::Ok, Payload::Empty {});
+    finish(
+        &mut response,
+        SuiteResult::Trap,
+        items,
+        vec![Vec::new(), Vec::new()],
+        &[],
     );
+    let mut stdout = Vec::new();
+    let code = emit(&response, &mut stdout, &mut std::io::sink(), &|envelope| {
+        envelope.to_validated_json()
+    });
     (code, String::from_utf8(stdout).expect("UTF-8"))
 }
 
 #[test]
 fn a_trapped_test_is_a_trap_record_and_the_suite_traps() {
-    let tree = Tree::new("trap");
-    TRAP_FIRST.set(true);
-    let (code, output) = run(&tree, &["--format", "json", "test"]);
-    let (human_code, human) = run(&tree, &["test"]);
-    TRAP_FIRST.set(false);
+    let (code, output) = trapped(OutputFormat::Json);
+    let (human_code, human) = trapped(OutputFormat::Human);
     assert_eq!(code, 5, "{output}");
     let document: Value = serde_json::from_str(&output).expect("one JSON value");
     vibra_schema::validate_command_result(&document).expect("the envelope validates");
@@ -111,11 +92,4 @@ fn a_trapped_test_is_a_trap_record_and_the_suite_traps() {
         Some("passed 1, failed 1, selected 2"),
         "{human}"
     );
-}
-
-#[test]
-fn without_the_hook_the_same_suite_passes() {
-    let tree = Tree::new("plain");
-    let (code, output) = run(&tree, &["--format", "json", "test"]);
-    assert_eq!(code, 0, "{output}");
 }

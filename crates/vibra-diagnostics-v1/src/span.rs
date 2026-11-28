@@ -51,17 +51,6 @@ impl ByteSpan {
         }
     }
 
-    /// A span of `length` bytes starting at `start`.
-    ///
-    /// Saturating, so no arithmetic here can overflow or wrap.
-    #[must_use]
-    pub const fn sized(start: usize, length: usize) -> Self {
-        Self {
-            start,
-            end: start.saturating_add(length),
-        }
-    }
-
     /// The first byte offset in the span.
     #[must_use]
     pub const fn start(self) -> usize {
@@ -93,17 +82,6 @@ impl ByteSpan {
     #[must_use]
     pub const fn contains(self, offset: usize) -> bool {
         self.start <= offset && offset < self.end
-    }
-
-    /// Whether `other` lies entirely within this span.
-    ///
-    /// Unlike [`Self::contains`], this is reflexive: every span contains
-    /// itself, and an empty span at a boundary is contained. A source-position
-    /// query needs that reading to find the smallest node containing a caret
-    /// sitting between two tokens.
-    #[must_use]
-    pub const fn contains_span(self, other: Self) -> bool {
-        self.start <= other.start && other.end <= self.end
     }
 
     /// The smallest span covering both operands.
@@ -159,36 +137,6 @@ mod tests {
             !span.contains(4),
             "half-open, so the start is not contained"
         );
-    }
-
-    #[test]
-    fn a_sized_span_ends_after_its_length() {
-        assert_eq!(ByteSpan::sized(2, 3), ByteSpan::new(2, 5));
-    }
-
-    #[test]
-    fn a_sized_span_saturates_rather_than_overflowing() {
-        let span = ByteSpan::sized(usize::MAX, 8);
-        assert_eq!(span.end(), usize::MAX);
-    }
-
-    #[test]
-    fn containment_is_half_open() {
-        let span = ByteSpan::new(2, 5);
-        assert!(!span.contains(1));
-        assert!(span.contains(2));
-        assert!(span.contains(4));
-        assert!(!span.contains(5), "the end offset is one past the span");
-    }
-
-    #[test]
-    fn span_containment_admits_the_boundaries() {
-        let outer = ByteSpan::new(2, 8);
-        assert!(outer.contains_span(outer), "containment is reflexive");
-        assert!(outer.contains_span(ByteSpan::empty_at(2)));
-        assert!(outer.contains_span(ByteSpan::empty_at(8)));
-        assert!(!outer.contains_span(ByteSpan::new(1, 8)));
-        assert!(!outer.contains_span(ByteSpan::new(2, 9)));
     }
 
     #[test]

@@ -1,4 +1,4 @@
-# Q9: counted after normalization over the effective allOf: 1 (allOf) + 3 (the
+# Counted after normalization over the effective allOf: 1 (allOf) + 3 (the
 # root rule, its names, one action) + 3 + k (the source rule, its names, one
 # action, k prefix names). k = 4089 gives 4096; k = 4090 gives 4097. Were prefix
 # names not entries, both restricts would be Result.ok.
@@ -6,7 +6,7 @@ id = "V2-GRANT-policy-4096-nodes"
 rule = "V2-GRANT-policy-4096-nodes"
 profile = "interpreterV2"
 operation = "workspaceTest"
-description = "03-effects.md#the-wire-form: an effective policy counted at 4,096 nodes and entries is Result.ok; one more entry is Err(ScopeError.policyTooComplex) (Q9)"
+description = "03-effects.md#the-wire-form: an effective policy counted at 4,096 nodes and entries is Result.ok; one more entry is Err(ScopeError.policyTooComplex)"
 
 [inputs]
 tree = "tree"

@@ -13,13 +13,16 @@ use vibra_ir::external::host::HostOp;
 use vibra_ir::{
     Arguments, BodyContext, CallTarget, Case, CheckedFunction, CheckedGlobal,
     CheckedModuleSet, CheckedProgram, ClosureBody, Constant, Construction,
-    ContractCall, EffectFault, Expr, FnType, FunctionBody, HostBinding, Implementation,
+    ContractCall, EffectFault, Expr, FunctionBody, HostBinding, Implementation,
     ImplementationRecord, InterfaceDefinition, InterfaceKey, InterfaceMember, IrError,
     Library, ModuleSetParts, NamedTypes, Node, ProcType, Row, SignatureRecord,
     SourceOrigin, Type, TypeBody, TypeDefinition, Value, Visibility,
 };
 
-use crate::{id, library_parts, library_type, node, origin, str_type};
+use crate::{
+    fn_type, id, library_parts, library_type, node, on_small_stack, origin, str_type,
+    variable, void,
+};
 
 const I: &str = "test.effects.I";
 const J: &str = "test.effects.J";
@@ -42,10 +45,6 @@ fn proc_type(parameters: Vec<Type>, result: Type, effects: Row) -> Type {
         result,
         effects,
     }))
-}
-
-fn fn_type(parameters: Vec<Type>, result: Type) -> Type {
-    Type::function(FnType::new(parameters, result))
 }
 
 /// An operation interface at `path` with one abstract member `p:
@@ -105,16 +104,6 @@ fn function(name: &str, ty: Type, body: Node, slot_count: usize) -> CheckedFunct
         origin: origin(),
         context: BodyContext::Pure,
     }
-}
-
-fn void() -> Node {
-    node(Expr::Literal(
-        Constant::new(Type::Void, Value::Void).unwrap(),
-    ))
-}
-
-fn variable(slot: usize, value_type: Type) -> Node {
-    node(Expr::Variable { slot, value_type })
 }
 
 fn await_node(plan: Node) -> Node {
@@ -811,23 +800,18 @@ fn an_origin_absent() {
 /// Architecture, risk 5: no host stack grows with the depth of a body.
 #[test]
 fn deep_body() {
-    let validated = std::thread::Builder::new()
-        .stack_size(256 * 1024)
-        .spawn(|| {
-            let mut body = await_node(build_p(I, 0));
-            for _ in 0..100_000 {
-                body = node(Expr::Sequence(vec![body]));
-            }
-            let f = function(
-                "f",
-                proc_type(vec![interface_type(I)], Type::Void, row(&[I])),
-                body,
-                1,
-            );
-            build(vec![f]).is_ok()
-        })
-        .unwrap()
-        .join()
-        .unwrap();
+    let validated = on_small_stack(|| {
+        let mut body = await_node(build_p(I, 0));
+        for _ in 0..100_000 {
+            body = node(Expr::Sequence(vec![body]));
+        }
+        let f = function(
+            "f",
+            proc_type(vec![interface_type(I)], Type::Void, row(&[I])),
+            body,
+            1,
+        );
+        build(vec![f]).is_ok()
+    });
     assert!(validated);
 }

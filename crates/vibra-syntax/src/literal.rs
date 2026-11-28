@@ -14,6 +14,8 @@ use std::cmp::Ordering;
 use std::fmt;
 use std::str::Chars;
 
+use vibra_diagnostics::ByteSpan;
+
 /// The exact type an integer suffix fixes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum IntegerSuffix {
@@ -205,7 +207,8 @@ pub(crate) fn scan_number(rest: &str) -> NumberScan {
 }
 
 /// Splits a well-formed number token into its body and its suffix text.
-pub(crate) fn split_number(token: &str) -> (&str, &str) {
+#[must_use]
+pub fn split_number(token: &str) -> (&str, &str) {
     let bytes = token.as_bytes();
     let mut at = usize::from(bytes.first() == Some(&b'-'));
     while bytes
@@ -384,6 +387,18 @@ pub fn canonical_string(value: &str) -> String {
     }
     spelled.push('"');
     spelled
+}
+
+/// The span record of `span` in the document `source_id`:
+/// `{sourceId: "…" start: …u64 end: …u64}`.
+#[must_use]
+pub fn span_record(source_id: &str, span: ByteSpan) -> String {
+    format!(
+        "{{sourceId: {} start: {}u64 end: {}u64}}",
+        canonical_string(source_id),
+        span.start(),
+        span.end()
+    )
 }
 
 /// The canonical spelling of a character literal, with `\'` for the quote.

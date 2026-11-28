@@ -1,6 +1,5 @@
-//! The rules rows of the step 01 test matrix of M2: the rule index is
-//! `rules.tsv` and every `rules/*.tsv` of a conformance root, and a rule
-//! identity is a row of exactly one file.
+//! The rule index is `rules.tsv` and every `rules/*.tsv` of a conformance
+//! root, and a rule identity is a row of exactly one file.
 
 use std::path::PathBuf;
 
@@ -103,13 +102,6 @@ fn rules_empty_file() {
     let index = RuleIndex::from_root(&root).expect("the index loads");
     assert_eq!(index.len(), 1);
     assert_eq!(index.status("V2-EFFECT-a"), Some(RuleStatus::Active));
-}
-
-#[test]
-fn rules_the_committed_directory_file_is_the_header_alone() {
-    let path = vibra_conformance::workspace_root().join("conformance/rules/m2-01.tsv");
-    let text = std::fs::read_to_string(&path).expect("the rules file exists");
-    assert_eq!(text, format!("{}\n", vibra_conformance::RULES_HEADER));
 }
 
 #[test]

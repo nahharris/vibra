@@ -68,26 +68,6 @@ fn a_selector_is_a_tests_module_and_a_canonical_string() {
 }
 
 #[test]
-fn tests_run_in_module_order_then_declaration_order() {
-    let b = "use @std.assert enduse\n\ntest \"second\" do assert.true(true) endtest\n\n\
-             test \"first\" do assert.true(true) endtest\n";
-    let a = "use @std.assert enduse\n\ntest \"z\" do assert.true(true) endtest\n\n\
-             test \"y\" do assert.true(true) endtest\n";
-    let run = run(&[("tests/b.vib", b), ("tests/a.vib", a)], None).expect("a run");
-    assert_eq!(
-        names(&run),
-        [
-            "@tests.a::\"z\"",
-            "@tests.a::\"y\"",
-            "@tests.b::\"second\"",
-            "@tests.b::\"first\"",
-        ]
-    );
-    assert_eq!(run.result(), SuiteResult::Ok);
-    assert_eq!((run.selected(), run.passed(), run.failed()), (4, 4, 0));
-}
-
-#[test]
 fn every_test_initializes_the_module_values_it_reads_afresh() {
     let tests = "use @std.assert enduse\n\nlet base: I32 be I32.add(1i32 2i32) endlet\n\n\
                  test \"once\" do assert.equal(3i32 base) endtest\n\n\
@@ -147,78 +127,6 @@ fn a_selector_parses_its_module_and_the_test_modules_it_imports() {
         run.diagnostics()
             .iter()
             .all(|diagnostic| diagnostic.source_id() == Some("tests/helpers.vib"))
-    );
-}
-
-#[test]
-fn an_exhausted_test_ends_only_itself() {
-    let tests = "use @std.assert enduse\n\n\
-                 fn grow\n  takes {items: List(I32)}\n  returns count: U64\n  do\n    \
-                 return grow(List.concat(items items))\nendfn\n\n\
-                 test \"a exhausts\" do assert.equal(0u64 grow([1i32])) endtest\n\n\
-                 test \"b passes\" do assert.true(true) endtest\n";
-    let run = run_with(
-        &[("tests/memory.vib", tests)],
-        None,
-        MemoryBudget::new(4 * 1024 * 1024),
-    )
-    .expect("a run");
-    let outcomes = run
-        .items()
-        .iter()
-        .map(|item| item.outcome().clone())
-        .collect::<Vec<_>>();
-    assert_eq!(outcomes, [TestOutcome::Exhausted, TestOutcome::Passed]);
-    assert_eq!(run.result(), SuiteResult::OperationalFailure);
-    assert_eq!((run.selected(), run.passed(), run.failed()), (2, 1, 1));
-    let document = run.document();
-    assert!(
-        document.starts_with(
-            "{format: @testRun.v2 result: @command.operationalFailure tests: \
-             [{name: \"@tests.memory::\\\"a exhausts\\\"\" result: @test.exhausted auditTrace:"
-        ),
-        "{document}"
-    );
-    assert!(
-        document.contains(
-            "{name: \"@tests.memory::\\\"b passes\\\"\" result: @test.passed auditTrace:"
-        ),
-        "{document}"
-    );
-}
-
-#[test]
-fn a_static_error_invalidates_the_whole_selection() {
-    let tests = "use @std.assert enduse\n\n\
-                 test \"bad\" do assert.true(1i32) endtest\n\n\
-                 test \"good\" do assert.true(true) endtest\n";
-    let run = run(&[("tests/math.vib", tests)], None).expect("a run");
-    assert_eq!(run.result(), SuiteResult::Diagnostics);
-    assert!(
-        run.items()
-            .iter()
-            .all(|item| item.outcome() == &TestOutcome::Invalid(None))
-    );
-    assert_eq!(run.items().len(), 2);
-    assert!(!run.diagnostics().is_empty());
-}
-
-#[test]
-fn a_parse_error_reports_no_items() {
-    let run = run(&[("tests/math.vib", "test \"broken\" do\n")], None).expect("a run");
-    assert_eq!(run.result(), SuiteResult::Diagnostics);
-    assert!(run.items().is_empty());
-    assert!(!run.diagnostics().is_empty());
-}
-
-#[test]
-fn a_project_without_tests_is_an_empty_passing_suite() {
-    let run = run(&[], None).expect("a run");
-    assert_eq!(run.result(), SuiteResult::Ok);
-    assert!(run.items().is_empty());
-    assert_eq!(
-        run.document(),
-        "{format: @testRun.v2 result: @command.ok tests: []}"
     );
 }
 

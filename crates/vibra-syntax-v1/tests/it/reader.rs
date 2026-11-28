@@ -4,8 +4,7 @@ use std::path::Path;
 
 use vibra_diagnostics_v1::{ByteSpan, DiagnosticCode};
 use vibra_syntax_v1::{
-    DocumentMode, DocumentModeError, SyntaxKind, TokenKind, parse_document,
-    parse_with_mode,
+    DocumentMode, DocumentModeError, SyntaxKind, TokenKind, parse_data, parse_with_mode,
 };
 
 #[test]
@@ -36,8 +35,9 @@ fn lexer_preserves_utf8_tokens_trivia_and_half_open_byte_spans() {
 fn parser_handles_deeply_nested_lists_without_recursive_construction() {
     const DEPTH: usize = 20_000;
     let source = format!("{}value{}", "(".repeat(DEPTH), ")".repeat(DEPTH));
-    let document = parse_document(Path::new("deep.vib"), &source)
-        .expect(".vib selects source mode");
+    let document =
+        parse_with_mode(Path::new("deep.vib"), &source, DocumentMode::Source)
+            .expect(".vib selects source mode");
 
     assert!(document.accepted());
     assert_eq!(document.root().to_source(), source);
@@ -57,7 +57,7 @@ fn parser_handles_deeply_nested_lists_without_recursive_construction() {
 
 #[test]
 fn empty_root_is_composite_and_has_no_leaf_text() {
-    let document = parse_document(Path::new("empty.vib"), "")
+    let document = parse_with_mode(Path::new("empty.vib"), "", DocumentMode::Source)
         .expect("empty source document parses");
 
     assert_eq!(document.root().kind(), SyntaxKind::Root);
@@ -68,7 +68,7 @@ fn empty_root_is_composite_and_has_no_leaf_text() {
 #[test]
 fn extension_selects_mode_without_content_sniffing_or_fallback() {
     let source = "(array @looks-like-source)";
-    let source_document = parse_document(Path::new("project.vibon"), source)
+    let source_document = parse_data(Path::new("project.vibon"), source)
         .expect(".vibon selects data mode even for source-shaped text");
     assert_eq!(source_document.mode(), DocumentMode::Data);
     assert!(source_document.accepted());

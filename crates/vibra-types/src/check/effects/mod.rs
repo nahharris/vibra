@@ -6,27 +6,20 @@
 //! check. The shared files of the checker (`declare.rs`, `interfaces.rs`,
 //! `expr.rs`, `lower.rs`, `testing.rs`) take no such decision of their own:
 //! each calls one hook here at the place the decision is taken, and the hook
-//! answers. A hook whose step has not landed reports the `@tool.unavailable`
-//! the form has, at the same span and with the same message, so the forms
-//! stay unavailable until that step lifts them.
+//! answers. A form a hook does not support is the `@tool.unavailable` the
+//! form has, at its span.
 //!
-//! Each file belongs to the step of `docs/roadmap/v0.0.2/m2/` that fills it;
-//! a later step that fixes it says so in its guide.
+//! | File | Hooks |
+//! | --- | --- |
+//! | [`rows`] | [`rows::resolve`], [`rows::section`] |
+//! | [`procs`] | [`procs::declare`], [`procs::identity_kind`], [`procs::header`], [`procs::describe`], [`procs::callable_type`], [`procs::applied`], [`procs::apply`], [`procs::named_as_value`], [`procs::await_expr`], [`procs::finish_await`], [`procs::stub`], [`procs::lower`], [`procs::test_header`], [`procs::test_context`] |
+//! | [`members`] | [`members::contract_member`], [`members::contract_row`], [`members::identity_kind`], [`members::member_type`], [`members::impl_member`], [`members::applied`], [`members::named_as_value`] |
+//! | [`analysis`] | [`analysis::check_bodies`] |
+//! | [`values`] | [`values::written_type`], [`values::anonymous`] |
+//! | [`grants`] | [`grants::check_constant`], [`grants::is_encodable`] |
+//! | [`entry`] | [`entry::check_targets`], [`entry::entry_signature`] |
 //!
-//! | File | Hooks | Step |
-//! | --- | --- | --- |
-//! | [`rows`] | [`rows::resolve`], [`rows::section`] | 08 |
-//! | [`procs`] | [`procs::declare`], [`procs::identity_kind`], [`procs::header`], [`procs::describe`], [`procs::callable_type`], [`procs::applied`], [`procs::apply`], [`procs::named_as_value`], [`procs::await_expr`], [`procs::finish_await`], [`procs::stub`], [`procs::lower`] | 05 |
-//! | [`procs`] | [`procs::test_header`], [`procs::test_context`] | 07, 21 |
-//! | [`members`] | [`members::contract_member`], [`members::contract_row`], [`members::identity_kind`], [`members::member_type`], [`members::impl_member`], [`members::applied`], [`members::named_as_value`] | 08, 19 |
-//! | [`analysis`] | [`analysis::check_bodies`] | 09 |
-//! | [`values`] | [`values::written_type`], [`values::anonymous`] | 10 |
-//! | [`grants`] | [`grants::check_constant`] | fix A |
-//! | [`grants`] | [`grants::is_encodable`] | fix C |
-//! | [`entry`] | [`entry::check_targets`], [`entry::entry_signature`] | 25 |
-//!
-//! The hooks of [`procs`] read rows through [`rows`], and steps 12 and 24
-//! fix the files of their reviews.
+//! The hooks of [`procs`] read rows through [`rows`].
 
 pub(crate) mod analysis;
 pub(crate) mod entry;

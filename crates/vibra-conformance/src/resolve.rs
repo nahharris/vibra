@@ -6,7 +6,7 @@
 //! resolution. A case with an error is refuted; warnings leave it accepted.
 
 use vibra_resolve::resolve;
-use vibra_workspace::{SourceSnapshot, discover_project_at, resolve_input};
+use vibra_workspace::resolve_input;
 
 use crate::corpus::Case;
 use crate::manifest::Verdict;
@@ -25,21 +25,11 @@ impl ProfileHandler for ResolveHandler {
     }
 
     fn run(&self, case: &Case) -> Result<CaseObservation, HandlerError> {
-        let tree = case
-            .tree_directory()
-            .map_err(|error| HandlerError::new(error.to_string()))?
-            .ok_or_else(|| HandlerError::new("a resolve case declares one tree"))?;
-        let snapshot =
-            match discover_project_at(&tree).and_then(SourceSnapshot::capture) {
-                Ok(snapshot) => snapshot,
-                Err(diagnostics) => {
-                    let mut observation = CaseObservation::new(Verdict::Refuted);
-                    observation.diagnostics = diagnostics;
-                    return Ok(observation);
-                }
-            };
-        let input = resolve_input(&snapshot)
-            .map_err(|error| HandlerError::new(error.to_string()))?;
+        let snapshot = match case.snapshot()? {
+            Ok(snapshot) => snapshot,
+            Err(diagnostics) => return Ok(CaseObservation::refuted(diagnostics)),
+        };
+        let input = resolve_input(&snapshot)?;
         let resolution = resolve(&input);
         let verdict = if resolution.has_errors() {
             Verdict::Refuted

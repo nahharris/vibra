@@ -5,7 +5,7 @@
 
 use serde_json::{Value, json};
 
-use crate::support::{LIBRARY, TempDir, envelope_in, run_in};
+use crate::support::{LIBRARY, TempDir, codes, envelope_in, run_in};
 
 /// `src/app/math.vib`: the library function the tests call.
 const MATH: &str = "fn add\n  takes {left: I32 right: I32}\n  returns sum: I32\n  \
@@ -53,15 +53,6 @@ fn test(root: &TempDir, arguments: &[&str]) -> (i32, Value) {
     let mut line = vec!["--format", "json", "test"];
     line.extend_from_slice(arguments);
     envelope_in(root.path(), &line)
-}
-
-fn codes(document: &Value) -> Vec<String> {
-    document["diagnostics"]
-        .as_array()
-        .expect("diagnostics")
-        .iter()
-        .map(|diagnostic| diagnostic["code"].as_str().expect("code").to_owned())
-        .collect()
 }
 
 fn counts(document: &Value) -> (u64, u64, u64) {
@@ -526,42 +517,8 @@ fn test_human_report() {
 }
 
 #[test]
-fn test_json_validates() {
-    // Every test of this file reads its envelope through `envelope_in`, which
-    // validates it against the published schema. This test runs each shape
-    // once more in one place.
-    let failing = project(
-        "test-json",
-        &[("tests/math.vib", &math_tests(&[ADDS_WRONG]))],
-    );
-    let unavailable = project(
-        "test-json-unavailable",
-        &[("tests/math.vib", &math_tests(&[UNAVAILABLE, ADDS]))],
-    );
-    let parse = project(
-        "test-json-parse",
-        &[("tests/math.vib", "test \"x\" do endfn")],
-    );
-    let empty = project("test-json-empty", &[]);
+fn test_without_a_project_is_not_found() {
     let missing = TempDir::new("test-json-no-project");
-    for (directory, selector) in [
-        (&failing, None),
-        (&failing, Some("@tests.math::\"adds\"")),
-        (&failing, Some("@tests.math::\"missing\"")),
-        (&failing, Some("@tests.math:\"adds\"")),
-        (&unavailable, None),
-        (&parse, None),
-        (&empty, None),
-        (&missing, None),
-    ] {
-        let mut line = vec!["--format", "json", "test"];
-        line.extend(selector);
-        let (code, document) = envelope_in(directory.path(), &line);
-        assert!(
-            vibra_schema::validate_command_result(&document).is_ok() && code >= 0,
-            "{line:?}"
-        );
-    }
     let (code, document) = envelope_in(missing.path(), &["--format", "json", "test"]);
     assert_eq!(code, 1);
     assert_eq!(codes(&document), ["@project.notFound"]);

@@ -33,10 +33,10 @@ use vibra_syntax::source::{Declaration, Module, SourceOptions, TypeBody, module}
 use vibra_syntax::{Document, parse_source_with};
 
 pub use external::check_externals;
-pub use identity::declaration_identity;
 pub use manifest::manifest_schema;
 pub use names::LibraryNames;
 pub use roles::Role;
+pub use vibra_resolve::declaration_identity;
 
 use manifest::{MANIFEST_SOURCE_ID, Manifest, order_faults};
 pub(crate) use names::NARROWING_TYPES;

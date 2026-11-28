@@ -32,7 +32,7 @@ use crate::{
 };
 
 /// The most goals one conformance question may visit.
-const GOAL_LIMIT: usize = 4096;
+pub(crate) const GOAL_LIMIT: usize = 4096;
 
 /// The evidence a body is checked under: the binders of its signature, with
 /// their bounds, and the interface whose member it is, when it is the

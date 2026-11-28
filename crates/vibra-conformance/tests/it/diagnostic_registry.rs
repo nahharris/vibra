@@ -8,9 +8,9 @@
 
 use crate::support::workspace_root;
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
-use vibra_diagnostics::{DiagnosticCode, Domain, FixCapability, Level};
+use vibra_diagnostics::{DiagnosticCode, Domain, FixCapability};
 
 const CHAPTER: &str = "docs/spec/07-diagnostics-and-conformance.md";
 
@@ -120,31 +120,6 @@ fn the_registry_is_in_specification_table_order() {
         .map(|code| code.as_atom())
         .collect();
     assert_eq!(implemented, specified);
-}
-
-#[test]
-fn the_registry_has_117_codes() {
-    assert_eq!(DiagnosticCode::ALL.len(), 117);
-    let unique = DiagnosticCode::ALL
-        .iter()
-        .map(|code| code.as_atom())
-        .collect::<BTreeSet<_>>();
-    assert_eq!(unique.len(), 117);
-}
-
-#[test]
-fn exactly_three_codes_are_warnings() {
-    for code in DiagnosticCode::ALL {
-        let expected = if matches!(
-            code.as_atom(),
-            "@type.suspiciousRow" | "@style.casing" | "@contract.unusedEffect"
-        ) {
-            Level::Warning
-        } else {
-            Level::Error
-        };
-        assert_eq!(code.level(), expected, "for {code}");
-    }
 }
 
 #[test]

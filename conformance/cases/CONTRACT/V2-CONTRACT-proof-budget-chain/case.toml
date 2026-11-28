@@ -2,7 +2,7 @@ id = "V2-CONTRACT-proof-budget-chain"
 rule = "V2-CONTRACT-proof-budget-chain"
 profile = "staticV2"
 operation = "workspaceCheck"
-description = "05-tooling.md#limits: a chain of twenty lessOrEqual facts is closed by INT-7 within the proof budget of the limit profile m1Default"
+description = "05-tooling.md#program-arguments-execution-and-evaluation: a chain of twenty lessOrEqual facts is closed by INT-7 within the proof budget of the limit profile m1Default"
 
 [inputs]
 tree = "tree"

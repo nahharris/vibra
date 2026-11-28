@@ -13,173 +13,23 @@
 
 mod effects;
 mod encode;
+mod fixtures;
 mod instantiation;
-mod migration;
 mod registry;
 mod shape;
 mod soundness;
 
-use vibra_diagnostics::ByteSpan;
+pub(crate) use fixtures::*;
+
 use vibra_ir::{
-    Case, Expr, FnType, InterfaceDefinition, InterfaceMember, Library, LibraryTypes,
-    ModuleSetParts, NamedTypes, Node, SignatureRecord, SourceOrigin, Type, TypeBody,
-    TypeDefinition, TypeId, TypeTable, Visibility,
+    FnType, InterfaceDefinition, InterfaceMember, Library, LibraryTypes,
+    ModuleSetParts, SignatureRecord, Type, TypeDefinition, TypeTable,
 };
-
-/// The chapter's placeholder identity.
-pub const SEED: &str =
-    "sha256:213e3a01ef10d7c10032616f8ab0da9a97fb729b9f98d723f4beb3158a25e2ad";
-
-pub fn id(path: &str) -> TypeId {
-    TypeId::new(path, SEED).unwrap()
-}
-
-pub fn origin() -> SourceOrigin {
-    SourceOrigin::new("test.vibra", ByteSpan::new(0, 0))
-}
-
-pub fn node(expr: Expr) -> Node {
-    Node::new(expr, origin())
-}
-
-/// The canonical path of each library declaration in the fixtures.
-pub fn path(library: Library) -> &'static str {
-    match library {
-        Library::Bool => "std.bool.Bool",
-        Library::Str => "std.str.Str",
-        Library::Bytes => "std.bytes.Bytes",
-        Library::Option => "std.option.Option",
-        Library::Result => "std.result.Result",
-        Library::Dict => "std.dict.Dict",
-        Library::Iter => "std.iter.Iter",
-        Library::Equatable => "std.equatable.Equatable",
-        Library::Ordered => "std.ordered.Ordered",
-        Library::Encodable => "std.encodable.Encodable",
-        Library::Ordering => "std.ordering.Ordering",
-        Library::ArithmeticError => "std.number.ArithmeticError",
-        Library::ConversionError => "std.number.ConversionError",
-    }
-}
-
-/// `{kind: @declared …}` of a library type in the fixtures, with its
-/// arguments' encodings.
-pub fn declared(library: Library, arguments: &str) -> String {
-    format!(
-        "{{kind: @declared path: @{} seed: \"{SEED}\" arguments: [{arguments}]}}",
-        path(library)
-    )
-}
-
-pub fn library_type(library: Library, arguments: Vec<Type>) -> Type {
-    Type::Declared(id(path(library)), arguments)
-}
-
-pub fn bool_type() -> Type {
-    library_type(Library::Bool, Vec::new())
-}
-
-pub fn str_type() -> Type {
-    library_type(Library::Str, Vec::new())
-}
-
-pub fn option(value: Type) -> Type {
-    library_type(Library::Option, vec![value])
-}
 
 /// The library bindings of the fixtures: the ten roles but `@equatable`,
 /// `@ordered`, and `@encodable`, and the three core types.
 pub fn library() -> LibraryTypes {
-    Library::ALL
-        .into_iter()
-        .filter(|library| {
-            !matches!(
-                library,
-                Library::Equatable | Library::Ordered | Library::Encodable
-            )
-        })
-        .fold(LibraryTypes::new(), |bindings, library| {
-            bindings.with(library, id(path(library)))
-        })
-}
-
-fn variant(library: Library, parameters: &[&str], cases: Vec<Case>) -> TypeDefinition {
-    TypeDefinition::new(
-        id(path(library)),
-        parameters
-            .iter()
-            .map(|name| vibra_ir::Binder::new(*name, None).unwrap())
-            .collect(),
-        TypeBody::Variant(cases),
-        None,
-        Visibility::Public,
-    )
-    .unwrap()
-}
-
-fn plain(names: &[&str]) -> Vec<Case> {
-    names
-        .iter()
-        .map(|name| Case::new(*name, Vec::new()))
-        .collect()
-}
-
-fn wrapper(
-    library: Library,
-    parameters: &[&str],
-    representation: Type,
-) -> TypeDefinition {
-    TypeDefinition::new(
-        id(path(library)),
-        parameters
-            .iter()
-            .map(|name| vibra_ir::Binder::new(*name, None).unwrap())
-            .collect(),
-        TypeBody::Wrapper(representation),
-        None,
-        Visibility::Private,
-    )
-    .unwrap()
-}
-
-/// The definitions of the library types in the fixtures.
-pub fn library_definitions() -> Vec<TypeDefinition> {
-    vec![
-        variant(Library::Bool, &[], plain(&["false", "true"])),
-        variant(
-            Library::Option,
-            &["T"],
-            vec![
-                Case::new("none", Vec::new()),
-                Case::new("some", vec![("value".to_owned(), Type::Binder(0))]),
-            ],
-        ),
-        variant(
-            Library::Result,
-            &["T", "E"],
-            vec![
-                Case::new("ok", vec![("value".to_owned(), Type::Binder(0))]),
-                Case::new("err", vec![("error".to_owned(), Type::Binder(1))]),
-            ],
-        ),
-        variant(Library::Ordering, &[], plain(&["less", "equal", "greater"])),
-        variant(
-            Library::ArithmeticError,
-            &[],
-            plain(&["overflow", "divisionByZero", "invalidShift"]),
-        ),
-        variant(
-            Library::ConversionError,
-            &[],
-            plain(&["outOfRange", "invalidFormat", "unrepresentable"]),
-        ),
-        wrapper(Library::Str, &[], Type::list(Type::Char)),
-        wrapper(Library::Bytes, &[], Type::list(Type::U8)),
-        wrapper(
-            Library::Dict,
-            &["K", "V"],
-            Type::list(Type::Tuple(vec![Type::Binder(0), Type::Binder(1)])),
-        ),
-    ]
+    library_without(&[Library::Equatable, Library::Ordered, Library::Encodable])
 }
 
 /// `Iter`, with its associated type `Item` and its member
@@ -224,12 +74,6 @@ pub fn library_parts() -> ModuleSetParts {
         interfaces: vec![iter_interface()],
         ..ModuleSetParts::default()
     }
-}
-
-/// `{a: T …}` in the given order.
-pub fn named(entries: Vec<(&str, Type)>) -> NamedTypes {
-    NamedTypes::new(entries.into_iter().map(|(name, ty)| (name.to_owned(), ty)))
-        .unwrap()
 }
 
 /// The runtime chapter's "Traps": exactly two, each with its code.

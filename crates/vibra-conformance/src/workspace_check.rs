@@ -10,7 +10,7 @@
 //! judged by the same rule over the diagnostics that stopped it, so a project
 //! file past the source nesting limit is `unknown`.
 
-use vibra_workspace::{SourceSnapshot, check_snapshot, discover_project_at};
+use vibra_workspace::check_snapshot;
 
 use crate::corpus::Case;
 use crate::interpret::check_verdict;
@@ -29,15 +29,7 @@ impl ProfileHandler for WorkspaceCheckHandler {
     }
 
     fn run(&self, case: &Case) -> Result<CaseObservation, HandlerError> {
-        let tree = case
-            .tree_directory()
-            .map_err(|error| HandlerError::new(error.to_string()))?
-            .ok_or_else(|| {
-                HandlerError::new("a workspaceCheck case declares one tree")
-            })?;
-        let snapshot = match discover_project_at(&tree)
-            .and_then(SourceSnapshot::capture)
-        {
+        let snapshot = match case.snapshot()? {
             Ok(snapshot) => snapshot,
             Err(diagnostics) => {
                 let mut observation = CaseObservation::new(check_verdict(&diagnostics));
