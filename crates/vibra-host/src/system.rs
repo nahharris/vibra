@@ -97,7 +97,7 @@ impl fmt::Debug for Output {
 pub enum Variables {
     /// The process's environment.
     Process,
-    /// A fixed set, for the tests and the dual run: each name and its value;
+    /// A fixed set, for the tests: each name and its value;
     /// the first entry of a name wins.
     Fixed(Vec<(OsString, OsString)>),
 }

@@ -2,8 +2,7 @@
 //! Expectations come from the effects chapter ("Effect ceilings", "Cold
 //! plans and performed rows", "Operation interfaces", "Tests and model
 //! profiles"), the diagnostics chapter's rows of `@effect.outsideCeiling`
-//! and `@contract.unusedEffect` and the paragraph on their related spans,
-//! and question Q5 of the M2 plan.
+//! and `@contract.unusedEffect`, and the paragraph on their related spans.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -134,7 +133,7 @@ fn a_default_member_fits_its_complete_row() -> Result<(), String> {
         )]
     );
     // The owner is in the complete row: awaiting the owner's member fits,
-    // and an owner the body does not perform is no warning (Q5).
+    // and an owner the body does not perform is no warning.
     let owner = "  proc twice takes {log: Self entry: Str} returns d: Void do \
                  let _ be await Log.append(log entry) endlet return void endproc\n\
                    proc idle takes {log: Self} returns d: Void do return void endproc\n";
@@ -214,7 +213,7 @@ fn an_unused_root_is_a_warning_at_its_entry() -> Result<(), String> {
         seen_in(&source),
         [unused(within(&source, "performs {Log Clock}", "Clock"))]
     );
-    // Building a plan performs nothing (Q5).
+    // Building a plan performs nothing.
     let source = with_l(
         "proc build takes {m: Memory} returns d: Void performs {Log} do \
          let _ be Log.append(m \"x\") endlet return void endproc",
@@ -276,7 +275,7 @@ fn a_body_with_an_error_reports_no_unused_root() {
     );
 }
 
-/// The row prefix of the review of step 11: two operation interfaces, a
+/// A row prefix: two operation interfaces, a
 /// `proc` that performs `Log`, and one with the empty row.
 const ROW_PREFIX: &str = "interface Log proc emit takes {m: Self} returns d: Void endproc \
                           endinterface\n\
@@ -316,8 +315,7 @@ fn an_awaited_operand_with_an_error_starts_the_chain() {
 }
 
 /// A member applied at a closed receiver is statically resolved, so its hop
-/// is not marked indirect (probe `closedNotes`, ruling F2 of the review of
-/// step 11).
+/// is not marked indirect (probe `closedNotes`).
 #[test]
 fn a_member_at_a_closed_receiver_is_not_indirect() {
     let source = format!(
@@ -523,8 +521,7 @@ const ACCEPTED_EFFECT_CASES: &[(&str, &[CaseModule])] = &[
 /// For every accepted corpus case of prefix `EFFECT`, the performed row the
 /// checker computes for each body (`Performed::of`) equals the row the
 /// checked IR recomputes from the `Intent` types of the same body's awaits
-/// (`Facts::awaited`), in both directions (architecture, risk 1; F7 of the
-/// review of step 11). An anonymous `proc` is a `Proc` closure of its
+/// (`Facts::awaited`), in both directions. An anonymous `proc` is a `Proc` closure of its
 /// declaration; a `Proc` closure with no anonymous `proc`, which a contract
 /// member named as a value becomes, awaits exactly its type's row.
 #[test]

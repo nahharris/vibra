@@ -28,65 +28,32 @@
 use std::io::Write;
 
 use serde_json::Value as Json;
-use vibra_diagnostics::{ByteSpan, LineIndex};
 use vibra_schema::{
     AuditEvent, BindingRecordDocument, BindingStatus, CommandOutcome, DriverRecord,
-    Payload, RunPayload, SpanDocument, StartupFailureDocument, StartupRecordDocument,
-    StartupStatus, Status, TrapRecord,
+    Payload, RunPayload, StartupFailureDocument, StartupRecordDocument, StartupStatus,
+    Status, TrapRecord,
 };
 use vibra_workspace::run::{CommandResult, Launch, RunOutcome, run_target};
-use vibra_workspace::{Discovery, MemoryBudget, SourceOrigin, WorkspaceCapture};
+use vibra_workspace::{MemoryBudget, SourceOrigin};
 
 use crate::args::{Invocation, OutputFormat};
-use crate::check::{is_target_atom, outcome as check_outcome};
+use crate::check::{captured_target, outcome as check_outcome};
 use crate::refusal;
-use crate::render::{Response, reach, source_text, status_for};
+use crate::render::{Response, origin_json, reach, span_document, status_for};
 
-/// The memory budget a run's entry runs under: the memory limit of the
-/// published limit profile.
+/// The memory budget a run's entry and each test run under: the memory limit
+/// of the published limit profile.
 pub const MEMORY_BUDGET: MemoryBudget = MemoryBudget::DEFAULT;
 
 /// The response to a well-formed `run` line.
 #[must_use]
 pub fn run(invocation: &Invocation) -> Response {
     let format = invocation.globals.format;
-    let name = invocation.line.name();
-    let target = match invocation.operands.first() {
-        None => None,
-        Some(operand) => match operand.to_str().filter(|text| is_target_atom(text)) {
-            Some(text) => Some(text.to_owned()),
-            None => {
-                return refusal(
-                    format,
-                    name,
-                    &format!(
-                        "`{}` is not a target: a target is an atom such as `@app`",
-                        operand.to_string_lossy()
-                    ),
-                );
-            }
-        },
+    let (target, capture) = match captured_target(invocation) {
+        Ok(captured) => captured,
+        Err(refused) => return *refused,
     };
-    let capture =
-        WorkspaceCapture::capture(&invocation.globals.workspace, Discovery::Search);
-    if let (Some(target), Some(project)) = (&target, capture.project())
-        && !project
-            .project()
-            .targets()
-            .iter()
-            .any(|declared| declared.name() == target)
-    {
-        return refusal(format, name, &format!("`{target}` names no local target"));
-    }
-    let mut response =
-        Response::new(format, name, CommandOutcome::Ok, Payload::Empty {});
-    response.workspace_revision = capture.revision().map(str::to_owned);
-    if let Some(project) = capture.project() {
-        response.sources.insert(
-            project.project().source_id().to_owned(),
-            String::from_utf8_lossy(project.bytes()).into_owned(),
-        );
-    }
+    let mut response = Response::captured(format, invocation.line.name(), &capture);
     let Some(snapshot) = capture.snapshot() else {
         // No project was captured, so no target was selected: the
         // diagnostics, and no run payload.
@@ -98,12 +65,6 @@ pub fn run(invocation: &Invocation) -> Response {
         reach(&mut response, capture.limits_reached());
         return response;
     };
-    for module in snapshot.modules() {
-        response.sources.insert(
-            module.source_id().to_owned(),
-            String::from_utf8_lossy(module.bytes()).into_owned(),
-        );
-    }
     let project_source = snapshot.project().project().source_id().to_owned();
     let capture_output = format == OutputFormat::Json;
     if !capture_output {
@@ -176,13 +137,6 @@ pub(crate) fn respond(
     response
 }
 
-/// The `SpanDocument` of `span` in the source `source_id`, against its
-/// captured text.
-fn span_document(span: ByteSpan, source_id: &str, response: &Response) -> SpanDocument {
-    let text = source_text(response, source_id);
-    SpanDocument::render(span, &LineIndex::new(text), Some(source_id))
-}
-
 /// The `run` payload of `outcome`.
 ///
 /// # Errors
@@ -199,10 +153,7 @@ fn payload(
         .target
         .clone()
         .ok_or("a run that ended after its selection has no target")?;
-    let span = |origin: &SourceOrigin| {
-        serde_json::to_value(span_document(origin.span(), origin.source_id(), response))
-            .unwrap_or(Json::Null)
-    };
+    let span = |origin: &SourceOrigin| origin_json(response, origin);
     let mut entry = Vec::new();
     let mut startup = Vec::new();
     for event in &outcome.trace.events {
@@ -262,7 +213,7 @@ fn payload(
         .map(|failure| StartupFailureDocument {
             binding: failure.binding.to_string(),
             code: failure.code.atom().to_owned(),
-            origin: span_document(failure.span, project_source, response),
+            origin: span_document(response, project_source, failure.span),
         });
     Ok(RunPayload {
         target,
@@ -295,7 +246,7 @@ fn payload(
         trap: outcome.trap.as_ref().map(|trap| TrapRecord {
             trap_code: trap.trap.code().as_atom().to_owned(),
             origin: trap.origin.as_ref().map(|origin| {
-                span_document(origin.span(), origin.source_id(), response)
+                span_document(response, origin.source_id(), origin.span())
             }),
         }),
     })

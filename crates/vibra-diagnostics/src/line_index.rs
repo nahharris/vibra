@@ -6,8 +6,6 @@
 //! reason the milestone 1 exit gate can require Unicode byte and display
 //! spans to agree.
 
-use crate::ByteSpan;
-
 /// A one-based display position.
 ///
 /// The column counts Unicode scalar values, not bytes and not grapheme
@@ -81,19 +79,6 @@ impl<'source> LineIndex<'source> {
         self.source
     }
 
-    /// How many lines the document has.
-    ///
-    /// A document ending in a newline does not gain an extra empty line, which
-    /// matches how editors number lines. The empty document has one line.
-    #[must_use]
-    pub fn line_count(&self) -> usize {
-        if self.source.ends_with('\n') && self.line_starts.len() > 1 {
-            self.line_starts.len().saturating_sub(1)
-        } else {
-            self.line_starts.len()
-        }
-    }
-
     /// The display position of `offset`.
     ///
     /// An offset past the end of the document is clamped to its end, and an
@@ -119,38 +104,6 @@ impl<'source> LineIndex<'source> {
         Position::new(line.saturating_add(1), column.saturating_add(1))
     }
 
-    /// The span of `line`, excluding its terminator. `line` is one-based.
-    #[must_use]
-    pub fn line_span(&self, line: usize) -> Option<ByteSpan> {
-        let index = line.checked_sub(1)?;
-        let start = *self.line_starts.get(index)?;
-
-        let end = match self.line_starts.get(index.saturating_add(1)) {
-            // Step back over the "\n", then over a "\r" that belongs to it.
-            Some(next_start) => {
-                let without_newline = next_start.saturating_sub(1);
-                if self
-                    .source
-                    .get(..without_newline)
-                    .is_some_and(|text| text.ends_with('\r'))
-                {
-                    without_newline.saturating_sub(1)
-                } else {
-                    without_newline
-                }
-            }
-            None => self.source.len(),
-        };
-
-        Some(ByteSpan::new(start, end.max(start)))
-    }
-
-    /// The text of `line`, excluding its terminator. `line` is one-based.
-    #[must_use]
-    pub fn line_text(&self, line: usize) -> Option<&'source str> {
-        self.line_span(line)?.text(self.source)
-    }
-
     /// The largest char boundary at or below `offset`.
     ///
     /// `str::floor_char_boundary` is still unstable, so this open-codes it.
@@ -167,12 +120,10 @@ impl<'source> LineIndex<'source> {
 #[cfg(test)]
 mod tests {
     use super::{LineIndex, Position};
-    use crate::ByteSpan;
 
     #[test]
-    fn the_empty_document_has_one_line() {
+    fn the_empty_document_starts_at_line_one_column_one() {
         let index = LineIndex::new("");
-        assert_eq!(index.line_count(), 1);
         assert_eq!(index.position(0), Position::new(1, 1));
     }
 
@@ -187,27 +138,9 @@ mod tests {
     #[test]
     fn a_newline_starts_the_next_line() {
         let index = LineIndex::new("(a)\n(b)");
-        assert_eq!(index.line_count(), 2);
         assert_eq!(index.position(3), Position::new(1, 4), "at the newline");
         assert_eq!(index.position(4), Position::new(2, 1), "after it");
         assert_eq!(index.position(5), Position::new(2, 2));
-    }
-
-    #[test]
-    fn a_trailing_newline_does_not_add_an_empty_line() {
-        // Canonical Vibra output always ends in one newline, so this is the
-        // common case and must not report a phantom final line.
-        assert_eq!(LineIndex::new("(a)\n").line_count(), 1);
-        assert_eq!(LineIndex::new("(a)\n(b)\n").line_count(), 2);
-    }
-
-    #[test]
-    fn a_blank_line_between_forms_is_counted() {
-        // One blank line between top-level forms is canonical formatting.
-        let index = LineIndex::new("(a)\n\n(b)\n");
-        assert_eq!(index.line_count(), 3);
-        assert_eq!(index.line_text(2), Some(""));
-        assert_eq!(index.line_text(3), Some("(b)"));
     }
 
     #[test]
@@ -260,43 +193,17 @@ mod tests {
     #[test]
     fn carriage_return_before_newline_is_part_of_the_terminator() {
         let index = LineIndex::new("(a)\r\n(b)");
-        assert_eq!(index.line_count(), 2);
-        assert_eq!(index.line_text(1), Some("(a)"), "the CR is not content");
         assert_eq!(index.position(5), Position::new(2, 1));
     }
 
     #[test]
     fn a_lone_carriage_return_is_ordinary_content() {
         let index = LineIndex::new("a\rb");
-        assert_eq!(index.line_count(), 1);
         assert_eq!(index.position(2), Position::new(1, 3));
     }
 
     #[test]
-    fn line_spans_exclude_the_terminator() {
-        let index = LineIndex::new("ab\ncd\n");
-        assert_eq!(index.line_span(1), Some(ByteSpan::new(0, 2)));
-        assert_eq!(index.line_span(2), Some(ByteSpan::new(3, 5)));
-        assert_eq!(index.line_text(1), Some("ab"));
-        assert_eq!(index.line_text(2), Some("cd"));
-    }
-
-    #[test]
-    fn line_lookup_rejects_line_zero_and_lines_past_the_end() {
-        let index = LineIndex::new("ab\ncd");
-        assert_eq!(index.line_span(0), None, "lines are one-based");
-        assert_eq!(index.line_span(3), None);
-        assert!(index.line_span(2).is_some());
-    }
-
-    #[test]
-    fn the_last_line_without_a_terminator_reaches_the_end() {
-        let index = LineIndex::new("ab\ncd");
-        assert_eq!(index.line_text(2), Some("cd"));
-    }
-
-    #[test]
-    fn positions_and_line_text_agree_on_a_multiline_unicode_document() {
+    fn positions_agree_with_the_lines_of_a_multiline_unicode_document() {
         // The property the exit gate cares about: for every char boundary,
         // the derived column indexes the same scalar in the derived line.
         let source = "(defn 🌱 →)\n  \"e\u{301}\"\r\n(b)";
@@ -304,8 +211,9 @@ mod tests {
 
         for (offset, expected) in source.char_indices() {
             let position = index.position(offset);
-            let line = index
-                .line_text(position.line)
+            let line = source
+                .lines()
+                .nth(position.line.saturating_sub(1))
                 .unwrap_or_else(|| unreachable!("derived line must exist"));
 
             // The terminator scalars are not in any line's text.

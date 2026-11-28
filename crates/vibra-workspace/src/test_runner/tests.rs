@@ -1,15 +1,12 @@
 //! Unit tests of the runner that need its fault-injection hook.
 
-use std::fs;
-use std::path::PathBuf;
-
 use vibra_diagnostics::ByteSpan;
 use vibra_interp::MemoryBudget;
 use vibra_ir::{SourceOrigin, Trap};
 
 use super::{SuiteResult, TRAP_FIRST, TestOutcome, outcome, run_tests};
-use crate::discovery::discover_project_at;
 use crate::snapshot::SourceSnapshot;
+use crate::test_tree::Tree;
 
 const PROJECT: &str = "{format: @project.v2 package: {name: \"hello\" version: \"0.1.0\"} \
                        targets: [{name: @app kind: @lib root: \"src/app\"}] dependencies: [:]}";
@@ -18,38 +15,16 @@ const TESTS: &str = "use @std.assert enduse\n\n\
                      test \"first\" do assert.true(true) endtest\n\n\
                      test \"second\" do assert.true(true) endtest\n";
 
-/// A project tree in a fresh temporary directory, removed on drop.
-struct Tree(PathBuf);
-
-impl Tree {
-    fn new() -> Result<Self, String> {
-        Self::new_at("vibra-runner-trap")
-    }
-
-    /// A tree in its own directory `<prefix>-<process id>`, so tests that
-    /// run at once never share one.
-    fn new_at(prefix: &str) -> Result<Self, String> {
-        let root =
-            std::env::temp_dir().join(format!("{prefix}-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&root);
-        let write = |relative: &str, text: &str| {
-            let path = root.join(relative);
-            if let Some(parent) = path.parent() {
-                fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-            }
-            fs::write(path, text).map_err(|error| error.to_string())
-        };
-        write("project.vibon", PROJECT)?;
-        write("src/app/main.vib", "")?;
-        write("tests/math.vib", TESTS)?;
-        Ok(Self(root))
-    }
-}
-
-impl Drop for Tree {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
-    }
+/// The snapshot of the project of `PROJECT` with the tests `TESTS`, and
+/// the tree that holds it.
+fn snapshot() -> Result<(Tree, SourceSnapshot), String> {
+    let tree = Tree::new(&[
+        ("project.vibon", PROJECT),
+        ("src/app/main.vib", ""),
+        ("tests/math.vib", TESTS),
+    ])?;
+    let snapshot = tree.snapshot()?;
+    Ok((tree, snapshot))
 }
 
 #[test]
@@ -100,11 +75,7 @@ fn the_suite_result_follows_the_precedence_over_all_five_outcomes() {
 
 #[test]
 fn a_trap_ends_only_its_own_test() -> Result<(), String> {
-    let tree = Tree::new()?;
-    let root = fs::canonicalize(&tree.0).map_err(|error| error.to_string())?;
-    let project = discover_project_at(&root).map_err(|faults| format!("{faults:?}"))?;
-    let snapshot =
-        SourceSnapshot::capture(project).map_err(|faults| format!("{faults:?}"))?;
+    let (_tree, snapshot) = snapshot()?;
     TRAP_FIRST.set(true);
     let run = run_tests(&snapshot, None, MemoryBudget::DEFAULT);
     TRAP_FIRST.set(false);
@@ -142,11 +113,7 @@ fn a_trap_ends_only_its_own_test() -> Result<(), String> {
 /// the trapping operation when one is known, and omits `origin` otherwise.
 #[test]
 fn a_trap_record_writes_its_origin_when_known() -> Result<(), String> {
-    let tree = Tree::new_at("vibra-runner-trap-origin")?;
-    let root = fs::canonicalize(&tree.0).map_err(|error| error.to_string())?;
-    let project = discover_project_at(&root).map_err(|faults| format!("{faults:?}"))?;
-    let snapshot =
-        SourceSnapshot::capture(project).map_err(|faults| format!("{faults:?}"))?;
+    let (_tree, snapshot) = snapshot()?;
     TRAP_FIRST.set(true);
     let run = run_tests(&snapshot, None, MemoryBudget::DEFAULT);
     TRAP_FIRST.set(false);

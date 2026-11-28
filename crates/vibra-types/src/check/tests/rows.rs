@@ -185,7 +185,7 @@ fn a_proc_row_resolves_and_is_its_ceiling() -> Result<(), String> {
         "{MEMORY}proc p takes {{m: Memory}} returns d: Void performs {{Log}} do \
          let _ be Log.append(m \"x\") endlet return void endproc\n"
     ));
-    // The body builds a plan and performs nothing (Q5).
+    // The body builds a plan and performs nothing.
     let set = accepted_unused(&source, &[entry(&source, "{Log}", "Log")])?;
     let p = function_type(&set, "main.p");
     assert_eq!(roots(p.as_ref()), ["app.main.Log"]);
@@ -618,7 +618,7 @@ fn the_narrowing_members_are_pure_rows_at_self() -> Result<(), String> {
 
 /// A package's model of `DirReadText` supplies the host-bound member and
 /// the three narrowing members; its `read` keeps the contract's row
-/// `{DirReadText}` (Q1, Q2).
+/// `{DirReadText}`.
 #[test]
 fn a_model_of_an_operation_interface_supplies_its_bound_members() -> Result<(), String>
 {

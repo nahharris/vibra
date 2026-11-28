@@ -32,7 +32,7 @@
 //!    ceiling.
 //!
 //! A target whose recipes all check has a validated [`BindingPlan`], which
-//! [`plan_of`] returns.
+//! its [`EntryFacts`](crate::entry::EntryFacts) hold.
 
 use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
 
@@ -47,9 +47,7 @@ use vibra_ir::external::host::HostInterface;
 use vibra_syntax::{TypedNode, TypedValue};
 use vibra_types::{EntryLeaf, EntrySignature};
 
-use crate::entry::EntryFacts;
 use crate::project::{Project, Recipe, Target};
-use crate::semantic::WorkspaceCheck;
 
 /// One startup step: the read of a path from the process, through the
 /// grant of the recipe's `source` leaf, before the entry runs.
@@ -109,17 +107,6 @@ impl BindingCheck {
     }
 }
 
-/// The validated binding plan of the checked binary target `target`, when
-/// its entry, its admission ceiling, and its recipes all check.
-#[must_use]
-pub fn plan_of<'c>(check: &'c WorkspaceCheck, target: &str) -> Option<&'c BindingPlan> {
-    check
-        .entries()
-        .iter()
-        .find(|facts| facts.target() == target)
-        .map(EntryFacts::plan)
-}
-
 /// Where the parts of one recipe are written.
 struct Spans {
     recipe: ByteSpan,
@@ -169,15 +156,6 @@ impl Spans {
             Field::After => self.after,
         }
     }
-}
-
-/// The standard operation interface `entity` names, when it is one of the
-/// 17 the provider table can issue.
-fn host_interface(entity: &EntityRef) -> Option<HostInterface> {
-    let path = format!("@{}", entity.path());
-    HostInterface::ALL
-        .into_iter()
-        .find(|interface| interface.owner().path() == path)
 }
 
 fn integer(node: Option<&TypedNode>) -> Option<u64> {
@@ -407,7 +385,8 @@ fn build_leaf(
         return None;
     };
     let entity = entry_leaf.leaf().interface();
-    let Some(interface) = host_interface(entity) else {
+    let Some(interface) = HostInterface::by_owner_path(&format!("@{}", entity.path()))
+    else {
         checker.report(
             name,
             Field::Provider,

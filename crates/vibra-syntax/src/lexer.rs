@@ -255,7 +255,8 @@ fn continues_identifier(character: char) -> bool {
 }
 
 /// Whether `text` matches the identifier production.
-pub(crate) fn is_identifier(text: &str) -> bool {
+#[must_use]
+pub fn is_identifier(text: &str) -> bool {
     let mut characters = text.chars();
     characters
         .next()

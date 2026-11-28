@@ -12,7 +12,7 @@
 use std::fmt::Write as _;
 
 use vibra_diagnostics::{ByteSpan, Diagnostic};
-use vibra_syntax::canonical_string;
+use vibra_syntax::{canonical_string, span_record};
 
 use crate::graph::Access;
 use crate::identity::{Anchor, DeclarationId};
@@ -441,13 +441,4 @@ fn separate(out: &mut String, index: usize) {
     if index > 0 {
         out.push(' ');
     }
-}
-
-fn span_record(source_id: &str, span: ByteSpan) -> String {
-    format!(
-        "{{sourceId: {} start: {}u64 end: {}u64}}",
-        canonical_string(source_id),
-        span.start(),
-        span.end()
-    )
 }

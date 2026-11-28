@@ -57,8 +57,8 @@ use vibra_host::world::{HostWorld, WorldDriver};
 use vibra_interp::{EntryArgument, Execution, MemoryBudget, RuntimeError, run_entry};
 use vibra_ir::authority::{GrantToken, HostFault};
 use vibra_ir::external::host::HostInterface;
-use vibra_ir::{CheckedProgram, EntityRef, SourceOrigin, Trap, Value};
-use vibra_syntax::canonical_string;
+use vibra_ir::{CheckedProgram, SourceOrigin, Trap, Value};
+use vibra_syntax::span_record;
 use vibra_types::{GrantShape, load_stdlib};
 
 use crate::entry::EntryFacts;
@@ -221,7 +221,12 @@ impl RunOutcome {
             let origin = trap
                 .origin
                 .as_ref()
-                .map(|origin| format!(" origin: {}", span_record(origin)))
+                .map(|origin| {
+                    format!(
+                        " origin: {}",
+                        span_record(origin.source_id(), origin.span())
+                    )
+                })
                 .unwrap_or_default();
             fields.push(format!(
                 "trap: {{trapCode: {}{origin}}}",
@@ -240,17 +245,6 @@ fn bytes_record(bytes: &[u8]) -> String {
         .map(|byte| format!("{byte}u8"))
         .collect::<Vec<_>>();
     format!("{{kind: @bytes values: [{}]}}", values.join(" "))
-}
-
-/// A span record: `{sourceId: … start: … end: …}`.
-fn span_record(origin: &SourceOrigin) -> String {
-    let span = origin.span();
-    format!(
-        "{{sourceId: {} start: {}u64 end: {}u64}}",
-        canonical_string(origin.source_id()),
-        span.start(),
-        span.end()
-    )
 }
 
 /// Runs the binary target `target` of `snapshot`, or its one binary target
@@ -352,15 +346,6 @@ fn defect(
     )
 }
 
-/// The standard operation interface `entity` names, when it is one of the
-/// 17 a provider can issue.
-fn host_interface(entity: &EntityRef) -> Option<HostInterface> {
-    let path = format!("@{}", entity.path());
-    HostInterface::ALL
-        .into_iter()
-        .find(|interface| interface.owner().path() == path)
-}
-
 /// What admission needs of the checked entry of `facts`.
 fn entry_shape(facts: &EntryFacts) -> Option<EntryShape> {
     let leaves = facts
@@ -369,7 +354,10 @@ fn entry_shape(facts: &EntryFacts) -> Option<EntryShape> {
         .map(|leaf| {
             Some(EntryLeaf {
                 name: LeafName::new(leaf.name()),
-                interface: host_interface(leaf.leaf().interface())?,
+                interface: HostInterface::by_owner_path(&format!(
+                    "@{}",
+                    leaf.leaf().interface().path()
+                ))?,
                 optional: leaf.leaf().optional(),
             })
         })
@@ -879,10 +867,6 @@ mod tests {
     //! counts and orders releases, and can make one host call report a
     //! refusal its gate did not make, a driver fault that traps.
 
-    use std::fs;
-    use std::path::PathBuf;
-    use std::sync::atomic::{AtomicU64, Ordering};
-
     use vibra_diagnostics::DiagnosticCode;
     use vibra_host::driver::{
         Acquire, Action, Completion, DriverIdentity, Gate, Progress, Resolved,
@@ -895,43 +879,8 @@ mod tests {
     use vibra_ir::Trap;
 
     use super::{CommandResult, Driver, RunOutcome, prepare};
-    use crate::discovery::discover_project_at;
     use crate::revision::workspace_revision;
-    use crate::snapshot::SourceSnapshot;
-
-    static NEXT: AtomicU64 = AtomicU64::new(0);
-
-    /// A project tree, removed on drop.
-    struct Tree(PathBuf);
-
-    impl Tree {
-        fn new(files: &[(&str, &str)]) -> Self {
-            let serial = NEXT.fetch_add(1, Ordering::Relaxed);
-            let root = std::env::temp_dir()
-                .join(format!("vibra-run-{}-{serial}", std::process::id()));
-            let _ = fs::remove_dir_all(&root);
-            for (path, contents) in files {
-                let path = root.join(path);
-                if let Some(parent) = path.parent() {
-                    fs::create_dir_all(parent).expect("directory");
-                }
-                fs::write(path, contents).expect("file");
-            }
-            Self(root)
-        }
-
-        fn snapshot(&self) -> SourceSnapshot {
-            discover_project_at(&self.0)
-                .and_then(SourceSnapshot::capture)
-                .expect("the tree captures")
-        }
-    }
-
-    impl Drop for Tree {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
-        }
-    }
+    use crate::test_tree::Tree;
 
     /// The world driver, recording acquisitions and releases, refusing
     /// without a gate refusal on its `fault`-th call, counted from 1, and
@@ -1037,8 +986,9 @@ mod tests {
         exhausted: Option<usize>,
     ) -> (RunOutcome, Counting) {
         let text = source(tail);
-        let tree = Tree::new(&[("project.vibon", PROJECT), (MAIN, &text)]);
-        let snapshot = tree.snapshot();
+        let tree =
+            Tree::new(&[("project.vibon", PROJECT), (MAIN, &text)]).expect("the tree");
+        let snapshot = tree.snapshot().expect("the tree captures");
         let revision =
             workspace_revision(&snapshot.revision_records()).unwrap_or_default();
         let Ok(prepared) = prepare(&snapshot, None, &revision) else {
@@ -1091,7 +1041,7 @@ mod tests {
             .count()
     }
 
-    /// F6 of the drivers review: a driver that reports memory exhaustion,
+    /// A driver that reports memory exhaustion,
     /// for an allocation the system refused, ends the run as memory
     /// exhausted: the memory limit reached, no event for the call, and every
     /// leaf released.
@@ -1114,7 +1064,7 @@ mod tests {
         assert_released(&outcome, &driver);
     }
 
-    /// F4 of the drivers review: a release the driver reports as failed
+    /// A release the driver reports as failed
     /// leaves the result and the record as they were, and one line for the
     /// tool's log.
     #[test]

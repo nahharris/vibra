@@ -8,8 +8,7 @@
 //! are the rows of the host registry of major 2 and of the test-world
 //! registry, in `vibra_ir::external::host`.
 //!
-//! [`SplitMix64`] is the deterministic generator of a host world. Each other
-//! module is filled by the M2 step its own documentation names.
+//! [`SplitMix64`] is the deterministic generator of a host world.
 //!
 //! # Position in the architecture
 //!

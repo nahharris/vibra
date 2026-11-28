@@ -3,8 +3,8 @@
 //! Expectations come from the type chapter ("Functions as values", "Guards
 //! and callable types", "Bare guards"), the source chapter ("Grammar",
 //! "`return`, `try`, `await`"), the effects chapter ("Effect ceilings",
-//! "Cold plans and performed rows"), the diagnostics chapter's rows of the
-//! codes below, and question Q6 of the M2 plan.
+//! "Cold plans and performed rows"), and the diagnostics chapter's rows of
+//! the codes below.
 
 use vibra_diagnostics::{ByteSpan, DiagnosticCode, Level};
 use vibra_ir::{Expr, FunctionBody, Node, Type};
@@ -139,7 +139,7 @@ fn an_omitted_row_is_the_empty_row() {
     accepted(source);
 }
 
-// `@type.suspiciousRow` (Q6).
+// `@type.suspiciousRow`.
 
 #[test]
 fn a_row_written_as_the_result_is_suspicious() {

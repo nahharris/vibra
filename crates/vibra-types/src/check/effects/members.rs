@@ -40,10 +40,11 @@ use vibra_ir::external::CompilerIntrinsic;
 use vibra_ir::external::host::{host_row, test_world_row};
 use vibra_ir::{
     BodyContext, CheckedFunction, Expr as IrExpr, FnType, FunctionBody, HostBinding,
-    IntentType, LibraryTypes, Node, ProcType, Row, SignatureRecord, SourceOrigin, Type,
+    IntentType, LibraryTypes, Node, Row, SignatureRecord, SourceOrigin, Type,
 };
 use vibra_syntax::source::{Callable, CallableKind};
 
+use super::values::proc_type;
 use super::{Hook, rows};
 use crate::check::declare::{FnData, InterfaceMemberData, Program};
 use crate::check::expr::BodyChecker;
@@ -265,16 +266,6 @@ pub(crate) fn value_signature(ty: &Type) -> Option<FnType> {
         }),
         _ => None,
     }
-}
-
-/// `Proc` over `signature` with the row `effects`.
-fn proc_type(signature: FnType, effects: Row) -> Type {
-    Type::Proc(Box::new(ProcType {
-        parameters: signature.parameters,
-        labels: signature.labels,
-        result: signature.result,
-        effects,
-    }))
 }
 
 /// Whether the interface member `member` is bound with `external`, so that

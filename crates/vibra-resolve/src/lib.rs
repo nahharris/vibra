@@ -39,8 +39,8 @@ mod snapshot;
 
 pub use graph::Access;
 pub use identity::{
-    Anchor, DeclarationId, DeclarationKind, implementation_identity,
-    implementation_name,
+    Anchor, DeclarationId, DeclarationKind, declaration_identity,
+    implementation_identity, implementation_name,
 };
 pub use input::{
     EmbeddedUnit, PackageId, PreludeBinding, ResolveInput, SourceModule, SourceUnit,

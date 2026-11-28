@@ -39,15 +39,17 @@ use vibra_ir::authority::{HostArgument, HostFsKind, HostOk, HostReply};
 use vibra_ir::external::host::{
     FS_KIND_CASES, HostErrorType, HostInterface, HostOp, HostType, host_row,
 };
-use vibra_ir::{EntityRef, SourceOrigin};
+use vibra_ir::{EntityRef, SourceOrigin, is_identity};
 use vibra_syntax::{
     DataField, DataNode, DataValue, FieldSchema, IntegerSuffix, RecordSchema, Schema,
     Slot, TypedNode, TypedValue, canonical_string, decode as read, parse_data,
+    span_record,
 };
 
 use crate::driver::DriverIdentity;
 use crate::policy::{self, Policy, PolicyError};
 use crate::recipe::{LeafName, Limits, Provider};
+use crate::world::raw_field;
 
 /// The format atom of an audit trace.
 pub const TRACE_FORMAT: &str = "@auditTrace.v2";
@@ -497,12 +499,7 @@ fn driver_bytes(driver: &DriverIdentity) -> String {
 }
 
 fn origin_bytes(origin: &SourceOrigin) -> String {
-    format!(
-        "{{sourceId: {} start: {}u64 end: {}u64}}",
-        canonical_string(origin.source_id()),
-        origin.span().start(),
-        origin.span().end()
-    )
+    span_record(origin.source_id(), origin.span())
 }
 
 /// An event of a kind this format does not define, kept as opaque data.
@@ -977,17 +974,6 @@ fn u64_of(node: &DataNode) -> Result<u64, Fault> {
     integer(node, IntegerSuffix::U64)
 }
 
-/// Whether `text` is a declaration identity: `sha256:` and 64 lower-case
-/// hexadecimal digits.
-fn is_identity(text: &str) -> bool {
-    text.strip_prefix("sha256:").is_some_and(|digits| {
-        digits.len() == 64
-            && digits
-                .bytes()
-                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-    })
-}
-
 /// An identity string.
 fn identity(node: &DataNode) -> Result<&str, Fault> {
     let text = string(node)?;
@@ -1230,10 +1216,7 @@ fn read_projection(node: &DataNode) -> Result<(GrantProjection, ByteSpan), Fault
     let reference = record(right, &["path", "seed"], &[])?;
     let path = reference.required("path")?;
     let path_atom = atom(path)?;
-    if !HostInterface::ALL
-        .iter()
-        .any(|interface| interface.owner().path() == path_atom)
-    {
+    if HostInterface::by_owner_path(path_atom).is_none() {
         return Err(value(
             path.span(),
             "the right is not an operation interface",
@@ -1419,16 +1402,6 @@ fn envelope() -> Schema {
             FieldSchema::required("events", Slot::list(Slot::Opaque)),
         ],
     )
-}
-
-fn raw_field<'a>(node: &'a DataNode, name: &str) -> Option<&'a DataNode> {
-    match node.value() {
-        DataValue::Record(fields) => fields
-            .iter()
-            .find(|field| field.name() == name)
-            .map(DataField::value),
-        _ => None,
-    }
 }
 
 fn diagnostics(faults: Vec<Fault>, source_id: Option<&str>) -> Vec<Diagnostic> {

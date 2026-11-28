@@ -47,8 +47,7 @@ use vibra_ir::names::{NameError, check_name};
 /// The format atom of a host world document.
 pub const WORLD_FORMAT: &str = "@hostWorld.v2";
 
-/// The version every driver of a world reports: the toolchain release
-/// (`docs/roadmap/v0.0.2/m2/spec-questions.md`, Q24).
+/// The version every driver of a world reports: the toolchain release.
 pub const DRIVER_VERSION: &str = "0.0.2";
 
 /// The longest scalar in UTF-8: a text read of a smaller count is
@@ -601,7 +600,7 @@ fn content(node: &DataNode, faults: &mut Faults) -> Option<Vec<u8>> {
 }
 
 /// The field `name` of a raw record.
-fn raw_field<'n>(node: &'n DataNode, name: &str) -> Option<&'n DataNode> {
+pub(crate) fn raw_field<'n>(node: &'n DataNode, name: &str) -> Option<&'n DataNode> {
     match node.value() {
         DataValue::Record(fields) => fields
             .iter()
@@ -1388,7 +1387,7 @@ fn stdin_read(input: &mut Input, action: &Action<'_>, gate: &mut dyn Gate) -> An
     };
     let text = action.op == HostOp::IoStdinText;
     // A text count below the longest scalar is refused before the stream is
-    // touched (Q30).
+    // touched.
     if text && max < LONGEST_SCALAR {
         return Answer::NotSubmitted("unsupported");
     }

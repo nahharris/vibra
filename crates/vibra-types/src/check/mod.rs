@@ -206,12 +206,7 @@ impl CheckResult {
     /// wrong.
     #[must_use]
     pub fn only_unavailable(&self) -> bool {
-        self.has_errors()
-            && self
-                .diagnostics
-                .iter()
-                .filter(|diagnostic| diagnostic.level() == Level::Error)
-                .all(|diagnostic| diagnostic.code() == DiagnosticCode::ToolUnavailable)
+        vibra_diagnostics::only_unavailable(&self.diagnostics)
     }
 
     /// Whether every type is known: no error, or only contract diagnostics,

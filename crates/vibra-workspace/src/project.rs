@@ -21,7 +21,7 @@
 use vibra_diagnostics::{ByteSpan, Diagnostic};
 use vibra_syntax::{
     FieldSchema, IntegerSuffix, RecordSchema, Schema, Slot, TypedDocument, TypedNode,
-    VariantSchema, decode, is_reserved_word, parse_data,
+    VariantSchema, decode, is_identifier, is_reserved_word, parse_data,
 };
 
 use crate::nesting::nesting_fault;
@@ -362,12 +362,11 @@ impl Project {
     }
 }
 
-fn is_identifier(text: &str) -> bool {
-    let mut characters = text.chars();
-    characters
-        .next()
-        .is_some_and(|first| first.is_ascii_alphabetic())
-        && characters.all(|character| character.is_ascii_alphanumeric())
+/// Whether `text` is an atom of one identifier part, such as `@app`: the
+/// spelling of a target name.
+#[must_use]
+pub fn is_target_atom(text: &str) -> bool {
+    text.strip_prefix('@').is_some_and(is_identifier)
 }
 
 fn package_name(text: &str) -> Option<&'static str> {
@@ -734,7 +733,10 @@ pub fn decode_project(
 
 #[cfg(test)]
 mod tests {
-    use super::{git_revision, git_url, package_name, semantic_version, target_name};
+    use super::{
+        git_revision, git_url, is_target_atom, package_name, semantic_version,
+        target_name,
+    };
 
     #[test]
     fn the_value_constraints_of_the_record_table() {
@@ -767,5 +769,16 @@ mod tests {
         );
         assert!(git_revision("abc").is_some());
         assert!(git_revision("0123456789ABCDEF0123456789abcdef01234567").is_some());
+    }
+
+    #[test]
+    fn a_target_is_an_atom_of_one_part() {
+        assert!(is_target_atom("@app"));
+        assert!(is_target_atom("@myApp2"));
+        assert!(!is_target_atom("app"));
+        assert!(!is_target_atom("src/app"));
+        assert!(!is_target_atom("@app.main"));
+        assert!(!is_target_atom("@"));
+        assert!(!is_target_atom("@2app"));
     }
 }

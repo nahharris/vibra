@@ -8,19 +8,18 @@
 use std::collections::BTreeMap;
 use std::io::Write;
 
-use vibra_diagnostics::{Diagnostic, LineIndex};
+use serde_json::Value as Json;
+use vibra_diagnostics::{ByteSpan, Diagnostic, LineIndex};
 use vibra_schema::{
     CommandOutcome, DiagnosticDocument, Envelope, Limits, Payload, SchemaViolation,
-    Status, TestPayload, TestResult,
+    SpanDocument, Status, TestPayload, TestResult,
 };
-
-use vibra_workspace::library_source;
+use vibra_workspace::{
+    LimitProfile, SourceOrigin, SourceSnapshot, WorkspaceCapture, library_source,
+};
 
 use crate::args::OutputFormat;
 use crate::exit_code;
-
-/// The identifier of the limit profile this tool publishes.
-pub const LIMIT_PROFILE: &str = "m1Default";
 
 /// The result of one command, before it is rendered.
 #[derive(Clone, Debug)]
@@ -77,6 +76,35 @@ impl Response {
             limits: limits(),
         }
     }
+
+    /// A `@command.ok` response over `capture`: its workspace revision, and
+    /// the text of its project file and of every module of its snapshot.
+    pub(crate) fn captured(
+        format: OutputFormat,
+        command: impl Into<String>,
+        capture: &WorkspaceCapture,
+    ) -> Self {
+        let mut response =
+            Self::new(format, command, CommandOutcome::Ok, Payload::Empty {});
+        response.workspace_revision = capture.revision().map(str::to_owned);
+        if let Some(project) = capture.project() {
+            response.sources.insert(
+                project.project().source_id().to_owned(),
+                String::from_utf8_lossy(project.bytes()).into_owned(),
+            );
+        }
+        for module in capture
+            .snapshot()
+            .into_iter()
+            .flat_map(SourceSnapshot::modules)
+        {
+            response.sources.insert(
+                module.source_id().to_owned(),
+                String::from_utf8_lossy(module.bytes()).into_owned(),
+            );
+        }
+        response
+    }
 }
 
 /// The status an envelope reports for `result`.
@@ -116,7 +144,7 @@ pub(crate) fn reach(response: &mut Response, reached: Vec<String>) {
 
 fn limits() -> Limits {
     Limits {
-        profile: LIMIT_PROFILE.to_owned(),
+        profile: LimitProfile::M1_DEFAULT.name.to_owned(),
         reached: Vec::new(),
         complete: true,
     }
@@ -186,6 +214,23 @@ pub(crate) fn source_text<'r>(response: &'r Response, source_id: &str) -> &'r st
         .map(String::as_str)
         .or_else(|| library_source(source_id))
         .unwrap_or("")
+}
+
+/// The `SpanDocument` of `span` in the source `source_id`, against its
+/// captured text.
+pub(crate) fn span_document(
+    response: &Response,
+    source_id: &str,
+    span: ByteSpan,
+) -> SpanDocument {
+    let text = source_text(response, source_id);
+    SpanDocument::render(span, &LineIndex::new(text), Some(source_id))
+}
+
+/// The JSON `SpanDocument` of `origin`, the span form of an audit event.
+pub(crate) fn origin_json(response: &Response, origin: &SourceOrigin) -> Json {
+    serde_json::to_value(span_document(response, origin.source_id(), origin.span()))
+        .unwrap_or(Json::Null)
 }
 
 /// One line per diagnostic on standard error, with its location when it has

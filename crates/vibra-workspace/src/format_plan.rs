@@ -126,19 +126,19 @@ impl WorkspaceCapture {
     }
 
     /// The limits the capture reached, by the name `limits.reached` gives
-    /// them: `sourceNesting` when the project file or a module is nested past
-    /// the source nesting limit, the only limit capture measures.
+    /// them: the snapshot's ([`SourceSnapshot::limits_reached`]), and
+    /// `sourceNesting` when a project file is nested past the source nesting
+    /// limit, the only limit capture measures.
     #[must_use]
     pub fn limits_reached(&self) -> Vec<String> {
-        let project = self
+        if let Some(snapshot) = &self.snapshot {
+            return snapshot.limits_reached();
+        }
+        if self
             .diagnostics
             .iter()
-            .any(|diagnostic| diagnostic.code() == DiagnosticCode::ToolLimitExceeded);
-        let module = self
-            .snapshot
-            .as_ref()
-            .is_some_and(|snapshot| !snapshot.limit_faults().is_empty());
-        if project || module {
+            .any(|diagnostic| diagnostic.code() == DiagnosticCode::ToolLimitExceeded)
+        {
             vec![SOURCE_NESTING.to_owned()]
         } else {
             Vec::new()

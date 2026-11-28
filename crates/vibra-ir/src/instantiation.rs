@@ -19,14 +19,10 @@
 //! Every walk keeps a work list, so no host stack grows with what a checker
 //! built.
 
-use crate::conformance::{Evidence, select_implementation};
+use crate::conformance::{Evidence, GOAL_LIMIT, select_implementation};
 use crate::expr::{CallTarget, ContractCall, Expr, Node, Tables};
 use crate::external::CompilerIntrinsic;
 use crate::{Binder, FunctionBody, Implementation, IrError, Type, TypeId};
-
-/// The most goals the evidence of one instantiation may visit: the limit
-/// of the conformance search, which accepted the same goals.
-const GOAL_LIMIT: usize = 4096;
 
 /// One instantiation: the function it is in, the function it names, and one
 /// type for each leading binder of that function.

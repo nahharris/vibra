@@ -8,7 +8,7 @@ mod vectors;
 
 pub use compiler::{
     CompilerIntrinsic, FloatOp, FloatType, IntegerOp, IntegerType, IntrinsicRow,
-    REGISTRY_MAJOR, REGISTRY_MINOR, RowType, is_assertion, spell_generics,
+    REGISTRY_MAJOR, REGISTRY_MINOR, RowType, spell_generics,
 };
 pub use native::{
     Answer, NATIVE_ROWS, NativeRow, Numeric, ObjectKind, Operand, Scalar, Totality,

@@ -299,6 +299,19 @@ impl Diagnostic {
     }
 }
 
+/// Whether `diagnostics` hold an error and every error is
+/// `@tool.unavailable`: the input uses something the toolchain does not
+/// support yet, and nothing it does support is wrong.
+#[must_use]
+pub fn only_unavailable(diagnostics: &[Diagnostic]) -> bool {
+    let mut errors = diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.is_error());
+    let unavailable =
+        |diagnostic: &Diagnostic| diagnostic.code() == DiagnosticCode::ToolUnavailable;
+    errors.next().is_some_and(unavailable) && errors.all(unavailable)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{Diagnostic, DocumentRevision, Fix};

@@ -129,23 +129,34 @@ impl Anchor {
     /// The identity this anchor hashes to.
     #[must_use]
     pub fn identity(&self) -> DeclarationId {
-        hash([
-            self.package.as_str(),
-            self.version.as_str(),
-            self.module.as_str(),
-            self.owner.as_str(),
+        DeclarationId(declaration_identity(
+            &self.package,
+            &self.version,
+            &self.module,
+            &self.owner,
             self.kind.as_atom(),
-            self.name.as_str(),
-        ])
+            &self.name,
+        ))
     }
 }
 
-/// The identity of the anchor of the six `fields`.
-fn hash(fields: [&str; 6]) -> DeclarationId {
+/// The identity of the declaration whose logical anchor is the package
+/// `package` at `version`, the module path atom `module` (with its `@`), the
+/// dotted `owner` path within the module (empty for a top-level declaration),
+/// the kind atom `kind` (with its `@`), and the name `name`.
+#[must_use]
+pub fn declaration_identity(
+    package: &str,
+    version: &str,
+    module: &str,
+    owner: &str,
+    kind: &str,
+    name: &str,
+) -> String {
     let mut hasher = Sha256::new();
     hasher.update(DOMAIN);
     hasher.update([0u8]);
-    for field in fields {
+    for field in [package, version, module, owner, kind, name] {
         let length = u64::try_from(field.len()).unwrap_or(u64::MAX);
         hasher.update(length.to_be_bytes());
         hasher.update(field.as_bytes());
@@ -154,7 +165,7 @@ fn hash(fields: [&str; 6]) -> DeclarationId {
     for byte in hasher.finalize() {
         let _ = write!(text, "{byte:02x}");
     }
-    DeclarationId(text)
+    text
 }
 
 /// The identity of an `impl` block: the hash of the anchor whose package,
@@ -169,14 +180,14 @@ pub fn implementation_identity(
     owner: &str,
     target: &str,
 ) -> DeclarationId {
-    hash([
+    DeclarationId(declaration_identity(
         package,
         version,
         module,
         owner,
         "@impl",
         &implementation_name(target),
-    ])
+    ))
 }
 
 /// A declaration identity: `sha256:` and 64 lower-case hexadecimal digits.
@@ -224,26 +235,5 @@ impl DeclarationId {
 impl fmt::Display for DeclarationId {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(&self.0)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{Anchor, DeclarationKind};
-
-    #[test]
-    fn the_type_chapters_test_vector() {
-        let anchor = Anchor::new(
-            "hello",
-            "0.1.0",
-            "@hello.main",
-            "",
-            DeclarationKind::Proc,
-            "main",
-        );
-        assert_eq!(
-            anchor.identity().as_str(),
-            "sha256:213e3a01ef10d7c10032616f8ab0da9a97fb729b9f98d723f4beb3158a25e2ad"
-        );
     }
 }

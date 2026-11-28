@@ -66,7 +66,7 @@ pub use signature::{
 pub use trap::Trap;
 pub use types::{
     EntityRef, FnType, IntentType, NamedTypes, OpenScope, ProcType, Row, Substitution,
-    Type, TypeId,
+    Type, TypeId, is_identity,
 };
 pub use value::{ObservedValue, Value};
 

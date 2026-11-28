@@ -25,26 +25,22 @@
 //!    item: the item is `@test.exhausted`, the limit `memory` is reached,
 //!    and the observation is incomplete. It is not a trap.
 
-use serde_json::Value as Json;
-use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode, LineIndex};
+use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 use vibra_schema::{
     AuditEvent, CommandOutcome, ObservationError, ObservationErrorCode, Payload,
-    SpanDocument, Status, TestFailure, TestFailureKind, TestItem as ItemRecord,
-    TestPayload, TestResult, TrapRecord,
+    Status, TestFailure, TestFailureKind, TestItem as ItemRecord, TestPayload,
+    TestResult, TrapRecord,
 };
 use vibra_workspace::{
-    AuditTrace, Discovery, FailureKind, MemoryBudget, PROJECT_FILE_NAME, SourceOrigin,
-    SuiteResult, TestAssertionFailure, TestOutcome, TestSelector, WorkspaceCapture,
+    AuditTrace, Discovery, FailureKind, SourceOrigin, SuiteResult,
+    TestAssertionFailure, TestOutcome, TestSelector, WorkspaceCapture,
     observation_type, run_tests,
 };
 
 use crate::args::Invocation;
 use crate::refusal;
-use crate::render::{Response, reach, source_text, status_for};
-
-/// The memory budget each test runs under: the memory limit of the published
-/// limit profile.
-pub const MEMORY_BUDGET: MemoryBudget = MemoryBudget::DEFAULT;
+use crate::render::{Response, origin_json, reach, span_document, status_for};
+use crate::run::MEMORY_BUDGET;
 
 /// The name `limits.reached` gives the memory limit.
 pub const MEMORY_LIMIT: &str = "memory";
@@ -70,15 +66,7 @@ pub fn run(invocation: &Invocation) -> Response {
     };
     let capture =
         WorkspaceCapture::capture(&invocation.globals.workspace, Discovery::Search);
-    let mut response =
-        Response::new(format, name.clone(), CommandOutcome::Ok, Payload::Empty {});
-    response.workspace_revision = capture.revision().map(str::to_owned);
-    if let Some(project) = capture.project() {
-        response.sources.insert(
-            PROJECT_FILE_NAME.to_owned(),
-            String::from_utf8_lossy(project.bytes()).into_owned(),
-        );
-    }
+    let mut response = Response::captured(format, name.clone(), &capture);
     let Some(snapshot) = capture.snapshot() else {
         finish(
             &mut response,
@@ -90,17 +78,11 @@ pub fn run(invocation: &Invocation) -> Response {
         reach(&mut response, capture.limits_reached());
         return response;
     };
-    for module in snapshot.modules() {
-        response.sources.insert(
-            module.source_id().to_owned(),
-            String::from_utf8_lossy(module.bytes()).into_owned(),
-        );
-    }
     let run = match run_tests(snapshot, selector.as_ref(), MEMORY_BUDGET) {
         Ok(run) => run,
         Err(invalid) => return refusal(format, name, &invalid),
     };
-    let mut items = run
+    let items = run
         .items()
         .iter()
         .map(|item| (item.selector().to_string(), item.outcome().clone()))
@@ -110,10 +92,13 @@ pub fn run(invocation: &Invocation) -> Response {
         .iter()
         .map(|item| audit_events(item.trace(), &response))
         .collect::<Vec<_>>();
-    let mut result = run.result();
-    inject(&mut items, &mut result);
-    finish(&mut response, result, items, traces, run.diagnostics());
-    reach(&mut response, capture.limits_reached());
+    finish(
+        &mut response,
+        run.result(),
+        items,
+        traces,
+        run.diagnostics(),
+    );
     reach(&mut response, run.limits_reached().to_vec());
     response
 }
@@ -253,9 +238,9 @@ fn finish(
             trap: match &outcome {
                 TestOutcome::Trap { trap, origin } => Some(TrapRecord {
                     trap_code: trap.code().as_atom().to_owned(),
-                    origin: origin
-                        .as_ref()
-                        .map(|origin| span_document(origin, response)),
+                    origin: origin.as_ref().map(|origin| {
+                        span_document(response, origin.source_id(), origin.span())
+                    }),
                 }),
                 _ => None,
             },
@@ -288,21 +273,11 @@ fn finish(
     });
 }
 
-/// The `SpanDocument` of a source origin, against the captured text of its
-/// source.
-fn span_document(origin: &SourceOrigin, response: &Response) -> SpanDocument {
-    let source_id = origin.source_id();
-    let text = source_text(response, source_id);
-    SpanDocument::render(origin.span(), &LineIndex::new(text), Some(source_id))
-}
-
 /// The JSON projection of the events of `trace`, a known origin as its
 /// `SpanDocument`. A test's trace holds only `@host` events, which every
 /// projection covers.
 fn audit_events(trace: &AuditTrace, response: &Response) -> Vec<AuditEvent> {
-    let span = |origin: &SourceOrigin| {
-        serde_json::to_value(span_document(origin, response)).unwrap_or(Json::Null)
-    };
+    let span = |origin: &SourceOrigin| origin_json(response, origin);
     trace
         .events
         .iter()
@@ -322,7 +297,11 @@ fn failure_record(failure: &TestAssertionFailure, response: &Response) -> TestFa
         assertion: Some(failure.assertion.clone()),
         expected: failure.expected.clone(),
         actual: failure.actual.clone(),
-        primary_span: span_document(&failure.origin, response),
+        primary_span: span_document(
+            response,
+            failure.origin.source_id(),
+            failure.origin.span(),
+        ),
         observation_error: observation.then(|| ObservationError {
             code: ObservationErrorCode::UnsupportedValue,
             value_type: observation_type(failure),
@@ -330,40 +309,6 @@ fn failure_record(failure: &TestAssertionFailure, response: &Response) -> TestFa
         }),
     }
 }
-
-#[cfg(test)]
-thread_local! {
-    /// The fault-injection hook of the trap test: the first selected test of
-    /// a checked selection ends in `@runtime.invalidCheckedProgram`.
-    static TRAP_FIRST: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-}
-
-/// The calling thread's test hook, to set on the thread a command runs on
-/// ([`crate::run`] runs every command on its own thread).
-#[cfg(test)]
-pub(crate) fn carry_hook() -> impl FnOnce() + Send {
-    let trap_first = TRAP_FIRST.get();
-    move || TRAP_FIRST.set(trap_first)
-}
-
-/// Applies the test hook to a run's items and suite result.
-#[cfg(test)]
-fn inject(items: &mut [(String, TestOutcome)], result: &mut SuiteResult) {
-    if !TRAP_FIRST.get() || *result == SuiteResult::Diagnostics {
-        return;
-    }
-    if let Some((_, first)) = items.first_mut() {
-        *first = TestOutcome::Trap {
-            trap: vibra_workspace::Trap::InvalidCheckedProgram,
-            origin: None,
-        };
-        *result = SuiteResult::by_precedence(items.iter().map(|(_, outcome)| outcome));
-    }
-}
-
-/// Outside the crate's own tests no fault is injected.
-#[cfg(not(test))]
-fn inject(_items: &mut [(String, TestOutcome)], _result: &mut SuiteResult) {}
 
 #[cfg(test)]
 mod tests;

@@ -608,7 +608,7 @@ impl<'a> Program<'a> {
                 && labelled.is_empty()
                 && program.lookup(module, "Any").is_none();
             let encodable = interface.is_some()
-                && interface == program.prelude_interface("Encodable");
+                && interface == program.library_interface(vibra_ir::Library::Encodable);
             (any || encodable).then(|| {
                 Diagnostic::new(
                     DiagnosticCode::TypeRedundantImplementation,

@@ -1,8 +1,7 @@
 //! Named procedures, plans, and `await`. Expectations come from the source
 //! chapter ("`fn` and `proc`", "`return`, `try`, `await`", "Bodies and
 //! statements"), the type chapter ("Application", "Guards and callable
-//! types"), the effects chapter ("Cold plans and performed rows"), and the
-//! rulings Q3 and Q4 of `docs/roadmap/v0.0.2/m2/spec-questions.md`.
+//! types"), the effects chapter ("Cold plans and performed rows").
 
 use vibra_diagnostics::DiagnosticCode;
 use vibra_ir::{BodyContext, CheckedModuleSet, Expr, FunctionBody, Node, Row, Type};
@@ -218,7 +217,7 @@ fn a_statement_of_another_type_is_a_mismatch() -> Result<(), String> {
 
 #[test]
 fn applying_a_proc_builds_a_plan() -> Result<(), String> {
-    // A statement that builds a plan and drops it (Q3).
+    // A statement that builds a plan and drops it.
     let source = with_p("proc run returns r: I32 do double(1i32) return 0i32 endproc");
     assert_eq!(
         faults(&source),
@@ -269,7 +268,7 @@ fn applying_a_proc_builds_a_plan() -> Result<(), String> {
 #[test]
 fn plans_and_worlds_are_checked() -> Result<(), String> {
     // An `await` of a plan whose row is not empty is checked against the
-    // ceiling (step 09), and is no longer unavailable.
+    // ceiling.
     let log = "interface Log proc append takes {log: Self entry: Str} returns d: Void \
                endproc endinterface\n\
                type Memory of I32 impl Log proc append takes {log: Self entry: Str} \
