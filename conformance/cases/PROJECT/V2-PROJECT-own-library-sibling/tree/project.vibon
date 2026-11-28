@@ -1,0 +1,1 @@
+{format: @project.v2 package: {name: "hello" version: "0.1.0"} targets: [{name: @greeting kind: @lib root: "src/greeting"} {name: @punctuation kind: @lib root: "src/punctuation"}] dependencies: [:]}

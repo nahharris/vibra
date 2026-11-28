@@ -15,7 +15,8 @@
 //!
 //! "Packages, units, and targets": a module names its own unit, `@std`, and
 //! its project's dependencies (the units its [`crate::SourceUnit`] lists); a
-//! module of `@tests` also names every local target. Any other unit is
+//! module of a binary target also names every library target of its own
+//! package, and a module of `@tests` every local target. Any other unit is
 //! `@module.unknownPath` at the reference. The modules of `@std` are the
 //! embedded unit's, walked like any other unit's.
 
@@ -98,14 +99,20 @@ fn resolve_import(
         return ImportTarget::Unresolved;
     };
     let unit = format!("@{first}");
+    // A target of the importing module's own package, of one of `kinds`.
+    let local = |kinds: &[UnitKind]| {
+        graph.modules.iter().any(|other| {
+            other.unit == unit
+                && other.package == module.package
+                && kinds.contains(&other.unit_kind)
+        })
+    };
     let visible = unit == module.unit
         || unit == graph.embedded_unit
         || module.dependencies.contains(&unit)
+        || (module.unit_kind == UnitKind::Bin && local(&[UnitKind::Lib]))
         || (module.unit_kind == UnitKind::Tests
-            && graph.modules.iter().any(|other| {
-                other.unit == unit
-                    && matches!(other.unit_kind, UnitKind::Bin | UnitKind::Lib)
-            }));
+            && local(&[UnitKind::Bin, UnitKind::Lib]));
     if !visible {
         return unknown_path(
             out,

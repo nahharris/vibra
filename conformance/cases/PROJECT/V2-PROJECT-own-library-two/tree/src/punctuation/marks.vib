@@ -1,0 +1,6 @@
+fn bang
+  returns text: Str
+  visibility @public
+  do
+    return "!\n"
+endfn

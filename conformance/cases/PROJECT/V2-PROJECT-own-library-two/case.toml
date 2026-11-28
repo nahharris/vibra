@@ -1,0 +1,12 @@
+id = "V2-PROJECT-own-library-two"
+rule = "V2-PROJECT-own-library-two"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "04-programs-and-packages.md#packages-units-and-targets: a binary target names both library targets of its own package"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

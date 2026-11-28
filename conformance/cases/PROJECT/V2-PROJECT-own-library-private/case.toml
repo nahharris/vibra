@@ -1,0 +1,19 @@
+id = "V2-PROJECT-own-library-private"
+rule = "V2-PROJECT-own-library-private"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "04-programs-and-packages.md#packages-units-and-targets: a library target of its own package is another unit, so an import of its private declaration is @name.privateAccess, related to the declaration"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@name.privateAccess"
+level = "@error"
+source = "src/hello/main.vib"
+span = { start = 69, end = 90 }
+related = [{ source = "src/greeting/text.vib", span = { start = 86, end = 92 } }]

@@ -1,0 +1,14 @@
+use @std.io.StdoutText enduse
+
+use @std.process.ExitCode enduse
+
+use @greeting.text enduse
+
+proc main
+  takes {out: StdoutText}
+  returns code: ExitCode
+  performs {StdoutText}
+  do
+    let _ be await StdoutText.write(out text.hello()) endlet
+    return ExitCode(0u8)
+endproc

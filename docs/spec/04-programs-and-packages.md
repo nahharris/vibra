@@ -339,11 +339,15 @@ roots are disjoint, every module belongs to exactly one unit and has exactly
 one canonical path.
 
 The units a module can name are closed: its own unit, `@std`, and the
-dependencies its own project file declares; a module of `@tests` can also
-name every local target. A path whose first part is any other unit,
-including `@tests` from a target, a dependency of a dependency, and an
-undeclared unit, is `@module.unknownPath` at the reference. Together with
-the acyclic dependency graph this keeps the unit graph acyclic.
+dependencies its own project file declares; a module of a binary target can
+also name every library target of its own package, and a module of `@tests`
+every local target. A path whose first part is any other unit, including
+`@tests` from a target, a binary target from a library or another binary
+target, another library target of its own package from a library, a
+dependency of a dependency, and an undeclared unit, is `@module.unknownPath`
+at the reference. A library therefore names only libraries, and only
+`@tests` names a binary target. Together with the acyclic dependency graph
+this keeps the unit graph acyclic.
 
 A library target has no entry. Its surface is every public declaration of
 every module under its root.

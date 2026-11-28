@@ -2,10 +2,11 @@
 
 use vibra_diagnostics::DiagnosticCode as C;
 
-use vibra_resolve::{Access, Anchor, DeclarationId, DeclarationKind};
+use vibra_resolve::{Access, Anchor, DeclarationId, DeclarationKind, UnitKind};
 
 use crate::support::{
-    STD_PACKAGE, assert_clean, codes, flat, resolve_modules, span_of, std_identity,
+    STD_PACKAGE, assert_clean, codes, flat, resolve_modules, resolve_units, span_of,
+    std_identity,
 };
 
 const MODEL: &str = "type User of {name: Str}\n  visibility @public\n  fn nameLength\n    takes {user: Self}\n    returns length: U64\n    visibility @public\n    do\n      return 0u64\n  endfn\nendtype\n\ntype Secret of U8 endtype\n";
@@ -273,6 +274,60 @@ fn a_test_module_names_every_local_target() {
         ("@app.model", MODEL),
     ]);
     assert_clean(&resolution);
+}
+
+/// `docs/spec/04-programs-and-packages.md`, "Packages, units, and targets":
+/// a module of a binary target names every library target of its own
+/// package; a library names neither a sibling library nor a program, a
+/// program names no other program, and a library of another package that
+/// no dependency binds is not visible.
+#[test]
+fn a_program_names_the_libraries_of_its_own_package() {
+    const LIB: &str = "fn one\n  returns result: I32\n  visibility @public\n  do\n    return 1i32\nendfn\n";
+    let units = |main: &'static str, core: &'static str| {
+        resolve_units(&[
+            ("@app", UnitKind::Bin, None, &[("@app.main", main)]),
+            ("@cli", UnitKind::Bin, None, &[("@cli.main", LIB)]),
+            ("@core", UnitKind::Lib, None, &[("@core.math", core)]),
+            ("@extra", UnitKind::Lib, None, &[("@extra.more", LIB)]),
+            (
+                "@money",
+                UnitKind::Lib,
+                Some(("money", "1.0.0")),
+                &[("@money.cents", LIB)],
+            ),
+        ])
+    };
+    let both = units("use @core.math.one enduse\n\nuse @extra.more enduse\n", LIB);
+    assert_clean(&both);
+    assert_eq!(both.imports().len(), 2);
+    assert!(both.imports().iter().all(|import| import.to().is_some()));
+    for (main, core) in [
+        ("use @cli.main enduse\n", LIB),
+        ("use @money.cents enduse\n", LIB),
+        ("", "use @extra.more enduse\n"),
+        ("", "use @app.main enduse\n"),
+    ] {
+        let resolution = units(main, core);
+        let (text, source) = if main.is_empty() {
+            (core, "src/core/math.vib")
+        } else {
+            (main, "src/app/main.vib")
+        };
+        let locator = text.trim_start_matches("use ").split(' ').next().unwrap();
+        let (start, end) = span_of(text, locator, 0);
+        assert_eq!(
+            flat(&resolution),
+            [(
+                C::ModuleUnknownPath,
+                source.to_owned(),
+                start,
+                end,
+                Vec::new()
+            )],
+            "{text}"
+        );
+    }
 }
 
 #[test]
