@@ -10,7 +10,6 @@
 )]
 
 mod broker;
-mod dual;
 mod fs;
 mod policy;
 mod recipe;

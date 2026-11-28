@@ -310,27 +310,6 @@ impl TestRun {
         &self.diagnostics
     }
 
-    /// The number of selected tests.
-    #[must_use]
-    pub fn selected(&self) -> usize {
-        self.items.len()
-    }
-
-    /// The number of `@test.passed` items.
-    #[must_use]
-    pub fn passed(&self) -> usize {
-        self.items
-            .iter()
-            .filter(|item| item.outcome == TestOutcome::Passed)
-            .count()
-    }
-
-    /// The selected tests that did not pass.
-    #[must_use]
-    pub fn failed(&self) -> usize {
-        self.selected() - self.passed()
-    }
-
     /// The limits checking the run reached, by the name `limits.reached`
     /// gives them, in the order first reached: `sourceNesting` when a module
     /// is nested past the source nesting limit, and those of the check of

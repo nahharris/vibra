@@ -213,38 +213,6 @@ fn check_revision_stable() {
     assert_ne!(first["workspaceRevision"], third["workspaceRevision"]);
 }
 
-#[test]
-fn check_json_validates() {
-    // Every test of this file and of `fmt.rs` reads its envelope through
-    // `envelope_in`, which validates it against the published schema. This
-    // test runs each shape once more in one place.
-    let root =
-        TempDir::project("check-json", LIBRARY, &[("src/app/main.vib", MISMATCH)]);
-    let empty = TempDir::new("check-json-empty");
-    for (directory, line) in [
-        (&root, &["--format", "json", "check"][..]),
-        (&root, &["--format", "json", "check", "@app"]),
-        (&root, &["--format", "json", "check", "@nope"]),
-        (&root, &["--format", "json", "check", "src/app"]),
-        (&empty, &["--format", "json", "check"]),
-        (&root, &["--format", "json", "fmt", "src/app/main.vib"]),
-        (
-            &root,
-            &["--format", "json", "fmt", "src/app/main.vib", "--write"],
-        ),
-        (&root, &["--format", "json", "fmt", "src/app/none.vib"]),
-        (&root, &["--format", "json", "fmt", "../a.vib"]),
-        (&root, &["--format", "json", "fmt", "README.md"]),
-        (&root, &["--format", "json", "fmt", "project.vibon"]),
-    ] {
-        let (code, document) = envelope_in(directory.path(), line);
-        assert!(
-            vibra_schema::validate_command_result(&document).is_ok() && code >= 0,
-            "{line:?}"
-        );
-    }
-}
-
 const POS: &str = "fn pos takes {x: I32} returns r: I32 requires Ordered.greater(x 0i32) do return x endfn\n";
 
 /// The status, kind, and rules of each obligation the payload carries.

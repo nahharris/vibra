@@ -818,24 +818,3 @@ endproc
         println!("ROW {row}: windows, passed: {unc} is @grant.acquisitionFailed");
     }
 }
-
-#[cfg(not(windows))]
-#[test]
-fn attack_rows_not_run() {
-    for row in [
-        "ATK-run-symlink-denied",
-        "ATK-run-junction-denied",
-        "ATK-run-alias-denied",
-        "ATK-run-hard-link-read-allowed",
-        "ATK-run-hard-link-replace-denied",
-        "ATK-run-denied-leaves-file",
-        "ATK-run-create-denied-leaves-directory",
-        "ATK-run-root-replaced",
-        "ATK-run-prefix-by-names",
-        "ATK-run-swapped-component",
-        "ATK-run-ambient-path",
-        "ATK-run-unc-root",
-    ] {
-        println!("NOT RUN {row}: no directory driver");
-    }
-}

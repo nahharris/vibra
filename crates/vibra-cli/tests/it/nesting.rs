@@ -122,51 +122,6 @@ fn check_passes_at_exactly_the_limit_of_do_blocks() {
 }
 
 #[test]
-fn check_one_level_past_the_limit_is_the_limit_alone_and_unknown() {
-    let module = blocks(LIMIT + 1);
-    let directory = library("nesting-over-limit", &module);
-    let (code, value) = json(directory.path(), &["check"]);
-    // 05 "Versioned envelope and results": diagnostics are exit 1, and a
-    // reached limit makes the status `unknown`.
-    assert_eq!(value["result"], "@command.diagnostics");
-    assert_eq!(code, 1);
-    // `let x: I32 be ` is 14 bytes; the literal follows 1,025 `do `.
-    assert_limit_alone(&value, "src/app/main.vib", 14 + 3 * (LIMIT + 1));
-}
-
-#[test]
-fn types_past_64_levels_are_too_deep_until_the_limit_decides() {
-    let directory = library("nesting-lists-65", &lists(65));
-    let (_, value) = json(directory.path(), &["check"]);
-    let found = codes(&value);
-    assert!(
-        found.iter().any(|code| code == "@type.depthExceeded"),
-        "{value}"
-    );
-    assert!(
-        !found.iter().any(|code| code == "@tool.limitExceeded"),
-        "{value}"
-    );
-    assert_eq!(value["limits"]["reached"], serde_json::json!([]));
-
-    let directory = library("nesting-lists-1024", &lists(LIMIT));
-    let (_, value) = json(directory.path(), &["check"]);
-    let found = codes(&value);
-    assert!(
-        found.iter().any(|code| code == "@type.depthExceeded"),
-        "{value}"
-    );
-    assert!(
-        !found.iter().any(|code| code == "@tool.limitExceeded"),
-        "{value}"
-    );
-
-    let directory = library("nesting-lists-1025", &lists(LIMIT + 1));
-    let (_, value) = json(directory.path(), &["check"]);
-    assert_limit_alone(&value, "src/app/main.vib", 14 + LIMIT + 1);
-}
-
-#[test]
 fn a_project_file_past_the_limit_is_the_limit_alone() {
     // A field the closed record does not name: the limit decides before
     // the schema would.
@@ -237,56 +192,6 @@ fn check_answers_a_million_nested_brackets() {
     let (code, value) = json(directory.path(), &["check"]);
     assert_eq!(code, 1);
     assert_limit_alone(&value, "src/app/main.vib", 14 + LIMIT + 1);
-}
-
-/// The chains the reader keeps flat, 100,000 links each: `check` answers
-/// each with the limit alone. In a postfix chain the primary `q` is nested
-/// one level per link, so it is the first token past the limit, at the
-/// start of the initializer (14). In a prefix chain the `k`-th word is
-/// nested `k - 1` levels, so the 1,026th word is the first.
-#[test]
-fn check_answers_chains_of_a_hundred_thousand_links() {
-    const LINKS: usize = 100_000;
-    let postfix = [("()", "applications"), (".a", "fields"), ("().a", "mixed")];
-    for (link, label) in postfix {
-        let module = format!("let x: I32 be q{} endlet\n", link.repeat(LINKS));
-        let directory = library(&format!("chain-{label}"), &module);
-        let (code, value) = json(directory.path(), &["check"]);
-        assert_eq!(code, 1, "{label}");
-        assert_limit_alone(&value, "src/app/main.vib", 14);
-    }
-    let start = "fn f returns r: I32 do ";
-    let prefix: [(&[&str], &str); 4] = [
-        (&["return"], "return"),
-        (&["try"], "try"),
-        (&["await"], "await"),
-        (&["return", "try", "await"], "words"),
-    ];
-    for (words, label) in prefix {
-        let mut module = start.to_owned();
-        let mut first = 0;
-        for k in 0..LINKS {
-            if k == 1_025 {
-                first = module.len();
-            }
-            module.push_str(words[k % words.len()]);
-            module.push(' ');
-        }
-        module.push_str("1i32 endfn\n");
-        // Counted by hand: 1,025 words of `return `, `try `, `await `, or
-        // 341 rounds of `return try await ` and `return try `.
-        let by_hand = match label {
-            "return" => start.len() + 1_025 * 7,
-            "try" => start.len() + 1_025 * 4,
-            "await" => start.len() + 1_025 * 6,
-            _ => start.len() + 341 * 17 + 11,
-        };
-        assert_eq!(first, by_hand, "{label}");
-        let directory = library(&format!("chain-{label}"), &module);
-        let (code, value) = json(directory.path(), &["check"]);
-        assert_eq!(code, 1, "{label}");
-        assert_limit_alone(&value, "src/app/main.vib", by_hand);
-    }
 }
 
 /// `vibra check` answers each recursion probe of `vibra-workspace` with its

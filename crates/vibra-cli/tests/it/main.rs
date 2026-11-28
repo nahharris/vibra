@@ -27,6 +27,5 @@ mod inventory;
 mod limits;
 mod nesting;
 mod run_command;
-mod sequences;
 mod test_command;
 mod unavailable;

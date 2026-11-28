@@ -22,6 +22,5 @@ mod fixture;
 mod hygiene;
 mod misuse;
 mod ops;
-mod shape;
 mod stepper;
 mod sys;

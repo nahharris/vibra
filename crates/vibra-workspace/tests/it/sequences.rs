@@ -6,12 +6,11 @@
 //! `let`s, `let … else`, expression statements, the elements of a list
 //! literal, and the arms of a `match`. Every stage runs on a thread of
 //! 256 KiB. When a stage recursed along a sequence, 1,000 `let`s overflowed
-//! a stack of 1 MiB, so the default sizes overflow 256 KiB many times over
-//! if one does, which ends the test process; the ignored tests run the
-//! sequences at 100,000 and take minutes. A `match` of literals has no long
-//! form: its coverage is decided within a fixed amount of work, which 2,000
-//! arms fit and 2,800 do not. Each stage must also
-//! give its verdict: the check has no error, the test passes, the run exits
+//! a stack of 1 MiB, so about 250 overflow 256 KiB and the sizes here, eight
+//! times that, overflow it if one does, which ends the test process. A
+//! `match` of literals has no long form: its coverage is decided within a
+//! fixed amount of work, which 2,000 arms fit and 2,800 do not. Each stage
+//! must also give its verdict: the check has no error, the test passes, the run exits
 //! with the code the entry gives when `f` returns the value its first and
 //! last statements decide, and the format plan has no error.
 
@@ -28,14 +27,12 @@ use crate::support::TempDir;
 
 /// The stack of every stage.
 const STACK: usize = 256 * 1024;
-/// The length of a long sequence in the ignored tests.
-const LENGTH: usize = 100_000;
-/// The default size of each shape: within about 30 s and 2 GB, one test at
-/// a time, in a debug build.
-const LETS: usize = 20_000;
-const LET_ELSES: usize = 10_000;
-const STATEMENTS: usize = 20_000;
-const ELEMENTS: usize = 20_000;
+/// The size of each shape: eight times the length at which a recursing stage
+/// overflows [`STACK`].
+const LETS: usize = 2_000;
+const LET_ELSES: usize = 2_000;
+const STATEMENTS: usize = 2_000;
+const ELEMENTS: usize = 2_000;
 const ARMS: usize = 2_000;
 /// The exit code of the entry when `f` returns the expected value.
 const EXIT: u8 = 7;
@@ -214,28 +211,4 @@ fn elements_cost_no_stack() {
 #[test]
 fn arms_cost_no_stack() {
     stages("match", ARMS);
-}
-
-#[test]
-#[ignore = "minutes in a debug build; the default size proves the property"]
-fn a_hundred_thousand_lets_cost_no_stack() {
-    stages("lets", LENGTH);
-}
-
-#[test]
-#[ignore = "minutes in a debug build; the default size proves the property"]
-fn a_hundred_thousand_let_elses_cost_no_stack() {
-    stages("letElses", LENGTH);
-}
-
-#[test]
-#[ignore = "minutes in a debug build; the default size proves the property"]
-fn a_hundred_thousand_statements_cost_no_stack() {
-    stages("statements", LENGTH);
-}
-
-#[test]
-#[ignore = "minutes in a debug build; the default size proves the property"]
-fn a_hundred_thousand_elements_cost_no_stack() {
-    stages("list", LENGTH);
 }

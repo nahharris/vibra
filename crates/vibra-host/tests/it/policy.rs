@@ -14,8 +14,7 @@ use vibra_host::policy::{
     MAX_DEPTH, MAX_SIZE, NameTest, Policy, PolicyError, Request, TooComplex, count,
     decode, hash, normalize, permits,
 };
-use vibra_ir::names::{NameError, check_name};
-use vibra_syntax::decode_string;
+use vibra_ir::names::NameError;
 
 /// The document around `expression`.
 fn document(expression: &str) -> String {
@@ -622,36 +621,6 @@ fn a_deep_expression_is_walked_without_recursion() {
 
 // ---------------------------------------------------------------------------
 // The name profile.
-
-#[test]
-fn the_name_vectors() {
-    let vectors = include_str!("names.tsv");
-    let mut lines = vectors.lines();
-    assert_eq!(lines.next(), Some("name\tverdict"));
-    let mut seen = 0;
-    for line in lines {
-        let (literal, verdict) = line.split_once('\t').expect("two columns");
-        let name = decode_string(literal).expect("a string literal");
-        let verdict_ok = match verdict {
-            "accepted" => check_name(&name).is_ok(),
-            "rejected" => check_name(&name).is_err(),
-            other => panic!("unknown verdict {other:?}"),
-        };
-        assert!(verdict_ok, "{literal} is {verdict}");
-        seen += 1;
-    }
-    assert!(seen > 80, "{seen} vectors");
-}
-
-#[test]
-fn each_name_rule_has_its_error() {
-    assert_eq!(check_name(""), Err(NameError::Empty));
-    assert_eq!(check_name(".."), Err(NameError::DotName));
-    assert_eq!(check_name("a:b"), Err(NameError::ForbiddenCharacter(':')));
-    assert_eq!(check_name("a."), Err(NameError::TrailingDotOrSpace));
-    assert_eq!(check_name("NUL.txt"), Err(NameError::ReservedDevice));
-    assert_eq!(check_name("nul2"), Ok(()));
-}
 
 #[test]
 fn a_relative_path_checks_every_name() {

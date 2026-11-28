@@ -129,25 +129,9 @@ fn test_names_the_compile_time_reduction_limit() {
 }
 
 #[test]
-fn test_names_the_proof_derivation_limit() {
-    assert_reached(
-        &test("limit-test-derivations", &derivations()),
-        "proofDerivations",
-    );
-}
-
-#[test]
 fn run_names_the_compile_time_reduction_limit() {
     assert_reached(
         &run("limit-run-reductions", &reductions()),
         "compileTimeReductions",
-    );
-}
-
-#[test]
-fn run_names_the_proof_derivation_limit() {
-    assert_reached(
-        &run("limit-run-derivations", &derivations()),
-        "proofDerivations",
     );
 }

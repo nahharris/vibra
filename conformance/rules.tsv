@@ -1157,7 +1157,7 @@ V2-PROJECT-test-assert-equal-wrapped-function	active	02-type-system.md#interface
 V2-PROJECT-test-module-as-value-invalid	active	02-type-system.md#namespaces-and-resolution
 V2-PROJECT-test-takes-other-type	active	01-source-language.md#test
 V2-PROJECT-test-takes-renamed	active	01-source-language.md#test
-V2-PROJECT-test-takes-two	retired	01-source-language.md#test
+V2-PROJECT-test-takes-two	active	01-source-language.md#test
 V2-PROJECT-test-unavailable-closure	active	05-tooling.md#tests-and-selection
 V2-RUNTIME-anon-proc-captures	active	02-type-system.md#functions-as-values
 V2-RUNTIME-await-twice-two-events	active	03-effects.md#delivery-and-typed-outcomes
