@@ -1,0 +1,12 @@
+id = "V2-SRC-CALLS-default-fn-list"
+rule = "V2-SRC-CALLS-default-fn-list"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#constant-expressions-and-constant-patterns: a list whose elements are anonymous fns is a constant expression, so it is a labelled default, and each function in it runs"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

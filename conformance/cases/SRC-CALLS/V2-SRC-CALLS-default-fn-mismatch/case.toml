@@ -1,0 +1,18 @@
+id = "V2-SRC-CALLS-default-fn-mismatch"
+rule = "V2-SRC-CALLS-default-fn-mismatch"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#constant-expressions-and-constant-patterns: a function default is checked at its label's type, so one of another callable type is @type.mismatch at the default"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.mismatch"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 54, end = 107 }

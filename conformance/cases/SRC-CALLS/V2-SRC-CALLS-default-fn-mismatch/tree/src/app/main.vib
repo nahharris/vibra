@@ -1,0 +1,1 @@
+fn apply takes {v: I32} labelled {f: Fn({I32} I32) be fn takes {x: Str} returns r: I32 do return 1i32 endfn} returns r: I32 do return f(v) endfn

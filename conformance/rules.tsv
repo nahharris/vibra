@@ -1239,3 +1239,17 @@ V2-PROJECT-own-library-private	active	04-programs-and-packages.md#packages-units
 V2-PROJECT-own-library-sibling	active	04-programs-and-packages.md#packages-units-and-targets
 V2-PROJECT-own-library-names-program	active	04-programs-and-packages.md#packages-units-and-targets
 V2-PROJECT-own-library-other-package	active	04-programs-and-packages.md#packages-units-and-targets
+V2-SRC-CALLS-default-fn-anonymous	active	02-type-system.md#constant-expressions-and-constant-patterns
+V2-SRC-CALLS-default-fn-named	active	02-type-system.md#constant-expressions-and-constant-patterns
+V2-SRC-CALLS-default-fn-option-some	active	02-type-system.md#constant-expressions-and-constant-patterns
+V2-SRC-CALLS-default-fn-option-none	active	02-type-system.md#constant-expressions-and-constant-patterns
+V2-SRC-CALLS-default-fn-list	active	02-type-system.md#constant-expressions-and-constant-patterns
+V2-SRC-CALLS-default-fn-generic	active	02-type-system.md#constant-expressions-and-constant-patterns
+V2-SRC-CALLS-default-fn-module-value	active	02-type-system.md#constant-expressions-and-constant-patterns
+V2-SRC-CALLS-default-fn-mismatch	active	02-type-system.md#constant-expressions-and-constant-patterns
+V2-SRC-CALLS-default-proc-anonymous	active	02-type-system.md#constant-expressions-and-constant-patterns
+V2-SRC-CALLS-default-proc-named	active	02-type-system.md#constant-expressions-and-constant-patterns
+V2-SRC-CALLS-default-proc-option-none	active	02-type-system.md#constant-expressions-and-constant-patterns
+V2-TYPE-NAMES-function-constant-pattern	active	02-type-system.md#constant-expressions-and-constant-patterns
+V2-TYPE-INTERFACE-labelled-default-fn-same	active	02-type-system.md#constant-expressions-and-constant-patterns
+V2-TYPE-INTERFACE-labelled-default-fn-differs	active	02-type-system.md#constant-expressions-and-constant-patterns

@@ -435,7 +435,7 @@ fn world_member_type(op: TestWorldOp) -> Type {
 
 /// The default of a labelled parameter of a `TestWorld` member: the empty
 /// value of its type.
-fn empty_default(ty: &Type) -> Constant {
+fn empty_default(ty: &Type) -> Node {
     let value = if *ty == str_type() {
         text_value("")
     } else if matches!(ty, Type::Declared(..)) {
@@ -443,7 +443,7 @@ fn empty_default(ty: &Type) -> Constant {
     } else {
         Value::List(Vec::new())
     };
-    Constant::new(ty.clone(), value).unwrap()
+    node(Expr::Literal(Constant::new(ty.clone(), value).unwrap()))
 }
 
 fn host_function(name: &str, ty: Type, binding: HostBinding) -> CheckedFunction {

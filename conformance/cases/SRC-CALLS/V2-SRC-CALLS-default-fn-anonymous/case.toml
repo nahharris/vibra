@@ -1,0 +1,12 @@
+id = "V2-SRC-CALLS-default-fn-anonymous"
+rule = "V2-SRC-CALLS-default-fn-anonymous"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#constant-expressions-and-constant-patterns: an anonymous fn is a constant expression, so it is a labelled default; a call that omits the label runs the default function and one that writes it runs the written one"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

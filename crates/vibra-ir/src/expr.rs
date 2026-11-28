@@ -18,6 +18,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
+use vibra_diagnostics::ByteSpan;
+
 use crate::conformance::Evidence;
 use crate::constant::check_encodable;
 use crate::effects;
@@ -101,6 +103,28 @@ impl PartialEq for Node {
 }
 
 impl Eq for Node {}
+
+impl Node {
+    /// Whether this node and `other` have the same checked form: the same
+    /// expression, closure bodies included, wherever each was written. Two
+    /// labelled defaults that hold a function value are the same default
+    /// exactly when their forms are (`docs/spec/02-type-system.md`, "Constant
+    /// expressions and constant patterns").
+    #[must_use]
+    pub fn same_form(&self, other: &Self) -> bool {
+        let blank = SourceOrigin::new("", ByteSpan::empty_at(0));
+        let mut left = self.clone();
+        let mut right = other.clone();
+        for root in [&mut left, &mut right] {
+            let mut pending: Vec<&mut Self> = vec![root];
+            while let Some(node) = pending.pop() {
+                node.origin = blank.clone();
+                pending.extend(node.expr.operands_mut());
+            }
+        }
+        left == right
+    }
+}
 
 /// A node that continues a sequence is written as the list of its spine:
 /// each link without its rest, then the node that ends it.
@@ -327,7 +351,6 @@ impl Expr {
                 Self::Closure { closure, captures } => {
                     types.push(&closure.value_type);
                     types.extend(&closure.captures);
-                    types.extend(closure.defaults.iter().map(|(_, c)| c.value_type()));
                     nodes.extend(captures);
                     nodes.extend(closure.nodes());
                 }
@@ -487,6 +510,76 @@ impl Expr {
                 }
                 nodes.extend(&arguments.positional);
                 nodes.extend(arguments.labelled.iter().map(|(_, node)| node));
+            }
+            Self::Field { record: value, .. }
+            | Self::Await { plan: value }
+            | Self::Return(value)
+            | Self::Try(value)
+            | Self::WidenToInterface { value, .. }
+            | Self::WidenAtom(value) => nodes.push(value),
+            Self::Literal(_)
+            | Self::Variable { .. }
+            | Self::Global(_)
+            | Self::Function { .. }
+            | Self::Captured { .. }
+            | Self::Default(_) => {}
+        }
+        nodes
+    }
+
+    /// [`Self::operands`], mutably; a closure body shared with another node
+    /// is copied first.
+    fn operands_mut(&mut self) -> Vec<&mut Node> {
+        let mut nodes: Vec<&mut Node> = Vec::new();
+        match self {
+            Self::Intrinsic { arguments, .. } => nodes.extend(arguments),
+            Self::Sequence(statements) => nodes.extend(statements),
+            Self::Closure { closure, captures } => {
+                nodes.extend(captures);
+                nodes.extend(Arc::make_mut(closure).nodes_mut());
+            }
+            Self::Let { value, body, .. } => nodes.extend([&mut **value, &mut **body]),
+            Self::LetElse {
+                value,
+                fallback,
+                body,
+                ..
+            } => nodes.extend([&mut **value, &mut **fallback, &mut **body]),
+            Self::Match { subject, arms, .. } => {
+                nodes.push(subject);
+                nodes.extend(arms.iter_mut().map(|arm| &mut arm.body));
+            }
+            Self::If {
+                condition,
+                then_branch,
+                else_branch,
+            } => {
+                nodes.extend([&mut **condition, &mut **then_branch]);
+                nodes.extend(else_branch.as_deref_mut());
+            }
+            Self::Construct { construction, .. } => match construction {
+                Construction::Tuple(operands) | Construction::List(operands) => {
+                    nodes.extend(operands);
+                }
+                Construction::Record(fields) | Construction::Case { fields, .. } => {
+                    nodes.extend(fields.iter_mut().map(|(_, node)| node));
+                }
+                Construction::Wrapper(operand) => nodes.push(operand),
+                Construction::Dict(entries) => {
+                    for (key, value) in entries {
+                        nodes.extend([key, value]);
+                    }
+                }
+            },
+            Self::Lookup { collection, key } => {
+                nodes.extend([&mut **collection, &mut **key]);
+            }
+            Self::Call { target, arguments } | Self::TailCall { target, arguments } => {
+                if let CallTarget::Value(callee) = target {
+                    nodes.push(callee);
+                }
+                nodes.extend(&mut arguments.positional);
+                nodes.extend(arguments.labelled.iter_mut().map(|(_, node)| node));
             }
             Self::Field { record: value, .. }
             | Self::Await { plan: value }
@@ -826,9 +919,11 @@ pub struct ClosureBody {
     pub slot_count: usize,
     /// The type of each captured slot.
     pub captures: Vec<Type>,
-    /// The constant default of each labelled parameter, which the closure
-    /// value carries to every call through it.
-    pub defaults: Vec<(String, Constant)>,
+    /// The default of each labelled parameter, in its checked form, which
+    /// the closure value carries to every call through it: one literal when
+    /// it holds no function value, else the constant expression as checked
+    /// (`Checker::check_defaults`).
+    pub defaults: Vec<(String, Node)>,
     /// The body.
     pub body: Node,
     /// `requires C else V`, when the closure has one.
@@ -838,10 +933,13 @@ pub struct ClosureBody {
 }
 
 impl ClosureBody {
-    /// The body, then the predicate and the consequence of each guard.
+    /// The defaults, the body, then the predicate and the consequence of
+    /// each guard.
     #[must_use]
     pub fn nodes(&self) -> Vec<&Node> {
-        let mut nodes = vec![&self.body];
+        let mut nodes: Vec<&Node> =
+            self.defaults.iter().map(|(_, node)| node).collect();
+        nodes.push(&self.body);
         let guards = self
             .entry_guard
             .iter()
@@ -855,7 +953,9 @@ impl ClosureBody {
 
     /// [`Self::nodes`], mutably.
     pub fn nodes_mut(&mut self) -> Vec<&mut Node> {
-        let mut nodes = vec![&mut self.body];
+        let mut nodes: Vec<&mut Node> =
+            self.defaults.iter_mut().map(|(_, node)| node).collect();
+        nodes.push(&mut self.body);
         let guards = self
             .entry_guard
             .iter_mut()
@@ -1194,18 +1294,28 @@ impl<'a> Checker<'a> {
         self.tables.library_type(Library::Bool, Vec::new())
     }
 
-    /// Checks the defaults of a callable with the labels `labels`: one
-    /// constant for each label, as the source chapter's `labelled` gives
-    /// every optional parameter, and no other. A constant is closed, so a
-    /// default's type is its label's type with every binder replaced by
-    /// `Never` ([`Type::at_never`]): the default's value is then a value of
-    /// the label's type at every instantiation of the callable.
-    pub(crate) fn check_defaults(
+    /// Checks the defaults of a callable with the labels `labels`: one for
+    /// each label, as the source chapter's `labelled` gives every optional
+    /// parameter, and no other, each a constant expression in its checked
+    /// form (`docs/spec/02-type-system.md`, "Constant expressions and
+    /// constant patterns").
+    ///
+    /// A default that holds no function is folded to one [`Expr::Literal`]:
+    /// a constant is closed, so its type is the label's type with every
+    /// binder replaced by `Never` ([`Type::at_never`]), and its value is a
+    /// value of the label's type at every instantiation of the callable. A
+    /// default that holds a function value keeps its form, whose leaves are
+    /// literals, module functions, anonymous `fn`s that capture nothing, and
+    /// constant module values; its type is checked at the label's type where
+    /// the callable's body is, with the callable's type parameters in scope,
+    /// which gives the non-literal defaults this check does not type.
+    pub(crate) fn check_defaults<'n>(
         &self,
         labels: &NamedTypes,
-        defaults: &[(String, Constant)],
-    ) -> Result<(), IrError> {
+        defaults: &'n [(String, Node)],
+    ) -> Result<Vec<(&'n Node, Type)>, IrError> {
         let mut seen = BTreeSet::new();
+        let mut typed = Vec::new();
         for (label, default) in defaults {
             let expected = labels.get(label).ok_or_else(|| {
                 IrError::InvalidExpression(format!("a default for no label `{label}`"))
@@ -1216,8 +1326,13 @@ impl<'a> Checker<'a> {
                     name: label.clone(),
                 });
             }
-            self.check_constant(default)?;
-            expect(&expected.at_never(), default.value_type())?;
+            if let Expr::Literal(constant) = &default.expr {
+                self.check_constant(constant)?;
+                expect(&expected.at_never(), constant.value_type())?;
+            } else {
+                self.check_default_form(default)?;
+                typed.push((default, expected.clone()));
+            }
         }
         if let Some((label, _)) = labels
             .entries()
@@ -1227,6 +1342,90 @@ impl<'a> Checker<'a> {
             return Err(IrError::InvalidExpression(format!(
                 "the labelled parameter `{label}` has no default"
             )));
+        }
+        Ok(typed)
+    }
+
+    /// Checks that `node`, a labelled default that is not one literal, is a
+    /// constant expression in form: a literal, a construction of such forms
+    /// of a type without `where … else`, a module `fn` as a value, an
+    /// anonymous `fn` that captures nothing, or a constant module value, one
+    /// whose initializer is such a form. A `proc`, a plan, and anything
+    /// evaluation decides are not.
+    fn check_default_form(&self, node: &Node) -> Result<(), IrError> {
+        let not_constant = |what: &str| {
+            IrError::InvalidExpression(format!(
+                "a labelled default that is not a constant expression: {what}"
+            ))
+        };
+        let mut pending = vec![node];
+        let mut globals = BTreeSet::new();
+        while let Some(node) = pending.pop() {
+            match &node.expr {
+                Expr::Literal(_) => {}
+                Expr::WidenAtom(inner) => pending.push(inner),
+                Expr::Construct {
+                    value_type,
+                    construction,
+                } => {
+                    if let Type::Declared(id, _) = value_type
+                        && self
+                            .tables
+                            .types
+                            .get(id)
+                            .and_then(TypeDefinition::invariant)
+                            .is_some_and(|invariant| invariant.consequence.is_some())
+                    {
+                        return Err(not_constant(
+                            "a construction of a type with `where … else`",
+                        ));
+                    }
+                    pending.extend(match construction {
+                        Construction::Tuple(nodes) | Construction::List(nodes) => {
+                            nodes.iter().collect::<Vec<_>>()
+                        }
+                        Construction::Record(fields)
+                        | Construction::Case { fields, .. } => {
+                            fields.iter().map(|(_, node)| node).collect()
+                        }
+                        Construction::Wrapper(inner) => vec![&**inner],
+                        Construction::Dict(entries) => entries
+                            .iter()
+                            .flat_map(|(key, value)| [key, value])
+                            .collect(),
+                    });
+                }
+                Expr::Function { function, .. } => {
+                    let callable = self.tables.function(*function)?;
+                    if !matches!(callable.signature.type_info(), Type::Fn(_)) {
+                        return Err(not_constant("a procedure as a value"));
+                    }
+                }
+                Expr::Closure { closure, captures } => {
+                    if !matches!(closure.value_type, Type::Fn(_)) {
+                        return Err(not_constant("an anonymous procedure"));
+                    }
+                    if !captures.is_empty() {
+                        return Err(not_constant(
+                            "an anonymous function that captures a local",
+                        ));
+                    }
+                }
+                Expr::Global(index) => {
+                    let global = self
+                        .tables
+                        .globals
+                        .get(*index)
+                        .ok_or(IrError::UnknownGlobal(*index))?;
+                    if globals.insert(*index) {
+                        pending.push(&global.initializer);
+                    }
+                }
+                Expr::Call { .. } | Expr::TailCall { .. } => {
+                    return Err(not_constant("a call"));
+                }
+                _ => return Err(not_constant("an expression evaluation decides")),
+            }
         }
         Ok(())
     }

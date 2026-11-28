@@ -513,13 +513,24 @@ impl<'a> BodyChecker<'_, 'a> {
         if !self.layout.constants_known {
             return self.provisional_constant(index, own, ty, span);
         }
-        let value = self
-            .layout
-            .globals
-            .get(index)
-            .copied()
-            .flatten()
-            .and_then(|global| self.layout.constants.get(&global));
+        let global = self.layout.globals.get(index).copied().flatten();
+        let value = global.and_then(|global| self.layout.constants.get(&global));
+        // A constant that holds a function value has no pattern form, as a
+        // float, `void`, or a dict has none.
+        if value.is_none()
+            && global
+                .is_some_and(|global| self.layout.callable_constants.contains(&global))
+        {
+            self.report(
+                DiagnosticCode::PatternInvalidConstant,
+                span,
+                format!(
+                    "the constant `{}` holds a function, which has no pattern form",
+                    data.name
+                ),
+            );
+            return Kind::Error;
+        }
         let Some(value) = value.cloned() else {
             let related = data.view.name().map_or(span, |name| name.span());
             self.report_related(

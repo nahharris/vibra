@@ -3,10 +3,13 @@
 //!
 //! `docs/spec/02-type-system.md`, "Constant expressions and constant
 //! patterns": a labelled default is a constant expression, a literal, an
-//! atom, `void`, a construction, tuple, record, list, or dict of constants,
-//! or the name of a module value whose initializer is one; a function call
-//! never is. [`fold`] reads the value of such an expression from its checked
-//! node, a dict's entries in canonical key order.
+//! atom, `void`, an anonymous `fn`, the name of a `fn`, a construction,
+//! tuple, record, list, or dict of constants, or the name of a module value
+//! whose initializer is one; a function call, an anonymous `proc`, and the
+//! name of a `proc` never are. [`fold`] reads the value of an expression
+//! that holds no function from its checked node, a dict's entries in
+//! canonical key order; [`callable_form`] decides, by form alone, an
+//! expression that holds one, which keeps its checked node.
 //!
 //! "Generics": a generic anonymous callable bound by `let` stays generic, and
 //! anywhere else it is instantiated from its written expected type. The
@@ -23,12 +26,12 @@
 //! the depth of the program.
 
 use std::cmp::Ordering;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use vibra_ir::{
-    CallTarget, Construction, Expr as IrExpr, Library, NamedTypes, Node, Type, TypeId,
-    Value,
+    CallTarget, Construction, Expr as IrExpr, Library, NamedTypes, Node, Substitution,
+    Type, TypeId, Value,
 };
 
 /// Why a default has no constant value.
@@ -42,6 +45,68 @@ pub(crate) enum NotConstant {
     Dict,
     /// It names a module value whose constant is not known yet.
     Pending,
+    /// It is, or holds, a procedure value: an anonymous `proc` or the name
+    /// of a `proc`.
+    Procedure,
+}
+
+/// Whether the checked node `node`, which [`fold`] gave up on, is a
+/// constant expression that holds a function value: every leaf a literal, a
+/// module `fn` as a value (`is_fn` says whether the checked function at an
+/// index is a `fn`), an anonymous `fn` that captures nothing, or a module
+/// value that is a constant, by `constants` or by `callables`, the constant
+/// module values that hold a function; every inner node a construction or
+/// an atom widening. The body of an anonymous `fn` is not looked into: a
+/// lambda abstraction is a value.
+pub(crate) fn callable_form(
+    node: &Node,
+    constants: &BTreeMap<usize, Value>,
+    callables: &BTreeSet<usize>,
+    is_fn: &dyn Fn(usize) -> Option<bool>,
+) -> Result<(), NotConstant> {
+    let mut pending = vec![node];
+    while let Some(node) = pending.pop() {
+        match &node.expr {
+            IrExpr::Literal(_) => {}
+            IrExpr::WidenAtom(inner) => pending.push(inner),
+            IrExpr::Global(index) => {
+                if !constants.contains_key(index) && !callables.contains(index) {
+                    return Err(NotConstant::Pending);
+                }
+            }
+            IrExpr::Function { function, .. } => match is_fn(*function) {
+                Some(true) => {}
+                Some(false) => return Err(NotConstant::Procedure),
+                None => return Err(NotConstant::Expression),
+            },
+            IrExpr::Closure { closure, captures } => {
+                if !matches!(closure.value_type, Type::Fn(_)) {
+                    return Err(NotConstant::Procedure);
+                }
+                if !captures.is_empty() {
+                    return Err(NotConstant::Expression);
+                }
+            }
+            IrExpr::Construct { construction, .. } => {
+                pending.extend(match construction {
+                    Construction::Tuple(nodes) | Construction::List(nodes) => {
+                        nodes.iter().collect::<Vec<_>>()
+                    }
+                    Construction::Record(fields)
+                    | Construction::Case { fields, .. } => {
+                        fields.iter().map(|(_, node)| node).collect()
+                    }
+                    Construction::Wrapper(inner) => vec![&**inner],
+                    Construction::Dict(entries) => entries
+                        .iter()
+                        .flat_map(|(key, value)| [key, value])
+                        .collect(),
+                });
+            }
+            _ => return Err(NotConstant::Expression),
+        }
+    }
+    Ok(())
 }
 
 enum Fold<'n> {
@@ -309,8 +374,20 @@ fn map_named(named: &NamedTypes, go: impl Fn(&Type) -> Type) -> NamedTypes {
 /// Replaces each binder of every type in `node`, closure bodies included, by
 /// the type at its position in `binders`; a binder past the end is kept.
 pub(crate) fn substitute(node: &mut Node, binders: &[Type]) {
-    let go = |ty: &Type| ty.instantiate(binders);
-    let replace = |ty: &mut Type| *ty = ty.instantiate(binders);
+    substitute_with(
+        node,
+        &Substitution {
+            binders,
+            ..Substitution::default()
+        },
+    );
+}
+
+/// Applies `substitution` to every type in `node`, closure bodies included:
+/// each binder, `Self`, and each association slot it gives a type.
+pub(crate) fn substitute_with(node: &mut Node, substitution: &Substitution<'_>) {
+    let go = |ty: &Type| ty.substitute(substitution);
+    let replace = |ty: &mut Type| *ty = ty.substitute(substitution);
     let mut pending: Vec<&mut Node> = vec![node];
     while let Some(Node { expr, .. }) = pending.pop() {
         match expr {
@@ -333,18 +410,20 @@ pub(crate) fn substitute(node: &mut Node, binders: &[Type]) {
             IrExpr::Closure { closure, captures } => {
                 let body = Arc::make_mut(closure);
                 replace(&mut body.value_type);
-                // A default is a closed constant at its label's type with
-                // every open form `Never`, so it takes the instantiated
-                // label's type the same way.
+                // A default that holds no function is a closed constant at
+                // its label's type with every open form `Never`, so it takes
+                // the instantiated label's type the same way; one that holds
+                // a function is a node of the body, instantiated as one.
                 if let Type::Fn(signature) = &body.value_type {
                     for (label, default) in &mut body.defaults {
-                        if let Some(ty) = signature.labels.get(label)
+                        if let IrExpr::Literal(constant) = &default.expr
+                            && let Some(ty) = signature.labels.get(label)
                             && let Ok(retyped) = vibra_ir::Constant::new(
                                 ty.at_never(),
-                                default.value().clone(),
+                                constant.value().clone(),
                             )
                         {
-                            *default = retyped;
+                            default.expr = IrExpr::Literal(retyped);
                         }
                     }
                 }

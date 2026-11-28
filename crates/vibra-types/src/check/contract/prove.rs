@@ -1119,10 +1119,14 @@ impl<'v> Prover<'v> {
                 if !matches!(written.expr, Expr::Default(_)) {
                     continue;
                 }
-                let (Some(slot), Some((_, constant))) = (
+                let (Some(slot), Some((_, default))) = (
                     data.labels.iter().position(|name| name == label),
                     defaults.iter().find(|(name, _)| name == label),
                 ) else {
+                    continue;
+                };
+                // A default that holds a function value stays unknown.
+                let Expr::Literal(constant) = &default.expr else {
                     continue;
                 };
                 let term = self.terms.intern(Data::Constant(constant.clone()));
@@ -2625,7 +2629,7 @@ fn guarded<'v>(
 type Closures<'v> = (
     BTreeMap<usize, Guarded<'v>>,
     BTreeMap<(Arc<str>, ByteSpan), usize>,
-    BTreeMap<usize, Vec<(String, Constant)>>,
+    BTreeMap<usize, Vec<(String, Node)>>,
 );
 
 fn closures<'v>(

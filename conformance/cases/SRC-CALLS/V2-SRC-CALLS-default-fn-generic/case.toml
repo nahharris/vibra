@@ -1,0 +1,12 @@
+id = "V2-SRC-CALLS-default-fn-generic"
+rule = "V2-SRC-CALLS-default-fn-generic"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#constant-expressions-and-constant-patterns: an anonymous fn default of a generic callable is checked at its label type with the type parameter in it, and at each instantiation the default is that function at the instantiated label type"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

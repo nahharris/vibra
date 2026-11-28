@@ -1,0 +1,10 @@
+fn main returns r: {I32 I32} do return {apply(1i32) apply(1i32 f: Option.some(value: inc))} endfn
+fn inc takes {x: I32} returns r: I32 do return I32.add(x 1i32) endfn
+fn apply takes {v: I32} labelled {f: Option(Fn({I32} I32)) be Option.none()} returns r: I32 do
+  match f
+    case Option.some(value: g)
+      return g(v)
+    case Option.none()
+      return v
+  endmatch
+endfn

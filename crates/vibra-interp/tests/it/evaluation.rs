@@ -49,7 +49,9 @@ fn labelled_call(
     let zero = |label: &str| {
         (
             label.to_owned(),
-            Constant::new(Type::I32, Value::I32(0)).unwrap(),
+            node(Expr::Literal(
+                Constant::new(Type::I32, Value::I32(0)).unwrap(),
+            )),
         )
     };
     let callee = node(Expr::Closure {
@@ -631,7 +633,9 @@ fn an_unwritten_label_takes_the_callees_default() {
     let step = CheckedFunction {
         defaults: vec![(
             "step".to_owned(),
-            Constant::new(Type::I32, Value::I32(5)).unwrap(),
+            node(Expr::Literal(
+                Constant::new(Type::I32, Value::I32(5)).unwrap(),
+            )),
         )],
         ..function(
             "step",
@@ -672,7 +676,9 @@ fn v9_a_call_through_a_closure_value_binds_its_defaults() {
             captures: Vec::new(),
             defaults: vec![(
                 "step".to_owned(),
-                Constant::new(Type::I32, Value::I32(5)).unwrap(),
+                node(Expr::Literal(
+                    Constant::new(Type::I32, Value::I32(5)).unwrap(),
+                )),
             )],
             body: integer(
                 IntegerType::I32,

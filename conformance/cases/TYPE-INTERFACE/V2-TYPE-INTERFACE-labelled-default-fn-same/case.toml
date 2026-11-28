@@ -1,0 +1,12 @@
+id = "V2-TYPE-INTERFACE-labelled-default-fn-same"
+rule = "V2-TYPE-INTERFACE-labelled-default-fn-same"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#constant-expressions-and-constant-patterns: two function defaults are the same when their checked forms are identical, so an implementation member whose anonymous fn default has the contract member's text up to layout supplies the same default"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

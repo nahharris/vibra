@@ -769,7 +769,14 @@ impl<'a> BodyChecker<'_, 'a> {
                 constant
             }
             Err(NotConstant::Pending) if !self.layout.constants_known => None,
-            Err(NotConstant::Pending | NotConstant::Expression | NotConstant::Dict) => {
+            // A consequence is a value of the error type, which holds no
+            // function: an anonymous `fn` is no consequence.
+            Err(
+                NotConstant::Pending
+                | NotConstant::Expression
+                | NotConstant::Dict
+                | NotConstant::Procedure,
+            ) => {
                 self.report(
                     DiagnosticCode::ContractInvalidConsequence,
                     span,

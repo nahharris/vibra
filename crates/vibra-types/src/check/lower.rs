@@ -20,8 +20,9 @@ use vibra_ir::{
     Visibility, encode_open_type, encode_type,
 };
 use vibra_syntax::Document;
+use vibra_syntax::source::CallableKind;
 
-use super::callables::fold;
+use super::callables::{NotConstant, callable_form, fold};
 use super::contract::{
     self, CheckedGuard, CheckedInvariant, ContractGuard, Fold, Inputs, Owner,
     Predicate, Site, anonymous_entries,
@@ -72,7 +73,7 @@ pub(crate) struct Pass {
     unchecked: Vec<(Diagnostic, usize, ByteSpan)>,
     /// The labelled defaults of each interface member bound with
     /// `external @host`, which has no body to hold them, by program index.
-    host_defaults: BTreeMap<usize, Vec<(String, vibra_ir::Constant)>>,
+    host_defaults: BTreeMap<usize, Vec<(String, Node)>>,
 }
 
 fn layout(program: &Program<'_>) -> Layout {
@@ -431,7 +432,7 @@ fn host_defaults(
     documents: &[Document],
     layout: &Layout,
     data: &FnData<'_>,
-) -> Option<Vec<(String, vibra_ir::Constant)>> {
+) -> Option<Vec<(String, Node)>> {
     let labelled = data.view.labelled();
     if labelled.is_empty() || data.view.external()?.tag()?.text() != "@host" {
         return None;
@@ -696,16 +697,20 @@ fn contract_guards<'a>(
 }
 
 /// The `@type.mismatch` of each labelled default of `data`, a member of an
-/// implementation of the interface `interface` whose constant defaults are
+/// implementation of the interface `interface` whose checked defaults are
 /// `defaults`, that differs from the default its contract member writes,
-/// both checked under the implementation's substitution.
+/// both checked under the implementation's substitution. Two defaults are
+/// the same when they denote the same value: equal constants, or the same
+/// checked form for defaults that hold a function value
+/// (`docs/spec/02-type-system.md`, "Constant expressions and constant
+/// patterns").
 fn differing_defaults(
     program: &Program<'_>,
     documents: &[Document],
     layout: &Layout,
     data: &FnData<'_>,
     interface: usize,
-    defaults: &[(String, vibra_ir::Constant)],
+    defaults: &[(String, Node)],
 ) -> Vec<Diagnostic> {
     let Some(interface_data) = program.interfaces.get(interface) else {
         return Vec::new();
@@ -749,7 +754,7 @@ fn differing_defaults(
         let declared = declared.iter().find(|(found, _, _)| found.text() == label);
         if let (Some((_, actual)), Some((_, wanted)), Some((_, _, declared))) =
             (actual, wanted, declared)
-            && actual != wanted
+            && !actual.same_form(wanted)
         {
             let diagnostic = Diagnostic::new(
                 DiagnosticCode::TypeMismatch,
@@ -875,8 +880,17 @@ fn constants(
     provisional: &Layout,
     first: &Pass,
     layout: &Layout,
-) -> BTreeMap<usize, Value> {
+) -> (BTreeMap<usize, Value>, BTreeSet<usize>) {
     let mut known: BTreeMap<usize, Value> = BTreeMap::new();
+    let mut callables: BTreeSet<usize> = BTreeSet::new();
+    let is_fn = |function: usize| {
+        let index = provisional
+            .functions
+            .iter()
+            .position(|lowered| *lowered == Some(function))?;
+        let data = program.functions.get(index)?;
+        Some(data.view.kind() == CallableKind::Fn)
+    };
     loop {
         let mut grew = false;
         for (index, checked) in &first.values {
@@ -884,32 +898,58 @@ fn constants(
             else {
                 continue;
             };
-            if known.contains_key(&global) {
+            if known.contains_key(&global) || callables.contains(&global) {
                 continue;
             }
-            if let Some(value) = checked
+            let Some(node) = checked
                 .node
                 .as_ref()
                 .filter(|node| !fallible_construction(program, node))
-                .and_then(|node| fold(node, &known, &|id| program.library_of(id)).ok())
-            {
-                known.insert(global, value);
-                grew = true;
+            else {
+                continue;
+            };
+            match fold(node, &known, &|id| program.library_of(id)) {
+                Ok(value) => {
+                    known.insert(global, value);
+                    grew = true;
+                }
+                // A constant that holds a function value has no folded
+                // value; its form alone decides it.
+                Err(NotConstant::Pending | NotConstant::Expression)
+                    if callable_form(node, &known, &callables, &is_fn).is_ok() =>
+                {
+                    callables.insert(global);
+                    grew = true;
+                }
+                Err(_) => {}
             }
         }
         if !grew {
             break;
         }
     }
-    first
+    let remap = |index: &usize| {
+        let before = provisional.globals.get(*index).copied().flatten()?;
+        let after = layout.globals.get(*index).copied().flatten()?;
+        Some((before, after))
+    };
+    let values = first
         .values
         .keys()
         .filter_map(|index| {
-            let before = provisional.globals.get(*index).copied().flatten()?;
-            let after = layout.globals.get(*index).copied().flatten()?;
+            let (before, after) = remap(index)?;
             Some((after, known.get(&before)?.clone()))
         })
-        .collect()
+        .collect();
+    let forms = first
+        .values
+        .keys()
+        .filter_map(|index| {
+            let (before, after) = remap(index)?;
+            callables.contains(&before).then_some(after)
+        })
+        .collect();
+    (values, forms)
 }
 
 /// Checks `program`, whose modules are parsed as `documents`, and lowers it.
@@ -921,7 +961,8 @@ pub(crate) fn check_program(
     let first = check_bodies(&program, documents, &provisional);
     skip_faulty_stdlib(&mut program, &first);
     let mut layout = layout(&program);
-    layout.constants = constants(&program, &provisional, &first, &layout);
+    (layout.constants, layout.callable_constants) =
+        constants(&program, &provisional, &first, &layout);
     layout.constants_known = true;
     layout.errors = first.errors.clone();
     drop(first);

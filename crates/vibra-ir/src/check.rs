@@ -720,9 +720,11 @@ impl Checker<'_> {
             return self.enter_closure(frame, sink, closure, result());
         }
         if frame.index == CLOSURE_BODY {
-            // The body is checked: its guards follow, where nothing leaves
-            // the activation.
-            expect(&result(), &arrived(input)?)?;
+            if let Some(operand) = frame.next_operand(input.take())? {
+                return Ok(Next::Operand(operand));
+            }
+            // The defaults and the body are checked: the guards follow,
+            // where nothing leaves the activation.
             self.in_guard = true;
             frame.index = CLOSURE_ENTRY;
             let truth = self
@@ -769,7 +771,8 @@ impl Checker<'_> {
     }
 
     /// With every capture checked: checks the closure's slots and defaults
-    /// and starts its body in its own activation.
+    /// and starts, in its own activation, the defaults that hold a function
+    /// value, each at its label's type, then its body.
     fn enter_closure<'n>(
         &mut self,
         frame: &mut Frame<'n>,
@@ -792,7 +795,8 @@ impl Checker<'_> {
                 declared: closure.slot_count,
             });
         }
-        self.check_defaults(labels, &closure.defaults)?;
+        let mut operands = self.check_defaults(labels, &closure.defaults)?;
+        operands.push((&closure.body, result.clone()));
         let outer = Activation {
             slots: mem::replace(&mut self.slots, Slots::new(closure.slot_count)),
             captures: mem::replace(&mut self.captures, closure.captures.clone()),
@@ -804,7 +808,10 @@ impl Checker<'_> {
         for (slot, ty) in slot_types.into_iter().enumerate() {
             self.bind(slot, ty)?;
         }
-        Ok(Next::Operand(&closure.body))
+        frame.queue(operands);
+        frame.next_operand(None)?.map(Next::Operand).ok_or_else(|| {
+            IrError::InvalidExpression("a closure without a body".to_owned())
+        })
     }
 
     /// The operands of a construction of `value_type`, each with the type it

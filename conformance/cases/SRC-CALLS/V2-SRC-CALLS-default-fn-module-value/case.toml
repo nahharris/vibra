@@ -1,0 +1,12 @@
+id = "V2-SRC-CALLS-default-fn-module-value"
+rule = "V2-SRC-CALLS-default-fn-module-value"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#constant-expressions-and-constant-patterns: a module value whose initializer is an anonymous fn is a constant module value, so its name is a labelled default"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

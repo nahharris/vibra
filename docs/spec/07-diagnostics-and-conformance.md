@@ -320,7 +320,7 @@ Every row is an error with no automatic fix.
 | a labelled default that is not constant | `@type.notConstant`, the expression |
 | a `match` that does not cover its type | `@pattern.nonExhaustive`, the `match`, with one uncovered shape |
 | coverage the checker cannot decide for this type | `@pattern.unsupportedCoverage`, the `match`, or the `let` or parameter pattern |
-| a constant pattern whose value is or holds a float, `void`, or a dict | `@pattern.invalidConstant`, the constant pattern |
+| a constant pattern whose value is or holds a float, `void`, a dict, or a function | `@pattern.invalidConstant`, the constant pattern |
 | an arm that is repeated, already covered, or uninhabited | `@pattern.unreachableArm`, the arm's pattern |
 | a type argument the call does not determine, including one still undetermined when no bound is resolvable | `@type.ambiguousInference`, the application |
 | a type argument that does not meet its bound, written, inferred, or an `impl` target's argument; an argument of an interface at a call that does not meet its parameter's bound | `@type.unsatisfiedBound`, the actual type as written, or the operand or expected type that fixes it, related to the bound |

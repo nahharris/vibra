@@ -1,0 +1,1 @@
+fn run labelled {p: Proc({} I32) be proc returns r: I32 do return 1i32 endproc} returns r: I32 do return 0i32 endfn

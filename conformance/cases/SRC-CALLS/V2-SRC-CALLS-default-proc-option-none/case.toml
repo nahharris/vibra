@@ -1,0 +1,12 @@
+id = "V2-SRC-CALLS-default-proc-option-none"
+rule = "V2-SRC-CALLS-default-proc-option-none"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#constant-expressions-and-constant-patterns: Option.none() is a construction with constant operands and holds no procedure, so it is a labelled default at Option(Proc(...))"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"
